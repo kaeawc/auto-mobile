@@ -1,5 +1,6 @@
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
+import { ENV, readEnvRaw } from "../../config/env";
 import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
   type ForceStopOptions,
@@ -145,9 +146,8 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     if (device.platform === "android") {
-      const useFfmpegPipe =
-        process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE === "1" ||
-        process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE === "true";
+      const ffmpegPipe = readEnvRaw(ENV.ANDROID_VIDEO_USE_FFMPEG_PIPE);
+      const useFfmpegPipe = ffmpegPipe === "1" || ffmpegPipe === "true";
       if (useFfmpegPipe) {
         logger.info(
           "[VideoCapture] Android: using exec-out screenrecord → ffmpeg (AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE)",

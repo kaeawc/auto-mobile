@@ -9,7 +9,7 @@ import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSele
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
-import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { DefaultPlanLifecycleManager } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -154,6 +154,7 @@ describe("plan auto-release with other calls in flight (#11490)", () => {
           baseSessionUuid: "base",
           sessionUuid: "base",
           device: devices[0],
+          cleanupService: { cleanup: async () => ({ status: "cleaned" }) },
           shouldResolveDevice: true,
         }),
     );

@@ -8,7 +8,7 @@
 // Main client
 export { IOSCtrlProxyClient } from "./IOSCtrlProxyClient";
 export type {
-  IOSCtrlProxy,
+  IosCtrlProxy,
   IosMockRuleSyncOutcome,
   IosMockRuleSyncResult,
 } from "./IOSCtrlProxyClient";

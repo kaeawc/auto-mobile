@@ -1,52 +1,19 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { socketServerInputHooks } from "../helpers/socketServerInputHooks";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import type { DeviceService } from "../../src/features/observe/DeviceService";
-import { ActionableError, type BootedDevice, type ImeAction } from "../../src/models";
-import type { Timer } from "../../src/utils/SystemTimer";
+import { ActionableError, type BootedDevice } from "../../src/models";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 const reason = "No element has keyboard focus -- ensure a text field is focused";
 const guidance = `IME action 'done' failed after the text was entered: ${reason}. Do not retype the text.`;
-type TextResult = { success: boolean; error?: string; charsSent?: number };
-
-interface TypeTextHandler {
-  timer: Timer;
-  handleInputTypeText(request: DaemonRequest): Promise<unknown>;
-  resolveInputTargetDevice(): Promise<BootedDevice>;
-  requireCurrentFrameContext(): void;
-  runTrackedKeyedDeviceInput<T>(
-    method: string,
-    device: BootedDevice,
-    operation: (signal?: AbortSignal) => Promise<T>,
-  ): Promise<T>;
-  executeAndroidAppendText(): Promise<TextResult>;
-  executeInputTypeText(
-    platform: "android" | "ios",
-    device: BootedDevice,
-    text: string,
-    action: ImeAction | undefined,
-    timeoutMs: number,
-  ): Promise<TextResult>;
-  runImeActionWithinBudget(
-    client: Pick<DeviceService, "requestImeAction">,
-    action: ImeAction | undefined,
-    deadline: number,
-    timeoutMs: number,
-    charsSent?: number,
-  ): Promise<TextResult>;
-}
-
 function createHandler(platform: "android" | "ios" = "ios", signal?: AbortSignal) {
-  // Match socketServerInputKey's prototype harness: no server, DB, or sockets.
-  const handler = Object.create(UnixSocketServer.prototype) as TypeTextHandler;
   const timer = new FakeTimer();
+  const handler = socketServerInputHooks(timer);
   const device: BootedDevice = { platform, deviceId: "fake-text", name: "Fake" };
-  handler.timer = timer;
   handler.resolveInputTargetDevice = async () => device;
   handler.requireCurrentFrameContext = () => {};
   handler.runTrackedKeyedDeviceInput = async (_method, _device, operation) => operation(signal);
@@ -136,6 +103,14 @@ test("input/typeText submit preserves a rejected IME error's class and metadata"
   );
 });
 
+function prototypeOnlyIosClient(): IOSCtrlProxyClient {
+  return Object.create(IOSCtrlProxyClient.prototype);
+}
+
+function prototypeOnlyAndroidClient(): AndroidCtrlProxyClient {
+  return Object.create(AndroidCtrlProxyClient.prototype);
+}
+
 test.each([
   ["shared Error", "ios", false, new Error("owner cancelled submit")],
   ["string", "ios", false, "owner cancelled submit"],
@@ -147,35 +122,36 @@ test.each([
     const controller = new AbortController();
     const { handler } = createHandler(platform, controller.signal);
     const originalMessage = abortReason instanceof Error ? abortReason.message : undefined;
-    const client =
-      platform === "ios"
-        ? Object.create(IOSCtrlProxyClient.prototype)
-        : (Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient);
+    const abortingIme = (signal: AbortSignal | undefined): Promise<never> => {
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal?.aborted).toBe(false);
+      const pending = new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      controller.abort(abortReason);
+      return pending;
+    };
+    let ime;
     if (platform === "ios") {
-      spyOnIosClientInstance(client);
-      spyOn(client, "requestSetText").mockResolvedValue({ success: true, totalTimeMs: 0 });
+      const iosClient = prototypeOnlyIosClient();
+      spyOnIosClientInstance(iosClient);
+      spyOn(iosClient, "requestSetText").mockResolvedValue({ success: true, totalTimeMs: 0 });
+      ime = spyOn(iosClient, "requestImeAction").mockImplementation(
+        (_action, _timeoutMs, _perf, signal) => abortingIme(signal),
+      );
     } else {
-      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        client as AndroidCtrlProxyClient,
+      const androidClient = prototypeOnlyAndroidClient();
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(androidClient);
+      ime = spyOn(androidClient, "requestImeAction").mockImplementation(
+        (_action, _timeoutMs, _perf, signal) => abortingIme(signal),
       );
     }
-    const ime = spyOn(client, "requestImeAction").mockImplementation(
-      (_action, _timeoutMs, _perf, signal) => {
-        expect(signal).toBeInstanceOf(AbortSignal);
-        expect(signal?.aborted).toBe(false);
-        const pending = new Promise<never>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-        });
-        controller.abort(abortReason);
-        return pending;
-      },
-    );
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
 
     await expect(handler.handleInputTypeText(request(true, append, platform))).rejects.toBe(
       abortReason,
     );
-    if (abortReason instanceof Error) {
+    if (abortReason instanceof Error && originalMessage !== undefined) {
       expect(abortReason.message).toBe(originalMessage);
     }
     expect(controller.signal.reason).toBe(abortReason);
@@ -188,7 +164,7 @@ test.each([false, true])(
   "Android append preserves charsSent for an IME failure (throws=%s)",
   async (throws) => {
     const { handler } = createHandler("android");
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+    const client = prototypeOnlyAndroidClient();
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     const ime = spyOn(client, "requestImeAction");
     if (throws) {
@@ -267,7 +243,7 @@ test.each([false, true])(
       totalTimeMs: 0,
       error: reason,
     }));
-    expect(
+    expect<object>(
       await handler.runImeActionWithinBudget(
         { requestImeAction: ime },
         "done",
@@ -290,7 +266,7 @@ test("runImeActionWithinBudget keeps append rejection as a returned failure", as
   const ime = mock(async () => {
     throw new Error(reason);
   });
-  expect(
+  expect<object>(
     await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, 2),
   ).toEqual({ success: false, error: guidance, charsSent: 2 });
 });
@@ -308,7 +284,7 @@ test("a non-Error IME rejection remains thrown with its reason and cause", async
 test("an IME failure with no runner reason uses the existing fallback", async () => {
   const { handler } = createHandler();
   const ime = mock(async () => ({ success: false, action: "next", totalTimeMs: 0 }));
-  expect(
+  expect<object>(
     await handler.runImeActionWithinBudget({ requestImeAction: ime }, "next", 1000, 1000),
   ).toMatchObject({
     success: false,
@@ -320,10 +296,10 @@ test("an IME failure with no runner reason uses the existing fallback", async ()
 test("a successful IME action and an absent submit preserve append progress", async () => {
   const { handler } = createHandler();
   const ime = mock(async () => ({ success: true, action: "done", totalTimeMs: 0 }));
-  expect(
+  expect<object>(
     await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, 2),
   ).toEqual({ success: true, action: "done", totalTimeMs: 0, charsSent: 2 });
-  expect(
+  expect<object>(
     await handler.runImeActionWithinBudget({ requestImeAction: ime }, undefined, 1000, 1000, 2),
   ).toEqual({ success: true, charsSent: 2 });
   expect(ime).toHaveBeenCalledTimes(1);

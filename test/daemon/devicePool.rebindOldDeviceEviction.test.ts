@@ -53,28 +53,20 @@ describe("losing the old device during a deferred rebind cleanup", () => {
     devices.bootedDevices = booted;
     pool = makePool(sessions, "rebind-eviction-daemon", { timer, deviceManager: devices });
     await pool.initializeWithDevices(booted);
-    await pool.bindOrReuseDeviceSession("s1", OLD, "android");
+    await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: OLD, platform: "android" });
     sessions.updateSessionCache("s1", {
       keepScreenAwake: { applied: true, method: "svc", svcWasEnabled: false },
     });
     // setActiveDevice's shape (src/server/setActiveDevice.ts): receipt, refuse=true, then commit.
     const receipt: AcquisitionReceipt = {};
-    await pool.bindOrReuseDeviceSession(
-      "s1",
-      NEW,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "s1",
+      deviceId: NEW,
+      platform: "android",
+      allowSessionRebind: true,
       receipt,
-      true,
-    );
+      refusePreparedForOtherRequest: true,
+    });
     commitAcquisition(receipt);
     await spin();
     expect(sessions.getSession("s1")?.assignedDevice).toBe(NEW);
@@ -122,7 +114,7 @@ describe("losing the old device during a deferred rebind cleanup", () => {
 
   const evictOld = async (attemptDeviceLossRecovery: boolean): Promise<void> => {
     devices.bootedDevices = [booted[1]!];
-    const evict = Reflect.get(pool, "evictMissingPooledDevice").bind(pool) as (
+    const evict = pool.testHooks.evictMissingPooledDevice.call.bind(pool) as (
       device: NonNullable<ReturnType<DevicePool["getDevice"]>>,
       reason: string,
       options?: { attemptDeviceLossRecovery?: boolean },
@@ -146,7 +138,7 @@ describe("losing the old device during a deferred rebind cleanup", () => {
   arranged(
     "a newer identity observation during eviction leaves the deferred release to free the old device",
     async () => {
-      const evict = Reflect.get(pool, "evictMissingPooledDevice").bind(pool) as (
+      const evict = pool.testHooks.evictMissingPooledDevice.call.bind(pool) as (
         device: NonNullable<ReturnType<DevicePool["getDevice"]>>,
         reason: string,
         options: {
@@ -161,18 +153,18 @@ describe("losing the old device during a deferred rebind cleanup", () => {
       const old = pool.getDevice(OLD)!;
       old.identityObservedAt = 1;
       const claimsReleased: string[] = [];
-      const releaseClaim = Reflect.get(pool, "releaseDeviceClaim").bind(pool) as (
+      const releaseClaim = pool.testHooks.releaseDeviceClaim.bind(pool) as (
         deviceId: string,
       ) => void;
-      Reflect.set(pool, "releaseDeviceClaim", (deviceId: string) => {
+      pool.testHooks.releaseDeviceClaim = (deviceId: string) => {
         claimsReleased.push(deviceId);
         releaseClaim(deviceId);
-      });
+      };
       // The eviction awaits here; a newer observation reconfirms OLD meanwhile.
-      Reflect.set(pool, "tryPreserveSessionForMissingDevice", async () => {
+      pool.testHooks.tryPreserveSessionForMissingDevice = async () => {
         old.identityObservedAt = 5;
         return false;
-      });
+      };
       await evict(old, "runtime identity changed", {
         identityObservation: { deviceId: OLD, name: "avd-z", platform: "android", observedAt: 3 },
       });

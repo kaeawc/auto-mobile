@@ -66,7 +66,7 @@ test("ADB accumulator refuses more than the protocol maximum and stays refused",
   for (let i = 0; i < 63; i++) {
     expect(acc.push(chunk)).toBeUndefined();
   }
-  const result = { ok: false, reason: "ADB host response exceeds 65543 bytes" };
+  const result = { ok: false, reason: "ADB host response exceeds 65543 bytes" } as const;
   expect(acc.push(chunk)).toEqual(result);
   expect(acc.finish()).toEqual(result);
   expect(acc.push(Buffer.from("ignored"))).toEqual(result);

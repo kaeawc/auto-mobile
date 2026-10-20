@@ -1,3 +1,6 @@
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
+import { FakeTimer } from "../fakes/FakeTimer";
+import type { GestureStartRequest } from "../../src/features/observe/android/CtrlProxyGestures";
 import { spyOn } from "bun:test";
 import {
   INTERNAL_EXECUTION_ID_PARAM,
@@ -7,7 +10,7 @@ import {
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { registerInteractionTools } from "../../src/server/interactionTools";
@@ -108,35 +111,36 @@ export class RealToolCallPath {
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
       navigationToolCallRecorder: { record: () => undefined },
     });
-    const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
-      bindSession: () => undefined,
-      getScreenScaleMetadata: () => null,
-      requestTapCoordinates: async (
-        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-      ) => {
-        args[6]?.();
-        return { success: true };
-      },
-      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
-        }
-        this.ctrlProxyWrites.push("setPreference");
-        return { success: true };
-      },
-      requestGestureStart: async (gestureId: string) => {
-        this.gestureFrames.push(`start:${gestureId}`);
-        return { success: true };
-      },
-      requestGestureMove: async (gestureId: string) => {
-        this.gestureFrames.push(`move:${gestureId}`);
-        return { success: true };
-      },
-      requestGestureEnd: async (gestureId: string, _x: number, _y: number, cancel: boolean) => {
-        this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
-        return { success: true };
-      },
-    }));
+    const proxy = new FakeCtrlProxy(new FakeTimer());
+    proxy.bindSession = () => undefined;
+    proxy.getScreenScaleMetadata = () => null;
+    proxy.requestTapCoordinates = async (
+      ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+    ) => {
+      args[0].onDispatch?.();
+      return { success: true, totalTimeMs: 0 };
+    };
+    proxy.setPreference = async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+      if (typeof args[5] === "object") {
+        args[5].onDispatch?.();
+      }
+      this.ctrlProxyWrites.push("setPreference");
+    };
+    proxy.requestGestureStart = async (request: GestureStartRequest) => {
+      const { gestureId } = request;
+
+      this.gestureFrames.push(`start:${gestureId}`);
+      return { success: true, totalTimeMs: 0 };
+    };
+    proxy.requestGestureMove = async (gestureId: string) => {
+      this.gestureFrames.push(`move:${gestureId}`);
+      return { success: true, totalTimeMs: 0 };
+    };
+    proxy.requestGestureEnd = async (gestureId: string, _x: number, _y: number, cancel = false) => {
+      this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
+      return { success: true, totalTimeMs: 0 };
+    };
+    const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy);
     this.restorers.push(() => ctrlProxy.mockRestore());
     // Focused admission suites register their own tool and keep the real pipeline above.
     if (!registerDefaultTools) {

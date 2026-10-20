@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
@@ -9,7 +10,7 @@ import {
   FeatureFlagService,
   type FeatureFlagReader,
 } from "../features/featureFlags/FeatureFlagService";
-import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
+import { accessibilityDetector } from "../ctrlProxy/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../features/accessibility/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -229,6 +230,7 @@ const accessibilityTool = defineDeviceTool({
     throw new ActionableError(`Unsupported platform: ${device.platform}`);
   },
   options: {
+    ...PLAN_RELEVANT,
     defaultEnabled: false,
     outputSchema: accessibilityStateSchema,
     // The check form (no talkback/voiceover) reads (#10965); a toggle is control.

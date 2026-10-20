@@ -12,7 +12,9 @@ import {
 } from "../../src/utils/toolUtils";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 
-function observation(checked = false): ObserveResult {
+function observation(
+  checked = false,
+): Pick<ObserveResult, "updatedAt" | "screenSize" | "activeWindow" | "viewHierarchy" | "elements"> {
   return {
     updatedAt: 123,
     screenSize: { width: 100, height: 200 },
@@ -48,7 +50,7 @@ function observation(checked = false): ObserveResult {
       text: [],
       media: [],
     },
-  } as ObserveResult;
+  };
 }
 
 function wire(response: { content: Array<{ text: string }> }): string {
@@ -127,6 +129,7 @@ describe("finalizeToolResponse serialized shape compatibility", () => {
           createStructuredToolResponse({ success: true, observation: observation(true) }),
           {
             name: "tapOn",
+            defaultsToSkeletonObservation: true,
             args: { raw: true },
             sessionUuid: "fixture",
             baselineStore: store,
@@ -161,6 +164,7 @@ describe("finalizeToolResponse serialized shape compatibility", () => {
       }),
       {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         args: { project: "full" },
         artifactWriter: writer,
         artifactMode: "oversized",
@@ -240,6 +244,7 @@ describe("finalizeToolResponse observation clone boundary", () => {
         }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           args,
           sessionUuid: "fixture",
           baselineStore: store,

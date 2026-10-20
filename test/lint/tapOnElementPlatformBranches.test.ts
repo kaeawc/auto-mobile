@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { Visitor, type Program } from "oxc-parser";
-import { parseGuardSource, unwrapCallee } from "./astGuard";
+import { type Program } from "oxc-parser";
+import { parseGuardSource, unwrapCallee, readGuardFile, GuardVisitor as Visitor } from "./astGuard";
 
 /**
  * #11837: tap dispatch belongs behind `TapStrategy`, so `TapOnElement.ts` must not branch on
@@ -11,7 +11,7 @@ import { parseGuardSource, unwrapCallee } from "./astGuard";
  * TAP_ON_ELEMENT_PLATFORM_COMPARISONS. The number may only shrink: lower it in the PR that
  * moves a branch into `strategies/`. Target is 0-1.
  */
-export const TAP_ON_ELEMENT_PLATFORM_COMPARISONS = 16;
+export const TAP_ON_ELEMENT_PLATFORM_COMPARISONS = 13;
 
 const FILE = "src/features/action/TapOnElement.ts";
 const ROOT = path.resolve(import.meta.dir, "../..");
@@ -116,7 +116,7 @@ describe("TapOnElement platform branch ratchet", () => {
   let actual: number;
   // The AST scan runs in the hook so the per-test 100 ms budget is not spent on it.
   beforeAll(() => {
-    actual = countPlatformComparisons(FILE, readFileSync(path.join(ROOT, FILE), "utf8"));
+    actual = countPlatformComparisons(FILE, readGuardFile(path.join(ROOT, FILE)));
   });
 
   test("counts comparisons, switch cases and ignores unrelated code", () => {

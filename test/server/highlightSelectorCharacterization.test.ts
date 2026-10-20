@@ -1,11 +1,12 @@
+import { toolJson } from "../helpers/toolResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import { registerHighlightTools } from "../../src/server/highlightTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { issue8379Hierarchy } from "../fixtures/issue8379Hierarchy";
 import capturedAndroid from "../fixtures/android-focus/playground-text-field-pre-tap.json";
-import type { ViewHierarchyResult } from "../../src/models";
+import { viewHierarchyFromFixture } from "../helpers/observeFixture";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -41,7 +42,7 @@ describe("highlight selector failures", () => {
       { deviceId: "captured-device", name: "Captured iOS", platform: "ios" },
       args,
     );
-    const response = JSON.parse(result.content[0].text);
+    const response = toolJson(result);
     expect(response.success).toBe(false);
     expect(response.error).toContain(message);
     expect(additions).toBe(0);
@@ -49,8 +50,8 @@ describe("highlight selector failures", () => {
   });
 
   test("a captured root has no enclosing highlight container", async () => {
-    const capture = new FakeHierarchyCapture(
-      () => capturedAndroid.viewHierarchy as ViewHierarchyResult,
+    const capture = new FakeHierarchyCapture(() =>
+      viewHierarchyFromFixture(capturedAndroid.viewHierarchy),
     );
     const snapshot = await capture.capture({ freshness: "fresh" });
     const root = snapshot.nodes.find((node) => node.parentIndex === undefined && node.element)!;
@@ -63,7 +64,7 @@ describe("highlight selector failures", () => {
       { deviceId: "captured-device", name: "Captured Android", platform: "android" },
       { elementId: root.nodeKey, containerOf: true },
     );
-    expect(JSON.parse(result.content[0].text)).toEqual({
+    expect(toolJson(result)).toEqual({
       success: false,
       error: "Unable to resolve a container for the selected element.",
     });

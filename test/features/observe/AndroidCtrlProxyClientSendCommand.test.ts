@@ -31,7 +31,7 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "client-send-command", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "client-send-command", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -122,15 +122,15 @@ const methods: Method[] = [
   {
     name: "requestActivateAccessibilityLink",
     invoke: (h, signal, onDispatch) =>
-      h.client.requestActivateAccessibilityLink(
-        " link ",
-        2,
+      h.client.requestActivateAccessibilityLink({
+        text: " link ",
+        occurrence: 2,
         selector,
-        50,
+        timeoutMs: 50,
         perf,
         signal,
         onDispatch,
-      ),
+      }),
     frame: (requestId) =>
       ctrlProxyRequests.requestActivateAccessibilityLink({
         requestId,

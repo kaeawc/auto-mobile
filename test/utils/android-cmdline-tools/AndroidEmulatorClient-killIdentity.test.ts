@@ -281,9 +281,7 @@ function recordingFactory(attached: string[]): {
             includes: (part: string) => stdout.includes(part),
           };
         },
-        null,
-        undefined,
-        timer,
+        { timer },
       ),
   };
   return { factory, commands, timer };
@@ -503,9 +501,7 @@ function wedgedConsoleFactory(attached: string[]): {
             includes: () => false,
           };
         },
-        null,
-        undefined,
-        timer,
+        { timer },
       ),
   };
   return { factory, commands, timer };
@@ -551,7 +547,7 @@ test("an unforced kill still enriches discovery with the AVD-name probe", async 
   const startedAt = timer.now();
 
   const kill = client.killDevice(original);
-  for (let turn = 0; turn < 20 && nameProbes(commands).length < 3; turn++) {
+  for (let turn = 0; turn < 100 && nameProbes(commands).length < 3; turn++) {
     await Promise.resolve();
   }
   expect(nameProbes(commands).length).toBe(3);
@@ -633,7 +629,11 @@ test("a kill asks for the adb states in the mode that rejects a missing adb exec
   // ownership of an emulator that is alive (#11643).
   const { client, adb } = offlineFixture(offlineEmulator);
   const asked: Array<boolean | undefined> = [];
-  adb.getDeviceStates = async (options?: { throwOnMissingAdb?: boolean }) => {
+  adb.getDeviceStates = async (options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    throwOnMissingAdb?: boolean;
+  }) => {
     asked.push(options?.throwOnMissingAdb);
     throw new Error("ADB executable is unavailable");
   };

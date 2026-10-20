@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import type { IosNetworkErrorSimulationConfig } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import {
@@ -6,8 +7,8 @@ import {
   type IosMockRuleSyncResult,
 } from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
-import { NetworkState } from "../../src/server/NetworkState";
-import type { NetworkMockSyncReport } from "../../src/server/networkMockRules";
+import { NetworkState } from "../../src/utils/NetworkState";
+import type { NetworkMockSyncReport } from "../../src/utils/networkMockRules";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   isIosNetworkErrorSimulationAvailable,
@@ -41,7 +42,7 @@ function parseToolJson(response: any): any {
 describe("network tool schema", () => {
   let iosMessages: string[];
   let androidMessages: string[];
-  let iosErrorSimulations: unknown[];
+  let iosErrorSimulations: IosNetworkErrorSimulationConfig[];
   let iosMockRuleSyncCalls: number;
   let iosMockRuleSyncResult: IosMockRuleSyncOutcome | IosMockRuleSyncResult | Error;
   let iosGetInstanceSpy: ReturnType<typeof spyOn>;
@@ -89,7 +90,7 @@ describe("network tool schema", () => {
         iosMessages.push(message);
         return true;
       },
-      setNetworkErrorSimulation: async (config: unknown) => {
+      setNetworkErrorSimulation: async (config: IosNetworkErrorSimulationConfig) => {
         iosErrorSimulations.push(config);
         return { success: true, totalTimeMs: 0 };
       },
@@ -261,7 +262,7 @@ describe("network tool schema", () => {
     const nowSpy = spyOn(state.timer, "now").mockImplementation(() => nowMs);
     iosGetInstanceSpy.mockRestore();
     iosGetInstanceSpy = spyOnIosClientInstance({
-      setNetworkErrorSimulation: async (config: unknown) => {
+      setNetworkErrorSimulation: async (config: IosNetworkErrorSimulationConfig) => {
         iosErrorSimulations.push(config);
         nowMs += 5_000;
         return { success: true, totalTimeMs: 0 };
@@ -277,10 +278,10 @@ describe("network tool schema", () => {
         },
       });
 
-      const sent = iosErrorSimulations[0] as { expiresAtEpochMs: number };
-      expect(sent.expiresAtEpochMs).toBe(31_000);
-      expect((sent as { remainingMs: number }).remainingMs).toBe(30_000);
-      expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(sent.expiresAtEpochMs);
+      const sent = iosErrorSimulations[0];
+      expect(sent?.expiresAtEpochMs).toBe(31_000);
+      expect(sent?.remainingMs).toBe(30_000);
+      expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(31_000);
       expect(state.getSnapshot(iosDevice.deviceId).simulatingErrors?.remainingSeconds).toBe(25);
     } finally {
       nowSpy.mockRestore();

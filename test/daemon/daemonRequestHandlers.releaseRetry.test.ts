@@ -13,6 +13,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 
 const deviceId = "emulator-5554";
 const explicitSessionId = "00000000-0000-4000-8000-000000000001";
@@ -53,7 +54,11 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     await pool.initializeWithDevices(deviceManager.bootedDevices);
     sessionId = autolock
       ? (await pool.autolockDevice(deviceId, "android", "client"))!
-      : await pool.bindOrReuseDeviceSession(explicitSessionId, deviceId, "android");
+      : await pool.bindOrReuseDeviceSession({
+          sessionId: explicitSessionId,
+          deviceId,
+          platform: "android",
+        });
     state = {
       isInitialized: () => true,
       getSessionManager: () => manager,
@@ -77,7 +82,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each<T>([...table])(
         name,
         async (row: T) => {
           await arrangeHarness();
@@ -200,7 +205,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     const replacementId = "00000000-0000-4000-8000-000000000002";
     await manager.createSession(replacementId, deviceId, "android");
     const device = pool.getDevice(deviceId)!;
-    device.sessionId = replacementId;
+    patchDeviceBinding(device, { sessionId: replacementId });
     device.assignmentCount++;
     persistence.failure = null;
     if (path === "retry") {

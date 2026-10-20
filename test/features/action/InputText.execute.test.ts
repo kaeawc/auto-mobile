@@ -1,3 +1,5 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
@@ -53,12 +55,13 @@ describe("InputText.execute", () => {
   let iosGetInstanceSpy: ReturnType<typeof spyOn> | null = null;
   let savedMarkers: readonly string[];
 
-  const createObserveResult = (): ObserveResult => ({
-    timestamp: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: { node: { $: {} } } },
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: { $: {} } } },
+    });
 
   const createInputText = (
     device: BootedDevice,
@@ -197,18 +200,11 @@ describe("InputText.execute", () => {
         // Real (non-test-mode) process path: isTestMode is fixed at construction from this env flag.
         const priorTestMode = process.env.AUTOMOBILE_TEST_MODE;
         process.env.AUTOMOBILE_TEST_MODE = "false";
-        const adb = new AdbClient(
-          androidDevice,
-          null,
-          null,
-          new DefaultRetryExecutor(fakeTimer),
-          fakeTimer,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          host,
-        );
+        const adb = new AdbClient(androidDevice, null, {
+          retryExecutor: new DefaultRetryExecutor(fakeTimer),
+          timer: fakeTimer,
+          hostProcessExecutor: host,
+        });
         if (priorTestMode === undefined) {
           delete process.env.AUTOMOBILE_TEST_MODE;
         } else {
@@ -216,7 +212,10 @@ describe("InputText.execute", () => {
         }
         // Exercise real cancellation/settlement without SDK lookup or a real process.
         spyOn(adb, "getBaseCommandParts").mockResolvedValue({ adbPath: "adb", baseArgs: [] });
-        spyOn(adb, "getDeviceTimestampMs").mockImplementation(async () => fakeTimer.now());
+        spyOn(adb, "getDeviceTimestampMsWithSource").mockImplementation(async () => ({
+          timestampMs: fakeTimer.now(),
+          source: "device-ms",
+        }));
         const input = createInputText(androidDevice, adb);
         const controller = new AbortController();
         const reason = new Error("text cancelled");
@@ -367,7 +366,7 @@ describe("InputText.execute", () => {
         },
       );
       const input = createInputText(androidDevice, fakeAdb, () => ({
-        close: async () => ({ success: true, action: "close" }),
+        close: async () => ({ success: true, open: false, action: "close" as const }),
       }));
       const result = runWithAbortSignal(
         undefined,
@@ -515,15 +514,14 @@ describe("InputText.execute", () => {
       tapStrategy: new FakeTapStrategy(),
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     });
-    const observation: ObserveResult = {
+    const observation: ObserveResult = buildObserveResult({
       observationId: "occluded-focus",
       updatedAt: 1,
       screenSize: { width: 400, height: 240 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
-    };
-    tap.observedInteraction = async (action) => ({
-      ...(await action(recordObservationRead(observation))),
+    });
+    tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
       observation,
     });
     const error =

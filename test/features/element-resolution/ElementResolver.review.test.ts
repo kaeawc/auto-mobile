@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
-import { resolverSelectorSchema } from "../../../src/server/elementSelectorSchemas";
+import { resolverSelectorSchema } from "../../../src/models/elementSelectorSchemas";
 import { wireCapture } from "../../helpers/wireCapture";
 
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };

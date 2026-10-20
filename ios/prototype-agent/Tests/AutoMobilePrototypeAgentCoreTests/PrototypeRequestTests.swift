@@ -618,6 +618,39 @@ final class PrototypeRequestTests: XCTestCase {
         }
     }
 
+    func testForbiddenHeadersAreRejectedDuringSpecValidation() {
+        for name in [
+            "hOsT",
+            "cOnNeCtIoN",
+            "uPgRaDe",
+            "tRaNsFeR-EnCoDiNg",
+            "cOnTeNt-LeNgTh",
+            "tE",
+            "tRaIlEr",
+            "kEeP-AlIvE",
+            "cOoKiE",
+            "eXpEcT",
+            "oRiGiN",
+            "pRoXy-AuThOrIzAtIoN",
+            "PrOxY-Custom",
+        ] {
+            XCTAssertNotNil(rejection(
+                #"[{"type":"request","url":"https://public.example/","headers":{"\#(name)":"x"}}]"#
+            ), name)
+        }
+    }
+
+    func testBlockedDestinationWireCodeIsPreserved() throws {
+        let decoded = try XCTUnwrap(PrototypeRequestWire.decodeResponse([
+            "type": "prototype_response", "requestId": "r-1", "ok": false,
+            "error": ["code": "blocked_destination", "message": "Blocked destination"], "durationMs": 0,
+        ]))
+        XCTAssertEqual(decoded.response, .failed(.init(.blockedDestination, "Blocked destination"), durationMs: 0))
+        XCTAssertEqual(PrototypeRequestError(.blockedDestination, "Blocked destination").json, .object([
+            "code": .string("blocked_destination"), "message": .string("Blocked destination"),
+        ]))
+    }
+
     func testMoreThanSixteenHeadersAreRefused() {
         let headers = (0 ... 16).map { #""H\#($0)":"v""# }.joined(separator: ",")
         XCTAssertEqual(

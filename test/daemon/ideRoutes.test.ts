@@ -6,6 +6,12 @@ import {
   STARTUP_PROBE_METHODS,
 } from "../../src/daemon/ideRoutes";
 
+const SERVER_MODULES = [
+  "src/daemon/socketServer.ts",
+  "src/daemon/socketServer/ideRouteModule.ts",
+  "src/daemon/socketServer/ideDeviceRoutes.ts",
+];
+
 /** #11813: the `ide/*` admission classes live in one table, with the sets they replaced unchanged. */
 describe("ide/* admission table", () => {
   test("the derived sets equal the method-name sets the server used to hold", () => {
@@ -19,9 +25,7 @@ describe("ide/* admission table", () => {
   });
 
   test("every classified method has a handler entry in the server", () => {
-    const source = ["src/daemon/socketServer.ts", "src/daemon/socketServer/ideRouteModule.ts"]
-      .map((file) => readFileSync(file, "utf8"))
-      .join("\n");
+    const source = SERVER_MODULES.map((file) => readFileSync(file, "utf8")).join("\n");
     for (const method of Object.keys(IDE_ROUTE_ADMISSION)) {
       expect(source).toMatch(new RegExp(`\\[\\s*"${method}",`));
     }
@@ -36,7 +40,7 @@ describe("ide/* admission table", () => {
   });
 
   test("the server keeps no ide/ method-name admission sets", () => {
-    const source = readFileSync("src/daemon/socketServer.ts", "utf8");
+    const source = SERVER_MODULES.map((file) => readFileSync(file, "utf8")).join("\n");
     expect(source).not.toMatch(/new Set\(\[\s*"ide\//);
   });
 });

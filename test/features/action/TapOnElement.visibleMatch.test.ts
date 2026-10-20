@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -131,6 +132,7 @@ async function run(
     };
   }
   const observation: ObserveResult = {
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     observationId: "visible-match",
     updatedAt: 1,
     screenSize: observationScreenSize,
@@ -138,22 +140,22 @@ async function run(
     viewHierarchy: initial,
   };
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tap.refreshViewHierarchy = async () => refreshed;
   tap.executeAndroidTap = async (_action, x, y) => {
     points.push({ x, y });
   };
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+    effect: undefined,
     observation: current,
   });
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute({
     ...(textAny ? { textAny: [text] } : { text }),
@@ -475,9 +477,11 @@ describe("tapOn visible matched element", () => {
       "tap",
       0,
       result.element!,
-      { text: "Forms & Input", action: "tap" },
-      false,
-      { width: 402, height: 874 },
+      {
+        options: { text: "Forms & Input", action: "tap" },
+        isTalkBackEnabled: false,
+        screenSize: { width: 402, height: 874 },
+      },
     );
     expect(points).toEqual([
       { x: 261, y: 394 },

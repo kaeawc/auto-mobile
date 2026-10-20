@@ -1,117 +1,70 @@
-import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
-export { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
-import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
-import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
-import { toActionableError } from "../../models/ActionableError";
-import { errorMessage } from "../../utils/describeUnknownError";
+import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
 import { BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
-import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
+import { toActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
+import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
+import { errorMessage } from "../../utils/describeUnknownError";
+import type { ElementParser } from "../../utils/interfaces/ElementParser";
+import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { logger } from "../../utils/logger";
-import { ToolRegistry } from "../../server/toolRegistry";
-import { throwIfInternalToolFailed } from "../../server/internalToolCall";
+import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
+import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
+import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
+import { DefaultElementParser } from "../utility/ElementParser";
+import type { ExplorationLoopContext } from "./ExplorationLoopContext";
+import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlockerDetection";
+import { detectAndHandleBlockers } from "./ExploreBlockerDetection";
+import { selectDiscoveryElement } from "./ExploreDiscoverySelection";
+import {
+  getObservationPackageName,
+  getSafeExplorationCandidates,
+  planExplorationDryRun,
+} from "./ExploreDryRun";
+import { ExploreElementActions } from "./ExploreElementActions";
+import { getElementKey } from "./ExploreElementExtraction";
+import { ExplorePermissionDialog } from "./ExplorePermissionDialog";
+import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
+import { generateExplorationReport, isExplorationResetDue } from "./ExploreReporting";
+import { explorationSafetyStopReason } from "./ExploreSafety";
+import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
+import type {
+  ElementSelectionStats,
+  ExplorationMode,
+  ExplorationStrategy,
+  ExploreDryRunResult,
+  ExploreExecutionResult,
+  ExploreOptions,
+  ExploreResult,
+  GraphTraversalState,
+  TrackedElement,
+} from "./ExploreTypes";
+import {
+  initializeGraphTraversal,
+  isRecordedBackEdge,
+  markEdgeTraversed,
+  validateNavigation,
+} from "./ExploreValidateMode";
+import { selectValidateElement } from "./ExploreValidationSelection";
+import { registeredInternalToolCaller as toolCaller } from "./InternalToolCaller";
 import {
   NavigationGraphManager,
   type NavigationEdge,
   type NavigationGraphService,
 } from "./NavigationGraphManager";
-import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
-import { TapAtCoordinate } from "../action/TapAtCoordinate";
-import { TapOnElement } from "../action/TapOnElement";
-import { SwipeOnElement } from "../action/SwipeOnElement";
-import { PressButton } from "../action/PressButton";
-import { LaunchApp } from "../action/LaunchApp";
-import { DefaultElementParser } from "../utility/ElementParser";
-import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
-import { Timer, defaultTimer } from "../../utils/SystemTimer";
+
+export { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
+export type { ExploreOptions } from "./ExploreTypes";
 
 // Exploration waits for the UI to settle after an action.
 const EXPLORE_ACTION_SETTLE_MS = 1000;
 // Exploration waits for scrolling to settle.
 const EXPLORE_SCROLL_SETTLE_MS = 1000;
-// Long exploration transitions need extra time to settle.
-const EXPLORE_LONG_SETTLE_MS = 2000;
-
-// Re-export consumed types
-export type { ExploreOptions } from "./ExploreTypes";
-
-// Import types
-import type {
-  ExplorationMode,
-  ExplorationStrategy,
-  ExploreOptions,
-  ExploreResult,
-  ExploreDryRunResult,
-  ExploreExecutionResult,
-  ElementSelectionStats,
-  TrackedElement,
-  GraphTraversalState,
-} from "./ExploreTypes";
-
-// Import element extraction functions
-import {
-  extractNavigationElements,
-  extractScrollableContainers,
-  extractAllElements,
-  getElementKey,
-  filterUnexhaustedElements,
-  tapSelectorFor,
-  tapCoordinatesFor,
-  publicTapOnArgs,
-} from "./ExploreElementExtraction";
-
-// Import element scoring functions
-import {
-  selectBreadthFirst,
-  selectDepthFirst,
-  selectWeighted,
-  rankElementsForDryRun,
-  getElementTarget,
-  predictOutcomeForElement,
-} from "./ExploreElementScoring";
-
-// Import blocker detection functions
-import {
-  detectAndHandleBlockers,
-  filterPermissionNavigationCandidates,
-  isPermissionDialog,
-  isConfirmedPermissionDialogForNavigation,
-  handlePermissionDialog,
-} from "./ExploreBlockerDetection";
-import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlockerDetection";
-
-// Import validate mode functions
-import {
-  countNewTransitions,
-  initializeGraphTraversal,
-  markNodeVisited,
-  markEdgeTraversed,
-  selectNextEdgeToTraverse,
-  resolveEdgeTarget,
-  markEdgeSkipped,
-  validateNavigation,
-  isRecordedBackEdge,
-} from "./ExploreValidateMode";
 
 export const DEFAULT_MAX_INTERACTIONS = 200;
-
-interface ExplorationLoopContext {
-  options: ExploreOptions;
-  maxInteractions: number;
-  timeoutMs: number;
-  startTime: number;
-  strategy: ExplorationStrategy;
-  mode: ExplorationMode;
-  resetInterval: number;
-  initialNodeCount: number;
-  perf: PerformanceTracker;
-  progress?: ProgressCallback;
-  signal?: AbortSignal;
-}
 
 /**
  * Explore implements intelligent app navigation exploration.
@@ -128,8 +81,7 @@ export class Explore extends BaseVisualChange {
   private elementSelections: ElementSelectionStats[] = [];
   private consecutiveBackCount: number = 0;
   consecutiveNoChangeCount: number = 0;
-  private permissionDialogIdentity: string | null = null;
-  private permissionDialogTapAttempts: number = 0;
+  private readonly permissionDialog = new ExplorePermissionDialog();
   loopDetection: Map<string, number> = new Map();
   private elementParser: ElementParser;
   private stopReason: string = "";
@@ -156,10 +108,7 @@ export class Explore extends BaseVisualChange {
   private readonly tapActionFactory?: DialogTapActionFactory;
 
   // Constants for safety limits
-  private static readonly MAX_CONSECUTIVE_BACKS = 5;
   static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
-  private static readonly MAX_PERMISSION_DIALOG_TAP_ATTEMPTS = 3;
-  private static readonly MAX_LOOP_ITERATIONS = 3;
   private static readonly DEFAULT_RESET_INTERVAL = 15;
   private static readonly MAX_OUT_OF_APP_ATTEMPTS = 5;
 
@@ -328,8 +277,7 @@ export class Explore extends BaseVisualChange {
     this.lastResetAt = 0;
     this.consecutiveBackCount = 0;
     this.consecutiveNoChangeCount = 0;
-    this.permissionDialogIdentity = null;
-    this.permissionDialogTapAttempts = 0;
+    this.permissionDialog.reset();
     this.stopReason = "";
     this.previousScreen = null;
     this.consecutiveOutOfAppCount = 0;
@@ -448,10 +396,8 @@ export class Explore extends BaseVisualChange {
         markEdgeTraversed(
           this.graphTraversalState,
           edge,
-          null,
-          false,
+          { actualTo: null, success: false, error: "Back press failed" },
           this.timer,
-          "Back press failed",
         );
       }
       return false;
@@ -477,7 +423,7 @@ export class Explore extends BaseVisualChange {
     }
 
     if (!this.targetPackageName) {
-      this.targetPackageName = this.getObservationPackageName(observation);
+      this.targetPackageName = getObservationPackageName(observation);
       if (this.targetPackageName) {
         logger.info(`[Explore] Defaulting to foreground package: ${this.targetPackageName}`);
       }
@@ -510,7 +456,6 @@ export class Explore extends BaseVisualChange {
       this.device,
       this.adb,
       this.elementParser,
-      (p) => this.handleDeadEnd(p, undefined, signal),
       progress,
       this.blockerHandlerDeps(),
     );
@@ -624,7 +569,10 @@ export class Explore extends BaseVisualChange {
     }
 
     // Periodic reset if configured
-    if (options.resetToHome && this.isResetDue(resetInterval)) {
+    if (
+      options.resetToHome &&
+      isExplorationResetDue(this.interactionCount, this.lastResetAt, resetInterval)
+    ) {
       this.lastResetAt = this.interactionCount;
       await this.resetToHome(progress, signal);
     }
@@ -637,8 +585,6 @@ export class Explore extends BaseVisualChange {
     perf: PerformanceTracker,
     startTime: number,
   ): Promise<ExploreDryRunResult> {
-    const strategy = options.strategy ?? "weighted";
-    const mode = options.mode ?? "hybrid";
     const maxInteractions = options.maxInteractions ?? DEFAULT_MAX_INTERACTIONS;
 
     if (progress) {
@@ -654,184 +600,46 @@ export class Explore extends BaseVisualChange {
     this.consecutiveOutOfAppCount = 0;
     this.targetPackageName = options.packageName?.trim() || null;
 
-    const warnings: string[] = [];
-
     const observation = await this.observeScreen.execute({ perf, skipWaitForFresh: true, signal });
-    const viewHierarchy = observation.viewHierarchy;
-    if (!viewHierarchy || viewHierarchy.hierarchy.error) {
-      warnings.push("Unable to inspect view hierarchy for dry run planning.");
-      return {
-        success: true,
-        dryRun: true,
-        currentScreen: {
-          name: "unknown",
-          interactableElements: 0,
-        },
-        plannedInteractions: [],
-        estimatedCoverage: {
-          screensToVisit: [],
-          newScreensExpected: 0,
-          existingScreensToRevisit: 0,
-        },
-        warnings,
-        observation,
-        durationMs: this.timer.now() - startTime,
-      };
-    }
-
-    const currentPackage = this.getObservationPackageName(observation);
-    if (this.targetPackageName && currentPackage && this.targetPackageName !== currentPackage) {
-      warnings.push(
-        `Foreground package '${currentPackage}' does not match target '${this.targetPackageName}'.`,
-      );
-    }
-
-    const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
-    const edges =
-      currentScreen !== "unknown" ? await this.navigationManager.getEdgesFrom(currentScreen) : [];
-
-    const navigationElements = extractNavigationElements(viewHierarchy, this.elementParser);
-    const scrollableContainers = extractScrollableContainers(viewHierarchy, this.elementParser);
-    const allCandidates = [...navigationElements, ...scrollableContainers];
-    const safeCandidates = filterPermissionNavigationCandidates(
-      allCandidates,
-      extractAllElements(viewHierarchy, this.elementParser),
-    );
-
-    if (safeCandidates.length === 0) {
-      warnings.push("No interactable elements were detected on the current screen.");
-    }
-
-    const scored = rankElementsForDryRun(safeCandidates, strategy, mode, this.exploredElements);
-    const plannedInteractions = scored.slice(0, maxInteractions).map((entry, index) => {
-      const target = getElementTarget(entry.element);
-      const predictedOutcome = predictOutcomeForElement(entry.element, edges);
-
-      return {
-        order: index + 1,
-        action: entry.action,
-        target,
-        reason: entry.reason,
-        predictedOutcome,
-        whitelistStatus: entry.whitelistStatus,
-      };
-    });
-
-    const predictedScreens = plannedInteractions
-      .map((interaction) => interaction.predictedOutcome.screen)
-      .filter((screen) => screen && screen !== "unknown");
-    const uniqueScreens = Array.from(new Set(predictedScreens));
-    const knownScreens = await this.navigationManager.getKnownScreens();
-    const knownScreenSet = new Set(knownScreens);
-
-    const newScreensExpected = uniqueScreens.filter((screen) => !knownScreenSet.has(screen)).length;
-    const existingScreensToRevisit = uniqueScreens.filter((screen) =>
-      knownScreenSet.has(screen),
-    ).length;
-
-    if (currentScreen === "unknown") {
-      warnings.push("Current screen is unknown; outcome predictions may be limited.");
-    } else if (edges.length === 0) {
-      warnings.push("No navigation edges recorded for the current screen.");
-    }
-
-    perf.end();
-    return {
-      success: true,
-      dryRun: true,
-      currentScreen: {
-        name: currentScreen,
-        interactableElements: safeCandidates.length,
-      },
-      plannedInteractions,
-      estimatedCoverage: {
-        screensToVisit: uniqueScreens,
-        newScreensExpected,
-        existingScreensToRevisit,
-      },
-      warnings,
+    return planExplorationDryRun(
       observation,
-      durationMs: this.timer.now() - startTime,
-    };
+      options,
+      {
+        maxInteractions,
+        navigationManager: this.navigationManager,
+        elementParser: this.elementParser,
+        timer: this.timer,
+        targetPackageName: this.targetPackageName,
+        exploredElements: this.exploredElements,
+      },
+      perf,
+      startTime,
+    );
   }
 
-  /**
-   * Detect and act on a permission dialog at the top of the exploration loop.
-   *
-   * Returns:
-   * - `"continue"` when the dialog was granted (screen changed) or the no-op of
-   *   an ungrantable dialog was accounted for and the loop should re-observe;
-   * - `"break"` when an ungrantable (e.g. deny-only) dialog has stalled the
-   *   screen long enough to trip the stuck-screen accounting;
-   * - `"none"` when no permission dialog is present.
-   *
-   * A dialog exposing no safe affirmative control (e.g. only "Don't allow") can
-   * neither be granted nor have its deny control tapped (issue #6241). The
-   * previous fast-path discarded that outcome and always continued, so
-   * exploration re-observed the same unchanged dialog until the timeout. Counting
-   * the no-op lets the existing stuck-screen accounting stop the run instead
-   * (partially addresses issue #6169).
-   */
   async handlePermissionDialogFastPath(
     observation: ObserveResult,
     progress?: ProgressCallback,
   ): Promise<"continue" | "break" | "none"> {
-    const viewHierarchy = observation.viewHierarchy;
-    if (!viewHierarchy || viewHierarchy.hierarchy.error) {
-      return "none";
-    }
-    const elements = extractAllElements(viewHierarchy, this.elementParser);
-    if (!isPermissionDialog(elements) || !isConfirmedPermissionDialogForNavigation(elements)) {
-      return "none";
-    }
-
-    const identity = elements
-      .filter((element) => isTruthy(element.clickable))
-      .map((element) => getElementKey(element, viewHierarchy))
-      .sort()
-      .join("|");
-    if (identity !== this.permissionDialogIdentity) {
-      this.permissionDialogIdentity = identity;
-      this.permissionDialogTapAttempts = 0;
-    }
-    if (this.permissionDialogTapAttempts >= Explore.MAX_PERMISSION_DIALOG_TAP_ATTEMPTS) {
-      this.consecutiveNoChangeCount++;
-      logger.warn(
-        `[Explore] Permission dialog tap cap reached for identity "${identity}" ` +
-          `(${this.permissionDialogTapAttempts}/${Explore.MAX_PERMISSION_DIALOG_TAP_ATTEMPTS})`,
-      );
-      if (this.shouldBreakForSafety(observation)) {
-        logger.warn("[Explore] Unresolvable permission dialog treated as blocker, stopping");
-        return "break";
-      }
-      return "continue";
-    }
-    this.permissionDialogTapAttempts++;
-
-    logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-    const granted = await handlePermissionDialog(
-      elements,
-      viewHierarchy,
-      this.device,
-      this.adb,
+    return this.permissionDialog.handle(
+      observation,
+      {
+        elementParser: this.elementParser,
+        device: this.device,
+        adb: this.adb,
+        blockerHandlerDeps: this.blockerHandlerDeps(),
+        maxConsecutiveNoChange: Explore.MAX_CONSECUTIVE_NO_CHANGE,
+        incrementNoChange: () => {
+          this.consecutiveNoChangeCount++;
+        },
+        resetNoChange: () => {
+          this.consecutiveNoChangeCount = 0;
+        },
+        getNoChange: () => this.consecutiveNoChangeCount,
+        shouldBreakForSafety: () => this.shouldBreakForSafety(observation),
+      },
       progress,
-      this.blockerHandlerDeps(),
     );
-    if (granted) {
-      this.consecutiveNoChangeCount = 0;
-      return "continue";
-    }
-
-    this.consecutiveNoChangeCount++;
-    logger.warn(
-      `[Explore] Permission dialog could not be granted (deny-only); counted as no-op ` +
-        `(${this.consecutiveNoChangeCount}/${Explore.MAX_CONSECUTIVE_NO_CHANGE})`,
-    );
-    if (this.shouldBreakForSafety(observation)) {
-      logger.warn("[Explore] Unresolvable permission dialog treated as blocker, stopping");
-      return "break";
-    }
-    return "continue";
   }
 
   /**
@@ -863,32 +671,19 @@ export class Explore extends BaseVisualChange {
    * Check for safety conditions that should stop exploration
    */
   private shouldBreakForSafety(observation: ObserveResult): boolean {
-    // Check for consecutive backs
-    if (this.consecutiveBackCount >= Explore.MAX_CONSECUTIVE_BACKS) {
-      this.stopReason = `Too many consecutive back navigations (${Explore.MAX_CONSECUTIVE_BACKS})`;
-      logger.warn(`[Explore] ${this.stopReason}`);
-      return true;
+    const reason = explorationSafetyStopReason({
+      consecutiveBackCount: this.consecutiveBackCount,
+      consecutiveNoChangeCount: this.consecutiveNoChangeCount,
+      maxConsecutiveNoChange: Explore.MAX_CONSECUTIVE_NO_CHANGE,
+      loopDetection: this.loopDetection,
+      getCurrentScreen: () => this.navigationManager.getCurrentScreen(),
+    });
+    if (!reason) {
+      return false;
     }
-
-    // Check for screen stuck (no changes)
-    if (this.consecutiveNoChangeCount >= Explore.MAX_CONSECUTIVE_NO_CHANGE) {
-      this.stopReason = `Screen appears stuck - no changes detected after ${Explore.MAX_CONSECUTIVE_NO_CHANGE} interactions`;
-      logger.warn(`[Explore] ${this.stopReason}`);
-      return true;
-    }
-
-    // Check for loops
-    const currentScreen = this.navigationManager.getCurrentScreen();
-    if (currentScreen) {
-      const loopCount = this.loopDetection.get(currentScreen) ?? 0;
-      if (loopCount >= Explore.MAX_LOOP_ITERATIONS) {
-        this.stopReason = `Detected navigation loop on screen: ${currentScreen}`;
-        logger.warn(`[Explore] ${this.stopReason}`);
-        return true;
-      }
-    }
-
-    return false;
+    this.stopReason = reason;
+    logger.warn(`[Explore] ${reason}`);
+    return true;
   }
 
   /**
@@ -903,7 +698,7 @@ export class Explore extends BaseVisualChange {
     return await perf.track("selectNextElement", async () => {
       this.recordedBackEdge = null;
       const viewHierarchy = observation.viewHierarchy;
-      const safeCandidates = this.getSafeExplorationCandidates(observation);
+      const safeCandidates = getSafeExplorationCandidates(observation, this.elementParser);
 
       // Validate selection also handles empty leaf screens and missing elements.
       if (mode === "validate" && this.graphTraversalState) {
@@ -919,131 +714,39 @@ export class Explore extends BaseVisualChange {
       this.currentTargetEdge = null;
       this.currentElementConfidence = 0;
 
-      // Filter out exhausted elements
-      const currentScreen = this.navigationManager.getCurrentScreen();
-      const unexhaustedElements = filterUnexhaustedElements(
-        safeCandidates,
-        this.exploredElements,
-        currentScreen,
-        viewHierarchy,
+      return selectDiscoveryElement(
+        { elements: safeCandidates, hierarchy: viewHierarchy },
+        strategy,
+        mode,
+        {
+          currentScreen: this.navigationManager.getCurrentScreen(),
+          exploredElements: this.exploredElements,
+          elementSelections: this.elementSelections,
+        },
       );
-
-      if (unexhaustedElements.length === 0) {
-        return null;
-      }
-
-      // Select based on strategy
-      switch (strategy) {
-        case "breadth-first":
-          return selectBreadthFirst(unexhaustedElements);
-        case "depth-first":
-          return selectDepthFirst(unexhaustedElements, this.exploredElements);
-        case "weighted":
-        default: {
-          const result = selectWeighted(unexhaustedElements, mode, this.exploredElements);
-          if (result) {
-            // Record selection stats
-            this.elementSelections.push(result.stats);
-            return result.element;
-          }
-          return null;
-        }
-      }
     });
   }
-
-  private getSafeExplorationCandidates(observation: ObserveResult): Element[] {
-    const viewHierarchy = observation.viewHierarchy;
-    if (!viewHierarchy || viewHierarchy.hierarchy.error) {
-      return [];
-    }
-
-    const navigationElements = extractNavigationElements(viewHierarchy, this.elementParser);
-    const scrollableContainers = extractScrollableContainers(viewHierarchy, this.elementParser);
-    // Retain the permission fast-path's conservative deny-label policy at selection.
-    return filterPermissionNavigationCandidates(
-      [...navigationElements, ...scrollableContainers],
-      extractAllElements(viewHierarchy, this.elementParser),
-    );
-  }
-
   private selectValidateElement(candidates: Element[]): Element | null {
-    const state = this.graphTraversalState;
-    if (!state) {
-      return null;
-    }
-    const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
-    if (currentScreen !== "unknown") {
-      markNodeVisited(state, currentScreen);
-    }
-
-    // Each skipped edge leaves the pending set, so this terminates.
-    for (;;) {
-      const targetEdge = selectNextEdgeToTraverse(state, currentScreen);
-      if (!targetEdge) {
-        if (state.pendingEdges.size === 0) {
-          this.stopReason = "All edges in navigation graph have been traversed";
-          logger.info(`[Explore] ${this.stopReason}`);
-        }
-        // Pending sources elsewhere: let the loop use its bounded back recovery.
-        return null;
-      }
-
-      const resolution = resolveEdgeTarget(candidates, targetEdge);
-      if (resolution.status === "not-validatable") {
-        // A property of the recorded edge, not of the app: skip it and try the next one.
-        markEdgeSkipped(state, targetEdge, resolution.reason, this.timer);
-        continue;
-      }
-      if (resolution.status === "back") {
-        // Nothing to tap: the loop replays this edge with the Back button.
-        this.currentTargetEdge = targetEdge;
-        this.currentElementConfidence = 1;
-        this.recordedBackEdge = targetEdge;
-        return null;
-      }
-      if (resolution.status === "not-found") {
-        this.stopReason =
-          `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
-          `App may have diverged from known graph.`;
-        logger.error(`[Explore] ${this.stopReason}`);
-        markEdgeTraversed(
-          state,
-          targetEdge,
-          null,
-          false,
-          this.timer,
-          "Element not found on screen",
-        );
-        return null;
-      }
-      return this.targetValidateEdge(targetEdge, resolution);
-    }
-  }
-
-  private targetValidateEdge(
-    targetEdge: NavigationEdge,
-    match: { element: Element; confidence: number },
-  ): Element {
-    logger.info(
-      `[Explore] Validate mode: targeting edge ${targetEdge.from}->${targetEdge.to} ` +
-        `(confidence: ${(match.confidence * 100).toFixed(0)}%)`,
+    const selection = {
+      stopReason: this.stopReason,
+      currentTargetEdge: this.currentTargetEdge,
+      currentElementConfidence: this.currentElementConfidence,
+      recordedBackEdge: this.recordedBackEdge,
+    };
+    const element = selectValidateElement(
+      candidates,
+      {
+        graphTraversalState: this.graphTraversalState,
+        navigationManager: this.navigationManager,
+        timer: this.timer,
+      },
+      selection,
     );
-    this.currentTargetEdge = targetEdge;
-    this.currentElementConfidence = match.confidence;
-    return match.element;
-  }
-
-  private getObservationPackageName(observation: ObserveResult): string | null {
-    const packageName =
-      observation.viewHierarchy?.packageName ?? observation.activeWindow?.appId ?? null;
-
-    if (!packageName) {
-      return null;
-    }
-
-    const trimmed = packageName.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    this.stopReason = selection.stopReason;
+    this.currentTargetEdge = selection.currentTargetEdge;
+    this.currentElementConfidence = selection.currentElementConfidence;
+    this.recordedBackEdge = selection.recordedBackEdge;
+    return element;
   }
 
   async enforceTargetApp(
@@ -1052,7 +755,7 @@ export class Explore extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<"ok" | "handled" | "stop"> {
-    const currentPackage = this.getObservationPackageName(observation);
+    const currentPackage = getObservationPackageName(observation);
 
     if (currentPackage === targetPackageName) {
       if (this.awaitingRelaunchScreen) {
@@ -1172,20 +875,7 @@ export class Explore extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    logger.info(
-      `[Explore] Swiping on scrollable container: ${element["resource-id"] || element["class"]}`,
-    );
-    const swipeOn = new SwipeOnElement(this.device, this.adb);
-    const container = observation.viewHierarchy
-      ? tapSelectorFor(element, observation.viewHierarchy)
-      : null;
-    const result = await this.runRecorded(
-      container ? "swipeOn" : null,
-      container ? { container, direction: "up", speed: "slow" } : {},
-      observation,
-      () => swipeOn.execute(element, "up", { duration: 600 }, { progress, signal }),
-    );
-    return result.success;
+    return this.elementActions().swipeContainer(element, observation, progress, signal);
   }
 
   /** Tap an element by selector, else its centre; null when it has no tap target. */
@@ -1195,30 +885,7 @@ export class Explore extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<boolean | null> {
-    const selector = observation.viewHierarchy
-      ? tapSelectorFor(element, observation.viewHierarchy)
-      : null;
-    const coordinates = selector ? null : tapCoordinatesFor(element);
-    if (!selector && !coordinates) {
-      logger.warn(
-        `[Explore] Element has no tap target: missing resource-id, text/content-desc (including descendants), and usable bounds; class=${element["class"] || "<empty>"}; bounds=${JSON.stringify(element.bounds)}`,
-      );
-      return null;
-    }
-    const result = selector
-      ? await this.runRecorded("tapOn", publicTapOnArgs(selector), observation, () =>
-          new TapOnElement(this.device, this.adb).execute(
-            { ...selector, action: "tap" },
-            { progress, signal },
-          ),
-        )
-      : await this.runRecorded("tapAt", { ...coordinates!, action: "tap" }, observation, () =>
-          new TapAtCoordinate(this.device, this.adb, { timer: this.timer }).execute(
-            { ...coordinates!, action: "tap" },
-            { progress, signal },
-          ),
-        );
-    return result.success;
+    return this.elementActions().tapElement(element, observation, progress, signal);
   }
 
   /**
@@ -1282,36 +949,9 @@ export class Explore extends BaseVisualChange {
     // Recovery dispatches below bypass BaseVisualChange's action boundary.
     await beginPostActionCaptureAction();
     await this.runRecorded("pressButton", { button: "back" }, observation, async () => {
-      await this.pressBackOnPlatform(signal);
+      await this.platformRecovery().pressBack(signal);
       return { success: true };
     });
-  }
-
-  private async pressBackOnPlatform(signal?: AbortSignal): Promise<void> {
-    if (this.device.platform === "android") {
-      // Preserve the Explore instance's injected transport and timer. Calling
-      // press() avoids nested observed-interaction progress on this operation.
-      const result = await new PressButton(this.device, this.adb, this.timer).press(
-        "back",
-        undefined,
-        undefined,
-        signal,
-      );
-      if (!result.success) {
-        throw new Error(result.error ?? "Android back navigation failed");
-      }
-      return;
-    }
-    // iOS recovery must route through the selected device/session tool.
-    // Do not forward the outer progress callback: the nested action has a
-    // different scale and would make exploration progress jump backward.
-    const response = await ToolRegistry.callInternal("pressButton", {
-      button: "back",
-      platform: this.device.platform,
-      deviceId: this.device.deviceId,
-      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-    });
-    throwIfInternalToolFailed(response, "pressButton", this.device.platform);
   }
 
   /**
@@ -1374,35 +1014,7 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Recovery dispatches below bypass BaseVisualChange's action boundary.
-      await beginPostActionCaptureAction();
-      if (this.device.platform === "android") {
-        // PressButton's Android home path retains the injected ADB/timer and
-        // performs the same accessibility-service then ADB fallback. Forward
-        // Explore's AbortSignal (not just a remaining timeout) so a cancelled
-        // exploration aborts the home dispatch and foreground-verification reads
-        // rather than running them to completion (issue #6289).
-        const result = await new PressButton(this.device, this.adb, this.timer).press(
-          "home",
-          undefined,
-          undefined,
-          signal,
-        );
-        if (!result.success) {
-          throw new Error(result.error ?? "Android home navigation failed");
-        }
-      } else {
-        // Keep iOS recovery session/device-aware without nested progress.
-        const response = await ToolRegistry.callInternal("homeScreen", {
-          platform: this.device.platform,
-          deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-        });
-        throwIfInternalToolFailed(response, "homeScreen", this.device.platform);
-      }
-
-      // Wait for home screen
-      await awaitWhileRequestIsLive(this.timer.sleep(EXPLORE_LONG_SETTLE_MS), signal);
+      await this.platformRecovery().home(signal);
 
       // Home alone leaves the launcher in the foreground, which the next
       // observation would treat as having left the target app (issue #6126).
@@ -1420,141 +1032,47 @@ export class Explore extends BaseVisualChange {
       this.stopReason = `Home-screen recovery failed: ${errorMessage(error)}`;
     }
   }
-
-  /**
-   * A periodic reset is due once per resetInterval successful interactions.
-   * interactionCount only advances on success, so the modulo check alone would
-   * re-fire on every iteration the count sits on a multiple, including 0
-   * before anything was explored (issue #6126).
-   */
-  private isResetDue(resetInterval: number): boolean {
-    return (
-      this.interactionCount > 0 &&
-      this.interactionCount !== this.lastResetAt &&
-      this.interactionCount % resetInterval === 0
-    );
-  }
-
-  /**
-   * Bring the target app back to the foreground after a home reset or app exit.
-   *
-   * This is a plain warm launchApp on purpose (no clearAppData, no coldBoot):
-   * it recovers the foreground (issue #6126) with the platform's cheapest
-   * launch. What "warm" means is launchApp's contract per platform — Android
-   * and the iOS simulator foreground the existing process, while a physical
-   * iOS device relaunches it because devicectl has no foreground verb.
-   */
   private async relaunchTargetApp(packageName: string, signal?: AbortSignal): Promise<void> {
-    if (this.device.platform === "android") {
-      // Same injected transport and timer as the home press above.
-      const result = await new LaunchApp(this.device, this.adb, null, this.timer).execute(
-        packageName,
-        { clearAppData: false, coldBoot: false, signal },
-      );
-      if (!result.success) {
-        throw new Error(result.error ?? `Android relaunch of ${packageName} failed`);
-      }
-    } else {
-      // Keep iOS recovery session/device-aware without nested progress.
-      const response = await ToolRegistry.callInternal(
-        "launchApp",
-        {
-          appId: packageName,
-          platform: this.device.platform,
-          deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-        },
-        undefined,
-        signal,
-      );
-      throwIfInternalToolFailed(response, "launchApp", this.device.platform);
-    }
-    // Only an initial launch with no target-app observation can establish a
-    // fresh-start root. Later warm launches may resume any screen in the task.
+    await this.platformRecovery().relaunch(packageName, signal);
+    // Only an initial launch with no target-app observation can establish a fresh-start root.
     this.awaitingRelaunchScreen = !this.hasObservedTargetApp;
   }
-
-  private traversalStopReason(): string {
-    const reason = this.stopReason || "Exploration completed successfully";
-    const state = this.graphTraversalState;
-    if (!state || state.pendingEdges.size === 0) {
-      return reason;
-    }
-
-    const results = Array.from(state.edgeValidationResults.values());
-    const validated = results.filter((result) => result.success).length;
-    const skipped = results.filter((result) => result.skipped).length;
-    const failed = results.length - validated - skipped;
-    const skippedNote = skipped > 0 ? `${skipped} skipped (not replayable); ` : "";
-    const pending = Array.from(
-      state.pendingEdges,
-      ([key, edge]) => `${edge.from}->${edge.to} (${key})`,
-    );
-    // A budget/safety stop proves these were not reached in this run, not that
-    // they are globally unreachable. Preserve its reason alongside the remainder.
-    return (
-      `${reason}. Validated ${validated} of ${state.totalEdgesInGraph} edges; ` +
-      `${failed} failed validation; ${skippedNote}${state.pendingEdges.size} remain pending. ` +
-      `Pending edges not reached before stopping (source->destination): ${pending.join(", ")}`
+  private elementActions(): ExploreElementActions {
+    return new ExploreElementActions({
+      device: this.device,
+      adb: this.adb,
+      timer: this.timer,
+      runRecorded: (toolName, args, observation, run) =>
+        this.runRecorded(toolName, args, observation, run),
+    });
+  }
+  private platformRecovery(): ExplorePlatformRecovery {
+    return new ExplorePlatformRecovery(
+      this.device,
+      this.adb,
+      this.timer,
+      async (toolName, args, signal) => {
+        const response = await toolCaller.callInternal(toolName, args, undefined, signal);
+        throwIfInternalToolFailed(response, toolName, this.device.platform);
+      },
+      this.sessionUuid,
     );
   }
-
-  /**
-   * Generate final report
-   */
   async generateReport(
     initialGraph: ExportedGraph,
     startTime: number,
     cancelled: boolean,
   ): Promise<ExploreResult> {
-    const finalGraph = initialGraph.appId
-      ? await this.navigationManager.exportGraphForApp(initialGraph.appId)
-      : await this.navigationManager.exportGraph();
-    const screensDiscovered = Math.max(0, finalGraph.nodes.length - initialGraph.nodes.length);
-    const edgesAdded = countNewTransitions(initialGraph.edges, finalGraph.edges);
-
-    // Calculate coverage
-    const totalScreens = finalGraph.nodes.length;
-    const exploredScreens = new Set(this.explorationPath).size;
-    const coveragePercentage = totalScreens > 0 ? (exploredScreens / totalScreens) * 100 : 0;
-
-    // Build graph traversal metrics if in validate mode
-    let graphTraversal: ExploreResult["graphTraversal"];
-    if (this.graphTraversalState) {
-      const traversalCoverage =
-        this.graphTraversalState.totalEdgesInGraph > 0
-          ? (this.graphTraversalState.traversedEdges.size /
-              this.graphTraversalState.totalEdgesInGraph) *
-            100
-          : 0;
-
-      graphTraversal = {
-        nodesVisited: this.graphTraversalState.visitedNodes.size,
-        totalNodes: this.graphTraversalState.totalNodesInGraph,
-        edgesTraversed: this.graphTraversalState.traversedEdges.size,
-        totalEdges: this.graphTraversalState.totalEdgesInGraph,
-        edgeValidationResults: Array.from(this.graphTraversalState.edgeValidationResults.values()),
-        coveragePercentage: Math.round(traversalCoverage * 100) / 100,
-      };
-    }
-
-    return {
-      success: true,
-      cancelled,
-      interactionsPerformed: this.interactionCount,
-      screensDiscovered,
-      edgesAdded,
-      navigationGraph: finalGraph,
-      explorationPath: this.explorationPath,
-      coverage: {
-        totalScreens,
-        exploredScreens,
-        percentage: Math.round(coveragePercentage * 100) / 100,
-      },
-      elementSelections: this.elementSelections,
-      durationMs: this.timer.now() - startTime,
-      stopReason: this.traversalStopReason(),
-      graphTraversal,
-    };
+    return generateExplorationReport(initialGraph, startTime, cancelled, {
+      navigationManager: this.navigationManager,
+      timer: this.timer,
+      getState: () => ({
+        explorationPath: this.explorationPath,
+        graphTraversalState: this.graphTraversalState,
+        interactionCount: this.interactionCount,
+        elementSelections: this.elementSelections,
+        stopReason: this.stopReason,
+      }),
+    });
   }
 }

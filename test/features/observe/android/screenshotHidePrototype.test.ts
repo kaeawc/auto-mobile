@@ -19,7 +19,6 @@ import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 const device: BootedDevice = {
   deviceId: "screenshot-hide-prototype",
   platform: "android",
-  isEmulator: true,
   name: "Android",
 };
 
@@ -44,7 +43,9 @@ function clientWithCapturedFrames(supportedCommands?: readonly string[]) {
     },
   };
   if (supportedCommands) {
-    client["webSocketMessageHandlers"].connected({ type: "connected", supportedCommands });
+    void client.testHooks.handleWebSocketMessage(
+      JSON.stringify({ type: "connected", supportedCommands: [...supportedCommands] }),
+    );
   }
   return { client, sent };
 }

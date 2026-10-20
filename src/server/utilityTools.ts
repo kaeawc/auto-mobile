@@ -1,9 +1,10 @@
-import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
-import { createSetActiveDeviceHandler } from "./setActiveDevice";
+import { createSetActiveDeviceHandler, type SetActiveDeviceSeams } from "./setActiveDevice";
 export type { SetActiveDeviceArgs } from "./setActiveDevice";
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
+import { deviceStateMessage } from "./deviceStateMessage";
 import { deviceClockInputSchema, validateDeviceClockInput } from "../features/utility/DeviceClock";
 import { runSessionClockMutation } from "./sessionClock";
 import {
@@ -52,7 +53,7 @@ import {
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { SessionManager } from "../daemon/sessionManager";
@@ -580,56 +581,6 @@ function displayConfigMessage(result: DisplayConfigResult): string {
   return result.error ?? "Failed to apply display configuration";
 }
 
-function deviceStateMessage(result: DeviceStateResult): string {
-  if (!result.success) {
-    return result.error ?? "Failed to read device state";
-  }
-
-  const sections = [
-    doNotDisturbMessage(result),
-    connectivityMessage(result),
-    biometricsMessage(result),
-    networkConditionMessage(result),
-  ].filter((section): section is string => section !== undefined);
-  return sections.length > 0 ? sections.join("; ") : "Read device state";
-}
-
-function doNotDisturbMessage(result: DeviceStateResult): string | undefined {
-  if (!result.doNotDisturb?.supported) {
-    return undefined;
-  }
-  const { enabled, mode } = result.doNotDisturb;
-  return enabled === false ? "DND off" : mode ? `DND on (${mode})` : "DND on";
-}
-
-function connectivityMessage(result: DeviceStateResult): string | undefined {
-  if (!result.connectivity?.supported) {
-    return undefined;
-  }
-  const { airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled } = result.connectivity;
-  const connectivity = [
-    connectivityStateMessage("Wi-Fi", wifiEnabled),
-    connectivityStateMessage("Bluetooth", bluetoothEnabled),
-    connectivityStateMessage("Location", locationEnabled),
-    connectivityStateMessage("Airplane", airplaneMode),
-  ].filter((state): state is string => state !== undefined);
-  return connectivity.length > 0 ? connectivity.join(", ") : undefined;
-}
-
-function connectivityStateMessage(name: string, enabled: boolean | undefined): string | undefined {
-  return enabled === undefined ? undefined : `${name} ${enabled ? "on" : "off"}`;
-}
-
-function biometricsMessage(result: DeviceStateResult): string | undefined {
-  const enrollment = result.biometrics?.supported ? result.biometrics.enrollment : undefined;
-  return enrollment === undefined ? undefined : `Biometrics ${enrollment}`;
-}
-
-function networkConditionMessage(result: DeviceStateResult): string | undefined {
-  const profile = result.networkCondition?.supported ? result.networkCondition.profile : undefined;
-  return profile === undefined ? undefined : `Network ${profile}`;
-}
-
 export type GetDeviceStateArgs = z.infer<typeof getDeviceStateSchema>;
 
 export type SetDeviceStateArgs = z.infer<typeof setDeviceStateSchema>;
@@ -840,6 +791,7 @@ function isDisplayConfigRead(args: DisplayConfigArgs): boolean {
 }
 
 const displayConfigToolOptions = {
+  ...PLAN_RELEVANT,
   defaultEnabled: false,
   deviceReadOnly: isDisplayConfigRead,
   deviceReadOnlyArgs: [{ absentArguments: ["reset", "fontScale", "density", "theme"] }],
@@ -927,14 +879,14 @@ const createGetDeviceStateHandler =
 
 // Register tools
 export function registerUtilityTools(
-  options: {
-    displayInventory?: DisplayInventoryProvider;
+  options: SetActiveDeviceSeams & {
     /** iOS Simulator network-extension controller; defaults to the installed one. */
     networkFilterBridge?: NetworkFilterBridge;
   } = {},
 ) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
     displayInventory: options.displayInventory,
+    legacyDeviceSelection: options.legacyDeviceSelection,
     resumeCtrlProxy: resumeCtrlProxyIfCurrentlyBooted,
   });
 
@@ -1065,7 +1017,7 @@ export function registerUtilityTools(
     "Change locale, time zone, text direction, time format, and calendar system",
     changeLocalizationSchema,
     changeLocalizationHandler,
-    { defaultEnabled: false, outputSchema: changeLocalizationResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: changeLocalizationResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1096,6 +1048,6 @@ export function registerUtilityTools(
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     setDeviceStateSchema,
     setDeviceStateHandler,
-    { defaultEnabled: false, outputSchema: setDeviceStateResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setDeviceStateResultSchema },
   );
 }

@@ -11,7 +11,7 @@ import type { BootedDevice, Platform, SomePlatform } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceReadiness, type DeviceReadyOptions } from "../devices/DeviceReadiness";
+import { DeviceReadiness, type DeviceReadyOptions } from "../daemon/readiness/DeviceReadiness";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
@@ -31,16 +31,16 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "./directSessionDeviceRegistry";
+} from "../utils/directSessionDeviceRegistry";
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
 import {
   deviceAssignedToOtherSessionError,
   heldDeviceBindRefusal,
 } from "../daemon/inputDeviceOwnership";
-import { executionTracker } from "./executionTracker";
-import { isTypedToolRefusal } from "./shapeToolCallError";
+import { executionTracker } from "../daemon/executionTracker";
+import { isTypedToolRefusal } from "../daemon/shapeToolCallError";
 import { isClientCancelled } from "../utils/AbortContext";
-import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
+import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 
@@ -82,6 +82,12 @@ interface SetActiveDeviceDependencies {
   /** Defaults to the process-wide DeviceReadiness. */
   legacyDeviceSelection?: () => LegacyDeviceSelection;
 }
+
+/** The collaborators a registrar may inject into the setActiveDevice handler. */
+export type SetActiveDeviceSeams = Pick<
+  SetActiveDeviceDependencies,
+  "displayInventory" | "legacyDeviceSelection"
+>;
 
 // Matches the pool's unexported ANDROID_OFFLINE_PROBE_TIMEOUT_MS.
 const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
@@ -307,24 +313,16 @@ async function bindRequestedDevice(input: {
     // the mint (#11593).
     receipt.clientChosenSessionId = args.sessionUuid;
   }
-  const boundSession = await pool.bindOrReuseDeviceSession(
-    args.sessionUuid,
-    args.deviceId,
-    args.platform ?? device.platform,
-    undefined,
-    undefined,
-    undefined,
-    true,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const boundSession = await pool.bindOrReuseDeviceSession({
+    sessionId: args.sessionUuid,
+    deviceId: args.deviceId,
+    platform: args.platform ?? device.platform,
+    allowSessionRebind: true,
     // Records the move (or the mint), so a call cancelled before it answers is undone (#11593).
     receipt,
     // Asked again under the pool's assignment mutex: a start may have reserved the device since.
-    true,
-  );
+    refusePreparedForOtherRequest: true,
+  });
   if (boundSession !== args.sessionUuid) {
     throw heldDeviceBindRefusal(pool, args.deviceId, boundSession, args.sessionUuid);
   }

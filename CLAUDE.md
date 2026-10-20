@@ -161,25 +161,24 @@ the legacy `node10` that `"node"` aliased to; bundler also matches how bun
 resolves this repo's extensionless imports and is the config `tsgolint` reads for
 oxlint's `--type-aware` rules).
 
-## Typecheck baseline gate
+## Typecheck gates
 
 Bun's bundler skips type-checking, so `build`/`test` do NOT catch type errors.
-A scoped gate (issue #3001) runs `tsgo --noEmit` and fails CI only on errors NOT
-already in the committed baseline (`scripts/typecheck-baseline.txt`, the
-tolerated errors; count them with `grep -vc '^#' scripts/typecheck-baseline.txt`):
+Two `tsgo --noEmit` passes run in CI (`scripts/typecheck-baseline.sh`):
 
 ```bash
-bun run typecheck             # gate: fail on NEW type errors (CI runs this)
-bun run typecheck:update      # regenerate the baseline after fixing errors
+bun run typecheck             # src (tsconfig.json): NO baseline, any error fails
+bun run typecheck:test        # every test/**/*.ts (tsconfig.test.json): NO baseline, any error fails
 ```
 
-When you FIX type errors, run `bun run typecheck:update` and commit the smaller
-baseline — it is a one-way ratchet (`--update` refuses to grow it without
-`-- --allow-grow`). When you INTRODUCE a new error the gate prints it; fix it, or
-(rarely) record it with `typecheck:update`. The baseline is version-sensitive:
-`@typescript/native-preview` is a dated preview build, so regenerate the baseline
-in the same PR that bumps it (the `# generated-with:` header records the version
-and the gate warns on drift).
+Both baselines reached zero and were deleted (issues #3001, #11787): there is no
+type-error baseline and no `--update` path, so any type error in `src/` or `test/` fails.
+Both projects resolve `bun:*` modules and the `Bun` global from `@types/bun` via the
+`types` list in their tsconfig; if it is missing the gate exits 4 on TS2688 / unresolved
+`bun:` modules, so a broken install cannot pass silently. Run time is about 2 s (src) and
+6 s (test). `as any` and `as unknown as` in `test/` are hard `oxlint` errors
+(`auto-mobile/no-as-any`, `auto-mobile/no-unknown-cast`); the former test cast baselines
+are deleted too. Fix the code (typed fakes, `Pick<>` views, `satisfies`, type guards).
 
 ## oxlint ratchet baseline
 
@@ -197,10 +196,10 @@ bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 
 Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
-exit non-zero). The ratchet's violation counts cover only the rules set to `warn`
-because they carry pre-existing violations: `complexity`, `max-depth`, `max-params`,
-`max-lines-per-function`, `max-classes-per-file`, `auto-mobile/max-class-lines`
-(1000 non-blank lines), and `auto-mobile/catch-convention`.
+exit non-zero). `complexity`, `max-depth`, `max-params`, `max-lines-per-function`,
+`max-classes-per-file`, `auto-mobile/max-class-lines` (1000 non-blank lines), and
+`auto-mobile/catch-convention` are fully burned down and are `error` too, so the ratchet's
+violation counts no longer cover them.
 `typescript/no-floating-promises` and `typescript/no-misused-promises` are fully
 burned down and are `error` in `.oxlintrc.json`, but they need type information and
 the fast stage is not type-aware, so they are enforced by the ratchet stage
@@ -251,13 +250,23 @@ Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form
 exists; it does not outlaw iteration.
 
-## DaemonState.getInstance() ratchet
+## Zero baselines are deleted, not kept
 
-`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and compares per-file
-`DaemonState.getInstance(` call counts to `test/lint/daemon-state-get-instance-baseline.txt`
-(#11806). A file may never exceed its baseline count; after removing calls, run
-`UPDATE_DAEMON_STATE_BASELINE=1 bun test test/lint/daemonStateGetInstanceRatchet.test.ts`
-and commit the smaller baseline (it refuses to grow without `=grow`).
+When a ratchet baseline reaches zero, delete its baseline file, its regeneration
+path (`UPDATE_*` env var, `--update`) and any allow-list plumbing, and make the guard
+assert "no violations" outright (a warn-level oxlint rule becomes `error` and leaves
+the ratchet's rule list in `scripts/oxlint-baseline.sh`). Named `EXEMPT_*` lists that
+encode deliberate, reasoned exceptions are not baselines and stay. Import-direction
+tiers follow the same rule: only tiers marked `baselined: true` in
+`scripts/check-tier-import-direction.ts` keep a file under
+`scripts/import-direction-baselines/`; `scripts/check-utils-import-direction.ts` has
+no baseline at all.
+
+## DaemonState.getInstance() guard
+
+`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and fails on any
+`DaemonState.getInstance(` call outside its named `EXEMPT_FILES` (#11806). The
+baseline reached zero and was deleted; pass the daemon state in as a dependency.
 
 ## File-backed DB lifecycle tests
 
@@ -290,6 +299,25 @@ authoritative set of MCP tool names and schemas (regenerate it with
 interaction (tap/swipe/drag/pinch, key and text input, clipboard), app management
 (launch/terminate/install/uninstall), and device management (list/provision/kill
 devices, set the active device).
+
+## Android Lint
+
+Run `cd android && ./gradlew lintDebug --continue`. The Android pre-push gate
+runs lint for affected modules (all modules for Gradle/build-logic changes);
+the CI Detekt job runs it for every Android module. New warnings fail the build.
+Remaining findings live in each module's `lint-baseline.xml`; clean modules have
+no baseline. Baselines may only shrink, both in total and for each issue id per
+module. After fixing a module, remove its baseline and regenerate with
+`./gradlew :<module>:lintDebug -Dlint.baselines.continue=true`. Keep the generated
+file only if nonempty, then run `./gradlew :<module>:lintDebug --rerun-tasks` once
+to refresh AGP's cached baseline creation result. Never use `--allow-grow` when
+updating baselines. `scripts/android/check-lint-baseline-shrink.sh` checks
+HEAD against the merge-base with origin/main; pre-push includes local edits too.
+Checks that compare against what is published upstream (AndroidGradlePluginVersion,
+GradleDependency, NewerVersionAvailable, OldTargetApi) are disabled in the
+convention plugins: their findings change over time and cannot be baselined.
+Lint must never rewrite files (no autofix); a clean `git status` after a lint run
+is the check.
 
 # Android Notification Group Handling (Hard-Won Knowledge)
 

@@ -102,7 +102,11 @@ async function harness() {
     }),
   );
   await pool.initializeWithDevices([device]);
-  await pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   return { timer, manager, pool, persistence };
 }
 

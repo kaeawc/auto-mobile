@@ -62,24 +62,24 @@ function androidBoomerang(): Boomerang {
     spyOn(proxy, "getAccessibilityHierarchy").mockResolvedValue({
       hierarchy: { node: { $: {} } },
     });
-    const executor = new TalkBackSwipeExecutor(
+    const executor = new TalkBackSwipeExecutor({
       device,
-      gesture,
-      proxy,
-      new FakeAccessibilityDetector(),
-      new FakeAdbClient(),
+      executeGesture: gesture,
+      accessibilityService: proxy,
+      accessibilityDetector: new FakeAccessibilityDetector(),
+      adb: new FakeAdbClient(),
       timer,
-    );
-    return executor.executeBoomerangGesture(
-      100,
-      500,
-      100,
-      200,
-      { duration: 300 },
-      BOOMERANG,
+    });
+    return executor.executeBoomerangGesture({
+      x1: 100,
+      y1: 500,
+      x2: 100,
+      y2: 200,
+      gestureOptions: { duration: 300 },
+      boomerang: BOOMERANG,
       perf,
       signal,
-    );
+    });
   };
 }
 
@@ -93,16 +93,16 @@ function iosBoomerang(): Boomerang {
       new FakeIosVoiceOverDetector(),
       timer,
     );
-    return executor.executeBoomerangGesture(
-      100,
-      500,
-      100,
-      200,
-      { duration: 300 },
-      BOOMERANG,
+    return executor.executeBoomerangGesture({
+      x1: 100,
+      y1: 500,
+      x2: 100,
+      y2: 200,
+      gestureOptions: { duration: 300 },
+      boomerang: BOOMERANG,
       perf,
       signal,
-    );
+    });
   };
 }
 

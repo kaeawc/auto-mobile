@@ -57,6 +57,7 @@ describe("device binding writers current behavior (#11802)", () => {
   let utils: FakeDeviceUtils;
   let pool: DevicePool;
   let liveness: MissingDeviceLiveness;
+  let rebootOverride: boolean | undefined;
   let changes: StateChange[];
   let autolockEnv: string | undefined;
 
@@ -69,6 +70,7 @@ describe("device binding writers current behavior (#11802)", () => {
     utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [original, bystander]);
     changes = [];
+    rebootOverride = undefined;
     pool = makePool(manager, "binding-characterization", {
       timer,
       deviceManager: utils,
@@ -76,7 +78,11 @@ describe("device binding writers current behavior (#11802)", () => {
       recoveryPolicy: { onLoss: false, maxAttempts: 0 },
       deviceSessionContinuityEnabled: false,
       missingDeviceLivenessFactory: (port) => {
-        liveness = new MissingDeviceLiveness(port);
+        liveness = new MissingDeviceLiveness({
+          ...port,
+          shouldRebootDisconnectedAndroidDevice: (device) =>
+            rebootOverride ?? port.shouldRebootDisconnectedAndroidDevice(device),
+        });
         return liveness;
       },
       onDeviceStateChanged: (deviceId, platform) => {
@@ -121,7 +127,7 @@ describe("device binding writers current behavior (#11802)", () => {
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await arrangeHarness();
@@ -154,25 +160,30 @@ describe("device binding writers current behavior (#11802)", () => {
   }
 
   async function bindOwner() {
-    await pool.bindOrReuseDeviceSession("owner", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     assertAgreement();
     return pool.getDevice(original.deviceId)!;
   }
 
   const initial: Binding = {
     sessionId: null,
-    status: "idle",
-    bindingStatus: "idle",
-    health: "ok",
+    status: "idle" as const,
+    bindingStatus: "idle" as const,
+    health: "ok" as const,
     errorCount: 0,
     assignmentCount: 0,
     lastUsedAt: 1000,
   };
   const owned: Binding = {
     sessionId: "owner",
-    status: "busy",
-    bindingStatus: "busy",
-    health: "ok",
+    status: "busy" as const,
+    bindingStatus: "busy" as const,
+    health: "ok" as const,
     errorCount: 0,
     assignmentCount: 1,
     lastUsedAt: 1001,
@@ -203,13 +214,19 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
         });
         expect(changes.map((change) => change.binding)).toEqual([
           owned,
-          { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+          {
+            ...owned,
+            sessionId: null,
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
+          },
         ]);
       },
     },
@@ -244,9 +261,9 @@ describe("device binding writers current behavior (#11802)", () => {
           expect(binding(captured)).toEqual({
             ...owned,
             sessionId: null,
-            status: "idle",
-            bindingStatus: "idle",
-            health: "ok",
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
           });
           const rebound = { ...owned, lastUsedAt: 1002 };
           expect(binding(pool.getDevice(replacement.deviceId)!)).toEqual(rebound);
@@ -254,7 +271,13 @@ describe("device binding writers current behavior (#11802)", () => {
           expect(changes.map((change) => change.binding)).toEqual([
             owned,
             { ...owned, errorCount: 1 },
-            { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+            {
+              ...owned,
+              sessionId: null,
+              status: "idle" as const,
+              bindingStatus: "idle" as const,
+              health: "ok" as const,
+            },
             rebound,
           ]);
         } finally {
@@ -267,21 +290,18 @@ describe("device binding writers current behavior (#11802)", () => {
       name: "recovery rebind to another pooled device",
       run: async () => {
         await bindOwner();
-        await pool.bindOrReuseDeviceSession(
-          "owner",
-          bystander.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          true,
-        );
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: bystander.deviceId,
+          platform: "android",
+          allowSessionRebind: true,
+        });
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
         });
         expect(binding(pool.getDevice(bystander.deviceId)!)).toEqual({
           ...owned,
@@ -305,7 +325,13 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(pool.getDevice(original.deviceId)?.autolockSessionId).toBeUndefined();
         expect(changes.map((change) => change.binding)).toEqual([
           locked,
-          { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+          {
+            ...owned,
+            sessionId: null,
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
+          },
         ]);
       },
     },
@@ -321,9 +347,9 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(binding(captured)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
           errorCount: 1,
         });
         expect(pool.getDevice(original.deviceId)).toBeNull();
@@ -404,11 +430,11 @@ describe("device binding writers current behavior (#11802)", () => {
       }
       markDeviceError(device);
       const before = binding(device);
-      const snapshot = pool["snapshotSessionAssignment"](device);
+      const snapshot = pool.testHooks.snapshotSessionAssignment(device);
       expect(snapshot).toMatchObject({ status, health: "error", sessionId: device.sessionId });
       bindDevice(device, "tentative");
       device.errorCount = 17;
-      pool["restoreSessionAssignment"](device, snapshot);
+      pool.testHooks.restoreSessionAssignment(device, snapshot);
       expect(binding(device)).toEqual(before);
       expect(statusOf(device)).toBe("error");
     },
@@ -434,13 +460,17 @@ describe("device binding writers current behavior (#11802)", () => {
       pool.recordDeviceError(original.deviceId);
       await manager.releaseSession("owner");
       changes.length = 0;
-      await pool.bindOrReuseDeviceSession("next-owner", original.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "next-owner",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
       const departed = {
         ...owned,
         sessionId: null,
-        status: "idle",
-        bindingStatus: "idle",
-        health: "ok",
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
         errorCount: 1,
       };
       const rebound = {
@@ -470,8 +500,8 @@ describe("device binding writers current behavior (#11802)", () => {
         }
         const failed = {
           ...(bound ? owned : initial),
-          status: "error",
-          health: "error",
+          status: "error" as const,
+          health: "error" as const,
           errorCount: 5,
         };
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual(failed);
@@ -498,13 +528,13 @@ describe("device binding writers current behavior (#11802)", () => {
       pool.recordDeviceError(original.deviceId);
       changes.length = 0;
       const session = manager.getSession("owner")!;
-      expect(pool["detachSessionForAndroidRecovery"](captured, "owner", session)).toBe(true);
+      expect(pool.testHooks.detachSessionForAndroidRecovery(captured, "owner", session)).toBe(true);
       const detached = {
         ...owned,
         sessionId: null,
-        status: "idle",
-        bindingStatus: "idle",
-        health: "ok",
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
         errorCount: 1,
       };
       expect(binding(captured)).toEqual(detached);
@@ -518,7 +548,7 @@ describe("device binding writers current behavior (#11802)", () => {
     const session = manager.getSession("owner")!;
     const stale: Session = { ...session };
     changes.length = 0;
-    expect(pool["detachSessionForAndroidRecovery"](captured, "owner", stale)).toBe(false);
+    expect(pool.testHooks.detachSessionForAndroidRecovery(captured, "owner", stale)).toBe(false);
     expect(binding(captured)).toEqual(owned);
     expect(changes).toEqual([]);
     assertAgreement();
@@ -532,7 +562,7 @@ describe("device binding writers current behavior (#11802)", () => {
       const captured = await bindOwner();
       pool.recordDeviceError(original.deviceId);
       changes.length = 0;
-      await pool["releaseCapturedDevice"](captured, "owner", 0);
+      await pool.testHooks.releaseCapturedDevice(captured, "owner", 0);
       expect(binding(captured)).toEqual({ ...owned, errorCount: 1 });
       expect(changes).toEqual([]);
       assertAgreement();
@@ -550,7 +580,12 @@ describe("device binding writers current behavior (#11802)", () => {
       utils.setBootedDevices("android", [bystander]);
       await liveness.evictMissingPooledDevice(captured, "absent");
       const detached = { ...owned, sessionId: null, errorCount: 1 };
-      const removed = { ...detached, status: "idle", bindingStatus: "idle", health: "ok" };
+      const removed = {
+        ...detached,
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
+      };
       expect(changes.map((change) => change.binding)).toEqual([detached, removed]);
       expect(binding(captured)).toEqual(removed);
       expect(manager.getSessionForDevice(original.deviceId)).toBeNull();
@@ -574,9 +609,7 @@ describe("device binding writers current behavior (#11802)", () => {
           incidentStarted.resolve();
           return await incident.promise;
         });
-        const reboot = spyOn(pool, "shouldRebootDisconnectedAndroidDevice").mockReturnValue(
-          detached,
-        );
+        rebootOverride = detached;
         const disconnect = spyOn(pool, "removeDisconnectedDevice").mockResolvedValue();
         utils.setBootedDevices("android", [bystander]);
         const checking = liveness.ensurePooledDevicePresent(captured, detached, false, !detached);
@@ -584,8 +617,8 @@ describe("device binding writers current behavior (#11802)", () => {
           await incidentStarted.promise;
           expect(binding(captured)).toEqual({
             ...initial,
-            status: "error",
-            health: "error",
+            status: "error" as const,
+            health: "error" as const,
             errorCount: 1,
           });
           expect(changes.map((change) => change.binding)).toEqual([
@@ -605,7 +638,7 @@ describe("device binding writers current behavior (#11802)", () => {
             );
           } finally {
             record.mockRestore();
-            reboot.mockRestore();
+            rebootOverride = undefined;
             disconnect.mockRestore();
           }
         }

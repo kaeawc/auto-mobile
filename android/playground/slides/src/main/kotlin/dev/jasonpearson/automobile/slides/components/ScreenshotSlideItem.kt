@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.slides.components
 
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.slides.model.SlideContent
 
 /**
  * Screenshot slide component that displays app screenshots with day/night theme support.
@@ -33,25 +33,19 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCar
  */
 @Composable
 fun ScreenshotSlideItem(
-  @DrawableRes lightScreenshot: Int? = null,
-  @DrawableRes darkScreenshot: Int? = null,
-  caption: String? = null,
-  contentDescription: String? = null,
   modifier: Modifier = Modifier,
+  content: SlideContent.Screenshot = SlideContent.Screenshot(),
   captionColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-  forceTheme: Boolean? = null, // For testing - null uses system theme
+  forceTheme: Boolean? = null,
+  // For testing - null uses system theme,
 ) {
+  val caption = content.caption
+  val contentDescription = content.contentDescription
+
   val isDarkTheme = forceTheme ?: isSystemInDarkTheme()
 
   // Select appropriate screenshot based on theme and availability
-  val screenshotRes =
-    when {
-      isDarkTheme && darkScreenshot != null -> darkScreenshot
-      !isDarkTheme && lightScreenshot != null -> lightScreenshot
-      darkScreenshot != null -> darkScreenshot
-      lightScreenshot != null -> lightScreenshot
-      else -> null
-    }
+  val screenshotRes = selectScreenshot(content, isDarkTheme)
 
   Column(
     modifier = modifier.fillMaxSize().padding(24.dp),
@@ -138,10 +132,13 @@ private fun ScreenshotErrorState(modifier: Modifier = Modifier) {
 fun ScreenshotSlideItemLightPreview() {
   MaterialTheme {
     ScreenshotSlideItem(
-      lightScreenshot = android.R.drawable.ic_menu_gallery,
-      darkScreenshot = android.R.drawable.ic_menu_camera,
-      caption = "App Screenshot - Light Mode",
-      contentDescription = "Screenshot showing the app in light mode",
+      content =
+        SlideContent.Screenshot(
+          lightScreenshot = android.R.drawable.ic_menu_gallery,
+          darkScreenshot = android.R.drawable.ic_menu_camera,
+          caption = "App Screenshot - Light Mode",
+          contentDescription = "Screenshot showing the app in light mode",
+        ),
       forceTheme = false,
     )
   }
@@ -152,10 +149,13 @@ fun ScreenshotSlideItemLightPreview() {
 fun ScreenshotSlideItemDarkPreview() {
   MaterialTheme {
     ScreenshotSlideItem(
-      lightScreenshot = android.R.drawable.ic_menu_gallery,
-      darkScreenshot = android.R.drawable.ic_menu_camera,
-      caption = "App Screenshot - Dark Mode",
-      contentDescription = "Screenshot showing the app in dark mode",
+      content =
+        SlideContent.Screenshot(
+          lightScreenshot = android.R.drawable.ic_menu_gallery,
+          darkScreenshot = android.R.drawable.ic_menu_camera,
+          caption = "App Screenshot - Dark Mode",
+          contentDescription = "Screenshot showing the app in dark mode",
+        ),
       forceTheme = true,
     )
   }
@@ -166,9 +166,12 @@ fun ScreenshotSlideItemDarkPreview() {
 fun ScreenshotSlideItemLightOnlyPreview() {
   MaterialTheme {
     ScreenshotSlideItem(
-      lightScreenshot = android.R.drawable.ic_menu_gallery,
-      caption = "App Screenshot - Light Only Available",
-      contentDescription = "Screenshot available only in light mode",
+      content =
+        SlideContent.Screenshot(
+          lightScreenshot = android.R.drawable.ic_menu_gallery,
+          caption = "App Screenshot - Light Only Available",
+          contentDescription = "Screenshot available only in light mode",
+        ),
     )
   }
 }
@@ -178,8 +181,23 @@ fun ScreenshotSlideItemLightOnlyPreview() {
 fun ScreenshotSlideItemNoScreenshotsPreview() {
   MaterialTheme {
     ScreenshotSlideItem(
-      caption = "Missing Screenshot",
-      contentDescription = "No screenshots available",
+      content =
+        SlideContent.Screenshot(
+          caption = "Missing Screenshot",
+          contentDescription = "No screenshots available",
+        ),
     )
+  }
+}
+
+private fun selectScreenshot(content: SlideContent.Screenshot, isDarkTheme: Boolean): Int? {
+  val lightScreenshot = content.lightScreenshot
+  val darkScreenshot = content.darkScreenshot
+  return when {
+    isDarkTheme && darkScreenshot != null -> darkScreenshot
+    !isDarkTheme && lightScreenshot != null -> lightScreenshot
+    darkScreenshot != null -> darkScreenshot
+    lightScreenshot != null -> lightScreenshot
+    else -> null
   }
 }

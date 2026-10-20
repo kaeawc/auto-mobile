@@ -2,8 +2,10 @@ import { clearDeviceError, markDeviceError, holderOf, isIdle } from "./deviceBin
 import { logger } from "../utils/logger";
 import type { BootedDevice, Platform } from "../models";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
-import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
-import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
+import {
+  resetBootedDevicesResourceCache,
+  resetAndroidDeviceImageResourceCache,
+} from "./deviceResourceInvalidation";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import type { PooledDevice, RemoveDeviceOptions, SessionRecoveryPreparation } from "./devicePool";
@@ -345,7 +347,7 @@ export class MissingDeviceLiveness {
    * either the pooled entry is the runtime that answered, or a different one
    * has taken the serial and the entry must be replaced.
    */
-  private async reconcileDiscoveredPooledDevice(
+  async reconcileDiscoveredPooledDevice(
     device: PooledDevice,
     bootedDevice: BootedDevice,
     assignmentLockHeld: boolean,
@@ -610,7 +612,7 @@ export class MissingDeviceLiveness {
     return true;
   }
 
-  private async resolveMissingDeviceIncident(
+  async resolveMissingDeviceIncident(
     device: PooledDevice,
     attemptDeviceLossRecovery: boolean,
     incidentId: string | undefined,

@@ -5,6 +5,7 @@ import {
   SharedDaemonNamespaceError,
   SHARED_DAEMON_NAMESPACE_CODE,
 } from "../../src/daemon/sharedNamespaceGuard";
+import type { DaemonClientLike } from "../../src/daemon/client";
 import { resolveDaemonStatePath } from "../../src/daemon/constants";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
@@ -89,7 +90,7 @@ describe("daemon CLI lifecycle commands honor the namespace guard (#11252)", () 
         events.push("restart");
         return "restarted" as const;
       }
-      override createClient() {
+      override createClient(): DaemonClientLike {
         events.push("client");
         throw new Error("no daemon in this test");
       }

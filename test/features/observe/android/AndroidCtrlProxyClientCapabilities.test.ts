@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { BootedDevice } from "../../../../src/models";
@@ -17,12 +18,11 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     fakeTimer = new FakeTimer();
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     fakeAdb.setScreenState(true);
     testDevice = {
       deviceId: "test-device-capabilities",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
     AndroidCtrlProxyManager.resetInstances();

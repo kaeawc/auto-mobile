@@ -3,6 +3,8 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
+import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
+import { createFakeDaemonState } from "../daemon/helpers/inputSocketHarness";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 
 /**
@@ -16,10 +18,11 @@ import type { SessionManager } from "../../src/daemon/sessionManager";
 export function daemonHeartbeatHandler(
   sessionManager: SessionManager,
 ): (method: string, params: Record<string, unknown>) => Promise<unknown> {
-  const state = {
+  const state: DaemonStateAccess = {
+    ...createFakeDaemonState(),
     isInitialized: () => true,
     getSessionManager: () => sessionManager,
-  } as unknown as DaemonStateAccess;
+  };
   return async (method, params) => {
     if (method !== "daemon/heartbeat") {
       return undefined;
@@ -29,7 +32,7 @@ export function daemonHeartbeatHandler(
       state,
     );
     if (!response.success) {
-      throw daemonResponseError({ id: method, type: "daemon_response", ...response });
+      throw daemonResponseError({ id: method, type: "mcp_response", ...response });
     }
     return response.result;
   };
@@ -50,4 +53,25 @@ export async function deliverDaemonHeartbeat(
     sessionId,
     ...params,
   });
+}
+
+/**
+ * Like {@link deliverDaemonHeartbeat} for an owner that keeps heartbeating without knowing its
+ * session is gone: the daemon's not-found answer is the outcome, reported as `false`, not a
+ * failure. Any other refusal still rejects.
+ */
+export async function deliverDaemonHeartbeatIfKnown(
+  sessionManager: SessionManager,
+  sessionId: string,
+  params: Record<string, unknown> = {},
+): Promise<boolean> {
+  try {
+    await deliverDaemonHeartbeat(sessionManager, sessionId, params);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === DAEMON_SESSION_NOT_FOUND_CODE) {
+      return false;
+    }
+    throw error;
+  }
 }

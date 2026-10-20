@@ -22,7 +22,9 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
   let restoreClient: ReturnType<typeof spyOn>;
 
   const observation = (isFresh?: boolean): ObserveResult => ({
-    timestamp: 1000,
+    updatedAt: 1000,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: { hierarchy: {} },
@@ -74,7 +76,7 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
 
       expect(result.success).toBe(true);
       expect(find).toHaveBeenCalledTimes(1);
-      expect(find.mock.calls[0][0]).toBe(
+      expect<unknown>(find.mock.calls[0][0]).toBe(
         isFresh === false ? fresh.viewHierarchy : cached.viewHierarchy,
       );
       expect(observe.getExecuteOptions().map((options) => options.freshness)).toEqual(
@@ -88,7 +90,7 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
     observe.setObserveResult(cached);
     const find = spyOn(finder, "findScrollableElements");
     await swipe.execute({ direction: "up" });
-    expect(find.mock.calls[0][0]).toBe(cached.viewHierarchy);
+    expect<unknown>(find.mock.calls[0][0]).toBe(cached.viewHierarchy);
     expect(observe.getExecuteCallCount()).toBe(0);
   });
 
@@ -112,7 +114,7 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
   for (const error of [false, true]) {
     test(`unavailable stale refetch selects screen swipe (hierarchy error=${error})`, async () => {
       const fresh = observation(true);
-      fresh.viewHierarchy = error ? { hierarchy: { error: "unavailable" } } : null;
+      fresh.viewHierarchy = error ? { hierarchy: { error: "unavailable" } } : undefined;
       observe.setObserveSequence([observation(false), fresh]);
       const find = spyOn(finder, "findScrollableElements");
 

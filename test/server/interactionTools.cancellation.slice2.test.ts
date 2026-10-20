@@ -13,6 +13,8 @@ import { RecentApps } from "../../src/features/action/RecentApps";
 import { Clipboard } from "../../src/features/action/Clipboard";
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import { IosLockScreenUnlocker } from "../../src/features/action/IosLockScreenUnlocker";
+import { buildObserveResult } from "../helpers/observeFixture";
+import { readToolResponse } from "../helpers/toolResponse";
 import { getStructuredPayload } from "../../src/utils/toolUtils";
 import { type InteractionToolDependencies } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -34,12 +36,14 @@ const handler = cancellationHandlers(
 );
 function observed(command: Shake | RecentApps) {
   const screen = new FakeObserveScreen();
-  screen.setObserveResult({
-    timestamp: 0,
-    screenSize: { width: 100, height: 200 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: { node: { $: { class: "android.widget.FrameLayout" } } } },
-  });
+  screen.setObserveResult(
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 100, height: 200 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: { $: { class: "android.widget.FrameLayout" } } } },
+    }),
+  );
   command.observeScreen = screen;
   command.window = new FakeWindow();
   command.awaitIdle = new FakeAwaitIdle();
@@ -66,7 +70,7 @@ describe("slice 2 registered handler cancellation", () => {
         warning,
       }),
     });
-    const response = await handler("wakeAndUnlock")(devices[1]!, {});
+    const response = readToolResponse(await handler("wakeAndUnlock")(devices[1]!, {}));
     expect(getStructuredPayload(response)).toMatchObject({
       warning,
       message: `Device unlocked. Warning: ${warning}`,

@@ -12,6 +12,7 @@ import {
 } from "../../src/utils/logger";
 import * as processLiveness from "../../src/utils/processLiveness";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 
 /**
  * Tests the REAL prune used by logger.ts (src/utils/logPruner.ts), which is
@@ -84,7 +85,11 @@ describe("pruneLogFiles", () => {
       return this;
     });
     spyOn(timer, "setTimeout").mockImplementation((callback, ms) => {
-      const handle = { unref } as NodeJS.Timeout;
+      // A real (already cleared) Node timeout carrying the counting unref, so the handle is a
+      // genuine Timeout while the fake timer still owns scheduling.
+      const handle = defaultTimer.setTimeout(() => {}, 0);
+      defaultTimer.clearTimeout(handle);
+      handle.unref = unref;
       handles.set(handle, scheduleTimeout(callback, ms));
       return handle;
     });

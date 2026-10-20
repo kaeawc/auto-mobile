@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
   AdbClient,
@@ -49,15 +49,11 @@ function harness() {
         dispatched.push(args);
         return createExecResult("", "");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      pool.current?.getAndroidTransportRouting(),
+      {
+        retryExecutor: new DefaultRetryExecutor(timer),
+        timer,
+        transportRouting: pool.current?.getAndroidTransportRouting(),
+      },
     );
   const probe = new FakeAdbExecutor();
   probe.setCommandResponse("getprop ro.serialno", createExecResult(USB, ""));

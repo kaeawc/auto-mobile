@@ -6,7 +6,12 @@ import { stageSessionDownloadsResultSchema } from "../../src/server/downloadsFix
 import { registerAppFileTools } from "../../src/server/appFileTools";
 import { registerDatabaseTools } from "../../src/server/databaseTools";
 import { registerDownloadsFixtureTools } from "../../src/server/downloadsFixtureTools";
-import type { AppFileService } from "../../src/server/appFileService";
+import type {
+  AppFileService,
+  LegacyPutAppFileRequest,
+  PutAppFileRequest,
+} from "../../src/server/appFileService";
+import type { PutAppFileBatchResult, PutAppFileResult } from "../../src/server/appFileContract";
 import type { DownloadsFixtureService } from "../../src/server/downloadsFixtureService";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
@@ -18,6 +23,15 @@ isolateToolRegistry();
 const device: BootedDevice = { deviceId: "fake-device", name: "Fake", platform: "ios" };
 
 type Envelope = { content: Array<{ type: string; text?: string }>; structuredContent: unknown };
+
+function putFileReturning(result: PutAppFileBatchResult): AppFileService["putFile"] {
+  function putFile(request: PutAppFileRequest): Promise<PutAppFileBatchResult>;
+  function putFile(request: LegacyPutAppFileRequest): Promise<PutAppFileResult>;
+  async function putFile(): Promise<PutAppFileBatchResult | PutAppFileResult> {
+    return result;
+  }
+  return putFile;
+}
 
 function expectTextEqualsStructured(response: Envelope): void {
   expect(JSON.parse(response.content[0].text!)).toEqual(
@@ -54,7 +68,7 @@ describe("putAppFile, stageSessionDownloads and sqlQuery output schemas (#11830)
   test("putAppFile batch result keeps the text payload and validates structuredContent", async () => {
     registerAppFileTools({
       appFileService: () => ({
-        putFile: (async () => ({
+        putFile: putFileReturning({
           success: true,
           deviceId: device.deviceId,
           platform: "ios",
@@ -67,7 +81,7 @@ describe("putAppFile, stageSessionDownloads and sqlQuery output schemas (#11830)
               effects: [{ type: "mediaIndex", status: "notRequested" }],
             },
           ],
-        })) as AppFileService["putFile"],
+        }),
         listFiles: async () => {
           throw new Error("unused");
         },

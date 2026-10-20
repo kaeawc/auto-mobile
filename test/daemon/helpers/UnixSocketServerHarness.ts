@@ -1,9 +1,9 @@
-import type { Socket } from "node:net";
+import type { Server as NetServer, Socket } from "node:net";
 import { UnixSocketServer, type StrokeAdmission } from "../../../src/daemon/socketServer";
 import type { ProgressExtendableDeadline } from "../../../src/daemon/mcpRequestTimeout";
 import type { BootedDevice } from "../../../src/models";
 import type { DaemonNotification, DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import type { ResourceUpdateTargets } from "../../../src/server/listChangedBroadcast";
+import type { ResourceUpdateTargets } from "../../../src/daemon/listChangedBroadcast";
 import { fakeBindLock, unreachableMcpDispatcher } from "../../helpers/createTestUnixSocketServer";
 
 /**
@@ -16,6 +16,16 @@ export class UnixSocketServerHarness extends UnixSocketServer {
   /** Behave as a server that already finished `start()` without opening a listener. */
   allowRequests(): void {
     this.acceptingRequests = true;
+  }
+
+  /** Whether a forward is queued under this execution key. */
+  hasForwardTail(key: string): boolean {
+    return this.mcpForwardTails.has(key);
+  }
+
+  /** Wait for every in-flight request handler, however each one ends. */
+  async settleActiveRequestHandlers(): Promise<void> {
+    await Promise.allSettled([...this.activeRequestHandlers]);
   }
 
   connect(socket: Socket): void {
@@ -86,6 +96,20 @@ export class UnixSocketServerHarness extends UnixSocketServer {
   /** Forward one request through the real MCP-client passthrough. */
   forwardIdeRequest(...args: Parameters<UnixSocketServerHarness["handleIdeRequest"]>) {
     return this.handleIdeRequest(...args);
+  }
+
+  /** Replace the MCP forward step so a request's completion is controlled by the test. */
+  set mcpForwarder(
+    handler: (
+      context: Parameters<UnixSocketServerHarness["forwardMcpRequest"]>[0],
+    ) => Promise<unknown>,
+  ) {
+    this.forwardMcpRequest = handler;
+  }
+
+  /** Run one function on the real per-execution-key forward chain. */
+  runKeyedForward<T>(executionKey: string, fn: () => Promise<T>): Promise<T> {
+    return this.runKeyedMcpForward(executionKey, fn);
   }
 
   /** Forward through the real route/client acquisition path. */
@@ -167,6 +191,16 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     };
   }
 
+  /** The booted-device lookup the ide/* handlers run before acting on a serial. */
+  lookupBootedDevicesForIde(platform: "android" | "ios", serial: string): Promise<BootedDevice[]> {
+    return this.listBootedDevicesForIdeAction(platform, serial);
+  }
+
+  /** Sockets that currently own an open streamed gesture. */
+  get ownedGestureOwnerCount(): number {
+    return this.ownedGestures.ownerCount;
+  }
+
   /** The largest inbound frame this control server accepts from one peer. */
   get inboundFrameLimit(): number {
     return this.maxInboundFrameBytes;
@@ -224,6 +258,10 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     this.runTrackedKeyedDeviceInput = async (_toolName, _device, operation) => operation(signal);
   }
 
+  get pendingRequests() {
+    return this.pendingSocketRequests;
+  }
+
   get pendingRequestCount(): number {
     return this.pendingSocketRequests.size;
   }
@@ -244,6 +282,29 @@ export class UnixSocketServerHarness extends UnixSocketServer {
   /** Socket-session ids that currently hold a socket-bound MCP client key. */
   get boundClientSocketSessionIds(): string[] {
     return [...this.boundMcpClientKeysBySocketSession.keys()];
+  }
+
+  /** The execution scope key a request's raw `arguments` resolve to. */
+  scopeKeyFor(args: unknown): string | undefined {
+    return this.getRequestArgumentScopeKey(args);
+  }
+
+  /** The session uuid a socket session's bound MCP client currently routes to. */
+  boundSessionUuidFor(socketSessionId: string): string | undefined {
+    return this.boundMcpClientKeysBySocketSession.get(socketSessionId)?.sessionUuid;
+  }
+
+  /** The underlying listening `net.Server`, or null before `start()` / after `close()`. */
+  get netListener(): NetServer | null {
+    return this.server;
+  }
+
+  /** Whether the broadcaster subscriptions taken by `start()` are still held. */
+  get broadcasterSubscriptions(): { listChanged: boolean; sessionRelease: boolean } {
+    return {
+      listChanged: this.listChangedUnsubscribe !== null,
+      sessionRelease: this.sessionReleaseUnsubscribe !== null,
+    };
   }
 
   /** Drop one socket session's bound MCP client key, as its socket "close" handler does. */

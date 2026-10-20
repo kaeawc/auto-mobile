@@ -28,16 +28,14 @@ const cases: PressCase[] = [
   {
     name: "coordinate tap",
     request: (h, s, d) =>
-      new CtrlProxyGestures(h.context).requestTapCoordinates(
-        1,
-        2,
-        50,
-        50,
-        undefined,
-        undefined,
-        s,
-        d,
-      ),
+      new CtrlProxyGestures(h.context).requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 50,
+        timeoutMs: 50,
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "home",
@@ -69,19 +67,18 @@ const cases: PressCase[] = [
   {
     name: "multi-finger swipe",
     request: (h, s, d) =>
-      new CtrlProxyGestures(h.context).requestMultiFingerSwipe(
-        1,
-        2,
-        3,
-        4,
-        2,
-        300,
-        50,
-        undefined,
-        10,
-        s,
-        d,
-      ),
+      new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        fingerCount: 2,
+        duration: 300,
+        timeoutMs: 50,
+        fingerSpacing: 10,
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "pinch",
@@ -317,38 +314,51 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
       );
       expect(key).toHaveBeenCalledWith("enter", [], 50, undefined, signal, onDispatch);
       expect(
-        await client.requestMultiFingerSwipe(
-          1,
-          2,
-          3,
-          4,
-          2,
-          300,
-          50,
-          undefined,
-          10,
+        await client.requestMultiFingerSwipe({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          fingerCount: 2,
+          duration: 300,
+          timeoutMs: 50,
+          fingerSpacing: 10,
           signal,
           onDispatch,
           beforeSend,
-        ),
+        }),
       ).toBe(result);
-      expect(swipe).toHaveBeenCalledWith(
-        1,
-        2,
-        3,
-        4,
-        2,
-        300,
-        50,
-        undefined,
-        10,
+      expect(swipe).toHaveBeenCalledWith({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        fingerCount: 2,
+        duration: 300,
+        timeoutMs: 50,
+        fingerSpacing: 10,
         signal,
         onDispatch,
         beforeSend,
-      );
-      expect(await client.requestPinch(1, 2, 3, 4, 0, 300, 50, undefined, signal, onDispatch)).toBe(
-        result,
-      );
+      });
+      expect(
+        await client.requestPinch(
+          {
+            centerX: 1,
+            centerY: 2,
+            distanceStart: 3,
+            distanceEnd: 4,
+            rotationDegrees: 0,
+            duration: 300,
+            timeoutMs: 50,
+            perf: undefined,
+            signal: signal,
+            displayId: 2,
+            beforeSend,
+          },
+          onDispatch,
+        ),
+      ).toBe(result);
       expect(pinch).toHaveBeenCalledWith(
         {
           centerX: 1,
@@ -380,22 +390,19 @@ describe("iOS press beforeSend display fence", () => {
   test("a StaleDisplayError from the fence is rethrown, not reported as a transport failure", async () => {
     const h = createIosDelegateHarness();
     const stale = staleDisplayError(1, 2);
-    const pending = new CtrlProxyGestures(h.context).requestMultiFingerSwipe(
-      1,
-      2,
-      3,
-      4,
-      2,
-      300,
-      50,
-      undefined,
-      10,
-      undefined,
-      undefined,
-      () => {
+    const pending = new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      fingerCount: 2,
+      duration: 300,
+      timeoutMs: 50,
+      fingerSpacing: 10,
+      beforeSend: () => {
         throw stale;
       },
-    );
+    });
     await expect(pending).rejects.toBe(stale);
     expect(h.sentMessages).toHaveLength(0);
   });

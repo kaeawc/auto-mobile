@@ -11,8 +11,8 @@ import {
   getAppearanceConfig,
   resolveAppearanceMode,
   updateAppearanceConfig,
-} from "../server/appearanceManager";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+} from "./appearanceManager";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {
   DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
@@ -25,7 +25,7 @@ import {
   executionTracker,
   sessionExecutionMetadataOf,
   type ActiveExecution,
-} from "../server/executionTracker";
+} from "./executionTracker";
 import { admitInputOnHolderSession } from "./inputDeviceOwnership";
 import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
@@ -116,7 +116,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   constructor(
     socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+    protected readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "appearance",
       // An observer may store its own config; it applies once the observer holds a device (#10976).
       { allowObserverSessions: true },

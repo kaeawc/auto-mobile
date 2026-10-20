@@ -1,6 +1,5 @@
 import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -9,6 +8,7 @@ import {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
+import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -38,13 +38,10 @@ const avdLease: VirtualDeviceLifecycleIdentity = {
 };
 
 /** An emulator child that ignores SIGTERM and SIGKILL until `exit()` is called. */
-class StubbornChild extends EventEmitter {
-  readonly pid = 4242;
-  readonly exitCode: number | null = null;
-  readonly signalCode: NodeJS.Signals | null = null;
+class StubbornChild extends StreamlessChildProcess {
   readonly signals: Array<NodeJS.Signals | number | undefined> = [];
 
-  kill(signal?: NodeJS.Signals | number): boolean {
+  override kill(signal?: NodeJS.Signals | number): boolean {
     this.signals.push(signal);
     return true;
   }
@@ -78,7 +75,7 @@ class CancelledRelaunchManager extends OfflineAwareManager {
   override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
     this.startedDevices.push(device);
     this.onStart?.();
-    throw new EmulatorLaunchCancelledError(device.name, this.child as unknown as ChildProcess);
+    throw new EmulatorLaunchCancelledError(device.name, this.child);
   }
 }
 

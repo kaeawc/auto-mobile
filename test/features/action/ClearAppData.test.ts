@@ -1,10 +1,12 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 import { promises as fs } from "fs";
 
 import * as path from "path";
 import { ClearAppData, IosAppReinstaller } from "../../../src/features/action/ClearAppData";
-import { ActionableError, AppNotInstalledError } from "../../../src/models/ActionableError";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { AppNotInstalledError } from "../../../src/models/AppNotInstalledError";
 import { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -31,15 +33,15 @@ describe("ClearAppData", () => {
         { userId: 0, name: "Owner", flags: 0x13, running: true },
         { userId: 10, name: "Work", flags: 0x30, running: true },
       ]);
-      adb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.app",
-        stderr: "",
-      });
-      adb.setCommandResponse("shell pm list packages --user 10", {
-        stdout: "package:com.example.other",
-        stderr: "",
-      });
-      adb.setCommandResponse("shell pm clear", { stdout: "Success\n", stderr: "" });
+      adb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.app", ""),
+      );
+      adb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult("package:com.example.other", ""),
+      );
+      adb.setCommandResponse("shell pm clear", createExecResult("Success\n", ""));
       const action = new ClearAppData(device, adbFactoryFor(adb));
 
       expect(await action.execute("com.example.app")).toEqual({
@@ -60,11 +62,11 @@ describe("ClearAppData", () => {
         const adb = new FakeAdbExecutor();
         adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
         adb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
-        adb.setCommandResponse("shell pm list packages --user 0", {
-          stdout: "package:com.example.app",
-          stderr: "",
-        });
-        adb.setCommandResponse("shell pm clear", { stdout, stderr: "" });
+        adb.setCommandResponse(
+          "shell pm list packages --user 0",
+          createExecResult("package:com.example.app", ""),
+        );
+        adb.setCommandResponse("shell pm clear", createExecResult(stdout, ""));
         const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
         await new ClearAppData(device, adbFactoryFor(adb), { cacheInvalidator }).execute(
           "com.example.app",
@@ -83,10 +85,10 @@ describe("ClearAppData", () => {
         { userId: 10, name: "Work", flags: 0x30, running: true },
       ]);
       for (const userId of [0, 10]) {
-        adb.setCommandResponse(`shell pm list packages --user ${userId}`, {
-          stdout: "package:com.example.other",
-          stderr: "",
-        });
+        adb.setCommandResponse(
+          `shell pm list packages --user ${userId}`,
+          createExecResult("package:com.example.other", ""),
+        );
       }
       const perf = new FakeRecordingPerformanceTracker();
       const action = new ClearAppData(device, adbFactoryFor(adb), {}, () => perf);
@@ -125,7 +127,7 @@ describe("ClearAppData", () => {
         if (outcome === "throw") {
           adb.setCommandError("shell pm clear", new Error("adb offline"));
         } else {
-          adb.setCommandResponse("shell pm clear", { stdout: outcome, stderr: "" });
+          adb.setCommandResponse("shell pm clear", createExecResult(outcome, ""));
         }
         const perf = new FakeRecordingPerformanceTracker();
         const action = new ClearAppData(device, adbFactoryFor(adb), {}, () => perf);
@@ -144,10 +146,7 @@ describe("ClearAppData", () => {
         { userId: 0, name: "Owner", flags: 0x13, running: true },
         { userId: 10, name: "Work", flags: 0x30, running: true },
       ]);
-      adb.setCommandResponse(`shell pm clear --user ${userId}`, {
-        stdout: "Success\n",
-        stderr: "",
-      });
+      adb.setCommandResponse(`shell pm clear --user ${userId}`, createExecResult("Success\n", ""));
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
 
       const result = await clearAppData.execute("com.example.app", userId);
@@ -161,11 +160,11 @@ describe("ClearAppData", () => {
 
     test("uses the package foreground user when no user is explicitly requested", async () => {
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("shell pm clear --user 11", { stdout: "Success\n", stderr: "" });
-      adb.setCommandResponse("shell pm list packages --user 11", {
-        stdout: "package:com.example.app",
-        stderr: "",
-      });
+      adb.setCommandResponse("shell pm clear --user 11", createExecResult("Success\n", ""));
+      adb.setCommandResponse(
+        "shell pm list packages --user 11",
+        createExecResult("package:com.example.app", ""),
+      );
       adb.setForegroundApp({ packageName: "com.example.app", userId: 11 });
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
 
@@ -180,7 +179,7 @@ describe("ClearAppData", () => {
 
     test("returns failure when pm clear prints Failed despite resolving successfully", async () => {
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("shell pm clear --user 10", { stdout: "Failed\n", stderr: "" });
+      adb.setCommandResponse("shell pm clear --user 10", createExecResult("Failed\n", ""));
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
 
       const result = await clearAppData.execute("com.example.app", 10);
@@ -196,7 +195,7 @@ describe("ClearAppData", () => {
     test("returns failure for synthetic unexpected pm clear output", async () => {
       const output = "Unexpected synthetic output";
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("shell pm clear --user 10", { stdout: output, stderr: "" });
+      adb.setCommandResponse("shell pm clear --user 10", createExecResult(output, ""));
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
 
       const result = await clearAppData.execute("com.example.app", 10);
@@ -211,10 +210,10 @@ describe("ClearAppData", () => {
 
     test("succeeds when stdout is Success despite an unrelated stderr warning", async () => {
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("shell pm clear --user 10", {
-        stdout: "  Success  \n",
-        stderr: "unrelated warning\n",
-      });
+      adb.setCommandResponse(
+        "shell pm clear --user 10",
+        createExecResult("  Success  \n", "unrelated warning\n"),
+      );
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
 
       const result = await clearAppData.execute("com.example.app", 10);

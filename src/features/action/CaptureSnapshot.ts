@@ -43,7 +43,7 @@ import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
 import * as path from "path";
-import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { type Timer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { SettingsNamespace } from "../observe/android";
 import {
@@ -53,6 +53,15 @@ import {
 
 export const VM_SNAPSHOT_SAVE_DISPATCHED = "isVmSnapshotSaveDispatched";
 
+export interface CaptureSnapshotOptions {
+  adbFactory?: AdbClientFactory;
+  emulator?: AndroidEmulatorClient;
+  timer?: Timer;
+  store?: DeviceSnapshotStorePort;
+  simctl?: IosSnapshotBackendDeps["simctl"];
+  consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+}
+
 /**
  * Capture device state snapshot, dispatching on device platform.
  *
@@ -61,21 +70,22 @@ export const VM_SNAPSHOT_SAVE_DISPATCHED = "isVmSnapshotSaveDispatched";
  * - **iOS**: app container backups via `simctl` (portable across restores).
  */
 export class CaptureSnapshot implements SnapshotCaptureProvider {
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
   private device: BootedDevice;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
   private store: DeviceSnapshotStorePort;
   private iosSnapshotBackend: IosSnapshotBackend;
 
-  constructor(
-    device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    emulator?: AndroidEmulatorClient,
-    _timer: Timer = defaultTimer,
-    store: DeviceSnapshotStorePort = new DeviceSnapshotStore(),
-    simctl?: IosSnapshotBackendDeps["simctl"],
-    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
-  ) {
+  constructor(device: BootedDevice, options: CaptureSnapshotOptions = {}) {
+    const {
+      adbFactory = defaultAdbClientFactory,
+      emulator,
+      store = new DeviceSnapshotStore(),
+      simctl,
+      consoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+    } = options;
+    this.consoleBusyRegistry = consoleBusyRegistry;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.emulator = emulator || new AndroidEmulatorClient();
@@ -639,7 +649,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     }
   }
 
-  private async getIosDeviceMetadata(): Promise<{ deviceType?: string; osVersion?: string }> {
+  async getIosDeviceMetadata(): Promise<{ deviceType?: string; osVersion?: string }> {
     try {
       const deviceInfo = await this.simulatorSnapshotBackend.getDeviceInfo();
       if (!deviceInfo) {

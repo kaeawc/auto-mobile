@@ -1,4 +1,4 @@
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
@@ -527,7 +527,11 @@ describe("ToolRegistry autolock session enforcement", () => {
       }),
     );
     await pool.initializeWithDevices([androidA, androidB]);
-    await pool.bindOrReuseDeviceSession("owner-session", androidA.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: androidA.deviceId,
+      platform: "android",
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
     let handlerCalls = 0;

@@ -1441,7 +1441,11 @@ describe("DeviceSessionRepository", () => {
 
     try {
       await pool.initializeWithDevices([androidDevice]);
-      await pool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
       fakeDeviceUtils.setBootedDevices("android", []);
       fakeDeviceUtils.markDeviceAsStopped("Pixel 7");
       fakeDeviceUtils.markDeviceAsStopped("emulator-5554");
@@ -1454,8 +1458,12 @@ describe("DeviceSessionRepository", () => {
       ).resolves.toBe("released");
 
       const row = await repo.getSession("session-1");
-      expect(row!.release_reason).toBe(deviceRestartReleaseReason(androidDevice.name));
-      expect(isRecoverableDaemonReleaseReason(row!.release_reason)).toBe(true);
+      const reason = row?.release_reason;
+      expect(reason).toBe(deviceRestartReleaseReason(androidDevice.name));
+      if (reason === null || reason === undefined) {
+        throw new Error("Expected a persisted release reason");
+      }
+      expect(isRecoverableDaemonReleaseReason(reason)).toBe(true);
     } finally {
       sessionManager.stopCleanupTimer();
     }
@@ -1479,7 +1487,11 @@ describe("DeviceSessionRepository", () => {
 
     try {
       await pool.initializeWithDevices([physicalDevice]);
-      await pool.bindOrReuseDeviceSession("physical-session", physicalDevice.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "physical-session",
+        deviceId: physicalDevice.deviceId,
+        platform: "android",
+      });
       fakeDeviceUtils.setBootedDevices("android", []);
 
       const pooledDevice = pool.getDevice(physicalDevice.deviceId);
@@ -1527,12 +1539,20 @@ describe("DeviceSessionRepository", () => {
 
     try {
       await pool.initializeWithDevices([androidDevice]);
-      await pool.bindOrReuseDeviceSession("session-1", androidDevice.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: androidDevice.deviceId,
+        platform: "android",
+      });
       const pooledDevice = pool.getDevice(androidDevice.deviceId);
       fakeDeviceUtils.setBootedDevices("android", []);
 
       await expect(
-        pool.bindOrReuseDeviceSession("session-2", androidDevice.deviceId, "android"),
+        pool.bindOrReuseDeviceSession({
+          sessionId: "session-2",
+          deviceId: androidDevice.deviceId,
+          platform: "android",
+        }),
       ).rejects.toThrow(/not available/);
 
       expect(await repo.getSession("session-1")).toMatchObject({

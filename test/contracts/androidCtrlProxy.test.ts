@@ -30,20 +30,7 @@ async function realHarness(replies: AndroidCtrlProxyReplies): Promise<AndroidCtr
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "contract-device", platform: "android", name: "contract" },
     new FakeAdbExecutor(),
-    () => socket,
-    timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    new FakeIdGenerator(),
-    false,
+    { webSocketFactory: () => socket, timer, idGenerator: new FakeIdGenerator() },
   );
   // The client's own tests drive the same private seams: an open socket, no reconnect, no redial.
   client.connectionTestHooks.socket = socket;

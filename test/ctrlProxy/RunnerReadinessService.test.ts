@@ -1,9 +1,10 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, test, spyOn } from "bun:test";
 import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
 import { logger } from "../../src/utils/logger";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, ViewHierarchyResult } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import {
   RunnerReadinessError,
@@ -20,6 +21,8 @@ import {
   deviceReadinessLockKey,
 } from "../../src/utils/deviceReadinessLock";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 
 const androidDevice = (deviceId = "emulator-5554"): BootedDevice => ({
   deviceId,
@@ -60,7 +63,9 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
   connectionCalls = 0;
   resetConnectionBudgetCalls = 0;
   accessibilityHierarchies: Array<ViewHierarchyResult | null> = [];
-  tapResult = { success: true };
+  tapResult: Awaited<ReturnType<NonNullable<ReadinessClient["requestTapCoordinates"]>>> = {
+    success: true,
+  };
   tapCoordinates: Array<{ x: number; y: number }> = [];
   onTap?: () => Promise<void> | void;
   getLastConnectionFailureMessage?: () => string | undefined;
@@ -97,7 +102,11 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
     return this.accessibilityHierarchies.shift() ?? null;
   }
 
-  async requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }> {
+  async requestTapCoordinates(
+    request: TapCoordinatesRequest,
+  ): Promise<{ success: boolean; error?: string }> {
+    const { x, y } = request;
+
     this.tapCoordinates.push({ x, y });
     await this.onTap?.();
     return this.tapResult;
@@ -126,7 +135,7 @@ class FakeAndroidManager implements ReadinessAndroidManager {
     return this.installed;
   }
 
-  async isEnabled(): Promise<boolean> {
+  async isEnabled(..._args: Parameters<ReadinessAndroidManager["isEnabled"]>): Promise<boolean> {
     return this.enabled;
   }
 
@@ -159,7 +168,9 @@ class FakeAndroidManager implements ReadinessAndroidManager {
     return this.compatibilityResult;
   }
 
-  async setup() {
+  async setup(
+    ..._args: Parameters<ReadinessAndroidManager["setup"]>
+  ): ReturnType<ReadinessAndroidManager["setup"]> {
     this.setupCalls++;
     if (this.setupAttempted) {
       return { success: false, message: "Setup already attempted" };
@@ -179,7 +190,10 @@ class FakeAndroidManager implements ReadinessAndroidManager {
 class FakeIosManager implements ReadinessIosManager {
   installed = true;
   servicePort = 8765;
-  setupResult = { success: true, message: "ready" };
+  setupResult: Awaited<ReturnType<ReadinessIosManager["setup"]>> = {
+    success: true,
+    message: "ready",
+  };
   setupCalls = 0;
   startCalls = 0;
   forceRestartCalls = 0;
@@ -232,7 +246,7 @@ class FakeIosManager implements ReadinessIosManager {
 
   async setup(
     _force?: boolean,
-    _perf?: unknown,
+    _perf?: PerformanceTracker,
     signal?: AbortSignal,
     minimumHealthPollDurationMs?: number,
   ) {
@@ -322,7 +336,7 @@ function systemUiAnrHierarchy(): ViewHierarchyResult {
           node: [
             { text: "System UI isn't responding" },
             { text: "Close app" },
-            { text: "Wait", bounds: "[100,200][300,260]" },
+            { text: "Wait", bounds: { left: 100, top: 200, right: 300, bottom: 260 } },
           ],
         },
       },
@@ -351,7 +365,7 @@ function localizedSystemUiAnrHierarchy(windowType = 3): ViewHierarchyResult {
             {
               text: "Warten",
               "resource-id": "android:id/button2",
-              bounds: "[100,200][300,260]",
+              bounds: { left: 100, top: 200, right: 300, bottom: 260 },
             },
           ],
         },
@@ -372,7 +386,7 @@ function appScreenMimickingEnglishSystemUiAnr(): ViewHierarchyResult {
           node: [
             { text: "System UI isn't responding" },
             { text: "Close app" },
-            { text: "Wait", bounds: "[100,200][300,260]" },
+            { text: "Wait", bounds: { left: 100, top: 200, right: 300, bottom: 260 } },
           ],
         },
       },

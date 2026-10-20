@@ -26,10 +26,11 @@ import {
   deviceIncarnationToken,
   setDeviceIncarnationResolver,
 } from "../../src/utils/deviceIncarnation";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { A11yImeActionResult } from "../../src/features/observe/android/types";
 import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
-import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { spyOnIosTestClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import {
   androidDevice,
   iosDevice,
@@ -519,7 +520,7 @@ describe("UnixSocketServer input/typeText", () => {
   test("append preserves full progress when submit reaches the shared deadline", async () => {
     const requestImeAction = mock(
       () =>
-        new Promise((resolve) => {
+        new Promise<A11yImeActionResult>((resolve) => {
           fakeTimer.setTimeout(
             () => resolve({ success: false, error: "enter key unavailable", totalTimeMs: 1 }),
             100,
@@ -1215,8 +1216,12 @@ describe("UnixSocketServer input/typeText", () => {
       // The confirmed prefix advanced the frame epoch, so any validation after
       // the original append's own one is answered "stale".
       return validationCalls > 2
-        ? { success: false, error: "Stale frame context; observe a fresh frame before retrying" }
-        : { success: true };
+        ? {
+            success: false,
+            totalTimeMs: 0,
+            error: "Stale frame context; observe a fresh frame before retrying",
+          }
+        : { success: true, totalTimeMs: 0 };
     });
     spyOnAndroidClientInstance(androidDevice, {
       validateFrameContext,
@@ -1290,6 +1295,7 @@ describe("UnixSocketServer input/typeText", () => {
   test("surfaces a runner rejection instead of self-healing the helper", async () => {
     const validateFrameContext = mock(async () => ({
       success: false,
+      totalTimeMs: 0,
       error: "Stale frame context; observe a fresh frame before retrying",
     }));
     spyOnAndroidClientInstance(androidDevice, {
@@ -1368,7 +1374,7 @@ describe("UnixSocketServer input/typeText", () => {
   // spent on a key event that landed
   // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
   test("replays the whole text WITH its validator when nothing was confirmed", async () => {
-    const validateFrameContext = mock(async () => ({ success: true }));
+    const validateFrameContext = mock(async () => ({ success: true, totalTimeMs: 0 }));
     spyOnAndroidClientInstance(androidDevice, {
       validateFrameContext,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
@@ -1524,8 +1530,12 @@ describe("UnixSocketServer input/typeText", () => {
 
   test("routes iOS text input through existing platform input infrastructure", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    spyOnIosClientInstance({
+    const requestImeAction = mock(async () => ({
+      success: true,
+      action: "done",
+      totalTimeMs: 1,
+    }));
+    spyOnIosTestClientInstance(iosDevice, {
       requestSetText,
       requestImeAction,
     });
@@ -1565,9 +1575,9 @@ describe("UnixSocketServer input/typeText", () => {
   });
 
   test("accepts iOS append mode and uses the CtrlProxy append primitive", async () => {
-    const requestAppendText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestAppendText = mock(async (_text: string) => ({ success: true, totalTimeMs: 1 }));
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestAppendText,
       requestSetText,
     });
@@ -1592,8 +1602,8 @@ describe("UnixSocketServer input/typeText", () => {
   });
 
   test("forwards an iOS frame context to the CtrlProxy append primitive", async () => {
-    const requestAppendText = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    spyOnIosClientInstance({
+    const requestAppendText = mock(async (_text: string) => ({ success: true, totalTimeMs: 1 }));
+    spyOnIosTestClientInstance(iosDevice, {
       requestAppendText,
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
@@ -1697,6 +1707,7 @@ describe("UnixSocketServer input/typeText", () => {
     const adb = new ProductionShapedAdbExecutor(fakeTimer, { probeApiLevel: 31 });
     const validateFrameContext = mock(async () => ({
       success: false,
+      totalTimeMs: 0,
       error: "Stale frame context; observe a fresh frame before retrying",
     }));
     spyOnAndroidClientInstance(androidDevice, {
@@ -1728,7 +1739,7 @@ describe("UnixSocketServer input/typeText", () => {
     const adb = new ScriptedAdbExecutor(fakeTimer);
     const validateFrameContext = mock(async () => {
       fakeTimer.advanceTime(30_000);
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOnAndroidClientInstance(androidDevice, {
       validateFrameContext,
@@ -1759,7 +1770,7 @@ describe("UnixSocketServer input/typeText", () => {
     let validationCount = 0;
     const validateFrameContext = mock(async () => {
       validationCount += 1;
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOnAndroidClientInstance(androidDevice, {
       validateFrameContext,
@@ -1959,10 +1970,11 @@ describe("UnixSocketServer input/typeText", () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({
       success: false,
+      action: "done",
       error: "return key unavailable",
       totalTimeMs: 1,
     }));
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestSetText,
       requestImeAction,
     });

@@ -1,13 +1,9 @@
+import type { StageSharedStorageResult } from "../../src/server/sharedStorageContract";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test } from "bun:test";
-import {
-  createDownloadsFixtureService,
-  StageSessionDownloadsRefusal,
-} from "../../src/server/downloadsFixtureService";
-import {
-  createSharedStorageServiceForTesting,
-  type StageSharedStorageResult,
-} from "../../src/server/sharedStorageService";
+import { createDownloadsFixtureService } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
+import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -254,7 +250,11 @@ describe("DownloadsFixtureService (#7007)", () => {
     const staging = Promise.withResolvers<StageSharedStorageResult>();
     try {
       await devicePool.initializeWithDevices([androidDevice]);
-      await devicePool.bindOrReuseDeviceSession("session-1", androidDevice.deviceId, "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: androidDevice.deviceId,
+        platform: "android",
+      });
       DaemonState.getInstance().initialize(sessionManager, devicePool);
       const service = createDownloadsFixtureService({
         resolveActiveSession: () => activeAndroid("session-1"),

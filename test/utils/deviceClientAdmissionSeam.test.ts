@@ -15,9 +15,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
-  DefaultDeviceClientProvider,
+  createDefaultDeviceClientProvider,
   DeviceSessionManager,
-} from "../../src/devices/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceSessionManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -75,7 +75,7 @@ describe("device-client admission seam", () => {
     async (identity) => {
       const adb = new FakeAdbExecutor();
       adb.setDevices([{ ...DEVICE, name: SERIAL }]);
-      const provider = new DefaultDeviceClientProvider(new FakeAdbClientFactory(adb));
+      const provider = createDefaultDeviceClientProvider(new FakeAdbClientFactory(adb));
       const cached = provider.getWindow(DEVICE);
       const active = spyOn(cached, "getActive").mockResolvedValue({
         appId: "com.example.app",
@@ -131,7 +131,7 @@ describe("device-client admission seam", () => {
   test("current quarantine refusal preserves selection and never discovers a replacement", async () => {
     const refusal = new DeviceIdentityQuarantinedError("identity unresolved");
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(),
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
       new FakeAdbClientFactory(),
       {
         admissionGate: {

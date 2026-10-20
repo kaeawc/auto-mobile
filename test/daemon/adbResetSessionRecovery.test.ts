@@ -3,7 +3,7 @@ import {
   AdbResetSessionRecovery,
   type AdbResetSessionRecoveryPoolPort,
 } from "../../src/daemon/adbResetSessionRecovery";
-import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/UnconfirmedRecoveryShutdownError";
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
 import type { AndroidRecoveryRecord } from "../../src/daemon/androidRecoveryRecordLedger";
 import type { AndroidEmulatorRecoveryDevice } from "../../src/daemon/devicePool";

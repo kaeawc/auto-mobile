@@ -126,7 +126,7 @@ describe("SystemConfigurationAdapter", () => {
       it(`retains the ${entry.name} typed failure and warns`, async () => {
         const adb = new FakeAdbExecutor();
         adb.setAndroidApiLevel(entry.legacy ? 32 : 33);
-        adb.setCommandResponse("shell id", { stdout: "uid=0(root)", stderr: "" });
+        adb.setCommandResponse("shell id", createExecResult("uid=0(root)", ""));
         adb.setCommandError(entry.command, new Error("write denied"));
         const capability = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
           throw new Error("optional service unavailable");
@@ -499,8 +499,8 @@ describe("SystemConfigurationAdapter", () => {
       // persist.sys.locale is read once for the previous value, then again for the
       // race-free read-back after the framework restart.
       adb.setCommandResultSequence("shell getprop persist.sys.locale", [
-        { stdout: "en-US", stderr: "" },
-        { stdout: "ja-JP", stderr: "" },
+        createExecResult("en-US", ""),
+        createExecResult("ja-JP", ""),
       ]);
       adb.setCommandResult("shell getprop sys.boot_completed", "1");
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
@@ -662,8 +662,8 @@ describe("SystemConfigurationAdapter", () => {
       adb.setCommandResultSequence(
         `shell cmd locale get-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0`,
         [
-          { stdout: readLocaleCapture("0-initial").appLocalesUser0, stderr: "" },
-          { stdout: readLocaleCapture("7-fr-FR").appLocalesUser0, stderr: "" },
+          createExecResult(readLocaleCapture("0-initial").appLocalesUser0, ""),
+          createExecResult(readLocaleCapture("7-fr-FR").appLocalesUser0, ""),
         ],
       );
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
@@ -685,15 +685,15 @@ describe("SystemConfigurationAdapter", () => {
       adb.setCommandResult("shell id", "uid=0(root) gid=0(root)\n");
       // Previous value, then the value after the restart settles.
       adb.setCommandResultSequence("shell getprop persist.sys.locale", [
-        { stdout: "en-US", stderr: "" },
-        { stdout: "es-ES", stderr: "" },
+        createExecResult("en-US", ""),
+        createExecResult("es-ES", ""),
       ]);
       // The framework is still restarting for the first two polls (empty
       // boot_completed) before it comes back up — mirroring the wedge in #6346.
       adb.setCommandResultSequence("shell getprop sys.boot_completed", [
-        { stdout: "", stderr: "" },
-        { stdout: "", stderr: "" },
-        { stdout: "1", stderr: "" },
+        createExecResult("", ""),
+        createExecResult("", ""),
+        createExecResult("1", ""),
       ]);
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -723,8 +723,8 @@ describe("SystemConfigurationAdapter", () => {
       adb.setCommandResult("wait-for-device", "");
       adb.setCommandResult("shell id", "uid=0(root) gid=0(root)\n");
       adb.setCommandResultSequence("shell getprop persist.sys.locale", [
-        { stdout: "en-US", stderr: "" },
-        { stdout: "es-ES", stderr: "" },
+        createExecResult("en-US", ""),
+        createExecResult("es-ES", ""),
       ]);
       // boot_completed never flips to "1"; the readiness wait times out but the
       // prop-based read-back still confirms the change was applied.

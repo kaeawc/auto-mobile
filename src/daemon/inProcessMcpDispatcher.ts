@@ -1,7 +1,7 @@
 import { AsyncResource } from "node:async_hooks";
 import type { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, type McpServer } from "@modelcontextprotocol/server";
-import type { ExecutionCancellationReason } from "../server/executionTracker";
+import type { ExecutionCancellationReason } from "./executionTracker";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
@@ -12,12 +12,13 @@ import {
 import { JsonBoundaryTransport } from "./jsonBoundaryTransport";
 import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
-import { executionTracker } from "../server/executionTracker";
+import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
+import { executionTracker } from "./executionTracker";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import {
   buildMcpRequestContext,
   createStatelessMcpServer,
+  refreshMcpResourceList,
   type McpForwardRequestContext,
   type McpRequestSessionContext,
   type StatelessMcpServerBase,
@@ -57,6 +58,8 @@ export interface InProcessMcpDispatcherDeps {
    * is built; the context-leak probe passes a pass-through to show what it guards against.
    */
   readonly serverScope?: AsyncScope;
+  /** Resource discovery must refresh external rosters even when its validated answer is cached. */
+  readonly refreshResources?: () => Promise<void>;
 }
 
 /** Runs a function inside some async context. */
@@ -90,7 +93,14 @@ export class InProcessMcpDispatcher {
 
   constructor(private readonly deps: InProcessMcpDispatcherDeps) {
     this.root = deps.serverScope ?? rootAsyncScope("auto-mobile-mcp-forward-root");
+    const refresh = deps.refreshResources;
+    if (refresh) {
+      this.refreshResources = () => this.root.run(refresh);
+    }
   }
+
+  /** Present only when the factory supplies the MCP handler's resource freshness hook. */
+  readonly refreshResources?: () => Promise<void>;
 
   /** Forwards whose client is still open. */
   get inFlightCount(): number {
@@ -201,10 +211,11 @@ export function createDaemonMcpDispatcher(options: {
 }): InProcessMcpDispatcher {
   return new InProcessMcpDispatcher({
     idGenerator: options.idGenerator ?? defaultIdGenerator,
+    refreshResources: refreshMcpResourceList,
     createServer: (context, scope) => createStatelessMcpServer(options.base(), context, scope),
     cancelScopeExecutions: (requestScopeId, reason) =>
       executionTracker.cancelSessionExecutions(requestScopeId, reason),
-    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
+    forgetScopeBindings: (requestScopeId) => forgetDaemonSessionBindingScope(requestScopeId),
     closeReason: options.closeReason ?? (() => MCP_FORWARD_CLOSED_REASON),
   });
 }

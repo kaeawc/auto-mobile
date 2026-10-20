@@ -1,3 +1,6 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, spyOn, test } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -19,7 +22,9 @@ import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigation
 import { scopedSelectionMatrix } from "../../helpers/scopedSelectionMatrix";
 import fixture from "../../fixtures/observe/ctrlproxy-notification-group-compact-bounds.json";
 
-const capture: ViewHierarchyResult = { hierarchy: { node: fixture.expanded } };
+const capture: ViewHierarchyResult = {
+  hierarchy: { node: capturedFlatNodeForTest(fixture.expanded) },
+};
 const nodes = new SearchableHierarchy().project(capture);
 const element = nodes.find((node) => node.nativeId === "android:id/title")!.element!;
 const device = {
@@ -56,6 +61,7 @@ for (const row of scopedSelectionMatrix) {
     const selector = new ResolverElementSelector({
       resolve: () => ({
         chosen: null,
+        matchMode: "exact",
         candidates: [],
         matches: [],
         error: "Container level 1 not found: missing",
@@ -116,8 +122,14 @@ for (const row of scopedSelectionMatrix) {
         supportsNodeActionSelectors: async () => true,
       },
     });
-    tap.observedInteraction = (action) =>
-      action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
+    tap.observedInteraction = runBlockWith(() =>
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: capture,
+        screenSize: { width: 1080, height: 2400 },
+      }),
+    );
     tap.testHooks.setRefreshViewHierarchy(async () => capture);
     try {
       const result = await tap.execute({ action: "tap", ...options });
@@ -155,8 +167,14 @@ for (const row of scopedSelectionMatrix) {
         supportsNodeActionSelectors: async () => true,
       },
     });
-    tap.observedInteraction = (action) =>
-      action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
+    tap.observedInteraction = runBlockWith(() =>
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: capture,
+        screenSize: { width: 1080, height: 2400 },
+      }),
+    );
     tap.testHooks.setRefreshViewHierarchy(async () => capture);
     try {
       const result = await tap.execute({ action: "tap", ...options });

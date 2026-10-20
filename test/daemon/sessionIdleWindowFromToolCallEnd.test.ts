@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeatIfKnown } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -19,8 +20,9 @@ import {
 import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+  CLI_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
-import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/server/executionTracker";
+import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -321,6 +323,13 @@ describe("the idle window counts from the end of the last tool call", () => {
   });
 });
 
+// The frame an external `--cli` heartbeat loop sends: it declares the CLI policy, so the daemon
+// keeps the session on its minutes-long idle window instead of restoring the strict lease.
+const CLI_KEEPER_FRAME = {
+  livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+  idleTimeoutMs: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+};
+
 describe("CLI idle is measured from tool activity, not heartbeats", () => {
   let timer: FakeTimer;
   let manager: SessionManager;
@@ -349,13 +358,13 @@ describe("CLI idle is measured from tool activity, not heartbeats", () => {
     const step = PROXY_HEARTBEAT_INTERVAL_MS;
     for (let at = step; at <= DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS; at += step) {
       timer.setCurrentTime(at);
-      manager.recordHeartbeat(SESSION);
+      await deliverDaemonHeartbeatIfKnown(manager, SESSION, CLI_KEEPER_FRAME);
     }
     await monitor.tick();
     expect(reaped).toEqual([]);
 
     timer.setCurrentTime(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS + step);
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeatIfKnown(manager, SESSION, CLI_KEEPER_FRAME);
     await monitor.tick();
     expect(reaped).toEqual(["cli-idle-timeout"]);
   });

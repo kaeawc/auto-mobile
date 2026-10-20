@@ -1,13 +1,21 @@
 import { spyOn } from "bun:test";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import {
-  createFakeDaemonState as createDrainDaemonState,
-  createFakeSession as createDrainSession,
+  androidDevice,
+  createFakeDaemonState,
+  createFakeDeviceManager,
+  createFakeSession,
+  iosDevice,
 } from "./helpers/inputSocketHarness";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -15,56 +23,12 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { sendRawSocketRequest } from "./helpers/socketRequest";
 import { InputKey, type InputKeyName } from "../../src/features/action/InputKey";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
-import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../src/models";
 import type { InputKeyResult } from "../../src/features/action/InputKey";
-
-const androidDevice: BootedDevice = {
-  deviceId: "emulator-5554",
-  name: "Pixel",
-  platform: "android",
-};
-
-const iosDevice: BootedDevice = {
-  deviceId: "ios-sim-1",
-  name: "iPhone 16",
-  platform: "ios",
-};
-
-function createFakeDeviceManager(
-  devices: BootedDevice[],
-  succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"]),
-) {
-  return {
-    getBootedDevicesDetailed: mock(async () => ({
-      devices,
-      succeededPlatforms,
-    })),
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
-}
-
-function createFakeDaemonState() {
-  return {
-    isInitialized: () => true,
-    getSessionManager: () => ({
-      getSession: (_sessionId: string): Session | null => null,
-      getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,
-      releaseSession: async () => null,
-    }),
-    getDevicePool: () => ({
-      refreshDevices: async () => 0,
-      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-      releaseDevice: async () => {},
-      resolveAutolockSessionForMcpSession: () => undefined,
-    }),
-  };
-}
 
 function sendRequest(
   socketPath: string,
@@ -86,7 +50,7 @@ function sendRequest(
 
 describe("UnixSocketServer input/key", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let fakeTimer: FakeTimer;
   let originalPress: typeof InputKey.prototype.press;
 
@@ -124,7 +88,7 @@ describe("UnixSocketServer input/key", () => {
     });
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = createHarnessServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -163,9 +127,8 @@ describe("UnixSocketServer input/key", () => {
     }));
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server = createHarnessServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server.stubFrameContextCheck();
     await server.start();
 
     const { response } = await sendRequest(socketPath, "input/key", {
@@ -191,7 +154,7 @@ describe("UnixSocketServer input/key", () => {
     }));
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = createHarnessServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -213,7 +176,7 @@ describe("UnixSocketServer input/key", () => {
       throw new Error("iOS unsupported should be reported before routing");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = createHarnessServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -238,7 +201,7 @@ describe("UnixSocketServer input/key", () => {
         { ...iosDevice, deviceId: "ios-sim-2", name: "iPhone 16 Pro" },
       ]),
     );
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = createHarnessServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -258,7 +221,7 @@ describe("UnixSocketServer input/key", () => {
       throw new Error("validation should fail before routing");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = createHarnessServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/key", {
@@ -298,14 +261,14 @@ describe("UnixSocketServer input/key", () => {
       sent = true;
       operationStarted.resolve();
       await releaseOperation.promise;
-      return { stdout: "", stderr: "" };
+      return createExecResult("", "");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessionId = "direct-key-after-dispatch-session";
     const sessions = new Map([
-      [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
+      [sessionId, createFakeSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
+    server = createHarnessServer(socketPath, createFakeDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/key", {
       platform: "android",
@@ -350,14 +313,14 @@ describe("UnixSocketServer input/key", () => {
       await options?.beforeDispatch?.(options.timeoutMs);
       options?.signal?.throwIfAborted();
       sent = true;
-      return { stdout: "", stderr: "" };
+      return createExecResult("", "");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessionId = "direct-key-before-dispatch-session";
     const sessions = new Map([
-      [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
+      [sessionId, createFakeSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
+    server = createHarnessServer(socketPath, createFakeDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/key", {
       platform: "android",

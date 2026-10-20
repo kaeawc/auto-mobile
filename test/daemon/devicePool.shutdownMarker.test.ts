@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
+import { bindDevice, unbindDevice } from "../../src/daemon/deviceBinding";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -467,8 +468,7 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [placeholder];
       await devicePool.refreshDevices();
       const pooled = devicePool.getDevice(placeholder.deviceId)!;
-      pooled.sessionId = "held-session";
-      pooled.status = "busy";
+      bindDevice(pooled, "held-session");
     };
 
     test("upgrades a quarantined placeholder that holds a session without rebinding it", async () => {
@@ -504,8 +504,7 @@ describe("DevicePool", () => {
       // pool does: the session ends, the entry goes, a new one takes the serial.
       const retired = { ...pooled };
       expect(retired.sessionId).toBe("held-session");
-      pooled.sessionId = null;
-      pooled.status = "idle";
+      unbindDevice(pooled);
       await devicePool.removeDevice(placeholder.deviceId);
       await devicePool.refreshDevices();
       const current = devicePool.getDevice(placeholder.deviceId)!;
@@ -611,12 +610,12 @@ describe("DevicePool", () => {
 
       try {
         await expect(
-          devicePool.bindOrReuseDeviceSession(
-            "competing-session",
-            replacement.deviceId,
-            "android",
+          devicePool.bindOrReuseDeviceSession({
+            sessionId: "competing-session",
+            deviceId: replacement.deviceId,
+            platform: "android",
             sourceImage,
-          ),
+          }),
         ).rejects.toThrow("not available");
         expect(sessionManager.getSession("competing-session")).toBeNull();
       } finally {
@@ -629,16 +628,14 @@ describe("DevicePool", () => {
 
       try {
         await expect(
-          devicePool.bindOrReuseDeviceSession(
-            "recovery-session",
-            replacement.deviceId,
-            "android",
+          devicePool.bindOrReuseDeviceSession({
+            sessionId: "recovery-session",
+            deviceId: replacement.deviceId,
+            platform: "android",
             sourceImage,
-            undefined,
-            undefined,
-            false,
-            new Set([reservation.owner]),
-          ),
+            allowSessionRebind: false,
+            readinessReservationOwners: new Set([reservation.owner]),
+          }),
         ).resolves.toBe("recovery-session");
         expect(sessionManager.getSession("recovery-session")?.assignedDevice).toBe(
           replacement.deviceId,
@@ -670,24 +667,22 @@ describe("DevicePool", () => {
           originalIncarnation,
         );
         await expect(
-          devicePool.bindOrReuseDeviceSession(
-            "competing-session",
-            replacement.deviceId,
-            "android",
+          devicePool.bindOrReuseDeviceSession({
+            sessionId: "competing-session",
+            deviceId: replacement.deviceId,
+            platform: "android",
             sourceImage,
-          ),
+          }),
         ).rejects.toThrow("not available");
         await expect(
-          devicePool.bindOrReuseDeviceSession(
-            "recovery-session",
-            replacement.deviceId,
-            "android",
+          devicePool.bindOrReuseDeviceSession({
+            sessionId: "recovery-session",
+            deviceId: replacement.deviceId,
+            platform: "android",
             sourceImage,
-            undefined,
-            undefined,
-            false,
-            new Set([reservation.owner]),
-          ),
+            allowSessionRebind: false,
+            readinessReservationOwners: new Set([reservation.owner]),
+          }),
         ).resolves.toBe("recovery-session");
         expect(sessionManager.getSession("competing-session")).toBeNull();
         expect(sessionManager.getSession("recovery-session")?.assignedDevice).toBe(
@@ -716,28 +711,24 @@ describe("DevicePool", () => {
 
       try {
         await expect(
-          devicePool.bindOrReuseDeviceSession(
-            "first-session",
-            device.deviceId,
-            "android",
-            undefined,
-            undefined,
-            device,
-            false,
-            new Set([firstReservation.owner]),
-          ),
+          devicePool.bindOrReuseDeviceSession({
+            sessionId: "first-session",
+            deviceId: device.deviceId,
+            platform: "android",
+            expectedIdentity: device,
+            allowSessionRebind: false,
+            readinessReservationOwners: new Set([firstReservation.owner]),
+          }),
         ).resolves.toBe("first-session");
         await expect(
-          devicePool.bindOrReuseDeviceSession(
-            "second-session",
-            device.deviceId,
-            "android",
-            undefined,
-            undefined,
-            device,
-            false,
-            new Set([secondReservation.owner]),
-          ),
+          devicePool.bindOrReuseDeviceSession({
+            sessionId: "second-session",
+            deviceId: device.deviceId,
+            platform: "android",
+            expectedIdentity: device,
+            allowSessionRebind: false,
+            readinessReservationOwners: new Set([secondReservation.owner]),
+          }),
         ).resolves.toBe("first-session");
       } finally {
         await firstReservation();

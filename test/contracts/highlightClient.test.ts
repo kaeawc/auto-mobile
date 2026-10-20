@@ -1,4 +1,5 @@
-import { VisualHighlight, VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlight } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import type { HighlightOperationResult } from "../../src/models";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";

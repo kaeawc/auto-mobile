@@ -10,7 +10,6 @@ import { ActionableError } from "../../src/models/ActionableError";
 import { observeSchema, registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
-import { getStructuredField } from "../../src/utils/toolUtils";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import {
@@ -23,6 +22,7 @@ import {
 } from "../../src/server/toolOutputSchemas";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import type { ImageOperation } from "../../src/utils/image/backend/ImageBackend";
 import { FakeImageBackend } from "../fakes/FakeImageBackend";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -36,6 +36,7 @@ import { screenshotPathProtection } from "../../src/features/observe/ScreenshotP
 import { selectScreenshotsToEvict } from "../../src/features/observe/screenshotCacheEviction";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { readToolResponse, toolField, toolStructured } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -120,6 +121,10 @@ function register(extra: Parameters<typeof registerObserveTools>[0] = {}) {
     },
     ...extra,
   });
+}
+
+function readCrop(response: unknown): ObserveCropResult {
+  return observeCropResultSchema.parse(toolField(response, "crop"));
 }
 
 async function call(args: Record<string, unknown>, targetDevice = device) {
@@ -257,7 +262,7 @@ describe("observe crop capture and output", () => {
         },
       });
       const response = await call({ crop: { rect } });
-      const crop = getStructuredField<ObserveCropResult>(response, "crop")!;
+      const crop = readCrop(response);
       expect(protection.calls.filter((path) => path === crop.cropPath)).toHaveLength(3);
       expect(crop.expiresAt).toBe(timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS);
       const files = [{ path: crop.cropPath, size: 129 * 1024 * 1024, mtimeMs: 0 }];
@@ -265,6 +270,7 @@ describe("observe crop capture and output", () => {
         selectScreenshotsToEvict(
           files,
           128 * 1024 * 1024,
+          0,
           timer.now(),
           () => false,
           protection.isProtected.bind(protection),
@@ -280,7 +286,7 @@ describe("observe crop capture and output", () => {
 
   test("Android crops once, preserves full screenshot, and delivers scalar metadata only", async () => {
     const response = await call({ crop: { rect } });
-    const crop = getStructuredField<ObserveCropResult>(response, "crop")!;
+    const crop = readCrop(response);
     expect(captures).toBe(1);
     expect(modes).toEqual(["settled"]);
     expect(reads).toEqual(["/fake/final.png"]);
@@ -305,9 +311,9 @@ describe("observe crop capture and output", () => {
       encoding: { mime: "image/png" },
     });
     expect(writes).toEqual([{ filePath: crop.cropPath, data: Buffer.from("png-crop") }]);
-    expect(getStructuredField(response, "screenshotPath")).toBe("/fake/final.png");
-    expect(getStructuredField(response, "screenshotOrientation")).toBe("display");
-    expect(response.content.every((part) => part.type === "text")).toBe(true);
+    expect(toolField(response, "screenshotPath")).toBe("/fake/final.png");
+    expect(toolField(response, "screenshotOrientation")).toBe("display");
+    expect(readToolResponse(response).content.every((part) => part.type === "text")).toBe(true);
     expect(JSON.stringify(crop)).not.toContain("png-crop");
   });
 
@@ -394,12 +400,12 @@ describe("observe crop capture and output", () => {
       current.viewHierarchy!.nativeScale = nativeScale;
       image.setMetadataResult({ width: rw, height: rh, format: "png", size: source.length });
       const response = await call({ crop: { rect: rectangle } }, { ...device, platform: "ios" });
-      const crop = getStructuredField<ObserveCropResult>(response, "crop")!;
+      const crop = readCrop(response);
       expect(crop.rasterBounds).toEqual(rasterBounds);
       expect(crop.scaleProvenance).toBe(provenance);
       expect(crop.unit).toBe("points");
       expect(crop.screenshotOrientation).toBe("display");
-      expect(getStructuredField(response, "screenshotOrientation")).toBe("native");
+      expect(toolField(response, "screenshotOrientation")).toBe("native");
       expect(image.lastPipeline?.operations).toEqual([
         {
           type: "crop",
@@ -410,7 +416,12 @@ describe("observe crop capture and output", () => {
         },
         ...(rotation === 0
           ? []
-          : [{ type: "rotate", degrees: rotation === 1 ? 270 : rotation === 3 ? 90 : 180 }]),
+          : [
+              {
+                type: "rotate",
+                degrees: rotation === 1 ? 270 : rotation === 3 ? 90 : 180,
+              } satisfies ImageOperation,
+            ]),
       ]);
       expect(captures).toBe(1);
     },
@@ -427,7 +438,7 @@ describe("observe crop capture and output", () => {
       { crop: { element: { text: "Gmail" } } },
       { ...device, platform: "ios" },
     );
-    const crop = getStructuredField<ObserveCropResult>(response, "crop")!;
+    const crop = readCrop(response);
     expect(crop.requestedBounds).toEqual(bounds);
     expect(crop.imageSize).toEqual({
       width: (bounds.right - bounds.left) * 3,
@@ -455,16 +466,16 @@ describe("observe crop capture and output", () => {
       { crop: { rect: { x: 1, y: 1, width: 2, height: 2 } } },
       { ...device, platform: "ios" },
     );
-    expect(getStructuredField(response, "crop")).toMatchObject({
+    expect(toolField(response, "crop")).toMatchObject({
       rasterBounds: { left: 2, top: 2, right: 6, bottom: 6 },
       screenshotOrientation: "display",
     });
-    expect(getStructuredField(response, "screenshotOrientation")).toBe("display");
+    expect(toolField(response, "screenshotOrientation")).toBe("display");
   });
 
   test("clips partial bounds while retaining the original request", async () => {
     const response = await call({ crop: { rect: { x: -10, y: 2390, width: 40, height: 40 } } });
-    expect(getStructuredField(response, "crop")).toMatchObject({
+    expect(toolField(response, "crop")).toMatchObject({
       clipped: true,
       requestedBounds: { left: -10, top: 2390, right: 30, bottom: 2430 },
       clippedBounds: { left: 0, top: 2390, right: 30, bottom: 2400 },
@@ -484,7 +495,7 @@ describe("observe crop capture and output", () => {
       crop: { rect: { x: 590, y: 390, width: 20, height: 20 } },
     });
     expect(reads).toEqual(["/fake/external.png"]);
-    expect(getStructuredField(response, "crop")).toMatchObject({
+    expect(toolField(response, "crop")).toMatchObject({
       screenSize: { width: 600, height: 400 },
       clipped: true,
       imageSize: { width: 10, height: 10 },
@@ -495,8 +506,8 @@ describe("observe crop capture and output", () => {
     const response = await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
       call({ deviceId: device.deviceId, crop: { element: { text: "Gmail" } } }),
     );
-    expect(getStructuredField(response, "crop")).toMatchObject({ requestedBounds: target.bounds });
-    expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
+    expect(toolField(response, "crop")).toMatchObject({ requestedBounds: target.bounds });
+    expect(toolField(response, "snapshotReference")).toBeUndefined();
     expect(modes).toEqual(["settled"]);
     expect(restoreNotify).not.toHaveBeenCalled();
   });
@@ -511,7 +522,7 @@ describe("observe crop capture and output", () => {
       ToolRegistry.getTool("observe")!.deviceAwareHandler!(device, args),
     );
     // The shared fake asserts both fields of the fourth argument, including timeoutMs: undefined.
-    expect(getStructuredField(response, "crop")).toBeDefined();
+    expect(toolField(response, "crop")).toBeDefined();
     expect(captures).toBe(1);
     expect(modes).toEqual(["settled"]);
   });
@@ -528,12 +539,12 @@ describe("observe crop capture and output", () => {
         { name: "observe", args: { project } },
       );
       for (const field of ["viewHierarchy", "elements", "skeleton", "readouts"]) {
-        expect(JSON.stringify(getStructuredField(cropped, field))).toBe(
-          JSON.stringify(getStructuredField(baseline, field)),
+        expect(JSON.stringify(toolField(cropped, field))).toBe(
+          JSON.stringify(toolField(baseline, field)),
         );
       }
-      expect(getStructuredField(cropped, "crop")).toBeDefined();
-      expect(observeToolResultSchema.safeParse(cropped.structuredContent).success).toBe(true);
+      expect(toolField(cropped, "crop")).toBeDefined();
+      expect(observeToolResultSchema.safeParse(toolStructured(cropped)).success).toBe(true);
     },
   );
 
@@ -542,7 +553,7 @@ describe("observe crop capture and output", () => {
     const response = await call({ crop: { rect }, screenshotOptions: options });
     expect(fake.getExecuteOptions()[0]?.screenshotOptions).toEqual(options);
     expect(image.lastPipeline?.encoding).toEqual({ mime: "image/png" });
-    expect(getStructuredField(response, "crop")).toBeDefined();
+    expect(toolField(response, "crop")).toBeDefined();
   });
 
   test("waitFor crops only the terminal settled frame after the quiet gate", async () => {
@@ -560,13 +571,13 @@ describe("observe crop capture and output", () => {
     expect(fake.getExecuteOptions().every((options) => options?.skipScreenshot)).toBe(true);
     expect(captures).toBe(1);
     expect(reads).toEqual(["/fake/final.png"]);
-    expect(getStructuredField(response, "settled")).toBe(true);
+    expect(toolField(response, "settled")).toBe(true);
   });
 
   test("raw append leaves element crop resolved on the filtered same-frame tree", async () => {
     const response = await call({ raw: true, crop: { element: { text: "Gmail" } } });
     expect(fake.getExecutedOperations()).toContain("appendRawViewHierarchy");
-    expect(getStructuredField(response, "crop")).toMatchObject({ requestedBounds: target.bounds });
+    expect(toolField(response, "crop")).toMatchObject({ requestedBounds: target.bounds });
   });
 
   test("full scope excludes an element without retargeting; skeleton retains existing scope behavior", async () => {
@@ -580,7 +591,7 @@ describe("observe crop capture and output", () => {
       scope,
       crop: { element: { text: "Gmail" } },
     });
-    expect(getStructuredField(response, "crop")).toMatchObject({ requestedBounds: target.bounds });
+    expect(toolField(response, "crop")).toMatchObject({ requestedBounds: target.bounds });
   });
 });
 
@@ -636,20 +647,20 @@ describe("observe crop failures", () => {
       "../fixtures/screenshots/overlay-fullscreen.png",
     );
     const response = await call({ crop: { rect }, includeScreenshotImage: true });
-    const inline = response.content.find((part) => part.type === "image");
+    const inline = readToolResponse(response).content.find((part) => part.type === "image");
     expect(inline).toBeDefined();
     if (inline?.type !== "image") {
       throw new Error("missing full screenshot image");
     }
     expect(Buffer.from(inline.data, "base64")).toEqual(await fs.readFile(current.screenshotPath));
     expect(Buffer.from(inline.data, "base64")).not.toEqual(Buffer.from("png-crop"));
-    expect(getStructuredField(response, "crop")).toBeDefined();
+    expect(toolField(response, "crop")).toBeDefined();
     expect(captures).toBe(1);
   });
 
   test("ordered text variants select the first uniquely exposed match", async () => {
     const response = await call({ crop: { element: { textAny: ["missing", "Gmail", "Photos"] } } });
-    expect(getStructuredField(response, "crop")).toMatchObject({ requestedBounds: target.bounds });
+    expect(toolField(response, "crop")).toMatchObject({ requestedBounds: target.bounds });
   });
 
   test("empty runtime rectangle uses the observe label and structured error", async () => {

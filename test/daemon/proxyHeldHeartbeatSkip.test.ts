@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import type { OtherHeldSession } from "../../src/daemon/proxy/ProxySessionState";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_HEARTBEAT_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -18,9 +19,13 @@ class LivenessTimer extends FakeTimer {
   }
 }
 
-interface HeldRecord {
-  claimSent: boolean;
-  lastUsedAt: number;
+type HeldRecord = OtherHeldSession;
+
+/** A real proxy that exposes its held-session map to the test. */
+class HeldRecordProxy extends DaemonMcpProxy {
+  heldSessions(): Map<string, OtherHeldSession> {
+    return this.otherHeldSessions;
+  }
 }
 
 const HELD = "android-session";
@@ -29,12 +34,11 @@ const INTERVAL_MS = 2_000;
 
 describe("held-session heartbeat skipped by the hold-is-current guard (#11028)", () => {
   let timer: LivenessTimer;
-  let proxy: DaemonMcpProxy;
+  let proxy: HeldRecordProxy;
   let spies: Array<ReturnType<typeof spyOn>>;
   let onHeldHeartbeat: () => void;
 
-  const held = () =>
-    (proxy as unknown as { otherHeldSessions: Map<string, HeldRecord> }).otherHeldSessions;
+  const held = () => proxy.heldSessions();
 
   beforeEach(() => {
     timer = new LivenessTimer();
@@ -48,7 +52,7 @@ describe("held-session heartbeat skipped by the hold-is-current guard (#11028)",
     ];
     const manager = new FakeDaemonManager();
     manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
-    proxy = new DaemonMcpProxy({
+    proxy = new HeldRecordProxy({
       clientFactory: () =>
         new FakeDaemonClient({
           daemonMethodResults: new Map<string, unknown>([["tools/list", { tools: [] }]]),

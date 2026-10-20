@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,7 +15,7 @@ import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlPro
 import { CtrlProxyServicePortChangedError } from "../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import type { KeyValueEntry, KeyValueType } from "../../../src/features/storage/storageTypes";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
-import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/server/storageSdkErrors";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/utils/storageSdkErrors";
 import { buildPlist, PlistReal } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -79,14 +80,23 @@ class FakeKeyValueClient implements IosPreferenceKeyValueClient {
     key: string,
     value: string | null,
     type: KeyValueType,
-    timeoutMs?: number,
-  ): Promise<void> {
-    this.calls.push({ operation: "set", appId, store, key, value, type, timeoutMs });
+    timeoutMs?: Parameters<IosPreferenceKeyValueClient["setPreference"]>[5],
+  ): ReturnType<IosPreferenceKeyValueClient["setPreference"]> {
+    this.calls.push({
+      operation: "set",
+      appId,
+      store,
+      key,
+      value,
+      type,
+      timeoutMs: typeof timeoutMs === "number" ? timeoutMs : timeoutMs?.timeoutMs,
+    });
     this.onWrite?.();
     if (this.writeError) {
       throw typeof this.writeError === "string" ? new Error(this.writeError) : this.writeError;
     }
     this.entry = { key, value, type };
+    return undefined;
   }
 }
 
@@ -129,13 +139,13 @@ class FakeContainerSimctl {
       if (this.processListError) {
         throw new Error(this.processListError);
       }
-      return { stdout: this.processList, stderr: "" };
+      return createExecResult(this.processList, "");
     }
     if (args[0] === "get_app_container") {
       if (this.containerError) {
         throw new Error(this.containerError);
       }
-      return { stdout: `${this.containerPath}\n`, stderr: "" };
+      return createExecResult(`${this.containerPath}\n`, "");
     }
     if (args[3] !== "write") {
       throw new Error("Unexpected defaults read");
@@ -143,7 +153,7 @@ class FakeContainerSimctl {
     if (this.writeError) {
       throw new Error(this.writeError);
     }
-    return { stdout: "", stderr: "" };
+    return createExecResult("", "");
   }
 }
 

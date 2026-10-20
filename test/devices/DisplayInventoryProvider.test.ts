@@ -71,7 +71,7 @@ describe("CachingDisplayInventoryProvider", () => {
       reason: "source offline",
     });
     const matcher = new DefaultDeviceMatcher();
-    for (const requires of [{ panels: 1 }, { panels: 2 }, { posture: "default" }]) {
+    for (const requires of [{ panels: 1 }, { panels: 2 }, { posture: "opened" as const }]) {
       expect(
         matcher.matchBootedDevice({ platform: "android", requires }, [fold], "LATEST"),
       ).toBeNull();

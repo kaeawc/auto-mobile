@@ -1,10 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import {
-  DaemonHandshakeMismatchError,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-} from "../client";
+import { DaemonHandshakeMismatchError } from "../DaemonHandshakeMismatchError";
+import { DaemonRequestNotDeliveredError } from "../DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../DaemonShuttingDownError";
+import { DaemonUnavailableError } from "../client";
 import { isMcpQueueTimeoutError } from "../McpTimeoutError";
 import {
   DAEMON_SESSION_NOT_ACTIVE_CODE,
@@ -13,14 +11,10 @@ import {
   errorCodeOf,
   isGatedToolErrorCode,
 } from "../types";
-import {
-  DaemonAssetVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonVersionMismatchError,
-  daemonInternalErrors,
-} from "./daemonErrors";
-
-const { DaemonPreflightConnectionError } = daemonInternalErrors;
+import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchError";
+import { DaemonBuildMismatchError } from "./DaemonBuildMismatchError";
+import { DaemonVersionMismatchError } from "./DaemonVersionMismatchError";
+import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
 
 /**
  * Connection facts the classifier reads:

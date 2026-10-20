@@ -1,6 +1,7 @@
+import { z } from "zod/v4";
 import { afterEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 import { DefaultUIStateSetup } from "../../../src/features/navigation/DefaultUIStateSetup";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
@@ -45,12 +46,17 @@ describe("navigation internal no-diff marking (#3087)", () => {
       let capturedArgs: Record<string, unknown> | undefined;
       ToolRegistry.clearTools();
       // Plain-register so the handler sees the exact args navigation passed.
-      ToolRegistry.register("swipeOn", "swipeOn", {}, async (args: any) => {
-        capturedArgs = args;
-        // A successful scroll: `found: true` must be readable off the full result
-        // (proves the internal path is not stripped for the caller's own read).
-        return createStructuredToolResponse({ success: true, found: true });
-      });
+      ToolRegistry.register(
+        "swipeOn",
+        "swipeOn",
+        z.record(z.string(), z.unknown()),
+        async (args: any) => {
+          capturedArgs = args;
+          // A successful scroll: `found: true` must be readable off the full result
+          // (proves the internal path is not stripped for the caller's own read).
+          return createStructuredToolResponse({ success: true, found: true });
+        },
+      );
 
       const setup = new DefaultUIStateSetup(device, dummyAdb);
       const action = await setup.setupScrollPosition(scrollPosition, "android");
@@ -95,12 +101,21 @@ describe("navigation internal no-diff marking (#3087)", () => {
 
       let capturedArgs: Record<string, unknown> | undefined;
       ToolRegistry.clearTools();
-      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
-        capturedArgs = args;
-        return createStructuredToolResponse({ success: true });
-      });
+      ToolRegistry.register(
+        "tapOn",
+        "tapOn",
+        z.record(z.string(), z.unknown()),
+        async (args: any) => {
+          capturedArgs = args;
+          return createStructuredToolResponse({ success: true });
+        },
+      );
 
-      const navigateTo = new NavigateTo(device, undefined, uiStateSetup, screenWaiter, navManager);
+      const navigateTo = new NavigateTo(device, undefined, {
+        uiStateSetup,
+        screenWaiter,
+        navigationManager: navManager,
+      });
       const result = await navigateTo.execute({ targetScreen: "Detail", platform: "android" });
 
       expect(result.success).toBe(true);

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { createExecResult } from "../../../src/utils/execResult";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { defaultWebSocketFactory } from "../../../src/features/observe/DeviceServiceClient";
@@ -9,7 +10,6 @@ import type { CtrlProxyIosManager } from "../../../src/ctrlProxy/IOSCtrlProxyMan
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { installFakeCtrlProxyManagers } from "../../helpers/hermeticDeviceTools";
 import { maskRealCtrlProxyWebSocketOptIn } from "../../helpers/maskRealCtrlProxyWebSocketOptIn";
 
 /**
@@ -22,7 +22,6 @@ import { maskRealCtrlProxyWebSocketOptIn } from "../../helpers/maskRealCtrlProxy
 const androidDevice: BootedDevice = {
   deviceId: "guard-android",
   platform: "android",
-  isEmulator: true,
   name: "Guard Android",
 };
 
@@ -50,6 +49,10 @@ function createIosManager(timer: FakeTimer): CtrlProxyIosManager {
     },
     async start() {},
     async stop() {},
+    resetSetupState() {},
+    async getReportedRunnerPort() {
+      return null;
+    },
     getServicePort() {
       return 0;
     },
@@ -106,20 +109,18 @@ const iosCases: IosCase[] = [
   ["requestSetText", (c) => c.requestSetText("hello")],
   ["requestClipboard", (c) => c.requestClipboard("get")],
   ["requestVoiceOverActivate", (c) => c.requestVoiceOverActivate("OK", "activate")],
-  ["requestActivateAccessibilityLink", (c) => c.requestActivateAccessibilityLink("Terms", 0)],
+  [
+    "requestActivateAccessibilityLink",
+    (c) => c.requestActivateAccessibilityLink({ text: "Terms", occurrence: 0 }),
+  ],
   ["requestHierarchySync", (c) => c.requestHierarchySync()],
 ];
 
 describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#10470)", () => {
   maskRealCtrlProxyWebSocketOptIn();
 
-  let restoreManagers: () => void;
   let android: AndroidCtrlProxyClient | null = null;
   let ios: IOSCtrlProxyClient | null = null;
-
-  beforeEach(() => {
-    restoreManagers = installFakeCtrlProxyManagers();
-  });
 
   afterEach(async () => {
     await android?.close();
@@ -127,14 +128,13 @@ describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#1047
     await ios?.close();
     ios = null;
     IOSCtrlProxyClient.resetInstances();
-    restoreManagers();
   });
 
   test.each(androidCases)("Android %s rejects with the guard error", async (_name, call) => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
     adb.setDeviceStates([{ deviceId: androidDevice.deviceId, state: "device" }]);
     android = AndroidCtrlProxyClient.createForTesting(androidDevice, adb, {
       webSocketFactory: (url) => defaultWebSocketFactory(url),
@@ -151,7 +151,7 @@ describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#1047
       8765,
       (url) => defaultWebSocketFactory(url),
       timer,
-      () => createIosManager(timer),
+      { serviceManagerFactory: () => createIosManager(timer) },
     );
     await expect(call(ios)).rejects.toBeInstanceOf(RealCtrlProxyWebSocketInTestError);
   });

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { ActiveDeviceSelection } from "../../src/devices/ActiveDeviceSelection";
-import { DeviceReadiness } from "../../src/devices/DeviceReadiness";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { BootedDevice } from "../../src/models";
 
 const device = (deviceId: string): BootedDevice => ({
@@ -21,8 +23,12 @@ describe("ActiveDeviceSelection", () => {
   });
 
   test("two DeviceReadiness instances do not share a current device or pin", () => {
-    const first = DeviceReadiness.createInstance(new FakeDeviceClientProvider());
-    const second = DeviceReadiness.createInstance(new FakeDeviceClientProvider());
+    const first = DeviceReadiness.createInstance(
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
+    );
+    const second = DeviceReadiness.createInstance(
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
+    );
     first.setCurrentDevice(device("emulator-5554"), "android");
     first.setExplicitDevicePin(device("emulator-5554"));
     expect(second.getCurrentDevice()).toBeUndefined();

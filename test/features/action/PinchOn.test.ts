@@ -1,3 +1,6 @@
+import { createFlatNodeForTest, capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { createExecResult } from "../../../src/utils/execResult";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -49,27 +52,30 @@ describe("PinchOn", () => {
 
   const createHierarchy = (): ViewHierarchyResult => ({
     hierarchy: {
-      node: [
-        {
-          $: {
-            "resource-id": "container-id",
-            text: "Container",
-            bounds: { left: 0, top: 0, right: 200, bottom: 200 },
-            class: "android.widget.FrameLayout",
-          },
-        },
-      ],
+      node: createFlatNodeForTest({
+        node: [
+          createFlatNodeForTest({
+            $: {
+              "resource-id": "container-id",
+              text: "Container",
+              bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+              class: "android.widget.FrameLayout",
+            },
+          }),
+        ],
+      }),
     },
     packageName: "com.test.app",
     updatedAt: Date.now(),
   });
 
-  const createObserveResult = (): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy(),
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: createHierarchy(),
+    });
 
   const pinchWith = (capture: FakeHierarchyCapture): PinchOn =>
     new PinchOn(device, fakeAdb, {
@@ -131,12 +137,18 @@ describe("PinchOn", () => {
       before.viewHierarchy!.displayId = 0;
       const destination = {
         ...before,
-        viewHierarchy: { hierarchy: { node: { text: "Destination" } }, displayId: 0 },
+        viewHierarchy: {
+          hierarchy: { node: createFlatNodeForTest({ text: "Destination" }) },
+          displayId: 0,
+        },
       };
-      fakeAdb.setCommandResponse("cmd display get-displays", {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 1080 x 1920}',
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "cmd display get-displays",
+        createExecResult(
+          'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 1080 x 1920}',
+          "",
+        ),
+      );
       fakeA11yService.setSupportedCommands(["gesture_display_id_v1"]);
       const transitions = new FakeDisplayTransitionReader();
       transitions.generation = 0;
@@ -280,13 +292,17 @@ describe("PinchOn", () => {
   });
 
   test("screen fallback uses fresh rotated dimensions and capture insets", async () => {
-    fakeObserveScreen.setObserveResult({
-      ...createObserveResult(),
-      systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
-    });
+    fakeObserveScreen.setObserveResult(
+      buildObserveResult({
+        ...createObserveResult(),
+        systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
+      }),
+    );
     pinchOn = pinchWith(
       new FakeHierarchyCapture(() => ({
-        hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
+        hierarchy: {
+          node: createFlatNodeForTest({ bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } }),
+        },
         systemInsets: { top: 0, bottom: 0, left: 40, right: 60 },
       })),
     );
@@ -296,13 +312,17 @@ describe("PinchOn", () => {
   });
 
   test("rotated capture without inset metadata never reuses old portrait insets", async () => {
-    fakeObserveScreen.setObserveResult({
-      ...createObserveResult(),
-      systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
-    });
+    fakeObserveScreen.setObserveResult(
+      buildObserveResult({
+        ...createObserveResult(),
+        systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
+      }),
+    );
     pinchOn = pinchWith(
       new FakeHierarchyCapture(() => ({
-        hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
+        hierarchy: {
+          node: createFlatNodeForTest({ bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } }),
+        },
       })),
     );
     const result = await pinchOn.execute({ direction: "out", autoTarget: false });
@@ -314,17 +334,25 @@ describe("PinchOn", () => {
     const mapBounds = { left: 0, top: 0, right: 1000, bottom: 1500 };
     pinchOn = pinchWith(
       new FakeHierarchyCapture(() => ({
-        hierarchy: { node: { "resource-id": "app:id/map", bounds: mapBounds, scrollable: true } },
+        hierarchy: {
+          node: createFlatNodeForTest({
+            "resource-id": "app:id/map",
+            bounds: mapBounds,
+            scrollable: true,
+          }),
+        },
         windows: [
           {
             windowLayer: 10,
-            hierarchy: {
-              node: {
-                "resource-id": "ime:id/key",
-                clickable: true,
-                bounds: { left: 0, top: 0, right: 50, bottom: 50 },
-              },
-            },
+            hierarchy: createFlatNodeForTest({
+              node: [
+                createFlatNodeForTest({
+                  "resource-id": "ime:id/key",
+                  clickable: true,
+                  bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+                }),
+              ],
+            }),
           },
         ],
       })),
@@ -377,23 +405,27 @@ describe("PinchOn", () => {
   });
 
   test("container bare ID does not select a substring near miss", async () => {
-    fakeObserveScreen.setObserveResult({
-      ...createObserveResult(),
-      viewHierarchy: {
-        hierarchy: {
-          node: [
-            {
-              "resource-id": "com.app:id/map_controls",
-              bounds: { left: 0, top: 0, right: 30, bottom: 30 },
-            },
-            {
-              "resource-id": "com.app:id/map",
-              bounds: { left: 100, top: 100, right: 300, bottom: 300 },
-            },
-          ],
+    fakeObserveScreen.setObserveResult(
+      buildObserveResult({
+        ...createObserveResult(),
+        viewHierarchy: {
+          hierarchy: {
+            node: createFlatNodeForTest({
+              node: [
+                createFlatNodeForTest({
+                  "resource-id": "com.app:id/map_controls",
+                  bounds: { left: 0, top: 0, right: 30, bottom: 30 },
+                }),
+                createFlatNodeForTest({
+                  "resource-id": "com.app:id/map",
+                  bounds: { left: 100, top: 100, right: 300, bottom: 300 },
+                }),
+              ],
+            }),
+          },
         },
-      },
-    });
+      }),
+    );
     const result = await pinchOn.execute({ direction: "out", container: { elementId: "map" } });
     expect(result.success).toBe(true);
     expect(fakeA11yService.getPinchHistory()[0].centerX).toBe(200);
@@ -401,19 +433,21 @@ describe("PinchOn", () => {
 
   test("explicit text container keeps the matched label bounds", async () => {
     const labelBounds = { left: 100, top: 100, right: 300, bottom: 300 };
-    fakeObserveScreen.setObserveResult({
-      ...createObserveResult(),
-      viewHierarchy: {
-        hierarchy: {
-          node: {
-            "resource-id": "app:id/row",
-            clickable: true,
-            bounds: { left: 0, top: 0, right: 400, bottom: 400 },
-            node: [{ text: "Map", bounds: labelBounds }],
+    fakeObserveScreen.setObserveResult(
+      buildObserveResult({
+        ...createObserveResult(),
+        viewHierarchy: {
+          hierarchy: {
+            node: createFlatNodeForTest({
+              "resource-id": "app:id/row",
+              clickable: true,
+              bounds: { left: 0, top: 0, right: 400, bottom: 400 },
+              node: [createFlatNodeForTest({ text: "Map", bounds: labelBounds })],
+            }),
           },
         },
-      },
-    });
+      }),
+    );
     const result = await pinchOn.execute({ direction: "out", container: { text: "Map" } });
     expect(result.success).toBe(true);
     expect(fakeA11yService.getPinchHistory()[0].centerX).toBe(200);
@@ -421,23 +455,27 @@ describe("PinchOn", () => {
   });
 
   test("ambiguous bare container ID fails before sending a pinch", async () => {
-    fakeObserveScreen.setObserveResult({
-      ...createObserveResult(),
-      viewHierarchy: {
-        hierarchy: {
-          node: [
-            {
-              "resource-id": "com.one:id/map",
-              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-            },
-            {
-              "resource-id": "com.two:id/map",
-              bounds: { left: 100, top: 100, right: 300, bottom: 300 },
-            },
-          ],
+    fakeObserveScreen.setObserveResult(
+      buildObserveResult({
+        ...createObserveResult(),
+        viewHierarchy: {
+          hierarchy: {
+            node: createFlatNodeForTest({
+              node: [
+                createFlatNodeForTest({
+                  "resource-id": "com.one:id/map",
+                  bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+                }),
+                createFlatNodeForTest({
+                  "resource-id": "com.two:id/map",
+                  bounds: { left: 100, top: 100, right: 300, bottom: 300 },
+                }),
+              ],
+            }),
+          },
         },
-      },
-    });
+      }),
+    );
     const result = await pinchOn.execute({ direction: "out", container: { elementId: "map" } });
     expect(result.success).toBe(false);
     expect(result.error).toContain("com.one:id/map");
@@ -450,10 +488,10 @@ describe("PinchOn", () => {
       hierarchy: {
         // Keep screen geometry distinct from the freshly moved content control.
         bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
-        node: {
+        node: createFlatNodeForTest({
           "resource-id": "container-id",
           bounds: { left: 400, top: 400, right: 600, bottom: 600 },
-        },
+        }),
       },
     }));
     pinchOn = pinchWith(capture);
@@ -490,7 +528,7 @@ describe("PinchOn", () => {
     pinchOn = pinchWith(
       new FakeHierarchyCapture(() => ({
         ...createHierarchy(),
-        windows: [{ windowLayer: 5, hierarchy: { node: upper } }],
+        windows: [{ windowLayer: 5, hierarchy: createFlatNodeForTest({ node: [upper] }) }],
       })),
     );
     const result = await pinchOn.execute({
@@ -517,14 +555,19 @@ describe("PinchOn", () => {
   });
 
   test("pinches the selected nested descendant and never a peer", async () => {
-    fakeObserveScreen.setObserveResult({
-      ...createObserveResult(),
-      viewHierarchy: {
-        hierarchy: {
-          node: { "resource-id": "cart_A", node: containerFixture.viewHierarchy.hierarchy.node },
+    fakeObserveScreen.setObserveResult(
+      buildObserveResult({
+        ...createObserveResult(),
+        viewHierarchy: {
+          hierarchy: {
+            node: createFlatNodeForTest({
+              "resource-id": "cart_A",
+              node: [capturedFlatNodeForTest(containerFixture.viewHierarchy.hierarchy.node)],
+            }),
+          },
         },
-      },
-    });
+      }),
+    );
     const container = {
       elementId: "action",
       selectionStrategy: "unique" as const,
@@ -597,12 +640,14 @@ describe("PinchOn", () => {
       platform: "ios",
       name: "iPhone 16 Pro",
     };
-    fakeObserveScreen.setObserveResult(() => ({
-      updatedAt: Date.now(),
-      screenSize: { width: 393, height: 852 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: createHierarchy(),
-    }));
+    fakeObserveScreen.setObserveResult(() =>
+      buildObserveResult({
+        updatedAt: Date.now(),
+        screenSize: { width: 393, height: 852 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: createHierarchy(),
+      }),
+    );
     fakeIosService.setPinchResult({ success: true, totalTimeMs: 300, gestureTimeMs: 300 });
     pinchOn = new PinchOn(iosDevice, fakeAdb, {
       capture: new FakeHierarchyCapture(
@@ -636,7 +681,11 @@ describe("PinchOn", () => {
       platform: "ios",
       name: "iPhone 16 Pro",
     };
-    fakeIosService.setPinchResult({ success: false, error: "Pinch failed on runner" });
+    fakeIosService.setPinchResult({
+      totalTimeMs: 0,
+      success: false,
+      error: "Pinch failed on runner",
+    });
     pinchOn = new PinchOn(iosDevice, fakeAdb, {
       capture: new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
@@ -727,7 +776,7 @@ describe("PinchOn", () => {
       ["scale 1 with only distanceEnd", { scale: 1, distanceEnd: 80 }],
     ])("Android %s keeps a constant finger distance for either direction", async (_, distances) => {
       for (const direction of ["in", "out"] as const) {
-        fakeA11yService.clearPinchHistory?.();
+        fakeA11yService.clearHistory();
         const result = await pinchOn.execute({
           direction,
           container,
@@ -778,12 +827,14 @@ describe("PinchOn", () => {
         platform: "ios",
         name: "iPhone 16 Pro",
       };
-      fakeObserveScreen.setObserveResult(() => ({
-        updatedAt: Date.now(),
-        screenSize: { width: 393, height: 852 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        viewHierarchy: createHierarchy(),
-      }));
+      fakeObserveScreen.setObserveResult(() =>
+        buildObserveResult({
+          updatedAt: Date.now(),
+          screenSize: { width: 393, height: 852 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: createHierarchy(),
+        }),
+      );
       fakeIosService.setPinchResult({ success: true, totalTimeMs: 300, gestureTimeMs: 300 });
       pinchOn = new PinchOn(iosDevice, null, {
         timer: fakeTimer,

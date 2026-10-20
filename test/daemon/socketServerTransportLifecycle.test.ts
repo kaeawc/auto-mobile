@@ -2,17 +2,17 @@ import {
   createHarnessServer,
   type UnixSocketServerHarness,
 } from "./helpers/UnixSocketServerHarness";
-import { ResourceUpdatedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { Socket } from "node:net";
 import * as net from "node:net";
 import * as securePermissions from "../../src/utils/filesystem/securePermissions";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
-import type { DaemonRequest, DaemonNotification } from "../../src/daemon/types";
+import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { daemonSessionToolBindingStore } from "../../src/server/daemonSessionToolBindingStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
@@ -20,7 +20,8 @@ import {
   getToolCallRecordingStatus,
   resetToolCallRecordingState,
   startToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
+import { daemonNotificationFrameSchema } from "../helpers/wireMessageSchemas";
 
 class RpcSocket extends FakeSocket {
   setTimeout(_ms: number): this {
@@ -252,7 +253,7 @@ describe("daemon socket resource subscription routing", () => {
         ),
       ).toMatchObject({ success: true, result: {} });
       emit();
-      expect(socket.getWrittenMessages<DaemonNotification>()).toEqual([
+      expect(socket.getWrittenMessages(daemonNotificationFrameSchema)).toEqual([
         { type: "daemon_notification", method: "notifications/resources/updated", uri },
       ]);
       expect(resolutions).toBe(1);
@@ -379,13 +380,13 @@ describe("daemon socket resource subscription routing", () => {
         await request("resource-socket-3", third, "resources/unsubscribe", canonical),
       ).toMatchObject({ success: true, result: {} });
       await ResourceRegistry.notifyResourceUpdated(canonical);
-      expect(first.getWrittenMessages<DaemonNotification>()).toEqual([
+      expect(first.getWrittenMessages(daemonNotificationFrameSchema)).toEqual([
         { type: "daemon_notification", method: "notifications/resources/updated", uri: page },
       ]);
       expect(second.getWrittenMessages()).toEqual([]);
       expect(third.getWrittenMessages()).toEqual([]);
       await ResourceRegistry.notifyResourceUpdated("automobile:socket/two?appId=x");
-      expect(second.getWrittenMessages<DaemonNotification>()[0]?.uri).toBe(
+      expect(second.getWrittenMessages(daemonNotificationFrameSchema)[0]?.uri).toBe(
         "automobile:socket/two?appId=x",
       );
       expect(

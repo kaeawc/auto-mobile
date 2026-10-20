@@ -1,10 +1,11 @@
 import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
-import { SessionNoLongerOwnsDeviceError } from "../../../src/daemon/sessionNoLongerOwnsDevice";
+import { SessionNoLongerOwnsDeviceError } from "../../../src/models/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
 import { SocketRequest, SocketResponse } from "../../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
+import { numberResultFrameSchema } from "../../helpers/wireMessageSchemas";
 
 interface TestRequest extends SocketRequest {
   action: string;
@@ -163,7 +164,7 @@ describe("RequestResponseSocketServer", () => {
     const request: TestRequest = { id: "1", action: "double", value: 5 };
     await server.simulateLine(socket, JSON.stringify(request));
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages(numberResultFrameSchema);
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe("1");
     expect(messages[0].success).toBe(true);
@@ -173,7 +174,7 @@ describe("RequestResponseSocketServer", () => {
   it("handles invalid JSON gracefully", async () => {
     await server.simulateLine(socket, "not valid json{{{");
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages(numberResultFrameSchema);
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe("unknown");
     expect(messages[0].success).toBe(false);
@@ -187,7 +188,7 @@ describe("RequestResponseSocketServer", () => {
     const request: TestRequest = { id: "2", action: "double", value: 5 };
     await server.simulateLine(socket, JSON.stringify(request));
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages(numberResultFrameSchema);
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe("2");
     expect(messages[0].success).toBe(false);
@@ -227,19 +228,16 @@ describe("RequestResponseSocketServer", () => {
     await sequencer.send(seqSocket, { id: "3", action: "noop" });
     await flushMicrotasks();
 
-    expect(seqSocket.getWrittenMessages<TestResponse>().map((message) => message.id)).toEqual([
-      "stop",
-    ]);
+    expect(
+      seqSocket.getWrittenMessages(numberResultFrameSchema).map((message) => message.id),
+    ).toEqual(["stop"]);
     expect(sequencer.order).toEqual(["req1-start", "reqstop-start", "reqstop-end"]);
 
     sequencer.release();
     await flushMicrotasks();
-    expect(seqSocket.getWrittenMessages<TestResponse>().map((message) => message.id)).toEqual([
-      "stop",
-      "1",
-      "2",
-      "3",
-    ]);
+    expect(
+      seqSocket.getWrittenMessages(numberResultFrameSchema).map((message) => message.id),
+    ).toEqual(["stop", "1", "2", "3"]);
     expect(sequencer.order).toEqual([
       "req1-start",
       "reqstop-start",
@@ -263,7 +261,7 @@ describe("RequestResponseSocketServer", () => {
     const request: TestRequest = { id: "3", action: "unknown" };
     await server.simulateLine(socket, JSON.stringify(request));
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages(numberResultFrameSchema);
     expect(messages).toHaveLength(1);
     expect(messages[0].success).toBe(false);
     expect(messages[0].error).toBe("Unknown action: unknown");
@@ -291,7 +289,7 @@ it.each([
   server.throwError = error;
   const socket = new FakeSocket();
   await server.simulateLine(socket, JSON.stringify({ id: "ownership", action: "echo" }));
-  const response = socket.getWrittenMessages()[0];
+  const response = socket.getWrittenMessages(numberResultFrameSchema)[0];
   expect(response).toMatchObject({ success: false, error: error.message });
   if (error instanceof InputDeviceOwnedError || error instanceof SessionNoLongerOwnsDeviceError) {
     expect(response).toMatchObject({ code: error.code, retryable: false, deviceId: "emu" });

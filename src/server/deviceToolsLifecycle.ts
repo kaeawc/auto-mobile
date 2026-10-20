@@ -15,10 +15,10 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
-import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../daemon/shapeToolCallError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
-import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import type { ProgressCallback } from "./toolRegistry";
 import {
   assertLifecycleCallerHoldsDevice,

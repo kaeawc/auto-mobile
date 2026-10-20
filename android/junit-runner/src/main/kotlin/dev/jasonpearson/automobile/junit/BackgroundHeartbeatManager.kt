@@ -5,7 +5,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /**
@@ -35,37 +34,27 @@ internal class BackgroundHeartbeatManager(
   // Sessions the daemon has acknowledged at least once; only then is a bare 404 a real loss.
   private val confirmed = ConcurrentHashMap.newKeySet<String>()
   private val unconfirmedMisses = ConcurrentHashMap<String, Int>()
-  // The reference is swapped under startLock for each run: a loop owns the flag it was started
-  // with, so a new holder can start a fresh loop while an old one is still winding down.
-  @Volatile private var running: AtomicBoolean = AtomicBoolean(false)
   private val startLock = Any()
-  private val refCount = AtomicInteger(0)
-  @Volatile private var intervalMs: Long = 1_000L
-  @Volatile private var heartbeatThread: Thread? = null
   private val failureWarnings = RateLimitedWarning(FAILURE_WARNING_INTERVAL_MS, nowMs, warn)
+  private val lifecycle =
+    HeartbeatLifecycle(startLock, { sessions.isEmpty() }, sleeper, threadFactory) { running ->
+      sessions.toList().forEach { dispatchBeatSafely(it, running) }
+    }
 
   internal val isRunning: Boolean
-    get() = running.get()
+    get() = lifecycle.isRunning
 
   internal val holderCount: Int
-    get() = refCount.get()
+    get() = lifecycle.holderCount
 
-  fun start(intervalMs: Long): Closeable {
-    synchronized(startLock) {
-      this.intervalMs = intervalMs
-      refCount.incrementAndGet()
-      ensureRunning()
-    }
-    val closed = AtomicBoolean(false)
-    return Closeable { if (closed.compareAndSet(false, true)) stop() }
-  }
+  fun start(intervalMs: Long): Closeable = lifecycle.start(intervalMs)
 
   fun addSession(sessionId: String) {
     // A released UUID is terminal on the daemon (#11072): never heartbeat it again.
     if (losses.containsKey(sessionId)) return
     synchronized(startLock) {
       sessions.add(sessionId)
-      ensureRunning()
+      lifecycle.ensureRunning()
     }
   }
 
@@ -76,14 +65,10 @@ internal class BackgroundHeartbeatManager(
       sessions.remove(sessionId)
       // Prune per-id bookkeeping so a long-lived JVM does not grow with every plan UUID. `losses`
       // stays: it is the terminal marker that keeps a released id from being heartbeated again.
-      clearProgress(sessionId)
-      stopIfUnneededLocked()
+      confirmed.remove(sessionId)
+      unconfirmedMisses.remove(sessionId)
+      lifecycle.stopIfUnneededLocked()
     }
-  }
-
-  private fun clearProgress(sessionId: String) {
-    confirmed.remove(sessionId)
-    unconfirmedMisses.remove(sessionId)
   }
 
   /** Ids with acknowledged/miss bookkeeping still held; for tests asserting pruning. */
@@ -92,38 +77,6 @@ internal class BackgroundHeartbeatManager(
 
   /** Why the daemon released [sessionId] while it was heartbeated, or null if it has not. */
   fun sessionLoss(sessionId: String): DaemonSessionLoss? = losses[sessionId]
-
-  // Called under startLock so holder changes and thread lifecycle stay together.
-  private fun ensureRunning() {
-    if (running.get()) {
-      return
-    }
-    val loopRunning = AtomicBoolean(true)
-    running = loopRunning
-    // Each run keeps its own stop flag, even if a new holder starts before the old loop exits.
-    heartbeatThread =
-      threadFactory("auto-mobile-daemon-heartbeat", Runnable { runLoop(loopRunning) })
-  }
-
-  private fun stop() {
-    synchronized(startLock) {
-      if (refCount.decrementAndGet() > 0) {
-        return
-      }
-      stopLoopLocked()
-    }
-  }
-
-  /** A holderless loop exists only for its sessions; once none remain it ends. */
-  private fun stopIfUnneededLocked() {
-    if (refCount.get() == 0 && sessions.isEmpty()) stopLoopLocked()
-  }
-
-  private fun stopLoopLocked() {
-    running.set(false)
-    heartbeatThread?.interrupt()
-    heartbeatThread = null
-  }
 
   /**
    * A 404 for an id the daemon never acknowledged is usually a session it has not created yet
@@ -138,30 +91,28 @@ internal class BackgroundHeartbeatManager(
     // A stopped loop can still be mid-iteration when a new holder starts a second loop; only the
     // live loop may count misses, or both would charge the same id and give up early.
     synchronized(startLock) {
-      if (loopRunning.get()) recordReleaseLocked(sessionId, released)
+      if (!loopRunning.get()) return
+      // removeSession ran while this heartbeat was in flight; do not resurrect its pruned state.
+      if (!sessions.contains(sessionId)) return
+      val sure = released.releaseReason != null || confirmed.contains(sessionId)
+      if (!sure) {
+        val misses = unconfirmedMisses.merge(sessionId, 1, Int::plus) ?: 1
+        if (misses < MAX_UNCONFIRMED_MISSES) return
+      }
+      val loss =
+        DaemonSessionLoss(
+          sessionId,
+          released.releaseReason,
+          released.message ?: "Session not found",
+          confirmed = sure,
+        )
+      losses[sessionId] = loss
+      sessions.remove(sessionId)
+      confirmed.remove(sessionId)
+      unconfirmedMisses.remove(sessionId)
+      warn("${loss.describe()}; no longer heartbeating it")
+      lifecycle.stopIfUnneededLocked()
     }
-  }
-
-  private fun recordReleaseLocked(sessionId: String, released: DaemonSessionReleasedException) {
-    // removeSession ran while this heartbeat was in flight; do not resurrect its pruned state.
-    if (!sessions.contains(sessionId)) return
-    val sure = released.releaseReason != null || confirmed.contains(sessionId)
-    if (!sure) {
-      val misses = unconfirmedMisses.merge(sessionId, 1, Int::plus) ?: 1
-      if (misses < MAX_UNCONFIRMED_MISSES) return
-    }
-    val loss =
-      DaemonSessionLoss(
-        sessionId,
-        released.releaseReason,
-        released.message ?: "Session not found",
-        confirmed = sure,
-      )
-    losses[sessionId] = loss
-    sessions.remove(sessionId)
-    clearProgress(sessionId)
-    warn("${loss.describe()}; no longer heartbeating it")
-    stopIfUnneededLocked()
   }
 
   private fun recordAcknowledged(sessionId: String, loopRunning: AtomicBoolean) {
@@ -169,18 +120,6 @@ internal class BackgroundHeartbeatManager(
       if (loopRunning.get() && sessions.contains(sessionId)) {
         confirmed.add(sessionId)
         unconfirmedMisses.remove(sessionId)
-      }
-    }
-  }
-
-  private fun runLoop(loopRunning: AtomicBoolean) {
-    while (loopRunning.get()) {
-      sessions.toList().forEach { sessionId -> dispatchBeatSafely(sessionId, loopRunning) }
-
-      try {
-        sleeper(intervalMs)
-      } catch (_: InterruptedException) {
-        // Allow loop to exit if stopped.
       }
     }
   }

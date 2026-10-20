@@ -10,6 +10,12 @@ import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useScratchRoot } from "../helpers/scratchRoot";
 
+// Lock sampling uses ordinary Stats and UTF-8 reads, rather than bigint/buffer overloads.
+const sampledFileSystem: {
+  statSync(path: fs.PathLike, options?: fs.StatOptions & { bigint?: false }): fs.Stats;
+  readFileSync(path: fs.PathOrFileDescriptor, encoding: BufferEncoding): string;
+} = fs;
+
 const scratch = useScratchRoot("file-lock-ownerless-");
 let directory: string;
 let path: string;
@@ -130,10 +136,10 @@ test.each(["stat", "read", "marker-stat", "marker-read"] as const)(
   "backs off and logs when the ownerless %s sample fails",
   (failure) => {
     leaveLock("");
-    const realStat = fs.statSync;
+    const realStat = sampledFileSystem.statSync;
     const realRead = fs.readFileSync;
     let pathReads = 0;
-    const stat = spyOn(fs, "statSync").mockImplementation((file, options) => {
+    const stat = spyOn(sampledFileSystem, "statSync").mockImplementation((file, options) => {
       if (
         (failure === "stat" && file === path) ||
         (failure === "marker-stat" && file === `${path}.100.reclaim`)
@@ -142,7 +148,7 @@ test.each(["stat", "read", "marker-stat", "marker-read"] as const)(
       }
       return realStat(file, options);
     });
-    const read = spyOn(fs, "readFileSync").mockImplementation((file, options) => {
+    const read = spyOn(sampledFileSystem, "readFileSync").mockImplementation((file, options) => {
       if (file === path) {
         pathReads++;
       }
@@ -172,7 +178,7 @@ test("backs off and removes the marker after EEXIST even when the destination di
   expectedFiles = [];
   const marker = `${path}.100.reclaim`;
   const realRead = fs.readFileSync;
-  const read = spyOn(fs, "readFileSync").mockImplementation((file, options) => {
+  const read = spyOn(sampledFileSystem, "readFileSync").mockImplementation((file, options) => {
     if (file === marker) {
       throw new Error("marker sample unavailable");
     }

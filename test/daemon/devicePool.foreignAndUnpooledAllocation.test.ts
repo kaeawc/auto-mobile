@@ -61,7 +61,11 @@ describe("multi-device allocation on a shared host", () => {
     });
     await pool.initializeWithDevices(pooled.map(android));
     if (bindBase) {
-      await pool.bindOrReuseDeviceSession("base", pooled[0], "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: pooled[0],
+        platform: "android",
+      });
     }
   };
 
@@ -341,7 +345,7 @@ describe("single-device allocation on a shared host", () => {
     expect(ownership.claims).toEqual(["d1"]);
     expect(ownership.releases).toEqual([]);
 
-    await releaseSessionAndDevice(sessions, pool, "d1", "s1", "test-release");
+    await releaseSessionAndDevice(sessions, pool, "d1", "s1", "explicit-release");
 
     expect(pool.getDevice("d1")?.sessionId).toBeNull();
     expect(ownership.releases).toEqual(["d1"]);
@@ -405,7 +409,7 @@ describe("single-device allocation on a shared host", () => {
   test("an explicitly bound device is claimed, and daemon stop withdraws outstanding claims", async () => {
     await setUp(["d1", "d2"]);
 
-    await pool.bindOrReuseDeviceSession("s1", "d1", "android");
+    await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
     expect(await settle(assign("s2").result)).toBe("d2");
     expect(ownership.claims).toEqual(["d1", "d2"]);
 

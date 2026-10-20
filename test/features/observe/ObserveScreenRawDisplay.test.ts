@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
@@ -59,7 +60,7 @@ function rawClientRecorder() {
 function buildScreen(options: { display?: string; displays: string }) {
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("cmd display get-displays", { stdout: options.displays, stderr: "" });
+  adb.setCommandResponse("cmd display get-displays", createExecResult(options.displays, ""));
   const adbFactory = new FakeAdbClientFactory(adb);
   const recorder = rawClientRecorder();
   const capture = new FakeHierarchyCapture(() => ({
@@ -88,6 +89,7 @@ function buildScreen(options: { display?: string; displays: string }) {
 }
 
 const primary = (): ObserveResult => ({
+  observationId: "raw-display",
   updatedAt: 0,
   screenSize: { width: 0, height: 0 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },

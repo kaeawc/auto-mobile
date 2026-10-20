@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
@@ -36,7 +36,7 @@ describe("launch Reminders plan contract", () => {
     ).text();
     const plan = new YamlPlanSerializer().importPlanFromYaml(content);
 
-    const result = await new DefaultPlanExecutor().executePlan(
+    const result = await createDefaultPlanExecutor().executePlan(
       plan,
       0,
       "ios",

@@ -5,6 +5,7 @@ import {
   type BootedDevice,
   type DeviceSnapshotConfig,
   type DeviceSnapshotManifest,
+  type DeviceSnapshotType,
 } from "../../src/models";
 import {
   captureDeviceSnapshot,
@@ -15,8 +16,8 @@ import {
   setDeviceSnapshotManagerDependencies,
   updateDeviceSnapshotConfig,
   withVmRetentionSnapshotProtection,
-} from "../../src/server/deviceSnapshotManager";
-import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/server/deviceSnapshotResourceUris";
+} from "../../src/daemon/deviceSnapshotManager";
+import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/daemon/deviceSnapshotResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
@@ -2324,7 +2325,7 @@ describe("orphan accounting is keyed by AVD and record type (#6891 review)", () 
     snapshotName: string,
     deviceName: string,
     platform: "android" | "ios",
-    snapshotType: "vm" | "archive",
+    snapshotType: DeviceSnapshotType,
   ): Promise<void> {
     const timestamp = new Date(1000).toISOString();
     await repository.insertSnapshot({
@@ -2369,8 +2370,8 @@ describe("orphan accounting is keyed by AVD and record type (#6891 review)", () 
   });
 
   test("a non-vm record of the same name does not account for an in-AVD directory", async () => {
-    await insertRecord("mirror", AVD_NAME, "android", "archive");
-    await insertRecord("sim-only", "iPhone 16", "ios", "archive");
+    await insertRecord("mirror", AVD_NAME, "android", "adb");
+    await insertRecord("sim-only", "iPhone 16", "ios", "simctl");
     avdSnapshots.setVmSnapshot(AVD_NAME, "mirror", 2 * 1024 * MB);
     avdSnapshots.setVmSnapshot(AVD_NAME, "sim-only", 1024 * MB);
 

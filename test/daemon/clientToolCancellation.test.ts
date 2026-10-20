@@ -1,6 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
-import type { DaemonRequest } from "../../src/daemon/types";
 import {
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
@@ -9,18 +8,14 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
+import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
 
 function setup() {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    new FakeIdGenerator(),
-  );
+  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    idGenerator: new FakeIdGenerator(),
+  });
   client.testHooks.attachSocket(socket);
   const respond = (id: string) =>
     client.testHooks.simulateIncomingData(
@@ -40,7 +35,7 @@ describe("DaemonClient tool cancellation", () => {
       (error: unknown) => error,
     );
     const sibling = client.callDaemonMethod("daemon/heartbeat", { sessionId: "session-a" });
-    const [first, second] = socket.getWrittenMessages<DaemonRequest>();
+    const [first, second] = socket.getWrittenMessages(daemonRequestFrameSchema);
     try {
       expect(first.method).toBe(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
       controller.abort(new Error("proxy closing"));
@@ -48,7 +43,7 @@ describe("DaemonClient tool cancellation", () => {
       expect(client.testHooks.hasPendingRequest(first.id)).toBe(false);
       expect(client.testHooks.hasPendingRequest(second.id)).toBe(true);
       expect(socket.destroyed).toBe(false);
-      const cancel = socket.getWrittenMessages<DaemonRequest>()[2];
+      const cancel = socket.getWrittenMessages(daemonRequestFrameSchema)[2];
       expect(cancel).toMatchObject({
         method: DAEMON_CANCEL_REQUEST_METHOD,
         params: { requestId: first.id },
@@ -81,7 +76,7 @@ describe("DaemonClient tool cancellation", () => {
         (error: unknown) => error,
       );
     const sibling = client.readResource("automobile:devices/booted");
-    const [first, second] = socket.getWrittenMessages<DaemonRequest>();
+    const [first, second] = socket.getWrittenMessages(daemonRequestFrameSchema);
     try {
       expect(first).toMatchObject({
         method: "resources/read",
@@ -90,7 +85,7 @@ describe("DaemonClient tool cancellation", () => {
       controller.abort(new Error("cancel daemon resource read"));
       expect(client.testHooks.hasPendingRequest(first.id)).toBe(false);
       expect(await cancelled).toBe(controller.signal.reason);
-      const frames = socket.getWrittenMessages<DaemonRequest>();
+      const frames = socket.getWrittenMessages(daemonRequestFrameSchema);
       expect(frames).toHaveLength(3);
       expect(frames[2]).toMatchObject({
         method: DAEMON_CANCEL_REQUEST_METHOD,
@@ -140,7 +135,7 @@ describe("DaemonClient tool cancellation", () => {
       { signal: controller.signal },
     );
     try {
-      respond(socket.getWrittenMessages<DaemonRequest>()[0].id);
+      respond(socket.getWrittenMessages(daemonRequestFrameSchema)[0].id);
       controller.abort();
       expect(await result).toEqual({ ok: true });
       expect(socket.getWrittenMessages()).toHaveLength(1);
@@ -159,10 +154,10 @@ describe("DaemonClient tool cancellation", () => {
       (error: unknown) => error,
     );
     const sibling = client.callTool("tapOn", {});
-    const [first, second] = socket.getWrittenMessages<DaemonRequest>();
+    const [first, second] = socket.getWrittenMessages(daemonRequestFrameSchema);
     controller.abort(new Error("client cancelled"));
     expect(await cancelled).toEqual(controller.signal.reason);
-    const frames = socket.getWrittenMessages<DaemonRequest>();
+    const frames = socket.getWrittenMessages(daemonRequestFrameSchema);
     expect(frames).toHaveLength(3);
     expect(frames[2]).toMatchObject({
       method: DAEMON_CANCEL_REQUEST_METHOD,
@@ -186,7 +181,7 @@ describe("DaemonClient tool cancellation", () => {
     const { client, socket, respond } = setup();
     const controller = new AbortController();
     const result = client.callTool("tapOn", {}, undefined, undefined, controller.signal);
-    respond(socket.getWrittenMessages<DaemonRequest>()[0].id);
+    respond(socket.getWrittenMessages(daemonRequestFrameSchema)[0].id);
     controller.abort();
     expect(await result).toEqual({ ok: true });
     expect(socket.getWrittenMessages()).toHaveLength(1);

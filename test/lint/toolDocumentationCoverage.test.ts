@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, resolve } from "node:path";
 
 interface ToolDefinition {
@@ -83,20 +84,20 @@ function wordsByTool(sections: string[], toolNames: string[]): Map<string, Set<s
 }
 
 function readDocumentation(directory: string): { path: string; content: string }[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return readDocumentation(path);
     }
     // Markdown is the documentation source; exclude binary images and bundled assets.
     return entry.isFile() && entry.name.endsWith(".md")
-      ? [{ path, content: readFileSync(path, "utf8") }]
+      ? [{ path, content: readGuardFile(path) }]
       : [];
   });
 }
 
 beforeAll(() => {
-  tools = JSON.parse(readFileSync(join(root, "schemas/tool-definitions.json"), "utf8"));
+  tools = JSON.parse(readGuardFile(join(root, "schemas/tool-definitions.json")));
   const docs = readDocumentation(join(root, "docs"));
   documentedWordsByTool = wordsByTool(
     docs.flatMap((doc) =>

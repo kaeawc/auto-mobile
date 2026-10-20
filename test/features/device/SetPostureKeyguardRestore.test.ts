@@ -115,6 +115,9 @@ describe("setPosture swipe keyguard restore", () => {
       dismisser,
     });
     const result = await feature.execute("closed");
+    if ("status" in result) {
+      throw new Error(`Expected posture success: ${result.message}`);
+    }
     expect(dismisser.calls).toBe(1);
     expect(getObserveCount()).toBe(3);
     expect(result).toEqual({
@@ -135,6 +138,9 @@ describe("setPosture swipe keyguard restore", () => {
       observations: [lockedObservation, lockedObservation, unlockedObservation],
     });
     const result = await feature.execute("closed");
+    if ("status" in result) {
+      throw new Error(`Expected posture success: ${result.message}`);
+    }
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
       "emu fold",
@@ -171,6 +177,9 @@ describe("setPosture swipe keyguard restore", () => {
       dismisser,
     });
     const result = await feature.execute("closed");
+    if ("status" in result) {
+      throw new Error(`Expected posture success: ${result.message}`);
+    }
     expect(dismisser.calls).toBe(0);
     expect(getObserveCount()).toBe(2);
     expect(result).toEqual({
@@ -212,6 +221,9 @@ describe("setPosture swipe keyguard restore", () => {
         dismisser: new FakeDismisser(outcome),
       });
       const result = await feature.execute("closed");
+      if ("status" in result) {
+        throw new Error(`Expected posture success: ${result.message}`);
+      }
       expect(result).toMatchObject({ locked: true });
       expect("keyguardDismissed" in result).toBe(false);
       expect(result.warnings).toEqual([

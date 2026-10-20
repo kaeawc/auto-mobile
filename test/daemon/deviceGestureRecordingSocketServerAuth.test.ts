@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Socket } from "node:net";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
@@ -13,6 +12,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { DeviceGestureRecordingSocketServer } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import {
   SessionScopedStreamAuthenticator,
+  type StreamAuthorizeInput,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
@@ -25,7 +25,7 @@ import {
   stopDeviceGestureRecording,
   resetStoppedDeviceGestureRecordings,
   DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice, PlanStep } from "../../src/models";
@@ -40,7 +40,7 @@ class TestableServer extends DeviceGestureRecordingSocketServer {
     return this.handleRequest(request);
   }
   line(socket: FakeSocket, request: DeviceGestureRecordingCommand) {
-    return this.processLine(socket as unknown as Socket, JSON.stringify(request));
+    return this.processLine(socket, JSON.stringify(request));
   }
 }
 
@@ -102,7 +102,7 @@ describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919
     } else {
       stopGate.resolve({ steps: [], stepCount: 0 });
     }
-    const expected = stopError
+    const expected: PromiseSettledResult<unknown> = stopError
       ? { status: "rejected", reason: stopError }
       : {
           status: "fulfilled",
@@ -115,7 +115,7 @@ describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919
           },
         };
     const outcomes = await results;
-    expect(outcomes).toEqual([expected, expected]);
+    expect(outcomes).toEqual<unknown>([expected, expected]);
     if (stopError) {
       for (const outcome of outcomes) {
         expect(outcome.status).toBe("rejected");
@@ -160,9 +160,7 @@ describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919
   );
 });
 
-function recordingAuthenticator(
-  calls: Array<{ sessionUuid?: string; deviceId?: string }>,
-): StreamSocketAuthenticator {
+function recordingAuthenticator(calls: StreamAuthorizeInput[]): StreamSocketAuthenticator {
   return {
     authorize: (input) => {
       calls.push(input);
@@ -191,7 +189,7 @@ function quarantineGate(deviceId: string): DeviceAdmissionGate {
 
 describe("DeviceGestureRecordingSocketServer device admission (issue #6863)", () => {
   test("refuses a start on a quarantined serial before any device work", async () => {
-    const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
+    const calls: StreamAuthorizeInput[] = [];
     const server = new TestableServer(
       undefined,
       undefined,
@@ -325,7 +323,7 @@ describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () =>
     expect(readyCalls).toBe(1);
   });
   test("rejects a start from an unauthenticated caller before any device work", async () => {
-    const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
+    const calls: StreamAuthorizeInput[] = [];
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));
     await expect(
       server.invoke({ command: "start", deviceId: "emu-1", platform: "android" }),
@@ -335,7 +333,7 @@ describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () =>
   });
 
   test("rejects a stop from a caller with no live session before stopDeviceGestureRecording runs", async () => {
-    const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
+    const calls: StreamAuthorizeInput[] = [];
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));
     // The auth gate must reject a non-live session BEFORE stopDeviceGestureRecording runs.
     // The scoped device is whatever the current active recording reports (or
@@ -349,14 +347,14 @@ describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () =>
   });
 
   test("rejects status from an unauthenticated caller", async () => {
-    const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
+    const calls: StreamAuthorizeInput[] = [];
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));
     await expect(server.invoke({ command: "status" })).rejects.toThrow(/rejected session/);
     expect(calls).toEqual([{ sessionUuid: undefined, deviceId: undefined, admitViewer: true }]);
   });
 
   test("a live session passes the gate; status then returns the (empty) recording state", async () => {
-    const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
+    const calls: StreamAuthorizeInput[] = [];
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));
     const response = await server.invoke({ command: "status", sessionUuid: "live" });
     expect(response.success).toBe(true);
@@ -395,7 +393,7 @@ describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () =>
         deviceId: "emu-held",
         platform: "android",
       });
-      await drainMicrotasks();
+      await drainMicrotasks(32);
       const response = socket.getWrittenMessages()[0];
       expect(response).toMatchObject({
         success: false,

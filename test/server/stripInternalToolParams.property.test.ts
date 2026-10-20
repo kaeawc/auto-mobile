@@ -14,7 +14,7 @@ const ordinaryArgsArb = fc.dictionary(
 const arbitraryArgsArb = fc.dictionary(fc.string({ maxLength: 12 }), valueArb, {
   maxKeys: 8,
 }) as fc.Arbitrary<Record<string, unknown>>;
-const internalSubsetArb = fc.subarray(INTERNAL_TOOL_PARAM_NAMES, { maxLength: 5 });
+const internalSubsetArb = fc.subarray([...INTERNAL_TOOL_PARAM_NAMES], { maxLength: 5 });
 
 function withInternalParams(
   args: Record<string, unknown>,

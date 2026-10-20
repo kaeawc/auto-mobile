@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readAndroidDeviceApiLevel } from "../../../src/utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { ApiLevelProbeExecutor } from "../../../src/utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import type { ExecResult } from "../../../src/models";
 
 /**
@@ -40,7 +40,7 @@ function budgetProbe(
   timer: FakeTimer,
   primaryElapsedMs: number,
   fallbackStdout: string,
-): { adb: AdbExecutor; probe: Probe } {
+): { adb: ApiLevelProbeExecutor; probe: Probe } {
   const probe: Probe = { fallbackCalls: 0, fallbackTimeoutMs: undefined };
   const adb = {
     getAndroidApiLevel: async (): Promise<number | null> => {
@@ -55,7 +55,7 @@ function budgetProbe(
       probe.fallbackTimeoutMs = options?.timeoutMs;
       return ok(fallbackStdout);
     },
-  } as unknown as AdbExecutor;
+  } satisfies ApiLevelProbeExecutor;
   return { adb, probe };
 }
 

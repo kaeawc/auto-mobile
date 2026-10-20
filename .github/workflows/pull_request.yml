@@ -39,6 +39,7 @@ jobs:
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
       android_changed: ${{ steps.filter-android.outputs.android }}
       kotlin_changed: ${{ steps.filter-kotlin.outputs.kotlin }}
+      android_lint_changed: ${{ steps.filter-android-lint.outputs.lint }}
       installer_changed: ${{ steps.filter-installer.outputs.installer }}
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
@@ -366,6 +367,21 @@ jobs:
               - 'android/config/detekt/**'
               - '.github/actions/gradle-task-run/**'
 
+      # Lint reads resources and manifests as well as Kotlin sources. Changes to
+      # its enforcement must exercise the same cached Android analysis job.
+      - name: "Check for Android lint inputs"
+        id: filter-android-lint
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            lint:
+              - 'android/**'
+              - 'scripts/android/**'
+              - 'scripts/prepush-android.sh'
+              - '.github/actions/gradle-task-run/**'
+              - '.github/workflows/pull_request.yml'
+              - '.github/workflows/merge.yml'
+
       - name: "Check for iOS-related changes"
         id: filter-ios
         uses: dorny/paths-filter@v3
@@ -570,7 +586,7 @@ jobs:
             webrtc:
               - 'src/features/webrtc/**'
               - 'src/features/screen-stream/**'
-              - 'src/server/webrtcStreamManager.ts'
+              - 'src/daemon/webrtcStreamManager.ts'
               - 'src/daemon/webrtc*'
               - 'src/daemon/videoStreamSocket*'
               - 'src/daemon/videoStreamFraming.ts'
@@ -946,7 +962,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -1055,16 +1071,15 @@ jobs:
     name: "Detekt"
     runs-on: ubuntu-latest
     needs: detect-changes
-    # detekt analyzes Kotlin only, so a PR touching none of the inputs in the
-    # `kotlin` filter cannot change what it reports. This gates whether the job
-    # runs at all; when it does run it analyzes the whole tree, so it is not a
-    # narrowing of what gets checked. merge.yml re-runs it unconditionally.
-    if: needs.detect-changes.outputs.kotlin_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    # Both analyzers run over the whole tree. Lint also needs resource-only
+    # changes; merge.yml re-runs both unconditionally.
+    if: (needs.detect-changes.outputs.kotlin_changed == 'true' || needs.detect-changes.outputs.android_lint_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 0
 
       # Deliberately the FULL task list, not a per-module subset. An earlier
       # revision scoped this to the modules a PR changed; that is unsafe with
@@ -1074,9 +1089,34 @@ jobs:
       # finding in a consumer, so scoping would land it on main and redden the
       # next unrelated PR. The Gradle build cache, not a shorter task list, is
       # what makes this fast.
+      # Android Lint, unlike Detekt, only looks at one module's own inputs
+      # (checkDependencies = false), so a PR lints just the modules it changes.
+      # Build-logic/Gradle/lint-gate/workflow changes select every module. The
+      # selection is shared with scripts/prepush-android.sh; merge.yml still
+      # lints every module on each push to main.
+      - name: "Select Android lint modules"
+        id: lint-select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if selection="$(git diff --name-only "${BASE_SHA}...HEAD" | bash scripts/android/select-lint-modules.sh)"; then
+            :
+          else
+            echo "Could not select lint modules; linting all."
+            selection=all
+          fi
+          if [[ "$selection" == all ]]; then
+            tasks=lintDebug
+          else
+            tasks="$(printf '%s' "$selection" | tr '\n' ' ' | sed 's/ *$//')"
+          fi
+          echo "Android lint tasks: ${tasks:-none}"
+          echo "tasks=${tasks}" >> "$GITHUB_OUTPUT"
+
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: "detektMain detektTest :build-logic:test"
+          gradle-tasks: "detektMain detektTest :build-logic:test ${{ steps.lint-select.outputs.tasks }}"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           # Configuration-cache reuse is deliberately OFF here (#5332). A restored
@@ -1092,6 +1132,21 @@ jobs:
           # in test/bats/detekt-config-cache-disabled.bats pins it.
           reuse-configuration-cache: false
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Check Android lint baselines only shrink"
+        if: success() || failure()
+        run: bash scripts/android/check-lint-baseline-shrink.sh --base-ref origin/main
+
+      - name: "Upload Android Lint Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-lint-reports
+          path: |
+            android/**/build/reports/lint-results-*.html
+            android/**/build/reports/lint-results-*.sarif
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: "Upload Detekt Reports"
         if: failure()
@@ -2192,13 +2247,19 @@ jobs:
       # gate is infeasible (~550 pre-existing errors), so this compares against a
       # committed baseline and fails only on NEW type errors. Runs on this single
       # ubuntu job with the pinned tsc so the baseline is reproducible.
-      # Gated on ts_changed: the baseline only references src/, so a diff that
+      # Gated on ts_changed: the gate only references src/, so a diff that
       # touches no TypeScript cannot introduce a local error -- skipping it avoids
       # blocking native-only PRs on base-branch drift. See
       # scripts/typecheck-baseline.sh.
       - name: "Run Typecheck Gate"
         if: needs.detect-changes.outputs.ts_changed == 'true'
         run: bun run typecheck
+
+      # Second pass over every test/**/*.ts (issue #11787) against its own
+      # count baseline; same one-way ratchet as the gate above.
+      - name: "Run Test Typecheck Gate"
+        if: needs.detect-changes.outputs.ts_changed == 'true'
+        run: bun run typecheck:test
 
       - name: "Run Build"
         shell: bash
@@ -3432,7 +3493,7 @@ jobs:
           # :playground:app:compileDebugUnitTestKotlin keeps the app's unit-test
           # sources compiling as its own PR signal alongside the emulator lane (#10890; it
           # moved here from the removed Android Emulator Compile Smoke).
-          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
+          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest :playground:demos:testDebugUnitTest"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true

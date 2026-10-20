@@ -1,3 +1,7 @@
+import type {
+  ObservedActionResult,
+  ObservedEnvelope,
+} from "../../src/features/action/observedInteractionTypes";
 import {
   cancellationHandlers,
   cancellationTests,
@@ -24,6 +28,11 @@ import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { ActionCall } from "../../src/features/action/ActionCall";
+import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import { toolExecutionError } from "../../src/server/toolExecutionError";
 
 const interactionDeps: InteractionToolDependencies = {};
 const device: BootedDevice = { platform: "android", deviceId: "test", name: "Test" };
@@ -37,6 +46,8 @@ const captured = JSON.parse(
   ),
 ) as Pick<ObserveResult, "viewHierarchy">;
 const observation: ObserveResult = {
+  observationId: "test-observation",
+  display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
   ...captured,
   updatedAt: 0,
   screenSize: { width: 1080, height: 2316 },
@@ -64,7 +75,7 @@ test.each(["keyboard", "openLink", "systemTray"])(
     let dispatches = 0;
     const keyboard = spyOn(Keyboard.prototype, "execute").mockImplementation(
       async (_action, signal) => {
-        throwIfAborted(signal);
+        throwIfAborted(signal instanceof AbortSignal ? signal : signal?.signal);
         dispatches++;
         return { success: true, open: false, message: "closed" };
       },
@@ -176,16 +187,70 @@ test("openLink stops before chooser launch if URL resolution cancels the request
 
 // Exercise command dispatch while keeping the separately tested observation pipeline fake.
 class UnobservedOpenURL extends OpenURL {
+  override observedInteraction<R extends ObservedActionResult>(
+    block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+  ): Promise<R & ObservedEnvelope>;
   override async observedInteraction(
-    block: Parameters<OpenURL["observedInteraction"]>[0],
-  ): Promise<unknown> {
+    block: (observation: ObserveResult) => Promise<ObservedActionResult>,
+  ): Promise<ObservedActionResult & ObservedEnvelope> {
     return block(observation);
   }
 }
+
+test("single-use openLink dispatches once and preserves unknown dispatch in the tool error", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const dispatched: string[][] = [];
+  const adb = new AdbClient(
+    device,
+    async (_file: string, args: string[], _maxBuffer?: number) => {
+      dispatched.push(args);
+      // Captured adb wording: https://github.com/kaeawc/auto-mobile/issues/13822.
+      throw new Error("Command failed: adb shell am start", {
+        cause: Object.assign(new Error("Command failed: adb"), {
+          code: 1,
+          stderr: "connection terminated: read failed",
+        }),
+      });
+    },
+    { timer, retryExecutor: new DefaultRetryExecutor(timer) },
+  );
+  interactionDeps.openUrlFactory = () => new UnobservedOpenURL(device, adb, null, null, timer);
+  const url = "myapp://sign-in?token=single-use";
+  const error = await handler("openLink")(device, { url }).then(
+    () => undefined,
+    (failure: unknown) => failure,
+  );
+  expect(error).toBeInstanceOf(AdbDeviceTransportUnavailableError);
+  expect(error).toMatchObject({ dispatched: "unknown", retryable: true });
+  expect(dispatched).toHaveLength(1);
+  expect(dispatched[0].slice(-2)).toEqual([
+    "shell",
+    `am start -a android.intent.action.VIEW -d '${url}'`,
+  ]);
+  expect(timer.getSleepHistory()).toEqual([]);
+  // The registry's contextual boundary must not flatten the typed error.
+  expect(() => toolExecutionError(error, "openLink", device)).toThrow(
+    AdbDeviceTransportUnavailableError,
+  );
+  const result = shapeToolCallError(error, { toolName: "openLink", source: "MCP" });
+  expect(result.isError).toBe(true);
+  expect(JSON.parse(result.content[0].text)).toMatchObject({
+    success: false,
+    code: "device_transport_unavailable",
+    retryable: true,
+    dispatched: "unknown",
+    deviceId: device.deviceId,
+    error: expect.stringContaining("Observe before reissuing"),
+  });
+});
 class UnobservedChooser extends HandleIntentChooser {
+  override observedInteraction<R extends ObservedActionResult>(
+    block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+  ): Promise<R & ObservedEnvelope>;
   override async observedInteraction(
-    block: Parameters<HandleIntentChooser["observedInteraction"]>[0],
-  ): Promise<unknown> {
+    block: (observation: ObserveResult) => Promise<ObservedActionResult>,
+  ): Promise<ObservedActionResult & ObservedEnvelope> {
     return block({
       ...observation,
       viewHierarchy: { ...observation.viewHierarchy!, updatedAt: 1000 },
@@ -204,7 +269,11 @@ test.each(devices)("real commands receive pre-aborted requests on %s", async (ta
   const launcher = new FakeDeviceUrlLauncher();
   const simctl = new FakeSimctl();
   interactionDeps.keyboardFactory = () =>
-    new Keyboard(target, { create: () => adb }, hierarchy, timer);
+    new Keyboard(target, {
+      adbFactory: { create: () => adb },
+      hierarchyProvider: hierarchy,
+      timer,
+    });
   interactionDeps.openUrlFactory = () =>
     new UnobservedOpenURL(target, adb, simctl, launcher, timer);
   let gestures = 0;
@@ -261,7 +330,11 @@ test("keyboard cancels a pending hierarchy read without dispatch or rollback", a
   });
   restores.push(() => read.mockRestore());
   interactionDeps.keyboardFactory = () =>
-    new Keyboard(device, { create: () => adb }, hierarchy, timer);
+    new Keyboard(device, {
+      adbFactory: { create: () => adb },
+      hierarchyProvider: hierarchy,
+      timer,
+    });
   const controller = new AbortController();
   const pending = handler("keyboard")(device, { action: "open" }, undefined, controller.signal);
   expect(timer.getPendingSleeps()).toEqual([100]);
@@ -309,14 +382,8 @@ test("openLink chooser cancels during handler metadata resolution before any cho
       null,
       (signal) => {
         expect(signal).toBe(controller.signal);
-        const manager = new DeepLinkManager(
-          device,
-          adb,
-          null,
-          null,
-          undefined,
-          undefined,
-          {
+        const manager = new DeepLinkManager(device, adb, {
+          chooserMetadata: {
             getActivityLabel: async (_device, _package, _url, _adb, metadataSignal) => {
               expect(metadataSignal).toBe(signal);
               controller.abort();
@@ -332,8 +399,8 @@ test("openLink chooser cancels during handler metadata resolution before any cho
             },
           },
           timer,
-          signal,
-        );
+          chooserSignal: signal,
+        });
         // Detection is outside this test's metadata/dispatch boundary; use the captured hierarchy unchanged.
         const detected = spyOn(manager, "detectIntentChooser").mockReturnValue(true);
         restores.push(() => detected.mockRestore());

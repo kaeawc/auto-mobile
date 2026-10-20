@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as net from "node:net";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { connectionListenerOf } from "../helpers/netConnectionListener";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 class DeferredSocket extends FakeSocket {
@@ -16,28 +17,23 @@ class DeferredSocket extends FakeSocket {
 
 const sockets: DeferredSocket[] = [];
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { idFrameSchema } from "../helpers/wireMessageSchemas";
 
 let timer: FakeTimer;
 let client: InstanceType<typeof DaemonClient>;
 let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">>;
 
 beforeEach(() => {
-  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
-    const socket = new DeferredSocket(onConnect!);
+  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((...args: unknown[]) => {
+    const socket = new DeferredSocket(connectionListenerOf(args)!);
     sockets.push(socket);
-    return socket as unknown as net.Socket;
+    return socket;
   });
   sockets.length = 0;
   timer = new FakeTimer();
-  client = new DaemonClient(
-    "/fake/socket",
-    1_000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    undefined,
-    "win32",
-  );
+  client = new DaemonClient("/fake/socket", 1_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    platformOverride: "win32",
+  });
 });
 
 afterEach(async () => {
@@ -70,13 +66,6 @@ async function connectAndReplace() {
   newSocket.completeConnect();
   await reconnect;
   return { oldSocket, newSocket, closedCount: () => closedCount };
-}
-
-function connectionState() {
-  return client as unknown as {
-    readonly socket: net.Socket | null;
-    readonly connected: boolean;
-  };
 }
 
 function responseFrame(id: string, result: string): Buffer {
@@ -193,7 +182,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     }
     expect(sockets[0].destroyed).toBe(true);
     sockets[0].completeConnect();
-    expect(connectionState().connected).toBe(false);
+    expect(client.testHooks.connection().connected).toBe(false);
     const retry = client.connect();
     sockets.at(-1)!.completeConnect();
     await retry;
@@ -205,13 +194,13 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     test(`a stale ${event} leaves the live socket and its pending request intact`, async () => {
       const { oldSocket, newSocket, closedCount } = await connectAndReplace();
       const response = observe(client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 }));
-      const [{ id }] = newSocket.getWrittenMessages<{ id: string }>();
+      const [{ id }] = newSocket.getWrittenMessages(idFrameSchema);
       const frame = responseFrame(id, "日");
       const split = frame.indexOf(Buffer.from("日")) + 1;
       newSocket.emit("data", frame.subarray(0, split));
       oldSocket.emit(event, new Error("late ECONNRESET"));
-      expect(connectionState().socket).toBe(newSocket);
-      expect(connectionState().connected).toBe(true);
+      expect(client.testHooks.connection().socket).toBe(newSocket);
+      expect(client.testHooks.connection().connected).toBe(true);
       expect(newSocket.destroyed).toBe(false);
       expect(closedCount()).toBe(1);
       expect(client.testHooks.hasPendingRequest(id)).toBe(true);
@@ -223,7 +212,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
   test("stale data cannot complete a live request or corrupt its buffer and decoder", async () => {
     const { oldSocket, newSocket } = await connectAndReplace();
     const response = observe(client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 }));
-    const [{ id }] = newSocket.getWrittenMessages<{ id: string }>();
+    const [{ id }] = newSocket.getWrittenMessages(idFrameSchema);
     oldSocket.emit("data", responseFrame(id, "stale"));
     expect(client.testHooks.hasPendingRequest(id)).toBe(true);
     const frame = responseFrame(id, "日");
@@ -242,8 +231,8 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     client.onConnectionClosed(() => closedCount++);
     sockets[0].emit("error", new Error("read ECONNRESET"));
     expect(closedCount).toBe(1);
-    expect(connectionState().socket).toBeNull();
-    expect(connectionState().connected).toBe(false);
+    expect(client.testHooks.connection().socket).toBeNull();
+    expect(client.testHooks.connection().connected).toBe(false);
   });
 
   test("a joiner's own deadline releases it without cancelling the shared attempt", async () => {
@@ -270,7 +259,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     sockets[0].completeConnect();
     expect(await initiating).toEqual({ status: "fulfilled", value: undefined });
     expect(sockets).toHaveLength(1);
-    expect(connectionState().connected).toBe(true);
+    expect(client.testHooks.connection().connected).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 

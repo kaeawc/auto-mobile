@@ -7,6 +7,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { ActionableError, type BootedDevice } from "../../../src/models";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 
 describe("ExecuteGesture", () => {
   const androidDevice: BootedDevice = {
@@ -34,10 +35,10 @@ describe("ExecuteGesture", () => {
     getInstanceSpy = spyOnIosClientInstance(fakeClient);
     const gesture = new ExecuteGesture(iosDevice, null, new FakeTimer());
     await gesture.swipe(1, 2, 3, 4, { lockScreen: true, timeoutMs: 4200 });
-    expect(requestSwipe.mock.calls[0]?.[5]).toBe(4200);
-    expect(requestSwipe.mock.calls[0]?.[7]).toEqual({ lockScreen: true });
+    expect(requestSwipe.mock.calls[0]?.[0].timeoutMs).toBe(4200);
+    expect(requestSwipe.mock.calls[0]?.[0].contextOptions).toEqual({ lockScreen: true });
     await gesture.swipe(1, 2, 3, 4);
-    expect(requestSwipe.mock.calls[1]?.[7]).toBeUndefined();
+    expect(requestSwipe.mock.calls[1]?.[0].contextOptions).toBeUndefined();
   });
 
   describe("iOS swipe answered with the runner's deadline error (#10161)", () => {
@@ -175,13 +176,12 @@ describe("ExecuteGesture", () => {
   // a11y-mode gesture on a fresh device.
   test("passes the AdbClientFactory (not AdbExecutor) to AndroidCtrlProxyClient.getInstance in a11y mode (regression for #2225)", async () => {
     const factory = new FakeAdbClientFactory();
-    const fakeClient = {
-      requestSwipe: async () => ({
-        success: true,
-        totalTimeMs: 1,
-        gestureTimeMs: 1,
-      }),
-    };
+    const fakeClient = new FakeCtrlProxy();
+    spyOn(fakeClient, "requestSwipe").mockImplementation(async () => ({
+      success: true,
+      totalTimeMs: 1,
+      gestureTimeMs: 1,
+    }));
 
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
 
@@ -216,9 +216,12 @@ describe("ExecuteGesture", () => {
   test("reports both a11y and ADB failures when the fallback command fails", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError("shell input swipe", new Error("ADB device offline"));
-    const fakeClient = {
-      requestSwipe: async () => ({ success: false, error: "a11y dispatch rejected" }),
-    };
+    const fakeClient = new FakeCtrlProxy();
+    spyOn(fakeClient, "requestSwipe").mockImplementation(async () => ({
+      success: false,
+      totalTimeMs: 0,
+      error: "a11y dispatch rejected",
+    }));
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
     const result = await new ExecuteGesture(androidDevice, adb).swipe(0, 0, 100, 100, {
       scrollMode: "a11y",

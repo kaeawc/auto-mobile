@@ -1,3 +1,4 @@
+import { IntentChooserHandler } from "../../../src/features/utility/IntentChooserHandler";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { describe, expect, spyOn, test } from "bun:test";
@@ -249,11 +250,7 @@ async function choose(
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
-    metadata(label, nodes, undefined, listId, activityLabel),
+    { chooserMetadata: metadata(label, nodes, undefined, listId, activityLabel) },
   );
   const result = await manager.handleIntentChooser(hierarchy(nodes, listId), "custom", target, url);
   return { result, commands: adb.getExecutedCommands() };
@@ -290,13 +287,11 @@ describe("custom intent chooser exact package selection", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        getLabel: async () => null,
-        getFreshHierarchy: async () => ({ ...later, updatedAt: 101 }),
+        chooserMetadata: {
+          getLabel: async () => null,
+          getFreshHierarchy: async () => ({ ...later, updatedAt: 101 }),
+        },
       },
     );
     const result = await manager.handleIntentChooser(first, "custom", target);
@@ -330,16 +325,14 @@ describe("custom intent chooser exact package selection", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        getLabel: async () => null,
-        getFreshHierarchy: async (_device, _factory, floor) => ({
-          ...(++captures <= 3 ? second : first),
-          updatedAt: floor,
-        }),
+        chooserMetadata: {
+          getLabel: async () => null,
+          getFreshHierarchy: async (_device, _factory, floor) => ({
+            ...(++captures <= 3 ? second : first),
+            updatedAt: floor,
+          }),
+        },
       },
     );
     const result = await manager.handleIntentChooser(first, "custom", target);
@@ -426,14 +419,12 @@ describe("custom intent chooser label fallback", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        ...metadata("Application Name", rows),
-        getActivityLabel: async (_device, packageName, url, executor) =>
-          resolveChooserActivityLabel(executor, packageName, url),
+        chooserMetadata: {
+          ...metadata("Application Name", rows),
+          getActivityLabel: async (_device, packageName, url, executor) =>
+            resolveChooserActivityLabel(executor, packageName, url),
+        },
       },
     );
     const result = await manager.handleIntentChooser(
@@ -465,15 +456,13 @@ describe("custom intent chooser label fallback", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        getLabel: async () => "Example",
-        getFreshHierarchy: async () => {
-          captures += 1;
-          return { ...chooser, updatedAt: 101 };
+        chooserMetadata: {
+          getLabel: async () => "Example",
+          getFreshHierarchy: async () => {
+            captures += 1;
+            return { ...chooser, updatedAt: 101 };
+          },
         },
       },
     );
@@ -494,17 +483,15 @@ describe("custom intent chooser label fallback", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        getLabel: async () => "Example",
-        getFreshHierarchy: async (_device, _factory, floor) => {
-          floors.push(floor);
-          return floor === 101
-            ? { ...chooser, updatedAt: 101 }
-            : { hierarchy: { node: {} }, packageName: target, updatedAt: 2000 };
+        chooserMetadata: {
+          getLabel: async () => "Example",
+          getFreshHierarchy: async (_device, _factory, floor) => {
+            floors.push(floor);
+            return floor === 101
+              ? { ...chooser, updatedAt: 101 }
+              : { hierarchy: { node: {} }, packageName: target, updatedAt: 2000 };
+          },
         },
       },
     );
@@ -523,23 +510,21 @@ describe("custom intent chooser label fallback", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        getLabel: async () => "Shared",
-        getFreshHierarchy: async (_device, _factory, floor) =>
-          floor <= 101
-            ? { ...hierarchy([labelRow("Shared", 100)]), updatedAt: 101 }
-            : {
-                ...hierarchy([]),
-                hierarchy: { node: {} },
-                packageName: "com.other.app",
-                updatedAt: floor,
-              },
+        chooserMetadata: {
+          getLabel: async () => "Shared",
+          getFreshHierarchy: async (_device, _factory, floor) =>
+            floor <= 101
+              ? { ...hierarchy([labelRow("Shared", 100)]), updatedAt: 101 }
+              : {
+                  ...hierarchy([]),
+                  hierarchy: { node: {} },
+                  packageName: "com.other.app",
+                  updatedAt: floor,
+                },
+        },
+        timer,
       },
-      timer,
     );
     const result = await manager.handleIntentChooser(
       hierarchy([labelRow("Shared", 100)]),
@@ -582,16 +567,14 @@ describe("custom intent chooser label fallback", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        getLabel: async () => "Example",
-        getFreshHierarchy: async (_device, _factory, minTimestamp) =>
-          minTimestamp >= 1000
-            ? { ...second, hierarchy: { node: {} }, packageName: target, updatedAt: minTimestamp }
-            : { ...(minTimestamp <= 101 ? first : second), updatedAt: minTimestamp },
+        chooserMetadata: {
+          getLabel: async () => "Example",
+          getFreshHierarchy: async (_device, _factory, minTimestamp) =>
+            minTimestamp >= 1000
+              ? { ...second, hierarchy: { node: {} }, packageName: target, updatedAt: minTimestamp }
+              : { ...(minTimestamp <= 101 ? first : second), updatedAt: minTimestamp },
+        },
       },
     );
     const result = await manager.handleIntentChooser(first, "custom", target);
@@ -609,11 +592,12 @@ describe("custom intent chooser label fallback", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
-      metadata("Example", [labelRow("Example", 200), labelRow("Example Beta", 0)]),
+      {
+        chooserMetadata: metadata("Example", [
+          labelRow("Example", 200),
+          labelRow("Example Beta", 0),
+        ]),
+      },
     );
     const result = await manager.handleIntentChooser(
       hierarchy([labelRow("Example", 100), labelRow("Example Beta", 0)]),
@@ -629,15 +613,13 @@ describe("custom intent chooser label fallback", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        getLabel: async () => "Example",
-        getFreshHierarchy: async (_device, _factory, minTimestamp) => {
-          requestedTimestamp = minTimestamp;
-          return hierarchy([labelRow("Example", 100)]);
+        chooserMetadata: {
+          getLabel: async () => "Example",
+          getFreshHierarchy: async (_device, _factory, minTimestamp) => {
+            requestedTimestamp = minTimestamp;
+            return hierarchy([labelRow("Example", 100)]);
+          },
         },
       },
     );
@@ -672,14 +654,14 @@ describe("custom intent chooser label fallback", () => {
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
-      null,
-      null,
-      undefined,
-      undefined,
       {
-        getLabel: async () => "Always",
-        getFreshHierarchy: async (_device, _factory, floor) =>
-          floor > 101 ? { hierarchy: { node: {} }, packageName: target, updatedAt: floor } : fresh,
+        chooserMetadata: {
+          getLabel: async () => "Always",
+          getFreshHierarchy: async (_device, _factory, floor) =>
+            floor > 101
+              ? { hierarchy: { node: {} }, packageName: target, updatedAt: floor }
+              : fresh,
+        },
       },
     );
     const result = await manager.handleIntentChooser(
@@ -759,11 +741,7 @@ test("ignores exact package metadata outside the chooser app list", async () => 
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
-    metadata("Example", [row(target, 100)]),
+    { chooserMetadata: metadata("Example", [row(target, 100)]) },
   );
   const result = await manager.handleIntentChooser(
     chooserTree({
@@ -807,24 +785,22 @@ test("excludes a captured OEM chooser host from represented app metadata", async
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
-    metadata(
-      "Example",
-      [
-        {
-          ...row(host, 0),
-          node: [{ package: host, "resource-id": `${host}:id/title`, text: "Example Beta" }],
-        },
-        {
-          ...row(host, 100),
-          node: [{ package: host, "resource-id": `${host}:id/title`, text: "Example" }],
-        },
-      ],
-      host,
-    ),
+    {
+      chooserMetadata: metadata(
+        "Example",
+        [
+          {
+            ...row(host, 0),
+            node: [{ package: host, "resource-id": `${host}:id/title`, text: "Example Beta" }],
+          },
+          {
+            ...row(host, 100),
+            node: [{ package: host, "resource-id": `${host}:id/title`, text: "Example" }],
+          },
+        ],
+        host,
+      ),
+    },
   );
   const result = await manager.handleIntentChooser(
     chooserTree({
@@ -880,27 +856,25 @@ test("retries a fresh chooser and intermediate screen until the target app launc
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor) => {
-        floors.push(floor);
-        if (floor < 1000) {
-          return { ...chooser, updatedAt: floor };
-        }
-        if (floor === 1000) {
-          return { ...chooser, updatedAt: 1000 };
-        }
-        if (floor === 1001) {
-          return { hierarchy: { node: {} }, packageName: "com.loading", updatedAt: 1001 };
-        }
-        return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor) => {
+          floors.push(floor);
+          if (floor < 1000) {
+            return { ...chooser, updatedAt: floor };
+          }
+          if (floor === 1000) {
+            return { ...chooser, updatedAt: 1000 };
+          }
+          if (floor === 1001) {
+            return { hierarchy: { node: {} }, packageName: "com.loading", updatedAt: 1001 };
+          }
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
+        },
       },
+      timer,
     },
-    timer,
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(true);
@@ -918,18 +892,16 @@ test("bounds post-tap polling and returns the typed unverified failure", async (
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor) => {
-        floors.push(floor);
-        return { ...chooser, updatedAt: floor };
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor) => {
+          floors.push(floor);
+          return { ...chooser, updatedAt: floor };
+        },
       },
+      timer,
     },
-    timer,
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
@@ -949,25 +921,23 @@ test("bounds a slow post-tap hierarchy read by the remaining verification budget
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
-        if (floor < 1000) {
-          return { ...chooser, updatedAt: floor };
-        }
-        readBudgets.push(timeoutMs ?? 0);
-        if (readBudgets.length === 1) {
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+          if (floor < 1000) {
+            return { ...chooser, updatedAt: floor };
+          }
+          readBudgets.push(timeoutMs ?? 0);
+          if (readBudgets.length === 1) {
+            return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor };
+          }
+          await timer.sleep(Math.min(11_000, timeoutMs ?? 11_000));
           return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor };
-        }
-        await timer.sleep(Math.min(11_000, timeoutMs ?? 11_000));
-        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor };
+        },
       },
+      timer,
     },
-    timer,
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
@@ -988,22 +958,20 @@ test("accepts a confirming hierarchy read that completes at the verification dea
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
-        if (floor < 1000) {
-          return { ...chooser, updatedAt: floor };
-        }
-        readBudgets.push(timeoutMs ?? 0);
-        await timer.sleep(timeoutMs ?? 0);
-        return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+          if (floor < 1000) {
+            return { ...chooser, updatedAt: floor };
+          }
+          readBudgets.push(timeoutMs ?? 0);
+          await timer.sleep(timeoutMs ?? 0);
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
+        },
       },
+      timer,
     },
-    timer,
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(true);
@@ -1021,21 +989,19 @@ test("returns the typed verification failure when a bounded hierarchy read rejec
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
-        if (floor < 1000) {
-          return { ...chooser, updatedAt: floor };
-        }
-        await timer.sleep(timeoutMs ?? 11_000);
-        throw new Error("capture timed out");
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+          if (floor < 1000) {
+            return { ...chooser, updatedAt: floor };
+          }
+          await timer.sleep(timeoutMs ?? 11_000);
+          throw new Error("capture timed out");
+        },
       },
+      timer,
     },
-    timer,
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
@@ -1056,24 +1022,22 @@ test("accepts a fresh target capture within the tap's device-second", async () =
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor) => {
-        floors.push(floor);
-        if (floor < 2000) {
-          return { ...chooser, updatedAt: floor };
-        }
-        postTapReads += 1;
-        return postTapReads === 1
-          ? { ...chooser, updatedAt: 1000 }
-          : { hierarchy: { node: {} }, packageName: target, updatedAt: 1000 };
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor) => {
+          floors.push(floor);
+          if (floor < 2000) {
+            return { ...chooser, updatedAt: floor };
+          }
+          postTapReads += 1;
+          return postTapReads === 1
+            ? { ...chooser, updatedAt: 1000 }
+            : { hierarchy: { node: {} }, packageName: target, updatedAt: 1000 };
+        },
       },
+      timer,
     },
-    timer,
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(true);
@@ -1095,28 +1059,26 @@ test("rejects an out-of-order target capture after a newer device-seconds observ
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor) => {
-        floors.push(floor);
-        if (floor < 2000) {
-          return { ...chooser, updatedAt: floor };
-        }
-        postTapReads += 1;
-        if (postTapReads === 1) {
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor) => {
+          floors.push(floor);
+          if (floor < 2000) {
+            return { ...chooser, updatedAt: floor };
+          }
+          postTapReads += 1;
+          if (postTapReads === 1) {
+            return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 };
+          }
+          if (postTapReads === 2) {
+            return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 };
+          }
           return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 };
-        }
-        if (postTapReads === 2) {
-          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 };
-        }
-        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 };
+        },
       },
+      timer,
     },
-    timer,
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
@@ -1138,28 +1100,26 @@ test("rejects a millisecond-clock target capture older than the moving floor", a
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor) => {
-        floors.push(floor);
-        if (floor < 1000) {
-          return { ...chooser, updatedAt: floor };
-        }
-        postTapReads += 1;
-        if (postTapReads === 1) {
-          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 };
-        }
-        if (postTapReads === 2) {
-          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 };
-        }
-        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor };
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor) => {
+          floors.push(floor);
+          if (floor < 1000) {
+            return { ...chooser, updatedAt: floor };
+          }
+          postTapReads += 1;
+          if (postTapReads === 1) {
+            return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 };
+          }
+          if (postTapReads === 2) {
+            return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 };
+          }
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor };
+        },
       },
+      timer,
     },
-    timer,
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
@@ -1176,28 +1136,26 @@ test("accepts a target app screen containing chooser button text and IDs", async
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor) =>
-        floor < 1000
-          ? { ...chooser, updatedAt: floor }
-          : chooserTree({
-              hierarchy: {
-                node: {
-                  node: [
-                    { text: "Open with" },
-                    { text: "Always" },
-                    { text: "Just once", "resource-id": "android:id/button_once" },
-                  ],
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor) =>
+          floor < 1000
+            ? { ...chooser, updatedAt: floor }
+            : chooserTree({
+                hierarchy: {
+                  node: {
+                    node: [
+                      { text: "Open with" },
+                      { text: "Always" },
+                      { text: "Just once", "resource-id": "android:id/button_once" },
+                    ],
+                  },
                 },
-              },
-              packageName: target,
-              updatedAt: floor,
-            }),
+                packageName: target,
+                updatedAt: floor,
+              }),
+      },
     },
   );
   const result = await manager.handleIntentChooser(chooser, "custom", target);
@@ -1217,13 +1175,11 @@ test("deduplicates a stable chooser row visible in overlapping captures", async 
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      chooserMetadata: {
+        getLabel: async () => null,
+        getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      },
     },
   );
   const result = await manager.handleIntentChooser(first, "custom", target);
@@ -1254,13 +1210,11 @@ test("deduplicates a clamped chooser scroll using another row's observed displac
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      chooserMetadata: {
+        getLabel: async () => null,
+        getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      },
     },
   );
   const result = await manager.handleIntentChooser(first, "custom", target);
@@ -1294,18 +1248,16 @@ test("keeps a repeated chooser target ambiguous when anchor deltas disagree", as
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      chooserMetadata: {
+        getLabel: async () => null,
+        getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      },
     },
   );
   const result = await manager.handleIntentChooser(first, "custom", target);
   expect(
-    manager["getObservedChooserDisplacement"](first, second, "s2-bbbbbbbbbbbbbbbb"),
+    new IntentChooserHandler().getObservedChooserDisplacement(first, second, "s2-bbbbbbbbbbbbbbbb"),
   ).toBeUndefined();
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(
@@ -1328,12 +1280,7 @@ test("excludes duplicate chooser anchor IDs from displacement evidence", () => {
       ],
       updatedAt,
     );
-  const manager = new DeepLinkManager(
-    { platform: "android", deviceId: "fake", name: "fake" },
-    new FakeAdbExecutor(),
-    null,
-    null,
-  );
+  const analysis = new IntentChooserHandler();
   for (const [beforeTops, afterTops] of [
     [[80, 120], [40]],
     [[80], [40, 80]],
@@ -1342,8 +1289,8 @@ test("excludes duplicate chooser anchor IDs from displacement evidence", () => {
     const before = makePage(beforeTops, 140, 100);
     const after = makePage(afterTops, 100, 101);
     const duplicated = beforeTops.length > 1 ? before : after;
-    expect(manager["getChooserAnchorRows"](duplicated).has(anchorId)).toBe(false);
-    expect(manager["getObservedChooserDisplacement"](before, after, targetId)).toBeUndefined();
+    expect(analysis.getChooserAnchorRows(duplicated).has(anchorId)).toBe(false);
+    expect(analysis.getObservedChooserDisplacement(before, after, targetId)).toBeUndefined();
   }
 });
 
@@ -1366,16 +1313,16 @@ test("rejects opposite-direction chooser anchors as scroll evidence", async () =
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      chooserMetadata: {
+        getLabel: async () => null,
+        getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      },
     },
   );
-  expect(manager["getObservedChooserDisplacement"](first, second, targetId)).toBeUndefined();
+  expect(
+    new IntentChooserHandler().getObservedChooserDisplacement(first, second, targetId),
+  ).toBeUndefined();
   const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(adb.getExecutedCommands()[0]).toBe("shell input swipe 50 150 50 50 350");
@@ -1395,13 +1342,11 @@ test("keeps a repeated stable target ambiguous without overlapping anchor rows",
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      chooserMetadata: {
+        getLabel: async () => null,
+        getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      },
     },
   );
   const result = await manager.handleIntentChooser(first, "custom", target);
@@ -1431,19 +1376,17 @@ test("keeps a repeated stable target ambiguous when only its clickable child ove
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      chooserMetadata: {
+        getLabel: async () => null,
+        getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      },
     },
   );
   const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(
-    manager["getObservedChooserDisplacement"](first, second, "s2-bbbbbbbbbbbbbbbb"),
+    new IntentChooserHandler().getObservedChooserDisplacement(first, second, "s2-bbbbbbbbbbbbbbbb"),
   ).toBeUndefined();
   expect(
     adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
@@ -1466,19 +1409,17 @@ test("rejects identical stable label rows separated by chooser pages without tap
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor) => {
-        const page = Math.min(
-          adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"))
-            .length,
-          pages.length - 1,
-        );
-        return { ...pages[page], updatedAt: floor };
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor) => {
+          const page = Math.min(
+            adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"))
+              .length,
+            pages.length - 1,
+          );
+          return { ...pages[page], updatedAt: floor };
+        },
       },
     },
   );
@@ -1501,13 +1442,11 @@ test("keeps resource-backed row IDs ambiguous across pages", async () => {
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      chooserMetadata: {
+        getLabel: async () => null,
+        getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
+      },
     },
   );
   const result = await manager.handleIntentChooser(first, "custom", target);
@@ -1526,18 +1465,16 @@ test("uses the label refresh timestamp as the post-swipe freshness floor", async
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => "Example",
-      getFreshHierarchy: async (_device, _factory, floor) => {
-        floors.push(floor);
-        if (floor >= 1000) {
-          return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
-        }
-        return { ...chooser, updatedAt: floor === 101 ? 101 : floor };
+      chooserMetadata: {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, floor) => {
+          floors.push(floor);
+          if (floor >= 1000) {
+            return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
+          }
+          return { ...chooser, updatedAt: floor === 101 ? 101 : floor };
+        },
       },
     },
   );
@@ -1561,20 +1498,18 @@ test("restores a clipped middle-page row by rematching each reverse viewport", a
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
-    null,
-    null,
-    undefined,
-    undefined,
     {
-      getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) => {
-        const swipeCount = adb
-          .getExecutedCommands()
-          .filter((command) => command.startsWith("shell input swipe")).length;
-        if (swipeCount > viewport) {
-          viewport = swipeCount;
-        }
-        return { ...pages[viewport], updatedAt: floor };
+      chooserMetadata: {
+        getLabel: async () => null,
+        getFreshHierarchy: async (_device, _factory, floor) => {
+          const swipeCount = adb
+            .getExecutedCommands()
+            .filter((command) => command.startsWith("shell input swipe")).length;
+          if (swipeCount > viewport) {
+            viewport = swipeCount;
+          }
+          return { ...pages[viewport], updatedAt: floor };
+        },
       },
     },
   );

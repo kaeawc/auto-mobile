@@ -266,12 +266,16 @@ describe.each(factories)("existing configuration (%s)", (_name, open) => {
       const first = await h.acquire(spec);
       const second = await h.acquire(spec);
       const third = await h.acquire(spec);
+      if (first.outcome !== "ready") {
+        throw new Error(`expected ready, got ${JSON.stringify(first.failure)}`);
+      }
+      const firstStableId = first.device.stableId;
       for (const result of [first, second, third]) {
         if (result.outcome !== "ready") {
           throw new Error(`expected ready, got ${JSON.stringify(result.failure)}`);
         }
         expect(result.assignment.generation).toBe(1);
-        expect(result.device.stableId).toBe(first.outcome === "ready" && first.device.stableId);
+        expect(result.device.stableId).toBe(firstStableId);
       }
       expect(first).toMatchObject({ disposition: source === "created" ? "created" : "reused" });
       for (const result of [second, third]) {

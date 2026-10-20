@@ -5,7 +5,7 @@ import type { XcodeSigningManager } from "../../utils/ios-cmdline-tools/XcodeSig
 import type { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import type { Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import type { ProcessSupervisor } from "../../utils/ProcessSupervisor";
-import type { IosCtrlProxyBuilder } from "../IosCtrlProxyBuilder";
+import type { IosCtrlProxyBuilderSurface } from "../IosCtrlProxyBuilderSurface";
 import type { RemoteCtrlProxyIOSRunner } from "../IOSCtrlProxyManager";
 import type { HostPortAvailabilityChecker } from "./IOSHostPortAvailabilityChecker";
 import type { IosCtrlProxyProcessClient } from "./IosCtrlProxyProcessClient";
@@ -16,7 +16,7 @@ import type { IosTunnelClient } from "./IosTunnelClient";
 export interface IosCtrlProxyManagerDiagnostics {
   readonly device: BootedDevice;
   readonly timer: Timer;
-  readonly builder: IosCtrlProxyBuilder;
+  readonly builder: IosCtrlProxyBuilderSurface;
   readonly processExecutor: HostProcessExecutor;
   readonly xcodebuild: Xcodebuild;
   readonly processClient: IosCtrlProxyProcessClient;

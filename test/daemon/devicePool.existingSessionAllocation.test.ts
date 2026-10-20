@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { markDeviceError } from "../../src/daemon/deviceBinding";
+import { bindDevice, markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -73,7 +73,11 @@ for (const criteria of [false, true]) {
 
     test("one-label plan on the only device, held by its base session, allocates without waiting", async () => {
       await setUp(["d1"]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d1",
+        platform: "android",
+      });
       const held = sessions.getSession("base");
 
       // executePlan maps the plan's only label to its base session.
@@ -91,8 +95,16 @@ for (const criteria of [false, true]) {
 
     test("one-label plan allocates when every device is assigned (issue repro: idle 0, assigned 2)", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "android");
-      await pool.bindOrReuseDeviceSession("other-client", "d2", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d1",
+        platform: "android",
+      });
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "other-client",
+        deviceId: "d2",
+        platform: "android",
+      });
 
       const plan = observe(["base"]);
       await drainUntilQuiescent(timer);
@@ -104,7 +116,11 @@ for (const criteria of [false, true]) {
 
     test("two-label plan uses the base session's device and claims one idle device", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("base", "d2", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d2",
+        platform: "android",
+      });
 
       const result = (await settle(observe(["base", "base:B"]).result)) as Map<string, string>;
 
@@ -115,8 +131,16 @@ for (const criteria of [false, true]) {
 
     test("two-label plan with no idle device times out, keeps the base session and reports why", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "android");
-      await pool.bindOrReuseDeviceSession("other-client", "d2", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d1",
+        platform: "android",
+      });
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "other-client",
+        deviceId: "d2",
+        platform: "android",
+      });
       const held = sessions.getSession("base");
 
       const outcome = String(await settle(observe(["base", "base:B"]).result));
@@ -132,7 +156,11 @@ for (const criteria of [false, true]) {
 
     test("a request that never reaches the queue head says so in its timeout (#9950)", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: "d2",
+        platform: "android",
+      });
       const head = observe(["a", "b"], 8_000);
       await drainUntilQuiescent(timer);
       const follower = observe(["c"], 2_000);
@@ -151,7 +179,11 @@ for (const criteria of [false, true]) {
 
     test("a plan needing no new claim is not queued behind a request waiting on its device", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d1",
+        platform: "android",
+      });
       // Another client's two-device request waits for d1, which base holds.
       const other = observe(["x", "y"], 8_000);
       await drainUntilQuiescent(timer);
@@ -170,7 +202,11 @@ for (const criteria of [false, true]) {
 
     test("a held device in an error state fails fast naming the label", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d1",
+        platform: "android",
+      });
       markDeviceError(pool.getDevice("d1")!);
 
       const plan = observe(["base"]);
@@ -187,7 +223,7 @@ for (const criteria of [false, true]) {
 
     test("a held device on another platform fails fast naming the label", async () => {
       await setUp(["d1", "d2"], ["d1"]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "ios");
+      await pool.bindOrReuseDeviceSession({ sessionId: "base", deviceId: "d1", platform: "ios" });
 
       const plan = observe(["base"]);
       await drainUntilQuiescent(timer);
@@ -202,10 +238,18 @@ for (const criteria of [false, true]) {
 
     test("a session whose device left the pool is counted as needing a claim", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "android");
-      await pool.bindOrReuseDeviceSession("other-client", "d2", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d1",
+        platform: "android",
+      });
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "other-client",
+        deviceId: "d2",
+        platform: "android",
+      });
       // The session survives, but the pool no longer attributes d1 to it.
-      pool.getDevice("d1")!.sessionId = "someone-else";
+      bindDevice(pool.getDevice("d1")!, "someone-else");
 
       const outcome = String(await settle(observe(["base"], 2_000).result));
 

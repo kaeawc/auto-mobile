@@ -24,6 +24,11 @@ class TestableServer extends FailuresStreamSocketServer {
   run(request: FailuresStreamSocketRequest): Promise<FailuresStreamSocketResponse> {
     return this.handleRequest(request);
   }
+
+  /** Feeds a frame whose shape is deliberately not a valid request. */
+  runRaw(frame: unknown): Promise<FailuresStreamSocketResponse> {
+    return this.handleUntypedRequest(frame);
+  }
 }
 
 function makeServer(authenticator: StreamSocketAuthenticator = { authorize() {} }): {
@@ -74,15 +79,15 @@ describe("FailuresStreamSocketServer sinceTimestamp normalization", () => {
       const request = {
         command: "poll_notifications",
         sinceTimestamp: row.input,
-      } as unknown as FailuresStreamSocketRequest;
+      };
 
       if (row.throws) {
-        await expect(server.run(request)).rejects.toThrow(/Invalid sinceTimestamp/);
+        await expect(server.runRaw(request)).rejects.toThrow(/Invalid sinceTimestamp/);
         expect(repo.lastNotificationsQuery).toBeUndefined();
         return;
       }
 
-      const response = await server.run(request);
+      const response = await server.runRaw(request);
       expect(response.success).toBe(true);
       expect(repo.lastNotificationsQuery?.sinceTimestamp).toBe(row.expected as number | undefined);
     });
@@ -95,9 +100,9 @@ describe("FailuresStreamSocketServer command validation", () => {
     const request = {
       command: "poll_timeline",
       aggregation: "fortnight",
-    } as unknown as FailuresStreamSocketRequest;
+    };
 
-    await expect(server.run(request)).rejects.toThrow(/Invalid aggregation: fortnight/);
+    await expect(server.runRaw(request)).rejects.toThrow(/Invalid aggregation: fortnight/);
     expect(repo.lastTimelineQuery).toBeUndefined();
   });
 
@@ -117,9 +122,9 @@ describe("FailuresStreamSocketServer command validation", () => {
     const request = {
       command: "acknowledge",
       notificationIds: [1, 2.5],
-    } as unknown as FailuresStreamSocketRequest;
+    };
 
-    await expect(server.run(request)).rejects.toThrow(/Invalid notification ID/);
+    await expect(server.runRaw(request)).rejects.toThrow(/Invalid notification ID/);
     expect(repo.acknowledgedIds).toBeUndefined();
   });
 
@@ -136,9 +141,9 @@ describe("FailuresStreamSocketServer command validation", () => {
 
   test("an unsupported command is rejected", async () => {
     const { server } = makeServer();
-    const request = { command: "poll_everything" } as unknown as FailuresStreamSocketRequest;
+    const request = { command: "poll_everything" };
 
-    await expect(server.run(request)).rejects.toThrow(/Unsupported command: poll_everything/);
+    await expect(server.runRaw(request)).rejects.toThrow(/Unsupported command: poll_everything/);
   });
 });
 

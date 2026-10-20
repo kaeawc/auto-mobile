@@ -1,4 +1,5 @@
 import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
+import { readToolResponse, toolJson } from "../helpers/toolResponse";
 import { NotificationPolicy } from "../../src/features/utility/NotificationPolicy";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -227,12 +228,12 @@ test.each([
         { name: "Fake", deviceId: "fake", platform: "android" },
         { appId: result.appId, policyAccess },
       );
-      const payload = JSON.parse(response.content[0].text);
+      const payload = toolJson(response);
       expect(payload.message).toStartWith(expectedPrefix);
       expect(payload.message).toContain("not verified");
       expect(payload.message).not.toStartWith("Allowed");
       expect(payload.message).not.toStartWith("Revoked");
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
     } finally {
       policy.mockRestore();
       ToolRegistry.clearTools();

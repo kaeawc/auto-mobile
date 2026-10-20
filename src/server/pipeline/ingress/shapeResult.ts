@@ -1,6 +1,6 @@
 import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import { daemonShuttingDownMcpOutcome } from "../../../daemon/daemonShutdownOutcome";
-import { SessionReleasedDuringCreationError } from "../../../daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCreationError } from "../../../models/deviceAcquisitionRefusals";
 import {
   DaemonSessionCreationRejectedError,
   TerminalSessionError,
@@ -14,14 +14,14 @@ import {
   enrichDeviceLossOutcome,
   remainingDeviceLossIncidentWaitMs,
   type DeviceLossOutcome,
-} from "../../deviceLossOutcome";
+} from "../../../utils/deviceLossOutcome";
 import {
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,
-} from "../../deviceSessionResult";
-import { executionTracker } from "../../executionTracker";
+} from "../../../daemon/deviceSessionResult";
+import { executionTracker } from "../../../daemon/executionTracker";
 import { forwardingLeaseConflictCause } from "../../forwardingLeaseConflictOutcome";
-import { shapeToolCallError } from "../../shapeToolCallError";
+import { shapeToolCallError } from "../../../daemon/shapeToolCallError";
 import {
   stripToolResultStructuredContent,
   structuredContentOmissionReason,

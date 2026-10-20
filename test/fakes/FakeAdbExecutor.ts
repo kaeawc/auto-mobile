@@ -142,6 +142,11 @@ export class FakeAdbExecutor implements AdbExecutor {
     );
   }
 
+  /** Model a device whose wakefulness cannot be read (dumpsys omits the field). */
+  setWakefulnessUnknown(): void {
+    this.wakefulness = null;
+  }
+
   /**
    * Configure screen state and wakefulness
    * @param isOn - Whether screen is on
@@ -455,10 +460,9 @@ export class FakeAdbExecutor implements AdbExecutor {
     return this.devices;
   }
 
-  async getDeviceStates(_options?: {
-    timeoutMs?: number;
-    signal?: AbortSignal;
-  }): Promise<AdbDeviceState[]> {
+  async getDeviceStates(
+    _options?: Parameters<NonNullable<AdbExecutor["getDeviceStates"]>>[0],
+  ): Promise<AdbDeviceState[]> {
     return this.deviceStates;
   }
 

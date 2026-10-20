@@ -161,7 +161,7 @@ describe("IosPrototypeInstaller", () => {
       expect(error.cause).toBe(h.operations.error);
       expect(typeof error.code).toBe("string");
       if (error instanceof errors.CodesignError) {
-        expect(error.step).toBe(event);
+        expect<unknown>(error.step).toBe(event);
       }
       expect(h.files.removed).toEqual(
         ["resolve", "mkdtemp"].includes(event) ? [] : ["/temp/install"],
@@ -239,6 +239,9 @@ describe("IosPrototypeInstaller", () => {
     );
     const spec = JSON.parse(fixture.specJson) as PrototypeJson;
     const first = await h.installer.install({ ...input, spec });
+    if (typeof spec !== "object" || spec === null || Array.isArray(spec)) {
+      throw new Error("Expected object spec");
+    }
     const updatedSpec = { ...spec, id: "updated" };
     const second = await h.installer.install({ ...input, spec: updatedSpec });
     expect(first.bundleId).toBe(second.bundleId);

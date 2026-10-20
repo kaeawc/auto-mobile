@@ -31,13 +31,11 @@ function fixture() {
     { isInitialized: () => false } as DaemonStateAccess,
     timer,
   );
-  // Bracket access reaches the private preamble helpers without a type-erasing cast.
+  // Typed callbacks exercise the real preamble helpers.
   const preamble: Preamble = {
-    inputRouteClock: (request, input) => server["inputRouteClock"](request, input),
+    inputRouteClock: (request, input) => server.testHooks.input.inputRouteClock(request, input),
     remainingInputBudgetMs: (toolName, origin, queueEnterMs, totalTimeoutMs) =>
-      server["remainingInputBudgetMs"](toolName, origin, queueEnterMs, totalTimeoutMs),
-    requireLiveInputAttempt: (signal, deviceId, frameContext, label) =>
-      server["requireLiveInputAttempt"](signal, deviceId, frameContext, label),
+      server.testHooks.input.remainingInputBudgetMs(toolName, origin, queueEnterMs, totalTimeoutMs),
   };
   return { timer, preamble };
 }
@@ -54,13 +52,16 @@ const INPUT_METHODS = [
 ] as const;
 
 describe("input/* request preamble (#11814)", () => {
-  test.each(INPUT_METHODS)("%s: remaining budget is the total minus the queue wait", (method) => {
-    const { timer, preamble } = fixture();
-    timer.advanceTime(100);
-    expect(preamble.remainingInputBudgetMs(method, "origin", 40, 1000)).toBe(940);
-  });
+  test.each([...INPUT_METHODS])(
+    "%s: remaining budget is the total minus the queue wait",
+    (method) => {
+      const { timer, preamble } = fixture();
+      timer.advanceTime(100);
+      expect(preamble.remainingInputBudgetMs(method, "origin", 40, 1000)).toBe(940);
+    },
+  );
 
-  test.each(INPUT_METHODS)("%s: spent budget refuses with the queue-wait detail", (method) => {
+  test.each([...INPUT_METHODS])("%s: spent budget refuses with the queue-wait detail", (method) => {
     const { timer, preamble } = fixture();
     timer.advanceTime(1500);
     let caught: unknown;
@@ -84,7 +85,7 @@ describe("input/* request preamble (#11814)", () => {
   });
 
   test("the budget check exists once in the socket server", () => {
-    const source = readFileSync("src/daemon/socketServer.ts", "utf8");
+    const source = readFileSync("src/daemon/socketServerParts/SocketInput.ts", "utf8");
     expect(source.match(/spent \$\{queueWaitMs\}ms waiting in queue/g)).toHaveLength(1);
   });
 });

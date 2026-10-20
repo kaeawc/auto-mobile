@@ -9,8 +9,9 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, Platform } from "../../src/models";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import {
+  listDevicesOutputSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
@@ -27,6 +28,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolIsError, toolStructured } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -56,7 +58,6 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
       deviceId: platform === "android" ? "emulator-5554" : "11111111-1111-4111-8111-111111111111",
       name: platform === "android" ? "Pixel_8_API_34" : "iPhone 15",
       platform,
-      isEmulator: true,
       osVersion: platform === "android" ? "14" : "17.2",
       ...(platform === "android" ? { apiLevel: 34 } : { iosVersion: "17.2" }),
       formFactor: "phone",
@@ -348,7 +349,8 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
             return {
               ...device,
               displays: {
-                panels: [{ key: "main", role: "primary", sizePx: { width: 100, height: 100 } }],
+                panels: [{ key: "main", role: "unknown", sizePx: { width: 100, height: 100 } }],
+                postures: [],
               },
             };
           },
@@ -461,7 +463,7 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
         }),
       });
       const result = await select({ deviceId: h.device.deviceId, __mcpSessionId: "client-b" });
-      expect(result.isError).not.toBe(true);
+      expect(result.error).toBeUndefined();
       expect(calls).toEqual(["ready", "resume", "pin"]);
       expect(h.pool.isReservedForReadiness(h.device.deviceId)).toBe(false);
       expect(h.pool.getDevice(h.device.deviceId)?.sessionId).toBeNull();
@@ -511,10 +513,8 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
     await h.entered;
     try {
       const result = await ToolRegistry.getTool("listDevices")!.handler({ platform });
-      expect(result.isError).not.toBe(true);
-      const payload = JSON.parse(result.content[0].text) as {
-        devices: Array<{ runtime: { deviceId: string } }>;
-      };
+      expect(toolIsError(result)).toBe(false);
+      const payload = listDevicesOutputSchema.parse(toolStructured(result));
       expect(payload.devices.some((device) => device.runtime.deviceId === h.device.deviceId)).toBe(
         true,
       );
@@ -597,22 +597,14 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
         const h = await arrange(platform);
         const reservation = await h.pool.reserveDeviceForReadiness(h.device.deviceId, h.device);
         try {
-          const pending = h.pool.bindOrReuseDeviceSession(
-            "other-session",
-            h.device.deviceId,
+          const pending = h.pool.bindOrReuseDeviceSession({
+            sessionId: "other-session",
+            deviceId: h.device.deviceId,
             platform,
-            undefined,
-            undefined,
-            undefined,
-            true,
-            own ? new Set([reservation.owner]) : undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            flag,
-          );
+            allowSessionRebind: true,
+            readinessReservationOwners: own ? new Set([reservation.owner]) : undefined,
+            refusePreparedForOtherRequest: flag,
+          });
           if (flag && !own) {
             expectPreparationRefusal(await refusal(pending), h.device.deviceId);
             expect(h.manager.getSession("other-session")).toBeNull();

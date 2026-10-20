@@ -17,7 +17,7 @@ const FIRST_ROW = "/data/cart/0";
 const DATA_ROOT = "/data";
 const spec = {
   id: "shop",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root: { type: "text", id: "label", text: "Hello" },
   data: { cart: [{ sku: "a" }], note: "hi" },
 };
@@ -45,7 +45,7 @@ describe("data write change events", () => {
   test("decode with a pointer name and a payload, without validity", () => {
     const wire = dataWrite(1, "/data/cart", written("/data/cart", 4, "append", { sku: "b" }));
     const decoded = decodePrototypeEvent(wire, "test");
-    expect(decoded).toEqual(wire);
+    expect<unknown>(decoded).toEqual(wire);
     expect(prototypeDataWriteOf(decoded!)).toEqual({
       path: "/data/cart",
       op: "append",

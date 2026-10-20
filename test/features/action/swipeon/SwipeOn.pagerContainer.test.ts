@@ -1,11 +1,8 @@
+import { createAndroidHierarchyConverter } from "../../../helpers/androidHierarchyConverter";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
-import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../../src/features/observe/android/types";
+import type { AccessibilityHierarchy } from "../../../../src/features/observe/android/types";
 import type { ObserveResult, SwipeOnOptions } from "../../../../src/models";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
 import launcherHome from "../../../fixtures/android-launcher/launcher-home-emulator-5602.json";
@@ -32,9 +29,7 @@ const WORKSPACE = "com.google.android.apps.nexuslauncher:id/workspace";
 const SCREEN = { width: 2076, height: 2152 };
 
 function launcherHierarchy(): ViewHierarchyResult {
-  return new CtrlProxyHierarchy({
-    timer: new FakeTimer(),
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(
+  return createAndroidHierarchyConverter().convertToViewHierarchyResult(
     JSON.parse(launcherHome.rawViewHierarchy.json) as AccessibilityHierarchy,
   );
 }
@@ -48,7 +43,9 @@ function harness(
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy(timer));
   const observation: ObserveResult = {
     ...observationOf(viewHierarchy),
-    timestamp: 0,
+    updatedAt: 0,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     freshness: { isFresh: true },
     screenSize,
   };

@@ -7,7 +7,10 @@ import {
   SqliteBindingRegistry,
   type BindingRegistryDatabase,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
-import type { BindingScopeIdentity } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
+import type {
+  BindingScopeIdentity,
+  BindingScopeInvalidationReason,
+} from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 // A registry written by a build before the broker landing (#12497) can hold the broker scope marked
@@ -28,7 +31,10 @@ describe("ensureScope on a scope an older build marked abandoned", () => {
     db = undefined;
   });
 
-  async function openWithScopeInState(state: "invalidating" | "invalidated", reason: string) {
+  async function openWithScopeInState(
+    state: "invalidating" | "invalidated",
+    reason: BindingScopeInvalidationReason,
+  ) {
     db = new Kysely<BindingRegistryDatabase>({
       dialect: new BunSqliteDialect({ database: new Database(":memory:") }),
     });

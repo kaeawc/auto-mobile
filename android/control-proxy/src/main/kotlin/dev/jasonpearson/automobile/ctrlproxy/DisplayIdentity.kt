@@ -54,28 +54,46 @@ internal class PanelUniqueIdResolver<D : Any>(
         accessor =
           try {
             lookup()
-          } catch (error: Exception) {
+          } catch (error: NoSuchMethodException) {
+            return@synchronized unavailable(error)
+          } catch (error: SecurityException) {
             return@synchronized unavailable(error)
           } catch (error: LinkageError) {
             return@synchronized unavailable(error)
           }
         if (accessor == null) return@synchronized unavailable(null)
       }
-      try {
-        accessor?.invoke(display)
-      } catch (error: Exception) {
-        if (error is IllegalArgumentException || isAccessFailure(error)) {
-          unavailable(error)
-        } else {
-          if (!transientFailureLogged) {
-            transientFailureLogged = true
-            onTransientFailure(error)
-          }
-          null
-        }
-      } catch (error: LinkageError) {
-        unavailable(error)
+      read(display)
+    }
+  }
+
+  private fun read(display: D): String? {
+    return try {
+      accessor?.invoke(display)
+    } catch (error: IllegalArgumentException) {
+      unavailable(error)
+    } catch (error: IllegalAccessException) {
+      unavailable(error)
+    } catch (error: SecurityException) {
+      unavailable(error)
+    } catch (error: InvocationTargetException) {
+      invocationFailed(error)
+    } catch (error: LinkageError) {
+      unavailable(error)
+    }
+  }
+
+  private fun invocationFailed(error: InvocationTargetException): String? {
+    val cause = error.cause
+    if (cause is kotlinx.coroutines.CancellationException) throw cause
+    return if (isAccessFailure(error)) {
+      unavailable(error)
+    } else {
+      if (!transientFailureLogged) {
+        transientFailureLogged = true
+        onTransientFailure(error)
       }
+      null
     }
   }
 

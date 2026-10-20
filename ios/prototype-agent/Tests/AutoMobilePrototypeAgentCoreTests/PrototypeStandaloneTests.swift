@@ -32,7 +32,7 @@ private final class StandaloneHarness {
     var outbox: PrototypeEventOutbox<PrototypeEvent>
     var delivered: [PrototypeEvent] = []
     let clock = StandaloneClock()
-    lazy var timer = PrototypeIdleTimer(clock: clock) { [unowned self] in dismiss(.ttl) }
+    lazy var timer = PrototypeIdleTimer(clock: clock) { [weak self] in self?.dismiss(.ttl) }
 
     init(mode: PrototypeLifecycleMode) {
         self.mode = mode

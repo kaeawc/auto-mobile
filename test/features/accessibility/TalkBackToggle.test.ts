@@ -1,4 +1,5 @@
-import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
+import type { AccessibilityService } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   TalkBackToggle,
@@ -80,7 +81,7 @@ describe("TalkBackToggle", () => {
   test("disable confirms device state and replaces the shared detection cache immediately", async () => {
     const service = "com.google.android.marvin.talkback/.TalkBackService";
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("enabled_accessibility_services", { stdout: service, stderr: "" });
+    adb.setCommandResponse("enabled_accessibility_services", makeExecResult(service));
     const timer = new FakeTimer();
     const detector = new DefaultAccessibilityDetector(timer);
     detector.clearAllCache();
@@ -89,8 +90,8 @@ describe("TalkBackToggle", () => {
     secure.setGetResult({ success: true, found: true, value: service });
     secure.setPutResult({ success: true });
     adb.setCommandResponseSequence("enabled_accessibility_services", [
-      { stdout: service, stderr: "" },
-      { stdout: "null", stderr: "" },
+      makeExecResult(service),
+      makeExecResult("null"),
     ]);
     const result = await new TalkBackToggle(
       ANDROID_DEVICE,
@@ -369,7 +370,7 @@ describe("TalkBackToggle", () => {
     test.each([true, false])(
       "reports a bounded state mismatch for requested enabled=%s",
       async (enabled) => {
-        const initialService = enabled ? "unknown" : "talkback";
+        const initialService: AccessibilityService = enabled ? "unknown" : "talkback";
         fakeDetector.setTalkBackEnabled(!enabled);
         fakeDetector.enqueueDetectMethodResults(initialService);
         const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -410,8 +411,8 @@ describe("TalkBackToggle", () => {
     test.each([true, false])(
       "confirms a delayed state change for requested enabled=%s",
       async (enabled) => {
-        const initialService = enabled ? "unknown" : "talkback";
-        const requestedService = enabled ? "talkback" : "unknown";
+        const initialService: AccessibilityService = enabled ? "unknown" : "talkback";
+        const requestedService: AccessibilityService = enabled ? "talkback" : "unknown";
         // Enabling also reads the setting on each of the four dialog attempts.
         const dialogReads = enabled
           ? [initialService, initialService, initialService, initialService]
@@ -442,8 +443,8 @@ describe("TalkBackToggle", () => {
     test.each([true, false])(
       "confirms on the last bounded read for requested enabled=%s",
       async (enabled) => {
-        const initialService = enabled ? "unknown" : "talkback";
-        const requestedService = enabled ? "talkback" : "unknown";
+        const initialService: AccessibilityService = enabled ? "unknown" : "talkback";
+        const requestedService: AccessibilityService = enabled ? "talkback" : "unknown";
         const dialogReads = enabled
           ? [initialService, initialService, initialService, initialService]
           : [];

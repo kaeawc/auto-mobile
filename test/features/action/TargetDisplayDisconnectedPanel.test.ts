@@ -1,3 +1,5 @@
+import { createExecResult } from "../../../src/utils/execResult";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
@@ -50,7 +52,9 @@ function device(postures: Posture[] = ["closed", "opened"]): BootedDevice {
 }
 
 function observation(key: string): ObserveResult {
-  return {
+  return buildObserveResult({
+    updatedAt: 0,
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     display: {
       key,
       role: key === cover ? "cover" : "inner",
@@ -59,7 +63,7 @@ function observation(key: string): ObserveResult {
     },
     displayRevision: 41,
     screenSize: { width: 2076, height: 2152 },
-  };
+  });
 }
 
 function harness(
@@ -69,7 +73,7 @@ function harness(
 ) {
   const adb = new FakeAdbExecutor();
   // FakeAdbExecutor matches substrings, just like the existing action-display adb() helper.
-  adb.setCommandResponse("cmd display get-displays", { stdout: captures[posture], stderr: "" });
+  adb.setCommandResponse("cmd display get-displays", createExecResult(captures[posture], ""));
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation(previousKey));
   const transitions = new FakeDisplayTransitionReader();
@@ -93,6 +97,10 @@ const pinRemedy =
 
 class FakeTapClient implements CoordinateTapClient {
   calls = 0;
+  async requestDoubleTapCoordinates(): Promise<{ success: boolean }> {
+    this.calls++;
+    return { success: true };
+  }
   async requestTapCoordinates(): Promise<{ success: boolean }> {
     this.calls++;
     return { success: true };
@@ -170,7 +178,7 @@ describe("Android disconnected action panel", () => {
       if (unreadable === "throws") {
         h.adb.setCommandError("cmd display get-displays", new Error("display service unavailable"));
       } else {
-        h.adb.setCommandResponse("cmd display get-displays", { stdout: "", stderr: "" });
+        h.adb.setCommandResponse("cmd display get-displays", createExecResult("", ""));
       }
       await expect(h.prepare()).rejects.toThrow(reobserve(inner));
       expect(h.adb.getExecutedCommands()).toEqual(["shell cmd display get-displays"]);
@@ -361,9 +369,9 @@ describe("disconnected action panel pinnedDisplay details", () => {
     const error = await pinnedRejection(h);
     expect(error).toBeInstanceOf(DisplaySelectionError);
     const result = runWithSelectedDisplayPin(pinned(h), () =>
-      withStaleDisplay({ success: false }, error),
+      withStaleDisplay<BaseActionResult>({ success: false }, error),
     );
-    expect(result).toEqual({
+    expect<unknown>(result).toEqual({
       success: false,
       error: foldedMessage + pinRemedy,
       pinnedDisplay: { pin: "inner", availablePanels: [{ key: cover, role: "cover" }] },
@@ -404,13 +412,16 @@ describe("disconnected action panel pinnedDisplay details", () => {
 
   test("an unlisted connected panel keeps a valid schema role in pinnedDisplay", async () => {
     const h = harness();
-    h.adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:unlisted" type INTERNAL, real 100 x 100}',
-      stderr: "",
-    });
+    h.adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:unlisted" type INTERNAL, real 100 x 100}',
+        "",
+      ),
+    );
     const error = await pinnedRejection(h);
     const result = runWithSelectedDisplayPin(pinned(h), () =>
-      withStaleDisplay({ success: false }, error),
+      withStaleDisplay<BaseActionResult>({ success: false }, error),
     );
     expect(result.pinnedDisplay).toEqual({
       pin: "inner",

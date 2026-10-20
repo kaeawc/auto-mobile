@@ -9,7 +9,7 @@ import {
   type ServiceStatusProbe,
 } from "../../../src/server/bootedDeviceResources";
 import type { DeviceServiceStatus } from "../../../src/server/bootedDeviceResources";
-import { describeDevice } from "../../../src/server/deviceDescription";
+import { describeDevice } from "../../../src/daemon/deviceDescription";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../../src/utils/logger";
 import {
@@ -103,13 +103,21 @@ describe("iOS service status command applicability", () => {
 // A booted iOS simulator entry as the resource builds it from discovery, before service-status
 // enrichment. `readiness.unknown` and `capabilities.automation === null` are the freshly-discovered
 // defaults; a transient probe failure must leave them untouched (#7053).
-function bootedIosDevice(deviceId: string) {
+function bootedIosDevice(deviceId: string): ReturnType<typeof describeDevice> & {
+  source: "local";
+  deviceId: string;
+  recoveryEligibility: null;
+  identityUnresolved: boolean;
+  serviceStatusDiagnostic?: import("../../../src/server/bootedDeviceResources").ServiceStatusDiagnostic;
+} {
   const description = describeDevice({
     kind: "booted",
     device: { name: "iPhone 15 Pro", platform: "ios", deviceId },
   });
   return {
     ...description,
+    deviceId,
+    source: "local",
     recoveryEligibility: null,
     identityUnresolved: false,
   };

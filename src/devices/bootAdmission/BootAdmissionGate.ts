@@ -7,6 +7,8 @@ import type { Platform } from "../../models/Platform";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type { CapacityLimits, InFlightBootMemory } from "./capacityLimits";
+import { SampleWindow } from "./SampleWindow";
+import { ENV } from "../../config/env";
 
 /**
  * Platform-neutral boot admission (#11181): the ledger of admitted boots, the
@@ -15,9 +17,9 @@ import type { CapacityLimits, InFlightBootMemory } from "./capacityLimits";
  */
 
 /** Opt-out switch for every boot admission gate; exact `0` disables. */
-export const BOOT_CAPACITY_GATE_ENV = "AUTOMOBILE_BOOT_CAPACITY_GATE";
+export const BOOT_CAPACITY_GATE_ENV = ENV.BOOT_CAPACITY_GATE.name;
 /** iOS-only override of {@link BOOT_CAPACITY_GATE_ENV}: exact `0` disables, exact `1` enables. */
-export const IOS_SIM_CAPACITY_GATE_ENV = "AUTOMOBILE_IOS_SIM_CAPACITY_GATE";
+export const IOS_SIM_CAPACITY_GATE_ENV = ENV.IOS_SIM_CAPACITY_GATE.name;
 
 /**
  * Suggested wait before retrying a refused boot. Capacity frees when another
@@ -205,7 +207,7 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
   );
 }
 
-interface LedgerEntry {
+export interface LedgerEntry {
   deviceId?: string;
   /** Pid of the process spawned for the boot, once handed off with one. */
   processId?: number;
@@ -231,16 +233,6 @@ export interface LedgerAdmission {
  */
 export interface LedgerSampleWindow {
   close(): void;
-}
-
-class SampleWindow implements LedgerSampleWindow {
-  readonly ended: LedgerEntry[] = [];
-
-  constructor(private readonly onClose: (window: SampleWindow) => void) {}
-
-  close(): void {
-    this.onClose(this);
-  }
 }
 
 /** Admitted boots a capacity sample's device listing does not show. */

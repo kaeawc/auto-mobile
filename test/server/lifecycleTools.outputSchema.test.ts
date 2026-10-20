@@ -1,3 +1,4 @@
+import { readToolResponse, toolIsError, toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import type {
@@ -22,6 +23,7 @@ import { registerDeviceTools } from "../../src/server/deviceTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
+import { buildObserveResult } from "../helpers/observeFixture";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -29,12 +31,13 @@ isolateToolRegistry();
 
 const interactionDeps: InteractionToolDependencies = {};
 const appTools = createAppToolsHarness();
-const createObserveResult = (): ObserveResult => ({
-  timestamp: 1,
-  screenSize: { width: 1080, height: 1920 },
-  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-  viewHierarchy: { node: {} },
-});
+const createObserveResult = (): ObserveResult =>
+  buildObserveResult({
+    updatedAt: 1,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: { hierarchy: { node: {} } },
+  });
 
 const device: BootedDevice = { name: "fake", deviceId: "emulator-5554", platform: "android" };
 
@@ -43,7 +46,7 @@ beforeEach(() => {
   registerInteractionTools(interactionDeps);
   registerAppTools();
   registerUtilityTools();
-  setInstalledAppResourceRefresh(async () => {});
+  setInstalledAppResourceRefresh({ invalidate: () => {}, notify: async () => {} });
 });
 afterEach(() => {
   delete interactionDeps.pressButtonFactory;
@@ -60,10 +63,10 @@ async function checkResponse(
 ) {
   const tool = ToolRegistry.getTool(name)!;
   const response = await tool.deviceAwareHandler!(device, args);
-  expect(response.structuredContent).toEqual(payload);
-  expect(response.content).toEqual(createJSONToolResponse(payload).content);
-  expect(response.isError).toBe(isError);
-  expect(tool.outputSchema!.parse(response.structuredContent)).toBeDefined();
+  expect(toolStructured(response)).toEqual(payload);
+  expect(readToolResponse(response).content).toEqual(createJSONToolResponse(payload).content);
+  expect(toolIsError(response)).toBe(isError === true);
+  expect(tool.outputSchema!.parse(toolStructured(response))).toBeDefined();
 }
 
 for (const success of [true, false]) {
@@ -133,10 +136,10 @@ for (const success of [true, false]) {
             : "failed",
           ...result,
         };
-        expect(response.structuredContent).toEqual(payload);
-        expect(response.content).toEqual(createJSONToolResponse(payload).content);
+        expect(toolStructured(response)).toEqual(payload);
+        expect(readToolResponse(response).content).toEqual(createJSONToolResponse(payload).content);
         expect(ToolRegistry.getTool(name)!.outputSchema!.parse(payload)).toBeDefined();
-        expect(response.isError).toBeUndefined();
+        expect(toolIsError(response)).toBe(false);
       } finally {
         stateSpy.mockRestore();
       }
@@ -235,10 +238,10 @@ for (const target of [
       const tool = ToolRegistry.getTool("terminateApp")!;
       const response = await tool.deviceAwareHandler!(target, { appId: "com.example" });
       const payload = { message, observation: result.observation, ...result };
-      expect(response.structuredContent).toEqual(payload);
-      expect(response.content).toEqual(createJSONToolResponse(payload).content);
-      expect(response.isError).toBeUndefined();
-      expect(tool.outputSchema!.parse(response.structuredContent)).toBeDefined();
+      expect(toolStructured(response)).toEqual(payload);
+      expect(readToolResponse(response).content).toEqual(createJSONToolResponse(payload).content);
+      expect(toolIsError(response)).toBe(false);
+      expect(tool.outputSchema!.parse(toolStructured(response))).toBeDefined();
     },
   );
 }

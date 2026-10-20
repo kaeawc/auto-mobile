@@ -3,7 +3,7 @@ import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/se
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { TASKS_EXTENSION_ID } from "../../src/server/tasks/mcpTasksExtension";
+import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 
@@ -224,6 +224,9 @@ describe("stdio proxy relays the Tasks extension to the daemon (#4668)", () => {
     const wire = await connect(client);
     await wire.call("executePlan", true);
     const ownerKey = client.callToolOptions[0]?.tasks?.ownerKey;
+    if (ownerKey === undefined) {
+      throw new Error("The task call must carry an owner key");
+    }
 
     const got = await wire.task("tasks/get", { taskId: "task-1" });
     const updated = await wire.task("tasks/update", {

@@ -49,12 +49,11 @@ object PrototypeDataPointer {
     return value
   }
 
+  private fun isPositiveIndex(token: String): Boolean =
+    token.isNotEmpty() && token[0] in '1'..'9' && token.all { it in '0'..'9' }
+
   private fun arrayIndex(token: String): Int? =
-    if (
-      token == "0" || (token.isNotEmpty() && token[0] in '1'..'9' && token.all { it in '0'..'9' })
-    )
-      token.toIntOrNull()
-    else null
+    if (token == "0" || isPositiveIndex(token)) token.toIntOrNull() else null
 }
 
 /** Shared projection and scalar semantics; rendering is the existing repeat renderer. */

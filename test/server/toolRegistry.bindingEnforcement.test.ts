@@ -1,6 +1,6 @@
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
@@ -293,21 +293,13 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
           runWithToolSelectionContext({ callerMcpSessionId: mcpA }, () =>
             ToolRegistry.callInternal("controlProbe", { platform: "ios", sessionUuid }),
           ).catch((error: unknown) => error);
-        await DaemonState.getInstance()
-          .getDevicePool()
-          .bindOrReuseDeviceSession(
-            "foreign-session",
-            free.deviceId,
-            "ios",
-            undefined,
-            undefined,
-            undefined,
-            false,
-            undefined,
-            undefined,
-            undefined,
-            "mcp-socket-other",
-          );
+        await DaemonState.getInstance().getDevicePool().bindOrReuseDeviceSession({
+          sessionId: "foreign-session",
+          deviceId: free.deviceId,
+          platform: "ios",
+          allowSessionRebind: false,
+          mcpSessionId: "mcp-socket-other",
+        });
 
         const refused = await asBrokerConnection("foreign-session");
         expect((refused as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
@@ -451,19 +443,13 @@ describe("platform-only calls on a bound daemon connection", () => {
     );
     await pool.initializeWithDevices([device, iosDevice]);
     DaemonState.getInstance().initialize(manager, pool);
-    await pool.bindOrReuseDeviceSession(
-      SESSION,
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: device.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: CONNECTION,
+    });
     manager.setDeviceReadiness(SESSION, "automationReady");
     unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
     fixture = new McpTestFixture({
@@ -488,7 +474,7 @@ describe("platform-only calls on a bound daemon connection", () => {
 
   function arrangedEach2<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each<T>([...table])(
         name,
         async (row: T) => {
           await arrangeHarness2();

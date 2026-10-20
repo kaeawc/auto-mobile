@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { logger, type Logger } from "../../../../src/utils/logger";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -16,7 +17,6 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
   const device: BootedDevice = {
     deviceId: "request-registration-cleanup",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
   let client: AndroidCtrlProxyClient | null = null;
@@ -33,7 +33,7 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
     loggerInstance?: Logger,
   ): AndroidCtrlProxyClient => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
     adb.setScreenState(true);
     const instance = AndroidCtrlProxyClient.createForTesting(device, adb, {
       webSocketFactory: (url) => {
@@ -146,7 +146,7 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
   test("device info clears its registration when the socket disconnects before send", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
     adb.setScreenState(true);
     client = AndroidCtrlProxyClient.createForTesting(device, adb, {
       webSocketFactory: createInstantFailureWebSocketFactory(timer),

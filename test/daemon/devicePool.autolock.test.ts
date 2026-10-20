@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { describe, it, expect, afterEach } from "bun:test";
@@ -9,6 +10,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError } from "../../src/models";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -68,6 +71,25 @@ describe("DevicePool autolock", () => {
   afterEach(() => {
     clearAutolockEnv();
   });
+
+  arranged(
+    "autolockDevice forwards the ambient request signal into session creation (#11817)",
+    async () => {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      await initializeLiveAndroidDevice();
+      const controller = new AbortController();
+      const create = sessionManager.createSession.bind(sessionManager);
+      let forwarded: AbortSignal | undefined;
+      sessionManager.createSession = (...args: Parameters<SessionManager["createSession"]>) => {
+        forwarded = args[3]?.signal;
+        return create(...args);
+      };
+      await runWithAbortSignal(controller.signal, () =>
+        pool.autolockDevice(androidDevice.deviceId, "android", "mcp-1"),
+      );
+      expect(forwarded).toBe(controller.signal);
+    },
+  );
 
   arranged("autolockDevice returns undefined when autolock is disabled", async () => {
     // Autolock env not set -> disabled
@@ -340,7 +362,7 @@ describe("DevicePool autolock", () => {
 
     // Advance to just before expiry
     timer.advanceTime(4000);
-    sessionManager.recordHeartbeat("autolock-session");
+    await deliverDaemonHeartbeat(sessionManager, "autolock-session");
 
     // Liveness is not use, and the suspect grace never extends idleness.
     timer.advanceTime(2000);
@@ -728,16 +750,20 @@ describe("DevicePool autolock", () => {
           await release;
           await restoringPool.releaseDevice("emulator-5554", "reused-session");
           await expect(
-            restoringPool.bindOrReuseDeviceSession("reused-session", "emulator-5554", "android"),
+            restoringPool.bindOrReuseDeviceSession({
+              sessionId: "reused-session",
+              deviceId: "emulator-5554",
+              platform: "android",
+            }),
           ).rejects.toThrow("cleanup");
           const cleanup = restoringManager.getPendingDeviceCleanup("emulator-5554");
           finishRestore();
           await cleanup;
-          await restoringPool.bindOrReuseDeviceSession(
-            "reused-session",
-            "emulator-5554",
-            "android",
-          );
+          await restoringPool.bindOrReuseDeviceSession({
+            sessionId: "reused-session",
+            deviceId: "emulator-5554",
+            platform: "android",
+          });
 
           expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
             sessionId: "reused-session",
@@ -889,7 +915,7 @@ describe("DevicePool autolock", () => {
 
         // A live owner keeps heartbeating, but makes no tool call.
         timer.advanceTime(59 * 1000);
-        sessionManager.recordHeartbeat(sessionId!);
+        await deliverDaemonHeartbeat(sessionManager, sessionId!);
 
         // Past the idle timeout and the suspect grace a heartbeating session earns.
         timer.advanceTime(30 * 1000);
@@ -909,8 +935,7 @@ describe("DevicePool autolock", () => {
       // session's release callback fires.
       const device = pool.getDevice("emulator-5554")!;
       device.autolockSessionId = "new-session";
-      device.sessionId = "new-session";
-      device.status = "busy";
+      patchDeviceBinding(device, { sessionId: "new-session", status: "busy" });
 
       // Expire the original session.
       timer.advanceTime(61 * 1000);

@@ -1,18 +1,68 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { beforeAll, describe, expect, mock, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { scanToolRegistryIsolation } from "./toolRegistryIsolation";
 import { typeScriptFiles, relativePosix } from "./astGuard";
 
 const ROOT = path.join(import.meta.dir, "../..");
-const BASELINE_FILE = path.join(import.meta.dir, "tool-registry-isolation-baseline.txt");
-const BASELINE_CEILING = 0;
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
-const UPDATE_COMMAND =
-  "UPDATE_TOOL_REGISTRY_ISOLATION_BASELINE=1 bun test test/lint/toolRegistryIsolation.test.ts";
 const FILE = "test/server/fixture.test.ts";
 const IMPORT = 'import { registerObserveTools } from "../../src/server/observeTools";';
+
+function scanRegistrationCandidates(
+  file: string,
+  source: string,
+  scan = scanToolRegistryIsolation,
+): { line: number }[] {
+  // Named imports retain the exported name even when aliased; namespace calls
+  // contain the member name. Neither can yield a finding without register*Tool(s).
+  // Keep unusual export names too (the scanner uses .+, not \w+).
+  if (/register\w+Tools?\b/.test(source) || /register.+Tools?/.test(source)) {
+    return scan(file, source);
+  }
+  // The parser decodes hex/Unicode escapes. Other string escapes either retain
+  // their letter or produce whitespace; removing slashes/whitespace also keeps
+  // identity escapes and line continuations as conservative candidates.
+  if (
+    /\\[ux]/.test(source) ||
+    (source.includes("\\") && /register.*Tools?/.test(source.replaceAll(/\\|\s/g, "")))
+  ) {
+    return scan(file, source);
+  }
+  return [];
+}
+
+describe("tool registration candidate prefilter", () => {
+  test("skips files without registration text without parsing", () => {
+    const scan = mock(scanToolRegistryIsolation);
+    expect(scanRegistrationCandidates(FILE, 'const unrelated = "hello\\nworld";', scan)).toEqual(
+      [],
+    );
+    expect(scan).not.toHaveBeenCalled();
+  });
+  test("reports an aliased import whose call has no registration text", () => {
+    expect(
+      scanRegistrationCandidates(
+        FILE,
+        'import { registerObserveTools as x } from "../../src/server/observeTools";\nx();',
+      ),
+    ).toEqual([{ line: 2 }]);
+  });
+  test.each([
+    'import { register$Tools as x } from "../../src/server/observeTools";\nx();',
+    'import { register観察Tools as x } from "../../src/server/observeTools";\nx();',
+    'import { "register Foo Tools" as x } from "../../src/server/observeTools";\nx();',
+    'import { \\u0072egisterObserveTools as x } from "../../src/server/observeTools";\nx();',
+    'import * as tools from "../../src/server/observeTools";\ntools["\\x72egisterObserveTools"]();',
+    'import { "r\\egisterObserveTools" as x } from "../../src/server/observeTools";\nx();',
+    'import { "r\\egister Tools" as x } from "../../src/server/observeTools";\nx();',
+    'import { "regi\\\nsterObserveTools" as x } from "../../src/server/observeTools";\nx();',
+  ])("preserves findings for unusual or escaped export names: %s", (source) => {
+    const findings = scanToolRegistryIsolation(FILE, source);
+    expect(findings).toHaveLength(1);
+    expect(scanRegistrationCandidates(FILE, source)).toEqual(findings);
+  });
+});
 
 describe("production tool registry isolation scanner", () => {
   test.each([
@@ -91,62 +141,24 @@ describe("production tool registry isolation scanner", () => {
   });
 });
 
-describe("production registrations stay within the isolation baseline", () => {
-  let baseline: string[] = [];
-  let found: string[] = [];
+describe("production tool registrations are isolated in tests", () => {
   let callSites: { file: string; line: number }[] = [];
   beforeAll(() => {
     callSites = typeScriptFiles(path.join(ROOT, "test"))
       .filter((file) => file.endsWith(".test.ts"))
       .flatMap((file) => {
         const relative = relativePosix(ROOT, file);
-        return scanToolRegistryIsolation(relative, readFileSync(file, "utf8")).map((finding) => ({
+        return scanRegistrationCandidates(relative, readFileSync(file, "utf8")).map((finding) => ({
           file: relative,
           ...finding,
         }));
       });
-    found = [...new Set(callSites.map((call) => call.file))].sort();
-    baseline = readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean);
-    if (process.env.UPDATE_TOOL_REGISTRY_ISOLATION_BASELINE === "1") {
-      if (found.length > BASELINE_CEILING || found.some((file) => !baseline.includes(file))) {
-        throw new Error(
-          "Baseline updates may only shrink. Fix new offenders: call isolateToolRegistry() from test/helpers/withTemporaryTool.ts",
-        );
-      }
-      writeFileSync(BASELINE_FILE, found.map((file) => `${file}\n`).join(""));
-      const self = fileURLToPath(import.meta.url);
-      writeFileSync(
-        self,
-        readFileSync(self, "utf8").replace(
-          /BASELINE_CEILING = \d+;/,
-          `BASELINE_CEILING = ${found.length};`,
-        ),
-      );
-    }
-    baseline = readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean);
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
-  test("no new test registers production tools without isolation", () => {
-    const added = callSites.filter((call) => !baseline.includes(call.file));
-    if (added.length) {
+  test("no test registers production tools without isolation", () => {
+    if (callSites.length) {
       throw new Error(
-        `Unisolated production tool registrations:\n${added.map((call) => `${call.file}:${call.line}`).join("\n")}\nFix: call isolateToolRegistry() from test/helpers/withTemporaryTool.ts`,
+        `Unisolated production tool registrations:\n${callSites.map((call) => `${call.file}:${call.line}`).join("\n")}\nFix: call isolateToolRegistry() from test/helpers/withTemporaryTool.ts`,
       );
     }
-  });
-  test("the baseline only shrinks and lists still-offending files", () => {
-    const stale = baseline.filter((file) => !found.includes(file));
-    if (stale.length) {
-      throw new Error(`Stale isolation baseline:\n${stale.join("\n")}\nRun: ${UPDATE_COMMAND}`);
-    }
-    expect(baseline.length).toBe(BASELINE_CEILING);
-    expect(found.length).toBeLessThanOrEqual(BASELINE_CEILING);
-  });
-  test("the baseline is sorted, unique and uses repo-relative POSIX paths", () => {
-    expect(baseline).toEqual([...new Set(baseline)].sort());
-    expect(
-      baseline.filter(
-        (file) => !file.startsWith("test/") || file.includes("\\") || !file.endsWith(".test.ts"),
-      ),
-    ).toEqual([]);
   });
 });

@@ -113,6 +113,16 @@ function getAndroidRestoreDetails(
   };
 }
 
+export interface RestoreSnapshotOptions {
+  adbFactory?: AdbClientFactory;
+  emulator?: AndroidEmulatorClient;
+  timer?: Timer;
+  store?: DeviceSnapshotStorePort;
+  simctl?: IosSnapshotBackendDeps["simctl"];
+  consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+  iosRestoreOperations?: IosRestoreOperations;
+}
+
 /**
  * Restore device state from snapshot, dispatching on device platform.
  *
@@ -123,6 +133,7 @@ function getAndroidRestoreDetails(
  */
 export class RestoreSnapshot implements SnapshotRestoreProvider {
   windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
   private device: BootedDevice;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
@@ -131,16 +142,17 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   private iosSnapshotBackend: IosSnapshotBackend;
   private iosRestoreOperations: IosRestoreOperations;
 
-  constructor(
-    device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    emulator?: AndroidEmulatorClient,
-    timer: Timer = defaultTimer,
-    store: DeviceSnapshotStorePort = new DeviceSnapshotStore(),
-    simctl?: IosSnapshotBackendDeps["simctl"],
-    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
-    iosRestoreOperations?: IosRestoreOperations,
-  ) {
+  constructor(device: BootedDevice, options: RestoreSnapshotOptions = {}) {
+    const {
+      adbFactory = defaultAdbClientFactory,
+      emulator,
+      timer = defaultTimer,
+      store = new DeviceSnapshotStore(),
+      simctl,
+      consoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+      iosRestoreOperations,
+    } = options;
+    this.consoleBusyRegistry = consoleBusyRegistry;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.emulator = emulator || new AndroidEmulatorClient();
@@ -685,7 +697,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     }
   }
 
-  private async getIosDeviceOsVersion(): Promise<string | undefined> {
+  async getIosDeviceOsVersion(): Promise<string | undefined> {
     try {
       const deviceInfo = await this.simulatorSnapshotBackend.getDeviceInfo();
       if (!deviceInfo) {

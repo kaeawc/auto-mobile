@@ -69,19 +69,13 @@ describe("a session another connection owns is not controlled by naming it (#113
     await pool.initializeWithDevices([held, free]);
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     tools = new RealToolCallPath([held, free]).install();
-    await pool.bindOrReuseDeviceSession(
-      SESSION,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
   }
 
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.

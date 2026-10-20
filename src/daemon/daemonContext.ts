@@ -83,6 +83,21 @@ export type DevicePoolWrites = Pick<
   | "reconcileDiscoveryObservation"
 >;
 
+/** The one session read a failed plan makes to explain a lost session base. */
+export interface PlanEndDaemonContext {
+  sessionManager(): Pick<SessionManager, "peekTerminalAnswerForEndedSession"> | undefined;
+}
+
+/** The state the daemon itself initializes and updates over its lifecycle. */
+export type DaemonStateWrites = Pick<
+  DaemonState,
+  | "initialize"
+  | "isInitialized"
+  | "setSessionBrokerMode"
+  | "setBrokerExecutionReowner"
+  | "setSessionBrokerService"
+>;
+
 /**
  * Narrow view of daemon state for callers that only consume it (#11806).
  * Grow it when a second consumer needs more; do not mirror DaemonState wholesale.
@@ -102,6 +117,8 @@ export interface DaemonContext {
   requireDeviceSessionRegistry(): DeviceSessionRegistry;
   /** The device-pool mutations, throwing "DaemonState not initialized" when the daemon is not initialized. */
   requireDevicePoolWrites(): DevicePoolWrites;
+  /** The whole singleton, for the socket server that consumes most of its surface (resolved now). */
+  daemonState(): DaemonState;
   /** Whether the daemon runs in session-broker mode; false until a broker is configured. */
   isSessionBrokerMode(): boolean;
   /** The session-broker service, or undefined when none is attached (initialized or not). */
@@ -145,6 +162,7 @@ export const defaultDaemonContext: DaemonContext = {
   requireFullDevicePool: () => currentDaemon().getDevicePool(),
   requireDevicePoolWrites: () => currentDaemon().getDevicePool(),
   requireDeviceSessionRegistry: () => currentDaemon().getDeviceSessionRegistry(),
+  daemonState: () => currentDaemon(),
   isSessionBrokerMode: () => currentDaemon().isSessionBrokerMode(),
   sessionBrokerService: () => currentDaemon().getSessionBrokerService(),
   isInitialized: () => currentDaemon().isInitialized(),
@@ -154,6 +172,15 @@ export const defaultDaemonContext: DaemonContext = {
   brokerConnectionScopes: () => initializedDaemon()?.getBrokerConnectionScopes(),
   observerSessionRegistry: () => initializedDaemon()?.getObserverSessionRegistry(),
   deviceSessionRegistry: () => initializedDaemon()?.getDeviceSessionRegistry(),
+};
+
+/** The daemon lifecycle writes, resolved on every call so a reset singleton is never held stale. */
+export const defaultDaemonStateWrites: DaemonStateWrites = {
+  initialize: (...args) => currentDaemon().initialize(...args),
+  isInitialized: () => currentDaemon().isInitialized(),
+  setSessionBrokerMode: (enabled) => currentDaemon().setSessionBrokerMode(enabled),
+  setBrokerExecutionReowner: (reowner) => currentDaemon().setBrokerExecutionReowner(reowner),
+  setSessionBrokerService: (service) => currentDaemon().setSessionBrokerService(service),
 };
 
 export type { DaemonStateLike };

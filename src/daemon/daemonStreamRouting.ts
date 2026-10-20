@@ -7,7 +7,7 @@ import type { NavigationGraphStreamSource } from "../features/navigation/Navigat
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import { holderOf } from "./deviceBinding";
 import type { DeviceDataStreamSocketServer } from "./deviceDataStreamSocketServer";
 import type { PooledDevice } from "./devicePool";
@@ -22,6 +22,7 @@ import {
 import type { ObservationStreamIosClient } from "./observationInitialFrame";
 import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
+import { ENV } from "../config/env";
 
 /**
  * Observation-stream routing split out of daemon.ts (#11808): the navigation-graph push bridge, the
@@ -184,8 +185,8 @@ export function logSkippedObservationStreamDevice(
 ): void {
   const optInEnv =
     platform === "android"
-      ? "AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES"
-      : "AUTOMOBILE_IOS_WARMUP_DEVICES";
+      ? ENV.ANDROID_OBSERVATION_STREAM_DEVICES.name
+      : ENV.IOS_WARMUP_DEVICES.name;
   logger.info(
     `[Daemon] Skipping observation-stream ${action} for ${platform} device ${deviceId}: passive-work policy filtered it; set ${optInEnv} to opt in`,
   );

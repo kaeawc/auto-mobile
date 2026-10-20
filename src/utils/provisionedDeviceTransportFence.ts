@@ -1,6 +1,9 @@
 import { DeviceLostError } from "../models/DeviceLostError";
 import { ActionableError } from "../models/ActionableError";
-import { defaultTimer, type Timer } from "./SystemTimer";
+import { InMemoryProvisionedDeviceTransportFence } from "./InMemoryProvisionedDeviceTransportFence";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
+export { InMemoryProvisionedDeviceTransportFence } from "./InMemoryProvisionedDeviceTransportFence";
+export { DurableProvisionedDeviceTransportFence } from "./DurableProvisionedDeviceTransportFence";
 
 export interface RetiredProvisionedDeviceTransport {
   deviceId: string;
@@ -21,55 +24,10 @@ export interface ProvisionedDeviceTransportFence {
   clear(deviceId: string): Promise<void>;
 }
 
-export class InMemoryProvisionedDeviceTransportFence implements ProvisionedDeviceTransportFence {
-  private readonly retired = new Map<string, RetiredProvisionedDeviceTransport>();
-
-  async retire(input: RetiredProvisionedDeviceTransport): Promise<void> {
-    this.retired.set(input.deviceId, { ...input });
-  }
-
-  async get(deviceId: string): Promise<RetiredProvisionedDeviceTransport | undefined> {
-    const retired = this.retired.get(deviceId);
-    return retired ? { ...retired } : undefined;
-  }
-
-  async clear(deviceId: string): Promise<void> {
-    this.retired.delete(deviceId);
-  }
-}
-
-export class DurableProvisionedDeviceTransportFence implements ProvisionedDeviceTransportFence {
-  private readonly store: ProvisionedDeviceTransportTombstoneStore;
-  private readonly memory: ProvisionedDeviceTransportFence;
-  private readonly timer: Pick<Timer, "now">;
-
-  constructor(options: {
-    store: ProvisionedDeviceTransportTombstoneStore;
-    memory?: ProvisionedDeviceTransportFence;
-    timer?: Pick<Timer, "now">;
-  }) {
-    this.store = options.store;
-    this.memory = options.memory ?? new InMemoryProvisionedDeviceTransportFence();
-    this.timer = options.timer ?? defaultTimer;
-  }
-
-  async retire(input: RetiredProvisionedDeviceTransport): Promise<void> {
-    await this.store.retire(input, this.timer.now());
-    await this.memory.retire(input);
-  }
-
-  async get(deviceId: string): Promise<RetiredProvisionedDeviceTransport | undefined> {
-    return (await this.memory.get(deviceId)) ?? (await this.store.get(deviceId));
-  }
-
-  async clear(deviceId: string): Promise<void> {
-    await this.store.clear(deviceId);
-    await this.memory.clear(deviceId);
-  }
-}
-
 let defaultFence: ProvisionedDeviceTransportFence | undefined =
-  process.env.NODE_ENV === "test" ? new InMemoryProvisionedDeviceTransportFence() : undefined;
+  readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test"
+    ? new InMemoryProvisionedDeviceTransportFence()
+    : undefined;
 
 /** Startup owns construction; repeated registration must preserve the process-wide fence. */
 export function initializeProvisionedDeviceTransportFence(

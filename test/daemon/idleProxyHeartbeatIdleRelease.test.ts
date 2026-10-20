@@ -26,7 +26,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -183,7 +183,11 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
           boundSession: params[DAEMON_BOUND_SESSION_PARAM],
         });
         if (tool === "getAndroid") {
-          await pool.bindOrReuseDeviceSession(SESSION, DEVICE.deviceId, "android");
+          await pool.bindOrReuseDeviceSession({
+            sessionId: SESSION,
+            deviceId: DEVICE.deviceId,
+            platform: "android",
+          });
           return;
         }
         // A device tool call resolves its session as ToolExecutionContext does. This is the

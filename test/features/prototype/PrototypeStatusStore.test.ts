@@ -394,8 +394,11 @@ describe("patch spec and data hooks", () => {
   test("a device data write updates reported data and the tracked spec, or drops them", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     track(store);
-    const write = (sequence: number, name: string, payload: unknown) =>
-      store.recordEvent(scope, { ...event(sequence, "panel", "change", name), payload });
+    const write = (
+      sequence: number,
+      name: string,
+      payload: Parameters<InMemoryPrototypeStatusStore["recordEvent"]>[1]["payload"],
+    ) => store.recordEvent(scope, { ...event(sequence, "panel", "change", name), payload });
     write(1, "/data/count", { op: "set", value: 5, revision: 2 });
     expect(store.status(scope).prototypes[0].data).toEqual({ count: 5 });
     const tracked = store.shownSpecs.read(scope.deviceId, "panel");

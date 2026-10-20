@@ -120,21 +120,14 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
 
   const bind = async (pool: DevicePool, to: string): Promise<AcquisitionReceipt> => {
     const receipt: AcquisitionReceipt = {};
-    await pool.bindOrReuseDeviceSession(
-      "held",
-      to,
-      sessions.getSession("held")!.platform,
-      undefined,
-      undefined,
-      undefined,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      false,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "held",
+      deviceId: to,
+      platform: sessions.getSession("held")!.platform,
+      allowSessionRebind: true,
+      oneShotCli: false,
       receipt,
-    );
+    });
     return receipt;
   };
 
@@ -171,7 +164,11 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       ],
       overrides,
     );
-    await pool.bindOrReuseDeviceSession("held", AVD_A, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "held",
+      deviceId: AVD_A,
+      platform: "android",
+    });
     sessions.updateSessionCache("held", structuredClone(androidOverrides));
     return pool;
   };
@@ -196,7 +193,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       { deviceId: SIM_A, name: "sim-a", platform: "ios" },
       { deviceId: SIM_B, name: "sim-b", platform: "ios" },
     ]);
-    await pool.bindOrReuseDeviceSession("held", SIM_A, "ios");
+    await pool.bindOrReuseDeviceSession({ sessionId: "held", deviceId: SIM_A, platform: "ios" });
     sessions.setBiometricEnrollment("held", { initialEnrollment: "not_enrolled" });
 
     await rebindThenUndo(pool, SIM_A, SIM_B);
@@ -211,7 +208,11 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       { deviceId: AVD_A, name: "avd-a", platform: "android" },
       { deviceId: AVD_B, name: "avd-b", platform: "android" },
     ]);
-    await pool.bindOrReuseDeviceSession("held", AVD_A, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "held",
+      deviceId: AVD_A,
+      platform: "android",
+    });
     sessions.setKeepScreenAwake("held", { applied: true, method: "svc", svcWasEnabled: false });
 
     await rebindThenUndo(pool, AVD_A, AVD_B);
@@ -234,19 +235,27 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     keepAwakeGate = gate.promise;
     const receipt = await bind(pool, AVD_B);
     expect(restoredKeepAwake).toEqual([]);
-    await expect(pool.bindOrReuseDeviceSession("other", AVD_A, "android")).rejects.toThrow();
+    await expect(
+      pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: AVD_A, platform: "android" }),
+    ).rejects.toThrow();
     commitAcquisition(receipt);
     commitAcquisition(receipt);
     await spin();
     expect(restoredKeepAwake).toEqual([AVD_A]);
     expect(restoredSettings).toEqual([]);
     expect(pool.getDevice(AVD_A)).toMatchObject({ sessionId: "held", status: "busy" });
-    await expect(pool.bindOrReuseDeviceSession("other", AVD_A, "android")).rejects.toThrow();
+    await expect(
+      pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: AVD_A, platform: "android" }),
+    ).rejects.toThrow();
     gate.resolve();
     await settled(receipt);
     expectAndroidRestoredOnce();
     expect(sessions.hasDeviceCleanupInProgress(AVD_A)).toBe(false);
-    await pool.bindOrReuseDeviceSession("other", AVD_A, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "other",
+      deviceId: AVD_A,
+      platform: "android",
+    });
     expect(pool.getDevice(AVD_A)).toMatchObject({ sessionId: "other", status: "busy" });
     expect(sessions.getSession("held")!.cacheData).toEqual({});
   });
@@ -256,7 +265,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       { deviceId: SIM_A, name: "sim-a", platform: "ios" },
       { deviceId: SIM_B, name: "sim-b", platform: "ios" },
     ]);
-    await pool.bindOrReuseDeviceSession("held", SIM_A, "ios");
+    await pool.bindOrReuseDeviceSession({ sessionId: "held", deviceId: SIM_A, platform: "ios" });
     sessions.updateSessionCache("held", {
       biometricEnrollment: { initialEnrollment: "not_enrolled" },
       screenReader: { platform: "ios", previousEnabled: false },
@@ -311,15 +320,12 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
 
   test("a caller without a receipt restores inline", async () => {
     const pool = await androidPool();
-    await pool.bindOrReuseDeviceSession(
-      "held",
-      AVD_B,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      true,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "held",
+      deviceId: AVD_B,
+      platform: "android",
+      allowSessionRebind: true,
+    });
     expectAndroidRestoredOnce();
     expect(pool.getDevice(AVD_A)).toMatchObject({ sessionId: null, status: "idle" });
   });
@@ -339,17 +345,15 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
   test("undo crossing the hard deadline during bind-back keeps restored override records absent", async () => {
     const entered = Promise.withResolvers<void>();
     const bindBack = Promise.withResolvers<number>();
-    const pool = await androidPool({
-      cancelDeviceSessionExecutions: {
-        cancelDeviceExecutions: async (deviceId) => {
-          if (deviceId === AVD_B) {
-            entered.resolve();
-            return await bindBack.promise;
-          }
-          return 0;
-        },
-      },
-    });
+    const cancelSessionExecutions = async (): Promise<number> => 0;
+    cancelSessionExecutions.cancelDeviceExecutions = async (deviceId: string): Promise<number> => {
+      if (deviceId === AVD_B) {
+        entered.resolve();
+        return await bindBack.promise;
+      }
+      return 0;
+    };
+    const pool = await androidPool({ cancelDeviceSessionExecutions: cancelSessionExecutions });
     const routingCache = {
       displayPin: "main",
       deviceReadiness: "automationReady",
@@ -398,7 +402,11 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     const receipt = await bind(pool, AVD_B);
     commitAcquisition(receipt);
     await settled(receipt);
-    await pool.bindOrReuseDeviceSession("other", AVD_A, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "other",
+      deviceId: AVD_A,
+      platform: "android",
+    });
     await pool.releaseUndeliveredAcquisition(receipt);
     expectAndroidRestoredOnce();
     expect(pool.getDevice(AVD_A)).toMatchObject({ sessionId: "other", status: "busy" });
@@ -442,7 +450,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       { deviceId: SIM_A, name: "sim-a", platform: "ios" },
       { deviceId: SIM_B, name: "sim-b", platform: "ios" },
     ]);
-    await pool.bindOrReuseDeviceSession("held", SIM_A, "ios");
+    await pool.bindOrReuseDeviceSession({ sessionId: "held", deviceId: SIM_A, platform: "ios" });
     const held = sessions.getSession("held")!;
     const { rule } = sessions.beginIosAppNetworkRule(held, {
       udid: SIM_A,
@@ -500,7 +508,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       { deviceId: SIM_A, name: "sim-a", platform: "ios" },
       { deviceId: SIM_B, name: "sim-b", platform: "ios" },
     ]);
-    await pool.bindOrReuseDeviceSession("held", SIM_A, "ios");
+    await pool.bindOrReuseDeviceSession({ sessionId: "held", deviceId: SIM_A, platform: "ios" });
     const held = sessions.getSession("held")!;
     const { rule } = sessions.beginIosAppNetworkRule(held, {
       udid: SIM_A,
@@ -524,24 +532,17 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       { deviceId: SIM_A, name: "sim-a", platform: "ios" },
       { deviceId: AVD_B, name: "avd-b", platform: "android" },
     ]);
-    await pool.bindOrReuseDeviceSession("held", SIM_A, "ios");
+    await pool.bindOrReuseDeviceSession({ sessionId: "held", deviceId: SIM_A, platform: "ios" });
     sessions.setBiometricEnrollment("held", { initialEnrollment: "not_enrolled" });
     const receipt: AcquisitionReceipt = {};
-    await pool.bindOrReuseDeviceSession(
-      "held",
-      AVD_B,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      false,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "held",
+      deviceId: AVD_B,
+      platform: "android",
+      allowSessionRebind: true,
+      oneShotCli: false,
       receipt,
-    );
+    });
     await pool.releaseUndeliveredAcquisition(receipt);
     expect(sessions.getSession("held")).toMatchObject({
       assignedDevice: SIM_A,
@@ -568,7 +569,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
         { deviceId: from, name: "a", platform },
         { deviceId: to, name: "b", platform },
       ]);
-      await pool.bindOrReuseDeviceSession("held", from, platform);
+      await pool.bindOrReuseDeviceSession({ sessionId: "held", deviceId: from, platform });
       sessions.updateSessionCache("held", structuredClone(overrides));
       return { pool, receipt: await bind(pool, to) };
     };
@@ -580,7 +581,9 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
         for (let turn = 0; turn < yields; turn++) {
           await Promise.resolve();
         }
-        await expect(pool.bindOrReuseDeviceSession("other", from, platform)).rejects.toThrow();
+        await expect(
+          pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: from, platform }),
+        ).rejects.toThrow();
         await undo;
         await settled(receipt);
         expect(sessions.getSession("held")).toMatchObject({
@@ -615,7 +618,9 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       expect(pool.getDevice(from)).toMatchObject({ sessionId: "held", status: "busy" });
       expect(restoredSettings).toEqual([]);
       reservation!.release();
-      await expect(pool.bindOrReuseDeviceSession("other", from, platform)).rejects.toThrow();
+      await expect(
+        pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: from, platform }),
+      ).rejects.toThrow();
       gate.resolve();
       await settled(receipt);
       commitAcquisition(receipt);
@@ -634,7 +639,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
         ]);
       }
       expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
-      await pool.bindOrReuseDeviceSession("other", from, platform);
+      await pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: from, platform });
       expect(pool.getDevice(from)).toMatchObject({ sessionId: "other", status: "busy" });
     });
 
@@ -661,11 +666,13 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
         ]);
       }
       expect(sessions.hasDeviceCleanupInProgress(from)).toBe(true);
-      await expect(pool.bindOrReuseDeviceSession("other", from, platform)).rejects.toThrow();
+      await expect(
+        pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: from, platform }),
+      ).rejects.toThrow();
       otherCleanup.resolve();
       await spin();
       expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
-      await pool.bindOrReuseDeviceSession("other", from, platform);
+      await pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: from, platform });
     });
 
     test("an intervening holder receives no restores and the gate settles", async () => {
@@ -716,7 +723,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
         ]);
       }
       expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
-      await pool.bindOrReuseDeviceSession("other", from, platform);
+      await pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: from, platform });
     });
   });
 });

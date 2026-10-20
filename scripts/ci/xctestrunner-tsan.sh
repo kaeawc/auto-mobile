@@ -26,9 +26,9 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
 cd "${repo_root}"
-# shellcheck source=scripts/ios/xctestrunner_test_filter.sh disable=SC1091
+# shellcheck source=scripts/ios/xctestrunner_test_filter.sh
 source "${repo_root}/scripts/ios/xctestrunner_test_filter.sh"
-# shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
+# shellcheck source=scripts/ios/swift_test_counts.sh
 source "${repo_root}/scripts/ios/swift_test_counts.sh"
 timeout_seconds="${XCTESTRUNNER_TSAN_TIMEOUT_SECONDS:-1800}"
 poll_seconds="${XCTESTRUNNER_TSAN_POLL_SECONDS:-1}"

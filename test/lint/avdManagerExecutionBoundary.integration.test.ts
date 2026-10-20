@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative } from "node:path";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -30,7 +31,7 @@ function directlyExecutesAvdManager(source: string): boolean {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);
@@ -49,7 +50,7 @@ describe("avdmanager execution boundary (issue #4051)", () => {
       if (repoPath === CLIENT || exceptions.has(repoPath)) {
         return [];
       }
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       return directlyExecutesAvdManager(source)
         ? [`${repoPath} directly executes avdmanager; route it through ${CLIENT} instead.`]
         : [];

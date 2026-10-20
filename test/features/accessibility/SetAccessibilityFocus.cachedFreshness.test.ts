@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SetAccessibilityFocus } from "../../../src/features/accessibility/SetAccessibilityFocus";
 import { ActionableError, type ObserveResult } from "../../../src/models";
@@ -12,26 +13,26 @@ describe("SetAccessibilityFocus cached freshness", () => {
   let feature: SetAccessibilityFocus;
   let serviceRequests: number;
 
-  const observation = (
-    resourceId: string,
-    freshness?: ObserveResult["freshness"],
-  ): ObserveResult => ({
-    timestamp: timer.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: {
-      hierarchy: {
-        node: {
-          $: {
-            text: "Settings",
-            "resource-id": resourceId,
-            bounds: { left: 0, top: 0, right: 200, bottom: 60 },
+  const observation = (resourceId: string, freshness?: ObserveResult["freshness"]): ObserveResult =>
+    buildObserveResult({
+      updatedAt: timer.now(),
+      observationId: "test-observation",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            $: {
+              text: "Settings",
+              "resource-id": resourceId,
+              bounds: { left: 0, top: 0, right: 200, bottom: 60 },
+            },
           },
         },
       },
-    },
-    freshness,
-  });
+      freshness,
+    });
 
   beforeEach(() => {
     timer = new FakeTimer();
@@ -94,7 +95,7 @@ describe("SetAccessibilityFocus cached freshness", () => {
         const cached = observation("com.example:id/cached", { isFresh: false });
         const unavailable = observation("com.example:id/fresh", { isFresh: true });
         unavailable.viewHierarchy =
-          failure === "errored hierarchy" ? { hierarchy: { error: "capture failed" } } : null;
+          failure === "errored hierarchy" ? { hierarchy: { error: "capture failed" } } : undefined;
         observe.setObserveSequence([cached, unavailable]);
         if (failure === "throws") {
           observe.setFailureMode("execute", new Error("capture failed"));
@@ -116,7 +117,7 @@ describe("SetAccessibilityFocus cached freshness", () => {
   for (const error of [false, true]) {
     test(`preserves missing/errored cache fallback (hierarchy error=${error})`, async () => {
       const cached = observation("com.example:id/cached", { isFresh: false });
-      cached.viewHierarchy = error ? { hierarchy: { error: "cache unavailable" } } : null;
+      cached.viewHierarchy = error ? { hierarchy: { error: "cache unavailable" } } : undefined;
       observe.setObserveSequence([cached, observation("com.example:id/fresh", { isFresh: true })]);
 
       await feature.execute({ text: "Settings" });

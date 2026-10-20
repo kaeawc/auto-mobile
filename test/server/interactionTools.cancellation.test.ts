@@ -6,7 +6,8 @@ import { type InteractionToolDependencies } from "../../src/server/interactionTo
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createTapAt } from "../helpers/tapAtCoordinate";
-import type { ActionCall } from "../../src/features/action/ActionCall";
+import { resolveActionCallWithPerf, type ActionCall } from "../../src/features/action/ActionCall";
+import type { ProgressCallback } from "../../src/features/action/BaseVisualChange";
 
 const interactionDeps: InteractionToolDependencies = {};
 const devices = [
@@ -107,8 +108,8 @@ describe("registered interaction handler cancellation", () => {
     let received: AbortSignal | undefined;
     interactionDeps.tapAtElementFactory = () => ({
       execute: async (options, call) => {
-        received = (call as ActionCall | undefined)?.signal;
-        return { success: true, x: options.x, y: options.y, action: "doubleTap" };
+        received = resolveActionCallWithPerf(call).signal;
+        return { success: true, x: options.x ?? 0, y: options.y ?? 0, action: "doubleTap" };
       },
     });
     const controller = new AbortController();
@@ -124,8 +125,11 @@ describe("registered interaction handler cancellation", () => {
   test.each(["tapOn", "tapAny", "dragAndDrop"])("%s forwards the exact signal", async (name) => {
     let received: AbortSignal | undefined;
     const sentinel = new Error("fake command stopped");
-    const execute = async (_options: unknown, call?: ActionCall): Promise<never> => {
-      received = call?.signal;
+    const execute = async (
+      _options: unknown,
+      call?: ProgressCallback | ActionCall,
+    ): Promise<never> => {
+      received = resolveActionCallWithPerf(call).signal;
       throw sentinel;
     };
     if (name === "tapOn") {

@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HighlightShape } from "../../../../src/models/VisualHighlight";
-import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
+import type { NetworkMockRuleSync } from "../../../../src/utils/networkMockRules";
 import {
   SAVED_PROTOTYPE_ERROR_CODES,
   isSavedPrototypeErrorCode,
@@ -1064,7 +1064,7 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
     expect(builderNames.length).toBe(54);
     const covered = new Set(cases.map((row) => row.builder));
-    expect([...covered].sort()).toEqual([...builderNames].sort());
+    expect<unknown>([...covered].sort()).toEqual([...builderNames].sort());
   });
 });
 
@@ -1127,7 +1127,7 @@ test("saved prototype error codes match Kotlin", () => {
     "unsupported_format",
     "internal_error",
   ];
-  expect(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
+  expect<unknown>(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
   for (const code of kotlinCodes) {
     expect(isSavedPrototypeErrorCode(code)).toBe(true);
   }

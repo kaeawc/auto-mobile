@@ -81,14 +81,13 @@ async function setup() {
   });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   const recover = async (): Promise<RecoveryOutcome> =>
     await settleWithFakeTime(

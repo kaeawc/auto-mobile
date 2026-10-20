@@ -1,11 +1,11 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "fs";
 import { parseGuardSource } from "../lint/astGuard";
 import { collectSourceFacts } from "../lint/sourceFacts";
 import { buildAppFileResourceUri } from "../../src/server/appFileContract";
-import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { encodeUriSegment } from "../../src/utils/encodeUriSegment";
 import { buildNavigationNodeScreenshotUri } from "../../src/utils/navigationResourceUri";
@@ -34,12 +34,12 @@ describe("resource URI encoders accept lone surrogates (#10135)", () => {
     const uri = buildAppFileResourceUri({
       deviceId: "emulator-5554",
       appId: "com.example",
-      container: "files",
+      container: "documents",
       path: `docs/na${LONE_SURROGATE}me.txt`,
     });
 
     expect(uri).toBe(
-      "automobile:devices/emulator-5554/apps/com.example/files/files/docs/na%EF%BF%BDme.txt",
+      "automobile:devices/emulator-5554/apps/com.example/files/documents/docs/na%EF%BF%BDme.txt",
     );
   });
 
@@ -57,7 +57,10 @@ describe("resource URI encoders accept lone surrogates (#10135)", () => {
   let offenders: string[] = [];
   beforeAll(() => {
     const roots = [
-      ...readdirSync(`${import.meta.dir}/../../src/server`).map((name) => `src/server/${name}`),
+      ...readdirSync(`${import.meta.dir}/../../src/server`, {
+        recursive: true,
+        encoding: "utf8",
+      }).map((name) => `src/server/${name}`),
       "src/utils/navigationResourceUri.ts",
     ].filter((path) => path.endsWith(".ts"));
     offenders = roots.filter((path) => {

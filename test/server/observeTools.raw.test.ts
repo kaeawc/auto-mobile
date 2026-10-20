@@ -14,10 +14,12 @@ isolateToolRegistry();
 describe("observe accessibility readiness", () => {
   const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
-  test.each([
+  const scenarios: Array<[boolean, string[]]> = [
     [true, []],
     [false, ["reset", "invalidate:owner:accessibility service disabled"]],
-  ] as const)("synthetic=%s produces actions %j", async (detectionSkipped, expected) => {
+  ];
+
+  test.each(scenarios)("synthetic=%s produces actions %j", async (detectionSkipped, expected) => {
     const calls: string[] = [];
     const detector = new FakeAccessibilityDetector();
     detector.setCtrlProxyServiceEnabled(device.deviceId, false);

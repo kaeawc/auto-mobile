@@ -1,8 +1,9 @@
 import { firstFlagValue } from "./cliArgs";
 import { findValueOperand } from "./flagTokens";
+import { ENV } from "../config/env";
 
 export const EVENT_ALL_MARKERS_FLAG = "--event-all-markers";
-export const EVENT_ALL_MARKERS_ENV = "AUTOMOBILE_EVENT_ALL_MARKERS";
+export const EVENT_ALL_MARKERS_ENV = ENV.EVENT_ALL_MARKERS.name;
 
 export function hasEventAllMarkersCliOverride(args: string[]): boolean {
   // `--event-all-markers=` (explicit, empty) is an override; a bare flag with no value is not.

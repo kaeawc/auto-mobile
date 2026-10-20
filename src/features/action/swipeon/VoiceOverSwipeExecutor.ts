@@ -1,17 +1,22 @@
+import type {
+  SwipeGestureRequest,
+  BoomerangGestureRequest,
+  GestureExecutor,
+  VoiceOverSwipeRunner,
+} from "./types";
 import { getReturnDuration, validateSwipeTimingOptions } from "./swipeTiming";
 import { ActionableError } from "../../../models/ActionableError";
 import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
 import type { FencedGestureOptions } from "../ExecuteGesture";
-import { BootedDevice, Element, SwipeDirection } from "../../../models";
-import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
+import { BootedDevice } from "../../../models";
+import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
-import { BoomerangConfig, GestureExecutor, VoiceOverSwipeRunner } from "./types";
 import {
   VOICEOVER_STATE_UNKNOWN_WARNING,
   type IosVoiceOverDetector,
 } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { withEpilogueWarning } from "../../../utils/bestEffortEpilogue";
-import type { IOSCtrlProxy } from "../../observe/ios";
+import type { IosCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
 import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import { throwIfAborted } from "../../../utils/toolUtils";
@@ -34,7 +39,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
   constructor(
     private readonly device: BootedDevice,
     private readonly executeGesture: GestureExecutor,
-    private readonly iosClient: IOSCtrlProxy,
+    private readonly iosClient: IosCtrlProxy,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector,
     private readonly timer: Timer,
     private readonly featureFlags?: FeatureFlagReader,
@@ -49,32 +54,22 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
    * When boomerang is provided, performs a forward swipe, optional apex pause,
    * then a return swipe. Boomerang gestures are not supported while VoiceOver is active.
    *
-   * @param x1 - Start X coordinate
-   * @param y1 - Start Y coordinate
-   * @param x2 - End X coordinate
-   * @param y2 - End Y coordinate
-   * @param direction - Swipe direction
-   * @param containerElement - The scrollable container element, or null for screen swipe
-   * @param gestureOptions - Optional gesture options (duration, scrollMode)
-   * @param perf - Optional performance tracker
-   * @param boomerang - Optional boomerang configuration
+   * @param request - Swipe coordinates, container, direction, and optional gesture controls
    */
-  async executeSwipeGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    _direction: SwipeDirection,
-    _containerElement: Element | null,
-    gestureOptions?: FencedGestureOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    boomerang?: BoomerangConfig,
-    signal?: AbortSignal,
-  ): Promise<SwipeResult> {
+  async executeSwipeGesture({
+    x1,
+    y1,
+    x2,
+    y2,
+    gestureOptions,
+    perf = new NoOpPerformanceTracker(),
+    boomerang,
+    signal,
+  }: SwipeGestureRequest): Promise<SwipeResult> {
     throwIfAborted(signal);
     if (this.device.platform !== "ios") {
       if (boomerang) {
-        return this.executeBoomerangGesture(
+        return this.executeBoomerangGesture({
           x1,
           y1,
           x2,
@@ -83,7 +78,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
           boomerang,
           perf,
           signal,
-        );
+        });
       }
       return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
     }
@@ -102,7 +97,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     if (voiceOverState !== true) {
       const warning = voiceOverState === null ? VOICEOVER_STATE_UNKNOWN_WARNING : undefined;
       const result = boomerang
-        ? await this.executeBoomerangGesture(
+        ? await this.executeBoomerangGesture({
             x1,
             y1,
             x2,
@@ -111,7 +106,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
             boomerang,
             perf,
             signal,
-          )
+          })
         : await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
       return withEpilogueWarning(result, warning);
     }
@@ -142,16 +137,16 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
    * Execute a boomerang gesture using standard swipes (VoiceOver disabled or non-iOS).
    * Performs a forward swipe, optional apex pause, then a return swipe.
    */
-  async executeBoomerangGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    gestureOptions: FencedGestureOptions | undefined,
-    boomerang: BoomerangConfig,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-  ): Promise<SwipeResult> {
+  async executeBoomerangGesture({
+    x1,
+    y1,
+    x2,
+    y2,
+    gestureOptions,
+    boomerang,
+    perf = new NoOpPerformanceTracker(),
+    signal,
+  }: BoomerangGestureRequest): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
     const timingError = validateSwipeTimingOptions(
       {

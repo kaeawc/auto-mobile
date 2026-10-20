@@ -10,14 +10,22 @@ import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { loadIosFractionalObserve } from "../../fixtures/observe/observeFixture";
 
-const captured = {
-  display: { key: "main", role: "unknown", posture: "flat" },
+const captured: ObserveResult = {
+  observationId: "captured",
+  updatedAt: 0,
+  systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+  display: { key: "main", role: "unknown", posture: "opened", generation: 0 },
   displayRevision: 4,
   screenSize: { width: 100, height: 200 },
   rotation: 0,
   activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
-  viewHierarchy: { frameContext: "frame-1", nativeScale: 2, packageName: "com.example" },
-} as ObserveResult;
+  viewHierarchy: {
+    hierarchy: {},
+    frameContext: "frame-1",
+    nativeScale: 2,
+    packageName: "com.example",
+  },
+};
 
 function captureReference(
   store: SnapshotReferenceStore,

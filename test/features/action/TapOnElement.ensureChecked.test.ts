@@ -1,13 +1,22 @@
+import { buildObserveResult, viewHierarchyFromFixture } from "../../helpers/observeFixture";
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { isolatedTapStrategy } from "../../helpers/observedInteractionStub";
+import type { ElementSelector } from "../../../src/utils/interfaces/ElementSelector";
 import { describe, expect, test } from "bun:test";
-import type { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import type { Element, ObserveResult } from "../../../src/models";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-const hierarchy = { hierarchy: { node: [] } } as unknown as ViewHierarchyResult;
-const observation = { viewHierarchy: hierarchy } as ObserveResult;
+const hierarchy = viewHierarchyFromFixture({ hierarchy: { node: [] } });
+const observation = buildObserveResult({
+  updatedAt: 0,
+  screenSize: { width: 1080, height: 1920 },
+  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+  viewHierarchy: hierarchy,
+});
 
 function toggle(checked: boolean | string): Element {
   return {
@@ -24,8 +33,10 @@ function createTap(
   initial: Element,
   afterTap = initial,
   capture = hierarchy,
+  elementSelector?: ElementSelector,
 ): {
   tap: TapOnElement;
+  strategy: ReturnType<typeof isolatedTapStrategy>;
   calls: () => number;
   setNextElement: (element: Element) => void;
   timer: FakeTimer;
@@ -34,26 +45,28 @@ function createTap(
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const selector = new FakeElementSelector(initial);
+  const adb = new FakeAdbClient();
+  adb.isScreenOn = async () => true;
+  const strategy = isolatedTapStrategy();
   const tap = new TapOnElement(
-    { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-    new FakeAdbClient(),
-    { timer, elementSelector: selector },
+    { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+    adb,
+    {
+      timer,
+      elementSelector: elementSelector ?? selector,
+      tapStrategy: strategy,
+      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+    },
   );
-  (tap as any).adb.isScreenOn = async () => true;
   let tapCalls = 0;
-  (tap as any).strategy = {
-    isAccessibilityServiceEnabled: async () => false,
-    shouldRunPreTapStability: () => false,
-  };
   tap.executeAndroidTap = async () => {
     tapCalls++;
     selector.setNextElement(afterTap);
   };
   tap.prepareSelectionCapture = async () => null;
   tap.refreshViewHierarchy = async () => capture;
-  (tap as any).captureTerminalObservationScreenshot = async () => {};
-  (tap as any).recordDeferredPredictionOutcome = async () => {};
-  (tap as any).selectionStateTracker.finalize = async () => [];
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.deriveTapEffectAfterPostTapObservation = async (
     _previous: ObserveResult | null,
     current: ObserveResult,
@@ -61,12 +74,13 @@ function createTap(
     effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
     observation: current,
   });
-  (tap as any).observedInteraction = async (block: (result: ObserveResult) => Promise<unknown>) => {
-    const result = await block({ viewHierarchy: capture } as ObserveResult);
-    return { ...(result as object), observation };
-  };
+  tap.observedInteraction = runBlockWithEnvelope(
+    { ...observation, viewHierarchy: capture },
+    { observation },
+  );
   return {
     tap,
+    strategy,
     calls: () => tapCalls,
     setNextElement: (element) => selector.setNextElement(element),
     timer,
@@ -78,7 +92,7 @@ describe("tapOn ensureChecked", () => {
   for (const label of ["Wi-Fi", ""]) {
     test(`real selector reads the ${label ? "same-label" : "unlabelled descendant"} switch state`, async () => {
       const switchElement = { ...toggle(true), text: label };
-      const capture: ViewHierarchyResult = {
+      const capture = viewHierarchyFromFixture({
         hierarchy: {
           node: {
             text: "Wi-Fi",
@@ -87,9 +101,13 @@ describe("tapOn ensureChecked", () => {
             node: [switchElement],
           },
         },
-      };
-      const { tap, calls } = createTap(switchElement, switchElement, capture);
-      Object.assign(tap, { elementSelector: new ResolverElementSelector() });
+      });
+      const { tap, calls } = createTap(
+        switchElement,
+        switchElement,
+        capture,
+        new ResolverElementSelector(),
+      );
       const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
       expect(result).toMatchObject({ success: true, skipped: "already-checked" });
       expect(calls()).toBe(0);
@@ -103,9 +121,8 @@ describe("tapOn ensureChecked", () => {
       bounds: { left: 0, top: 0, right: 200, bottom: 100 },
     };
     const backupSwitch = { ...toggle(true), text: "Wi-Fi backup" };
-    const capture: ViewHierarchyResult = { hierarchy: { node: [row, backupSwitch] } };
-    const { tap, calls } = createTap(row, row, capture);
-    Object.assign(tap, { elementSelector: new ResolverElementSelector() });
+    const capture = viewHierarchyFromFixture({ hierarchy: { node: [row, backupSwitch] } });
+    const { tap, calls } = createTap(row, row, capture, new ResolverElementSelector());
     const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
     expect(result.success).toBe(false);
     expect(result.error).toContain(
@@ -218,9 +235,9 @@ describe("tapOn ensureChecked", () => {
   });
 
   test("does not ghost-retry when the freshly re-resolved toggle reached the desired state", async () => {
-    const { tap, setNextElement } = createTap(toggle("false"));
+    const { tap, strategy, setNextElement } = createTap(toggle("false"));
     let taps = 0;
-    (tap as any).strategy.retryTapIfNoChange = true;
+    strategy.retryTapIfNoChange = true;
     tap.executeAndroidTap = async () => {
       taps++;
       setNextElement(toggle(taps % 2 === 1));
@@ -238,8 +255,8 @@ describe("tapOn ensureChecked", () => {
   });
 
   test("ghost-retries when the fresh toggle is still unchecked", async () => {
-    const { tap, calls } = createTap(toggle("false"));
-    (tap as any).strategy.retryTapIfNoChange = true;
+    const { tap, strategy, calls } = createTap(toggle("false"));
+    strategy.retryTapIfNoChange = true;
 
     const result = await tap.execute({
       text: "Wi-Fi",
@@ -255,9 +272,9 @@ describe("tapOn ensureChecked", () => {
   test("rechecks the refreshed stable toggle before tapping", async () => {
     const initial = toggle("false");
     const refreshed = toggle("true");
-    const { tap, calls, setNextElement } = createTap(initial);
-    (tap as any).strategy.shouldRunPreTapStability = () => true;
-    (tap as any).resolveAndroidStableTapTargetAfterRefreshes = async () => {
+    const { tap, strategy, calls, setNextElement } = createTap(initial);
+    strategy.setShouldRunPreTapStability(true);
+    tap.resolveAndroidStableTapTargetAfterRefreshes = async () => {
       setNextElement(refreshed);
       return {
         ok: true,

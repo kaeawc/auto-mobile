@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
@@ -27,19 +28,13 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
   let releaseReasons: string[];
 
   const bind = (sessionId: string, mcpSessionId: string) =>
-    devicePool.bindOrReuseDeviceSession(
+    devicePool.bindOrReuseDeviceSession({
       sessionId,
-      DEVICE.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
       mcpSessionId,
-    );
+    });
 
   const ownerSession = (): Session => {
     const session = sessionManager.getSession(OWNER_SESSION);
@@ -183,7 +178,7 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
         {
           sessionId: OWNER_SESSION,
           deviceId: expect.any(String),
-          reason: "owned-by-other-connection",
+          reason: "owned-by-other-connection" as const,
         },
       ];
       expect(
@@ -229,11 +224,11 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
   arranged("an owner that heartbeats after its connection closed keeps its session", async () => {
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
     fakeTimer.advanceTime(1_000);
-    sessionManager.recordHeartbeat(OWNER_SESSION);
+    await deliverDaemonHeartbeat(sessionManager, OWNER_SESSION);
 
     for (const elapsed of [0, 2_000, 2_000, 2_000, 999]) {
       fakeTimer.advanceTime(elapsed);
-      sessionManager.recordHeartbeat(OWNER_SESSION);
+      await deliverDaemonHeartbeat(sessionManager, OWNER_SESSION);
       const clocks = [
         ownerSession().lastUsedAt,
         ownerSession().lastHeartbeat,
@@ -266,7 +261,7 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
     "a backward wall-clock step between the owner's heartbeat and its disconnect does not block the release (#11080)",
     async () => {
       fakeTimer.advanceTime(1_000);
-      sessionManager.recordHeartbeat(OWNER_SESSION);
+      await deliverDaemonHeartbeat(sessionManager, OWNER_SESSION);
       // An NTP correction an hour back: a wall-stamped close time would now predate the heartbeat
       // and read as "owner heartbeated after the connection closed".
       fakeTimer.stepWallClock(-3_600_000);

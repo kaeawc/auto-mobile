@@ -4,7 +4,7 @@
  * Production resolves the client through the static registry accessors
  * `IOSCtrlProxyClient.getInstance` / `getExistingInstance`, which are declared to
  * return the concrete class. A test double (`FakeIOSCtrlProxy`, or a partial stub
- * of a few methods) can only satisfy the narrow `IOSCtrlProxy` interface, so
+ * of a few methods) can only satisfy the narrow `IosCtrlProxy` interface, so
  * handing it to `mockReturnValue` needs a cast. These helpers confine that cast to
  * one documented place instead of repeating a double cast to `IOSCtrlProxyClient` at
  * every call site (#11863).
@@ -121,4 +121,14 @@ export function createIosTestClient(
     spyOn(client, "clearPreferenceStore").mockImplementation(overrides.clearPreferenceStore);
   }
   return client;
+}
+
+/** Make `IOSCtrlProxyClient.getInstance` return a {@link createIosTestClient} client until the spy is restored. */
+export function spyOnIosTestClientInstance(
+  device: BootedDevice,
+  overrides: IosClientOverrides = {},
+) {
+  return spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+    createIosTestClient(device, overrides),
+  );
 }

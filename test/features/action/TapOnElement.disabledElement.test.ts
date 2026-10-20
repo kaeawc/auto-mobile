@@ -1,3 +1,5 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -33,8 +35,8 @@ function createCommand(state: "disabled" | "enabled", talkBackUnknown = false) {
     },
   );
   // Exercise real resolution and dispatch; replace only the surrounding observation loop.
-  spyOn(command, "observedInteraction").mockImplementation(async (block) =>
-    block(recordObservationRead(observation)),
+  spyOn(command, "observedInteraction").mockImplementation(
+    runBlockWith(() => recordObservationRead(observation)),
   );
   return { command, service, adb, observation, node };
 }
@@ -48,7 +50,7 @@ describe("Android tapOn disabled captured control", () => {
     "%s still dispatches and succeeds with a disabled warning",
     async (action) => {
       const { command, service, adb, node } = createCommand("disabled");
-      expect(node.enabled).toBe("false");
+      expect(nodeAttributes(node).enabled).toBe("false");
       const result = await command.execute({ action, text: "Disabled" });
       expect(result.success).toBe(true);
       if (action === "longPress") {
@@ -70,15 +72,15 @@ describe("Android tapOn disabled captured control", () => {
 
   test("boolean false on a cloned captured node still dispatches with a warning", async () => {
     const { command, service, observation, node } = createCommand("disabled");
-    expect(node.enabled).toBe("false");
+    expect(nodeAttributes(node).enabled).toBe("false");
     const clonedNode = structuredClone(node);
-    clonedNode.enabled = false;
+    nodeAttributes(clonedNode).enabled = false;
     if (!observation.viewHierarchy) {
       throw new Error("Expected converted captured hierarchy");
     }
     observation.viewHierarchy.hierarchy.node = clonedNode;
     const result = await command.execute({ action: "tap", text: "Disabled" });
-    expect(node.enabled).toBe("false");
+    expect(nodeAttributes(node).enabled).toBe("false");
     expect(result.success).toBe(true);
     expect(service.getTapHistory()).toHaveLength(1);
     expect(result.warnings).toContain(disabledWarning);
@@ -87,9 +89,9 @@ describe("Android tapOn disabled captured control", () => {
   test.each([undefined, true, "true"] as const)("enabled=%s emits no warning", async (enabled) => {
     const { command, service, node } = createCommand("enabled");
     if (enabled !== undefined) {
-      node.enabled = enabled;
+      nodeAttributes(node).enabled = enabled;
     }
-    expect(node.enabled).toBe(enabled);
+    expect(nodeAttributes(node).enabled).toBe(enabled);
     const result = await command.execute({ action: "tap", text: "Disabled" });
     expect(result.success).toBe(true);
     expect(service.getTapHistory()).toHaveLength(1);
@@ -98,7 +100,7 @@ describe("Android tapOn disabled captured control", () => {
 
   test("preserves the unknown TalkBack warning alongside the disabled warning", async () => {
     const { command, service, node } = createCommand("disabled", true);
-    expect(node.enabled).toBe("false");
+    expect(nodeAttributes(node).enabled).toBe("false");
     const result = await command.execute({ action: "tap", text: "Disabled" });
     expect(result.success).toBe(true);
     expect(service.getTapHistory()).toHaveLength(1);

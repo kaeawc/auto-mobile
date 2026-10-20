@@ -17,6 +17,8 @@ import {
 } from "../../src/utils/toolUtils";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { toolJson, toolStructured, toolText } from "../helpers/toolResponse";
+import { buildObserveResult } from "../helpers/observeFixture";
 
 const observationSchema = z.looseObject({
   viewHierarchy: z.looseObject({
@@ -58,7 +60,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   let restorePipelineOverrides: (() => void) | undefined;
 
   function makeObserveResult(): ObserveResult {
-    return {
+    return buildObserveResult({
       updatedAt: 42,
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -72,7 +74,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
           },
         },
       },
-    };
+    });
   }
 
   /**
@@ -184,7 +186,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     expect((cacheData as Record<string, unknown>).customData).toBeUndefined();
 
     // Returned wire response is sanitized at the chokepoint.
-    const returnedRoot = observationSchema.parse(response.structuredContent).viewHierarchy.hierarchy
+    const returnedRoot = observationSchema.parse(toolStructured(response)).viewHierarchy.hierarchy
       .node;
     expect(returnedRoot["view-id"]).toBeUndefined();
     expect(returnedRoot.clickable).toBeUndefined();
@@ -213,15 +215,15 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     });
 
     // Action's nested observation is sanitized in BOTH representations.
-    const actionResponse = actionResponseSchema.parse(response.structuredContent);
+    const actionResponse = actionResponseSchema.parse(toolStructured(response));
     const scRoot = actionResponse.observation.viewHierarchy.hierarchy.node;
     expect(scRoot["view-id"]).toBeUndefined();
     expect(scRoot.clickable).toBeUndefined();
     expect(actionResponse.success).toBe(true);
 
-    const parsed = JSON.parse(response.content[0].text);
+    const parsed = actionResponseSchema.parse(toolJson(response));
     expect(parsed.observation.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
-    expect(response.content[0].text).toBe(stringifyToolResponse(response.structuredContent));
+    expect(toolText(response)).toBe(stringifyToolResponse(toolStructured(response)));
 
     const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
     const cachedHierarchy = cacheData.lastHierarchy;

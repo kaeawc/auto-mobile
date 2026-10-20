@@ -1,6 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS,
@@ -167,10 +167,16 @@ describe("explicit bind against a peer's idle forwarding lease (#11349)", () => 
     });
 
   const bind = (pool: DevicePool) =>
-    pool.bindOrReuseDeviceSession("a-session", DEVICE_ID, "android").then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    pool
+      .bindOrReuseDeviceSession({
+        sessionId: "a-session",
+        deviceId: DEVICE_ID,
+        platform: "android",
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
   beforeEach(() => {
     timer = new FakeTimer();
@@ -202,7 +208,11 @@ describe("explicit bind against a peer's idle forwarding lease (#11349)", () => 
   test("a lease holder with a session keeps the device, and is never asked to relinquish", async () => {
     const a = await daemon(A_PID, A_SOCKET);
     const b = await daemon(B_PID, B_SOCKET);
-    await b.pool.bindOrReuseDeviceSession("b-session", DEVICE_ID, "android");
+    await b.pool.bindOrReuseDeviceSession({
+      sessionId: "b-session",
+      deviceId: DEVICE_ID,
+      platform: "android",
+    });
     leaseHeldByB();
 
     const refusal = await bind(a.pool);

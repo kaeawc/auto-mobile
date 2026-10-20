@@ -12,7 +12,7 @@ import { SESSION_ACTIVITY_CLOCKS, SESSION_LIVENESS_CLOCKS } from "../../src/daem
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { foreignOwnedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { foreignOwnedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -167,7 +167,7 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await setUp();

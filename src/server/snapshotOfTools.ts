@@ -25,7 +25,7 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import { snapshotOfResultSchema } from "./snapshotOfToolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
 import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 
 const finite = z.number().finite();
 const rectangleSchema = z
@@ -97,33 +97,11 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
     "snapshotOf",
     "Save a PNG crop of one exposed element or a platform-native screen rectangle; return path and geometry metadata only.",
     snapshotOfSchema,
-    // oxlint-disable-next-line complexity -- acquisition, injected seams, and metadata publication share one operation boundary.
     async (device: BootedDevice, args: SnapshotOfArgs) => {
       try {
-        const capture =
-          dependencies.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
-        // A watcher's read (#10830) uses the isolated observer capture: on a held device it only
-        // connects to the running hierarchy service and leaves the holder's client untouched.
-        const snapshot = await capture.capture({
-          freshness: "fresh",
-          ...(isSessionlessDeviceRead() ? { observerMode: true } : {}),
-        });
-        const screenSize = {
-          width: snapshot.hierarchy.screenWidth,
-          height: snapshot.hierarchy.screenHeight,
-        };
-        if (!screenSize.width || !screenSize.height) {
-          throw new ActionableError("snapshotOf requires screen dimensions from a fresh hierarchy");
-        }
+        const { snapshot, screenSize } = await captureSnapshotHierarchy(device, dependencies);
         const requestedBounds = resolveRequestedBounds(args, snapshot);
-        const screenshot = await (
-          dependencies.screenshotFactory?.(device) ?? new TakeScreenshot(device)
-        ).execute({ format: "png" });
-        if (!screenshot.success || !screenshot.path) {
-          throw new ActionableError(
-            `snapshotOf screenshot capture failed: ${screenshot.error ?? "no path"}`,
-          );
-        }
+        const screenshot = await captureSnapshotScreenshot(device, dependencies);
         const source = await (dependencies.readFile ?? fs.readFile)(screenshot.path);
         const cropped = await cropSnapshot(
           source,
@@ -170,4 +148,41 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
       outputSchema: snapshotOfResultSchema,
     },
   );
+}
+
+async function captureSnapshotHierarchy(
+  device: BootedDevice,
+  dependencies: SnapshotOfDependencies,
+) {
+  const capture =
+    dependencies.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
+  // A watcher's read (#10830) uses the isolated observer capture: on a held device it only
+  // connects to the running hierarchy service and leaves the holder's client untouched.
+  const snapshot = await capture.capture({
+    freshness: "fresh",
+    ...(isSessionlessDeviceRead() ? { observerMode: true } : {}),
+  });
+  const screenSize = {
+    width: snapshot.hierarchy.screenWidth,
+    height: snapshot.hierarchy.screenHeight,
+  };
+  if (!screenSize.width || !screenSize.height) {
+    throw new ActionableError("snapshotOf requires screen dimensions from a fresh hierarchy");
+  }
+  return { snapshot, screenSize: { width: screenSize.width, height: screenSize.height } };
+}
+
+async function captureSnapshotScreenshot(
+  device: BootedDevice,
+  dependencies: SnapshotOfDependencies,
+) {
+  const screenshot = await (
+    dependencies.screenshotFactory?.(device) ?? new TakeScreenshot(device)
+  ).execute({ format: "png" });
+  if (!screenshot.success || !screenshot.path) {
+    throw new ActionableError(
+      `snapshotOf screenshot capture failed: ${screenshot.error ?? "no path"}`,
+    );
+  }
+  return { ...screenshot, path: screenshot.path };
 }

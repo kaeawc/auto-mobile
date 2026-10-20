@@ -3,12 +3,12 @@ import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { registerLocationRouteSessionCleanup } from "../features/utility/LocationRoutePlayer";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
-import { clearSessionAppearanceConfig } from "../server/appearanceManager";
-import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
+import { clearSessionAppearanceConfig } from "./appearanceManager";
+import { resolveAppearanceSessionKey } from "./appearanceSessionKey";
 import {
   DefaultDeviceSettingsAccess,
   DeviceSettingDefaults,
@@ -20,20 +20,23 @@ import { DeviceSettingDefaultsRepository } from "../db/deviceSettingDefaultsRepo
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
-} from "../server/networkStateSessionCleanup";
-import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
+} from "./networkStateSessionCleanup";
+import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   createRecorderTeardownRecoveryMarker,
   defaultRecordingSessionCleanupDeps,
   takeRecordingIdsFinalizedByRelease,
   registerRecordingSessionCleanup,
-} from "../server/recordingSessionCleanup";
+} from "./recordingSessionCleanup";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { syncAppearanceForDevice } from "./AppearanceSyncScheduler";
 import type { Timer } from "../utils/SystemTimer";
 import type { SessionManager } from "./sessionManager";
@@ -59,10 +62,10 @@ export interface DaemonSessionLifecycleHost {
   managedExecutionReowner(): Pick<ManagedExecutionReowner, "noteRecovering"> | undefined;
   devicePool(): Pick<DevicePool, "getDevice" | "getAllDevices" | "releaseDevice">;
   passiveWorkPolicy(): Pick<PassiveWorkPolicy, "allows">;
-  navigationGraphListenerManagers: WeakSet<NavigationGraphManager>;
+  navigationGraphListenerManagers: WeakSet<NavigationGraphService>;
   shutdownReleaseNotifications(): Set<string> | null;
   shutdownFallbackReleaseNotifications(): Set<string> | null;
-  setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
+  setupNavigationGraphUpdateListener(manager: NavigationGraphService): void;
   reownRehydratedManagedExecutions(rehydrated: readonly string[]): Promise<void>;
   hasActiveSessionExecution(sessionId: string, query?: ActiveSessionExecutionQuery): boolean;
   latestSessionExecutionDeadlineMs(

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { ENV } from "../../config/env";
 
 /**
  * Identity of the signed Network Extension app built by
@@ -26,7 +27,7 @@ export const NETWORK_FILTER_PROVIDER_RELATIVE_PATH = path.posix.join(
 export const NETWORK_FILTER_INSTALL_DIR = "/Applications";
 
 /** Local-build override: a path to a signed `.app` used instead of the release download. */
-export const NETWORK_FILTER_APP_PATH_ENV = "AUTOMOBILE_NETWORK_FILTER_APP_PATH";
+export const NETWORK_FILTER_APP_PATH_ENV = ENV.NETWORK_FILTER_APP_PATH.name;
 
 /**
  * Optional pinned Apple Team ID. When set, the app and its provider must be
@@ -34,7 +35,7 @@ export const NETWORK_FILTER_APP_PATH_ENV = "AUTOMOBILE_NETWORK_FILTER_APP_PATH";
  * `IOS_HELPER_TEAM_ID_ENV`), so without a pin the installer requires a
  * Developer ID team shared by the app and its provider.
  */
-export const NETWORK_FILTER_TEAM_ID_ENV = "AUTOMOBILE_NETWORK_FILTER_TEAM_ID";
+export const NETWORK_FILTER_TEAM_ID_ENV = ENV.NETWORK_FILTER_TEAM_ID.name;
 
 /** The explicit, opt-in command that installs and activates the app. */
 export const NETWORK_FILTER_INSTALL_COMMAND = "auto-mobile --ios-network-filter install";

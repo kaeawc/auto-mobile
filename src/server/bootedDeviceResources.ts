@@ -1,10 +1,13 @@
+import { BOOTED_DEVICE_RESOURCE_URIS } from "../constants/deviceResourceUris";
+export { BOOTED_DEVICE_RESOURCE_URIS };
 import { holderOf } from "../daemon/deviceBinding";
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import { registerDeviceResourceInvalidation } from "../daemon/deviceResourceInvalidation";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../daemon/adbOfflineHeldDevices";
 import {
   describeInventoryDevice,
   type AdbOfflineHold,
   type SimulatorTransitionHold,
-} from "./inventoryDeviceDescription";
+} from "../daemon/inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -12,6 +15,11 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import type {
+  DeviceLockStateInfo,
+  DeviceLockStatesResourceContent,
+} from "./deviceLockStatesResourceContent";
+export type { DeviceLockStatesResourceContent } from "./deviceLockStatesResourceContent";
 import {
   type BootedDeviceDiscovery,
   type DeviceDiscoveryError,
@@ -42,7 +50,7 @@ import {
   poolHoldFor,
   type BootedDeviceDescription,
   type DeviceDescription,
-} from "./deviceDescription";
+} from "../daemon/deviceDescription";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -96,10 +104,6 @@ import {
 } from "../devices/deviceBootService";
 
 // Resource URIs
-export const BOOTED_DEVICE_RESOURCE_URIS = {
-  ALL_BOOTED: "automobile:devices/booted",
-  PLATFORM_TEMPLATE: "automobile:devices/booted/{platform}",
-} as const;
 
 // A lightweight per-device lock-state resource. The full booted-devices resource also carries
 // `locked`, but computing it there recomputes service status (isInstalled/isEnabled/sha256) for
@@ -130,22 +134,6 @@ export function resetBootedDevicesResourceCache(): void {
   bootedDevicesResourceCache = null;
   bootedDevicesResourceSingleFlight = new SingleFlight();
   bootedDevicesResourcePublishedGeneration = ++bootedDevicesResourceGeneration;
-}
-
-// Per-device lock state for Android and iOS simulators. Omitted for physical iOS devices or
-// when the advisory probe could not read the state.
-interface DeviceLockStateInfo {
-  deviceId: string;
-  locked?: boolean;
-}
-
-export interface DeviceLockStatesResourceContent {
-  lastUpdated: string; // ISO 8601
-  lockStates: DeviceLockStateInfo[];
-  /** True only when both platform discovery sweeps completed. */
-  observationComplete: boolean;
-  /** Platform-specific discovery failures; an empty object means both sweeps completed. */
-  discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
 }
 
 export interface CtrlProxyVersionInfo {
@@ -2112,3 +2100,8 @@ export async function notifyBootedDeviceResourcesUpdated(): Promise<void> {
     DEVICE_LOCK_STATES_RESOURCE_URI,
   ]);
 }
+
+registerDeviceResourceInvalidation({
+  resetBootedDevicesResourceCache,
+  notifyBootedDeviceResourcesUpdated,
+});

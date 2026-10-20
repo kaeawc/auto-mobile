@@ -1,3 +1,5 @@
+import { createExecResult } from "../../../src/utils/execResult";
+import type { ExecResult } from "../../../src/models";
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   executeAndroidInputText,
@@ -210,7 +212,7 @@ describe("tracked Android input text", () => {
     );
     await adb.entered.promise;
     expect(adb.ambientSignals).toEqual([undefined]);
-    adb.host.resolve({ stdout: "", stderr: "" });
+    adb.host.resolve(createExecResult("", ""));
     await drainMicrotasks(50);
     timer.advanceTime(3 * INPUT_TEXT_CONSUME_PER_CHAR_MS);
     await done;
@@ -309,7 +311,7 @@ describe("tracked Android input text", () => {
   test("a probe rejecting after deadline is debug-logged and preserves cancellation", async () => {
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const h = start();
-    const probe = Promise.withResolvers<{ stdout: string; stderr: string }>();
+    const probe = Promise.withResolvers<ExecResult>();
     h.adb.cleanupResult = probe.promise;
     try {
       await h.adb.entered.promise;
@@ -337,7 +339,7 @@ describe("tracked Android input text", () => {
   test.each([30, 31, 34])("API %s selects its dispatch on the host", async (apiLevel) => {
     const h = start(undefined, apiLevel);
     await h.adb.entered.promise;
-    h.adb.host.resolve({ stdout: "", stderr: "" });
+    h.adb.host.resolve(createExecResult("", ""));
     await drainMicrotasks(50);
     h.timer.advanceTime(5 * INPUT_TEXT_CONSUME_PER_CHAR_MS);
     await h.result;
@@ -432,7 +434,7 @@ describe("tracked Android input text", () => {
   test("success costs no guard round trip and keeps result, quoting and redaction", async () => {
     const h = start();
     await h.adb.entered.promise;
-    const result = { stdout: "4242\n", stderr: "" };
+    const result = createExecResult("4242\n", "");
     h.adb.host.resolve(result);
     expect(await h.result).toBe(result);
     expect(h.adb.cleanupCalls).toEqual([]);
@@ -483,14 +485,12 @@ describe("tracked Android input text", () => {
     const secret = "private-payload'$";
     const adb = new AdbClient(
       null,
-      async (_file, args) => {
+      async (_file: string, args: string[]) => {
         throw Object.assign(new Error(`Command failed: adb ${args.join(" ")}`), {
           cmd: args.join(" "),
         });
       },
-      null,
-      defaultRetryExecutor,
-      timer,
+      { retryExecutor: defaultRetryExecutor, timer },
     );
     try {
       const result = await executeAndroidInputText(

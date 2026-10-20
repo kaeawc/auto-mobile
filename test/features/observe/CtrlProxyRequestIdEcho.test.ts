@@ -39,7 +39,7 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "request-id-echo", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "request-id-echo", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -56,7 +56,6 @@ async function harness() {
     streamPushes.push(data.hierarchy?.text ?? "");
   };
   client["startScreenshotBackoff"] = () => {};
-  client["shouldUseHierarchyNavigation"] = () => false;
   spyOn(client["deviceConnectionLostNotifier"], "onDeviceConnectionLost").mockImplementation(
     () => {},
   );
@@ -94,8 +93,8 @@ describe("Android request ID echo", () => {
   test("correlates concurrent swipe responses arriving in reverse order", async () => {
     const h = await harness();
     await h.advertise([echoCapability]);
-    const first = h.client.requestSwipe(0, 0, 10, 10);
-    const second = h.client.requestSwipe(0, 0, 20, 20);
+    const first = h.client.requestSwipe({ x1: 0, y1: 0, x2: 10, y2: 10 });
+    const second = h.client.requestSwipe({ x1: 0, y1: 0, x2: 20, y2: 20 });
     // The delegate awaits ensureConnected before registering/sending each request.
     await Promise.resolve();
     const requests = h.socket.sent.filter((message) => message.type === "request_swipe");
@@ -152,7 +151,7 @@ describe("Android request ID echo", () => {
     await h.advertise([echoCapability]);
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     let settled = false;
-    const pending = h.client.requestSwipe(0, 0, 10, 10).then((value) => {
+    const pending = h.client.requestSwipe({ x1: 0, y1: 0, x2: 10, y2: 10 }).then((value) => {
       settled = true;
       return value;
     });

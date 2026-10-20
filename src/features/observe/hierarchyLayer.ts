@@ -11,12 +11,21 @@ import {
   type ViewHierarchyResult,
   type ViewHierarchyWindowInfo,
 } from "../../models/ViewHierarchyResult";
-import { attachRawViewHierarchy, getRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { attachRawViewHierarchy, getRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import type { AccessibilityHierarchy as AndroidWireHierarchy } from "./android/types";
-import { iosWindowLayer } from "./ios/iosWindowLayer";
+import {
+  collectRoots,
+  iosWindowRoots,
+  pointInBounds,
+  prototypeRootCoversPoint,
+  runnerLayerTree,
+  scopeTree,
+  viewHierarchyLayerTree,
+  type WindowRoots,
+} from "./layerTree";
 import { linkWindowRoots } from "./linkWindowRoots";
-import type { XCTestHierarchy } from "./ios/types";
+import type { CtrlProxyNode, XCTestHierarchy } from "./ios/types";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import { PROTOTYPE_WINDOW_TYPE, ownPrototypeWindows } from "./ownWindowFocus";
 
@@ -28,28 +37,12 @@ const scopedCache = new WeakMap<
   Partial<Record<HierarchyLayer, ViewHierarchyResult>>
 >();
 
-/**
- * Host-owned markers identifying the iOS prototype agent's window (`PrototypeAgent.swift`). New
- * agents mark the window's root view only for a chromeless fullscreen prototype; every other
- * prototype (and older agents) is found by its dismiss control. Authored content cannot remove these markers.
- */
-const IOS_PROTOTYPE_MARKER_IDENTIFIERS = [
-  "automobile-prototype-window",
-  "automobile-prototype-dismiss",
-];
-
-/**
- * The window roots of a capture, each marked `true` when it belongs to AutoMobile's own prototype.
- * Window roots are never nested.
- */
-type WindowRoots = Map<ViewHierarchyNode, boolean>;
-
 /** Whether the capture contains one of AutoMobile's own prototype windows. */
 export function hasOwnPrototype(hierarchy: ViewHierarchyResult | undefined): boolean {
   if (ownPrototypeWindows(hierarchy).length > 0) {
     return true;
   }
-  const roots = hierarchy ? iosWindowRoots(hierarchy) : undefined;
+  const roots = hierarchy ? viewHierarchyIosWindowRoots(hierarchy) : undefined;
   return roots !== undefined && [...roots.values()].some(Boolean);
 }
 
@@ -62,143 +55,38 @@ function prototypeWindowIds(hierarchy: ViewHierarchyResult): Set<number> {
 }
 
 /** Android: each root stamped with a `windowId`, a prototype root when the window is CtrlProxy's. */
-function androidWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots {
+function androidWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots<ViewHierarchyNode> {
   const prototypeIds = prototypeWindowIds(hierarchy);
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
   const roots =
     tree && !hierarchy.hierarchy.error
-      ? collectRoots(tree, (node) => windowIdOf(node) !== undefined)
+      ? collectRoots(viewHierarchyLayerTree, tree, (node) => windowIdOf(node) !== undefined)
       : [];
   return new Map(roots.map((root) => [root, prototypeIds.has(windowIdOf(root)!)]));
 }
 
-function classOf(node: ViewHierarchyNode): unknown {
-  const attributes = nodeAttributes(node);
-  return attributes["class"] ?? attributes["className"];
-}
-
-function isIosWindowRoot(node: ViewHierarchyNode): boolean {
-  return iosWindowLayer(node.extras) !== undefined || classOf(node) === "UIWindow";
-}
-
-/** Ancestors of the first node carrying an agent window marker, root first, itself last. */
-function pathToIosMarker(root: ViewHierarchyNode): ViewHierarchyNode[] | undefined {
-  const path: ViewHierarchyNode[] = [];
-  const visit = (node: ViewHierarchyNode): boolean => {
-    path.push(node);
-    if (
-      IOS_PROTOTYPE_MARKER_IDENTIFIERS.some(
-        (marker) => nodeAttributes(node)["resource-id"] === marker,
-      ) ||
-      childrenOf(node).some(visit)
-    ) {
-      return true;
-    }
-    path.pop();
-    return false;
-  };
-  return visit(root) ? path : undefined;
-}
-
-/** Window roots in document order; descent stops at a root, so roots are never nested. */
-function collectRoots(
-  node: ViewHierarchyNode,
-  isRoot: (node: ViewHierarchyNode) => boolean,
-): ViewHierarchyNode[] {
-  return isRoot(node) ? [node] : childrenOf(node).flatMap((child) => collectRoots(child, isRoot));
-}
-
-/**
- * iOS: the in-app prototype agent's UIWindow (iphone D2). Captures carry no window ids, so the agent's
- * window is the one holding its chromeless fullscreen root marker, or otherwise its dismiss control:
- * - converted captures stamp each window's top-level nodes with its front-to-back layer once two
- *   windows contribute nodes (`iosWindowLayer.ts`); the prototype is every root sharing the
- *   marker's layer;
- * - unconverted XCUITest trees keep the `UIWindow` wrappers; the prototype is the one around it;
- * - when no window root is stamped the agent's window is the only one contributing nodes (a
- *   fullscreen prototype hides the app's windows from accessibility), so every top-level node of the
- *   application is the prototype's.
- * Undefined when neither marker is present: no prototype is showing, or this is not an iOS capture.
- */
-function iosWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots | undefined {
+/** iOS prototype window roots of a converted capture; undefined for an error or non-iOS capture. */
+function viewHierarchyIosWindowRoots(
+  hierarchy: ViewHierarchyResult,
+): WindowRoots<ViewHierarchyNode> | undefined {
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
-  const path = tree && !hierarchy.hierarchy.error ? pathToIosMarker(tree) : undefined;
-  if (!tree || !path) {
-    return undefined;
-  }
-  const owner = path.find(isIosWindowRoot);
-  if (owner) {
-    const layer = iosWindowLayer(owner.extras);
-    const roots = collectRoots(tree, isIosWindowRoot);
-    return new Map(
-      roots.map((root) => [
-        root,
-        layer === undefined ? root === owner : iosWindowLayer(root.extras) === layer,
-      ]),
-    );
-  }
-  const application = path.find((node) => classOf(node) === "XCUIApplication");
-  if (!application) {
-    return undefined;
-  }
-  return new Map(childrenOf(application).map((root) => [root, true]));
+  return tree && !hierarchy.hierarchy.error
+    ? iosWindowRoots(viewHierarchyLayerTree, tree)
+    : undefined;
 }
 
 /** Window roots for scoping: Android `windowId` roots, else the iOS prototype agent's window. */
-function windowRootsOf(hierarchy: ViewHierarchyResult): WindowRoots {
+function windowRootsOf(hierarchy: ViewHierarchyResult): WindowRoots<ViewHierarchyNode> {
   const android = androidWindowRoots(hierarchy);
   if ([...android.values()].some(Boolean)) {
     return android;
   }
-  return iosWindowRoots(hierarchy) ?? android;
-}
-
-function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
-  if (!node.node) {
-    return [];
-  }
-  return Array.isArray(node.node) ? node.node : [node.node];
+  return viewHierarchyIosWindowRoots(hierarchy) ?? android;
 }
 
 function windowIdOf(node: ViewHierarchyNode): number | undefined {
   const windowId = (node as { windowId?: unknown }).windowId ?? nodeAttributes(node).windowId;
   return typeof windowId === "number" && Number.isInteger(windowId) ? windowId : undefined;
-}
-
-/**
- * Remove every prototype window root. Untouched subtrees keep their identity so
- * node-identity checks (e.g. `isOwnPrototypeNode`) still hold; only the ancestors
- * of a removed root are shallow-copied.
- */
-function pruneWindowRoots(
-  node: ViewHierarchyNode,
-  roots: WindowRoots,
-): ViewHierarchyNode | undefined {
-  const isPrototype = roots.get(node);
-  if (isPrototype !== undefined) {
-    return isPrototype ? undefined : node;
-  }
-  const children = childrenOf(node);
-  if (children.length === 0) {
-    return node;
-  }
-  const kept = children.flatMap((child) => {
-    const pruned = pruneWindowRoots(child, roots);
-    return pruned ? [pruned] : [];
-  });
-  if (kept.length === children.length && kept.every((child, index) => child === children[index])) {
-    return node;
-  }
-  return { ...node, node: kept };
-}
-
-/** The prototype window roots, in document order; window roots are never nested. */
-function collectPrototypeRoots(node: ViewHierarchyNode, roots: WindowRoots): ViewHierarchyNode[] {
-  const isPrototype = roots.get(node);
-  if (isPrototype !== undefined) {
-    return isPrototype ? [node] : [];
-  }
-  return childrenOf(node).flatMap((child) => collectPrototypeRoots(child, roots));
 }
 
 function containsFlag(node: ViewHierarchyNode | undefined, flag: string): boolean {
@@ -209,28 +97,13 @@ function containsFlag(node: ViewHierarchyNode | undefined, flag: string): boolea
   return (
     value === true ||
     value === "true" ||
-    childrenOf(node).some((child) => containsFlag(child, flag))
+    viewHierarchyLayerTree.children(node).some((child) => containsFlag(child, flag))
   );
-}
-
-function scopeTree(
-  root: ViewHierarchyNode,
-  layer: HierarchyLayer,
-  windowRoots: WindowRoots,
-): ViewHierarchyNode {
-  if (layer === "app") {
-    return pruneWindowRoots(root, windowRoots) ?? {};
-  }
-  const roots = collectPrototypeRoots(root, windowRoots);
-  if (windowRoots.has(root)) {
-    return roots[0] ?? {};
-  }
-  return { ...root, node: roots };
 }
 
 /** The app's own package once the prototype is excluded, when the capture names the prototype host. */
 function appPackageName(
-  hierarchy: ViewHierarchyResult,
+  hierarchy: Pick<ViewHierarchyResult, "packageName">,
   windows: ViewHierarchyWindowInfo[] | undefined,
 ): string | undefined {
   if (hierarchy.packageName !== CTRL_PROXY_PACKAGE) {
@@ -245,21 +118,30 @@ function appPackageName(
   return preferred?.packageName ?? hierarchy.packageName;
 }
 
-function scopeSingleHierarchy(
-  hierarchy: ViewHierarchyResult,
+/** The capture's window entries once scoped to `layer`. */
+function scopedWindows(
+  hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows">,
   layer: HierarchyLayer,
-): ViewHierarchyResult {
+): ViewHierarchyWindowInfo[] | undefined {
   const prototypeWindowSet = new Set(ownPrototypeWindows(hierarchy));
   const keepWindow = (window: ViewHierarchyWindowInfo) =>
     layer === "prototype" ? prototypeWindowSet.has(window) : !prototypeWindowSet.has(window);
   // iOS window entries describe the app, not the agent's UIWindow, so they stay as captured.
-  const windows =
-    prototypeWindowSet.size > 0 || layer === "prototype"
-      ? hierarchy.windows?.filter(keepWindow)
-      : hierarchy.windows;
+  return prototypeWindowSet.size > 0 || layer === "prototype"
+    ? hierarchy.windows?.filter(keepWindow)
+    : hierarchy.windows;
+}
+
+function scopeSingleHierarchy(
+  hierarchy: ViewHierarchyResult,
+  layer: HierarchyLayer,
+): ViewHierarchyResult {
+  const windows = scopedWindows(hierarchy, layer);
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
   const scopedTree =
-    tree && !hierarchy.hierarchy.error ? scopeTree(tree, layer, windowRootsOf(hierarchy)) : tree;
+    tree && !hierarchy.hierarchy.error
+      ? scopeTree(viewHierarchyLayerTree, tree, layer, windowRootsOf(hierarchy))
+      : tree;
   const scoped: ViewHierarchyResult = {
     ...hierarchy,
     hierarchy: (scopedTree ?? hierarchy.hierarchy) as ViewHierarchyResult["hierarchy"],
@@ -314,6 +196,52 @@ export function scopeHierarchyToLayer(
   // Scoping an already-scoped capture again is a no-op.
   scopedCache.set(scoped, { [layer]: scoped });
   return scoped;
+}
+
+/** The prototype agent's window roots in a runner capture, when it has an error-free tree. */
+function runnerIosWindowRoots(capture: XCTestHierarchy): WindowRoots<CtrlProxyNode> | undefined {
+  return capture.error ? undefined : iosWindowRoots(runnerLayerTree, capture.hierarchy);
+}
+
+/**
+ * {@link hasOwnPrototype} for the runner's own capture, whose `UIWindow` wrappers are still in
+ * place (see `iosWindowRoots`); the converter flattens them away.
+ */
+export function hasOwnRunnerPrototype(capture: XCTestHierarchy): boolean {
+  if (ownPrototypeWindows(capture).length > 0) {
+    return true;
+  }
+  const roots = runnerIosWindowRoots(capture);
+  return roots !== undefined && [...roots.values()].some(Boolean);
+}
+
+/** {@link scopeHierarchyToLayer} for the runner's own capture. */
+export function scopeRunnerHierarchyToLayer(
+  capture: XCTestHierarchy,
+  layer: HierarchyLayer,
+): XCTestHierarchy {
+  const roots = runnerIosWindowRoots(capture);
+  const windows = scopedWindows(capture, layer);
+  return {
+    ...capture,
+    hierarchy: scopeTree(runnerLayerTree, capture.hierarchy, layer, roots ?? new Map()),
+    ...(windows ? { windows } : {}),
+    ...(layer === "app"
+      ? { packageName: appPackageName(capture, windows) ?? capture.packageName }
+      : {}),
+  };
+}
+
+/** {@link ownPrototypeCoversPoint} for the runner's own capture. */
+export function runnerPrototypeCoversPoint(
+  capture: XCTestHierarchy,
+  point: { x: number; y: number },
+): boolean {
+  if (ownPrototypeWindows(capture).some((window) => pointInBounds(point, window.bounds))) {
+    return true;
+  }
+  const roots = runnerIosWindowRoots(capture);
+  return roots !== undefined && prototypeRootCoversPoint(runnerLayerTree, roots, point);
 }
 
 /**
@@ -386,19 +314,6 @@ export function scopeHierarchyForSelector(
   return scopeHierarchyToLayer(hierarchy, layer);
 }
 
-function pointInBounds(
-  point: { x: number; y: number },
-  bounds: ViewHierarchyWindowInfo["bounds"],
-): boolean {
-  return (
-    bounds !== undefined &&
-    point.x >= bounds.left &&
-    point.x < bounds.right &&
-    point.y >= bounds.top &&
-    point.y < bounds.bottom
-  );
-}
-
 /**
  * Whether one of AutoMobile's own prototype windows covers a screen point (not the highlight
  * tool's window: FLAG_NOT_TOUCHABLE, it passes touches through). The iOS agent's window
@@ -412,15 +327,8 @@ export function ownPrototypeCoversPoint(
   if (ownPrototypeWindows(hierarchy).some((window) => pointInBounds(point, window.bounds))) {
     return true;
   }
-  const roots = hierarchy ? iosWindowRoots(hierarchy) : undefined;
-  if (!roots) {
-    return false;
-  }
-  const parser = new DefaultElementParser();
-  return [...roots].some(
-    ([root, isPrototype]) =>
-      isPrototype && pointInBounds(point, parser.parseNodeBounds(root)?.bounds ?? undefined),
-  );
+  const roots = hierarchy ? viewHierarchyIosWindowRoots(hierarchy) : undefined;
+  return roots !== undefined && prototypeRootCoversPoint(viewHierarchyLayerTree, roots, point);
 }
 
 /**
@@ -558,7 +466,7 @@ function findFlaggedElement(
       }
     }
     // Depth-first, document order: the first flagged node wins, as in ViewHierarchy.
-    pending.push(...[...childrenOf(node)].reverse());
+    pending.push(...[...viewHierarchyLayerTree.children(node)].reverse());
   }
   return undefined;
 }

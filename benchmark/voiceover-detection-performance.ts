@@ -14,7 +14,7 @@ import { FeatureFlagService } from "../src/features/featureFlags/FeatureFlagServ
 import { FakeTimer } from "../test/fakes/FakeTimer";
 import { SystemTimer } from "../src/utils/SystemTimer";
 import type { Timer } from "../src/utils/SystemTimer";
-import type { IOSCtrlProxy } from "../src/features/observe/ios";
+import type { IosCtrlProxy } from "../src/features/observe/ios";
 import type { FeatureFlagKey } from "../src/features/featureFlags/FeatureFlagDefinitions";
 
 /**
@@ -231,7 +231,7 @@ async function main() {
         "1. Cold detection (cache miss)",
         async () => {
           detector.clearAllCache();
-          await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
+          await detector.isVoiceOverEnabled(deviceId, client as unknown as IosCtrlProxy);
         },
         client,
         1,
@@ -248,14 +248,14 @@ async function main() {
     detector.clearAllCache();
 
     // Seed the cache with one real call
-    await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
+    await detector.isVoiceOverEnabled(deviceId, client as unknown as IosCtrlProxy);
     client.reset();
 
     results.push(
       await runScenario(
         "2. Warm detection (cache hit)",
         async () => {
-          await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
+          await detector.isVoiceOverEnabled(deviceId, client as unknown as IosCtrlProxy);
         },
         client,
         warmIterations,
@@ -272,7 +272,7 @@ async function main() {
     detector.clearAllCache();
 
     // Seed the cache
-    await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
+    await detector.isVoiceOverEnabled(deviceId, client as unknown as IosCtrlProxy);
     client.reset();
 
     // Invalidate and re-detect once
@@ -281,7 +281,7 @@ async function main() {
       await runScenario(
         "3. Cache invalidate + re-detect",
         async () => {
-          await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
+          await detector.isVoiceOverEnabled(deviceId, client as unknown as IosCtrlProxy);
         },
         client,
         1,
@@ -304,7 +304,7 @@ async function main() {
         async () => {
           await detector.isVoiceOverEnabled(
             deviceId,
-            client as unknown as IOSCtrlProxy,
+            client as unknown as IosCtrlProxy,
             featureFlags as unknown as FeatureFlagService,
           );
         },
@@ -326,7 +326,7 @@ async function main() {
         "5. Detection overhead (0ms CtrlProxy, cold)",
         async () => {
           detector.clearAllCache();
-          await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
+          await detector.isVoiceOverEnabled(deviceId, client as unknown as IosCtrlProxy);
         },
         client,
         100,
@@ -343,14 +343,14 @@ async function main() {
     detector.clearAllCache();
 
     // Seed cache with VoiceOver = false
-    await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
+    await detector.isVoiceOverEnabled(deviceId, client as unknown as IosCtrlProxy);
     client.reset();
 
     results.push(
       await runScenario(
         "6. Warm detection (VoiceOver disabled)",
         async () => {
-          await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
+          await detector.isVoiceOverEnabled(deviceId, client as unknown as IosCtrlProxy);
         },
         client,
         warmIterations,

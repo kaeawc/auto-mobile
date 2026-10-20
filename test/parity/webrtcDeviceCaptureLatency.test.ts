@@ -273,11 +273,11 @@ describe("#4343 device capture latency instrumentation", () => {
     // these runtime graphs before registering describe.skip can wedge the
     // isolate before Bun prints the skipped test result.
     expect(source).not.toContain('from "../../src/features/webrtc/IosH264Source"');
-    expect(source).not.toContain('from "../../src/server/webrtcStreamManager"');
+    expect(source).not.toContain('from "../../src/daemon/webrtcStreamManager"');
     expect(source).not.toContain('from "../../src/utils/ios-cmdline-tools/SimCtlClient"');
     expect(source).not.toContain('from "../../src/features/webrtc/webrtcStreamingConfig"');
     expect(source).toContain('await import("../../src/features/webrtc/IosH264Source")');
-    expect(source).toContain('await import("../../src/server/webrtcStreamManager")');
+    expect(source).toContain('await import("../../src/daemon/webrtcStreamManager")');
     expect(source).toContain('await import("../../src/utils/ios-cmdline-tools/SimCtlClient")');
     expect(source).toContain('await import("../../src/features/webrtc/webrtcStreamingConfig")');
   });
@@ -330,13 +330,13 @@ describe("#4343 device capture latency instrumentation", () => {
 
   test("mirrors the Android capture fps from the video-server default quality preset", () => {
     const integration = read(INTEGRATION_TEST_PATH);
-    const encoder = read("src/features/webrtc/PersistentEncoderH264Source.ts");
+    const encoder = read("src/features/webrtc/persistentEncoderSession.ts");
     const preset = read(
       "android/video-server/src/main/kotlin/dev/jasonpearson/automobile/video/QualityPreset.kt",
     );
 
     // The lane runs the persistent encoder, which sends `--quality medium`.
-    expect(encoder).toContain('this.options.quality ?? "medium"');
+    expect(encoder).toContain('context.options.quality ?? "medium"');
     // Sliced rather than matched in one regex so a ktfmt reflow or an argument
     // reorder inside MEDIUM(...) does not turn a formatting change into a
     // spurious failure here.

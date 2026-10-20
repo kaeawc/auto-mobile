@@ -14,8 +14,8 @@ import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/De
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
+import { NetworkState } from "../../src/utils/NetworkState";
 import {
   registerLocationRouteSessionCleanup,
   LocationRouteRegistry,
@@ -81,12 +81,23 @@ async function setup(saved = true) {
       if ((kind === "rotation" && behavior.rotationFails) || kind === behavior.failingKind) {
         throw new Error("restore not confirmed");
       }
-      return { status: "restored" as const };
     },
   });
+  const recordKeepAwake = (kind: string) => {
+    const base = record(kind);
+    return (device: BootedDevice) => {
+      const restorer = base(device);
+      return {
+        restore: async (state: unknown, signal?: AbortSignal) => {
+          await restorer.restore(state, signal);
+          return { status: "restored" as const };
+        },
+      };
+    };
+  };
   const sessions = new SessionManager(timer, persistence, {
     barrier: () => new FakeDbWriteBarrier(),
-    keepScreenAwakeRestorer: record("keep-awake"),
+    keepScreenAwakeRestorer: recordKeepAwake("keep-awake"),
     biometricEnrollmentRestorer: record("biometric"),
     restorers: {
       networkCondition: record("network"),
@@ -107,7 +118,11 @@ async function setup(saved = true) {
     emulatorLossIncidentStore: new InMemoryEmulatorLossIncidentStore(timer),
   });
   await pool.initializeWithDevices([original]);
-  await pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "holder",
+    deviceId: original.deviceId,
+    platform: "android",
+  });
   const holder = sessions.getSession("holder")!;
   if (saved) {
     sessions.setKeepScreenAwake("holder", { applied: true, method: "settings" });
@@ -550,12 +565,20 @@ for (const joined of [false, true]) {
       await release;
       expect(h.restores).toEqual([]);
       await expect(
-        h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android"),
+        h.pool.bindOrReuseDeviceSession({
+          sessionId: "next",
+          deviceId: original.deviceId,
+          platform: "android",
+        }),
       ).rejects.toThrow("device_cleanup_in_progress");
       gate.resolve();
       await tracked;
       await drainMicrotasks(80);
-      await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "next",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
       expect(h.pool.getDevice(original.deviceId)?.sessionId).toBe("next");
     } finally {
       gate.resolve();
@@ -818,7 +841,11 @@ for (const path of ["fresh settlement", "monitor", "refresh"] as const) {
         ]) {
           expect(message).toContain(value);
         }
-        await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+        await h.pool.bindOrReuseDeviceSession({
+          sessionId: "next",
+          deviceId: original.deviceId,
+          platform: "android",
+        });
         expect(h.pool.getDevice(original.deviceId)?.sessionId).toBe("next");
         expect(h.restores).toEqual([]);
         // The fence retires A's work, while B's own later release still restores its baseline.
@@ -873,7 +900,11 @@ warmedTest("serial reuse retires a previously abandoned rotation restore", async
     await h.sessions.getPendingDeviceCleanup(original.deviceId);
     expect(h.restores).toHaveLength(6);
     await h.pool.releaseDevice(original.deviceId, "holder");
-    await h.pool.bindOrReuseDeviceSession("handoff-holder", original.deviceId, "android");
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "handoff-holder",
+      deviceId: original.deviceId,
+      platform: "android",
+    });
     expect(h.restores).toHaveLength(7);
     h.behavior.rotationFails = false;
     h.restores.length = 0;
@@ -888,7 +919,11 @@ warmedTest("serial reuse retires a previously abandoned rotation restore", async
         "Dropped restore state for session handoff-holder on replaced serial emulator-5554: rotation",
       ],
     ]);
-    await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: original.deviceId,
+      platform: "android",
+    });
     h.timer.advanceTime(240_000);
     await drainMicrotasks(80);
     expect(h.restores).toEqual([]);
@@ -1020,7 +1055,11 @@ for (const key of savedKeys) {
           String(message).startsWith("Dropped restore state"),
         ),
       ).toHaveLength(1);
-      await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "next",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
       h.timer.advanceTime(240_000);
       await drainMicrotasks(80);
       expect(h.restores).toEqual([]);
@@ -1126,7 +1165,11 @@ for (const kind of retryKinds) {
           await retry.pending;
           expect(h.restores).toEqual([]);
           expect(h.holder.cacheData[key]).toBeUndefined();
-          await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+          await h.pool.bindOrReuseDeviceSession({
+            sessionId: "next",
+            deviceId: original.deviceId,
+            platform: "android",
+          });
         }
       } finally {
         gate.resolve();
@@ -1164,7 +1207,11 @@ for (const kind of ["keep-awake", "biometric", "network", ...retryKinds]) {
         expect(h.releases).toEqual([{ reason: "explicit-release", identityReplaced: replaced }]);
         if (replaced) {
           expect(savedKeys.every((key) => h.holder.cacheData[key] === undefined)).toBe(true);
-          await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+          await h.pool.bindOrReuseDeviceSession({
+            sessionId: "next",
+            deviceId: original.deviceId,
+            platform: "android",
+          });
           h.timer.advanceTime(240_000);
           await drainMicrotasks(100);
           expect(h.restores).toEqual(beforeJoin);
@@ -1237,7 +1284,11 @@ warmedTest(
       expect(registry.isActive(original.deviceId)).toBe(false);
       expect(takeHeldPlanAppCleanup(h.sessions, "holder")).toBeUndefined();
       expect(h.sessions.hasDeviceCleanupInProgress(original.deviceId)).toBe(false);
-      await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "next",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
       h.timer.advanceTime(240_000);
       await drainMicrotasks(100);
       expect(h.restores).toEqual([]);
@@ -1307,7 +1358,11 @@ for (const kind of ["rotation", "screen-reader"] as const) {
           await drainMicrotasks(100);
           expect(h.restores).toEqual([]);
           expect(abandoned.has(original.deviceId)).toBe(false);
-          await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+          await h.pool.bindOrReuseDeviceSession({
+            sessionId: "next",
+            deviceId: original.deviceId,
+            platform: "android",
+          });
         }
       } finally {
         own.resolve();

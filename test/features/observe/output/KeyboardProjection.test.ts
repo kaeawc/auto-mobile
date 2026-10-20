@@ -1,3 +1,5 @@
+import { wireCapture } from "../../../helpers/wireCapture";
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
@@ -40,13 +42,13 @@ function observation(platform: "android" | "ios" = "android", keyboard = true): 
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 200 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, platform),
-  };
+  });
 }
 
 describe("Android keyboard output projection", () => {
@@ -55,7 +57,15 @@ describe("Android keyboard output projection", () => {
     const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
     const parser = new DefaultElementParser();
     const app = parser.parseNodeBounds(hierarchy.hierarchy.node!.node![0])!;
-    const key = parser.parseNodeBounds(hierarchy.windows![0].hierarchy.node!.node![0])!;
+    const window = hierarchy.windows?.[0];
+    if (!window?.hierarchy) {
+      throw new Error("Expected captured window hierarchy");
+    }
+    const windowRoot = parser.extractRootNodes(wireCapture({ hierarchy: window.hierarchy }))[0];
+    if (!windowRoot?.node?.[0]) {
+      throw new Error("Expected captured key node");
+    }
+    const key = parser.parseNodeBounds(windowRoot.node[0])!;
     expect(elements.clickable[0].bounds).toEqual(elements.text[0].bounds);
     expect(elements.clickable[0]["resource-id"]).toBeUndefined();
     expect(elements.text[0]["resource-id"]).toBeUndefined();
@@ -193,13 +203,13 @@ function iosKeyboardObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 320, height: 700 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "ios"),
-  };
+  });
 }
 
 describe("iOS keyboard output projection (#7214)", () => {
@@ -268,13 +278,13 @@ describe("iOS keyboard output projection (#7214)", () => {
         },
       },
     };
-    const source: ObserveResult = {
+    const source: ObserveResult = buildObserveResult({
       updatedAt: 1,
       screenSize: { width: 320, height: 700 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy,
       elements: new DefaultObserveElementCollector().collect(viewHierarchy, "ios"),
-    };
+    });
     const skeleton = sanitizeObserveResult(source, {
       dropElements: true,
       project: "skeleton",
@@ -368,13 +378,13 @@ function keyboardFloodObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("IME window collapses to one skeleton node (#6871)", () => {
@@ -458,13 +468,13 @@ function decoyKeycapObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("IME identity precedence (#6871)", () => {
@@ -533,13 +543,13 @@ function sharedPackageObservation({ imeKeys = true } = {}): ObserveResult {
       },
     ],
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: viewHierarchy as never,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy as never, "android"),
-  };
+  });
 }
 
 describe("IME window membership (#6871)", () => {
@@ -599,13 +609,13 @@ function loneDecoyKeycapObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("fallback keycap corroboration (#6871)", () => {
@@ -622,7 +632,7 @@ describe("fallback keycap corroboration (#6871)", () => {
 
   test("two distinct keycaps from one package still fold without the extra", () => {
     const source = loneDecoyKeycapObservation();
-    source.viewHierarchy!.hierarchy.node!.node![1].$["resource-id"] = "com.app:id/key_pos_0_1";
+    source.viewHierarchy!.hierarchy.node!.node![1].$!["resource-id"] = "com.app:id/key_pos_0_1";
     source.elements = new DefaultObserveElementCollector().collect(
       source.viewHierarchy!,
       "android",
@@ -718,13 +728,13 @@ function enclosingImeContainerObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("enclosing IME container folds with its keys (#6871)", () => {
@@ -837,13 +847,13 @@ function uncollectedImeWrapperObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("uncollected IME wrapper still bounds the fold (#6908)", () => {
@@ -865,7 +875,7 @@ describe("uncollected IME wrapper still bounds the fold (#6908)", () => {
   test("an uncollected wrapper owned by ANOTHER package never widens the fold", () => {
     const source = uncollectedImeWrapperObservation();
     // The framework's own decor wrapper encloses the keys but is not the IME's.
-    source.viewHierarchy!.hierarchy.node!.node![1].$["resource-id"] = "android:id/content";
+    source.viewHierarchy!.hierarchy.node!.node![1].$!["resource-id"] = "android:id/content";
     source.elements = new DefaultObserveElementCollector().collect(
       source.viewHierarchy!,
       "android",
@@ -884,8 +894,8 @@ describe("uncollected IME wrapper still bounds the fold (#6908)", () => {
     // provenance alone, and the row keeps the keys' own box, as before.
     const source = observation();
     const imeRoot = source.viewHierarchy!.hierarchy.node!.node![1];
-    imeRoot.$["resource-id"] = "example.keyboard:id/keyboard_view";
-    imeRoot.$.bounds = { left: 0, top: 0, right: 100, bottom: 200 };
+    imeRoot.$!["resource-id"] = "example.keyboard:id/keyboard_view";
+    imeRoot.$!.bounds = { left: 0, top: 0, right: 100, bottom: 200 };
     source.elements = new DefaultObserveElementCollector().collect(
       source.viewHierarchy!,
       "android",
@@ -946,13 +956,13 @@ function crossWindowKeycapObservation(windowKeyCount: number): ObserveResult {
       },
     ],
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: viewHierarchy as never,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy as never, "android"),
-  };
+  });
 }
 
 describe("keycap corroboration is scoped to one window group (#6908)", () => {

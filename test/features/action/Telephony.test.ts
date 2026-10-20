@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, describe, test, beforeEach } from "bun:test";
 import { Telephony } from "../../../src/features/action/Telephony";
 import { BootedDevice } from "../../../src/models";
@@ -19,7 +20,7 @@ describe("Telephony", () => {
 
   beforeEach(() => {
     adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
+    adb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
 
     consoleClient = new FakeEmulatorConsoleClient();
     device = { deviceId: "emulator-5554", platform: "android", name: "Pixel_5" } as BootedDevice;
@@ -92,7 +93,7 @@ describe("Telephony", () => {
     });
 
     test("returns supported:false when ro.kernel.qemu is not '1' even for emulator-NNNN serials", async () => {
-      adb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "", stderr: "" });
+      adb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("", ""));
 
       const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
@@ -18,7 +18,7 @@ import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
  */
 
 describe("PlanExecutor internal no-diff marker (#3053)", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   let capturedArgs: Record<string, unknown>[];
   let originalCollaborators: ToolRegistryCollaborators;
 
@@ -41,7 +41,7 @@ describe("PlanExecutor internal no-diff marker (#3053)", () => {
     ]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
     capturedArgs = [];
   });
 

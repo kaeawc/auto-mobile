@@ -1,6 +1,6 @@
-import type { Daemon } from "../../src/daemon/daemon";
 import type { BootedDevice } from "../../src/models";
 import type { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { ScenarioDaemon } from "./scenarioDaemon";
 import { DaemonRequestFailed, LivenessScenario, ToolCallRefused } from "./livenessScenarioHarness";
 
 // Shared rig for the lifecycle timer-interaction scenarios (heartbeat lease x idle window x disconnect
@@ -23,16 +23,6 @@ export interface DeviceListing {
   episodes(): string[];
   /** Devices the monitor is counting absent misses for. */
   misses(): Map<string, number>;
-}
-
-interface DisconnectMonitorSurface {
-  startDeviceDisconnectMonitor(
-    manager: unknown,
-    listRecordings: () => Promise<[]>,
-    transportRestarts: { isRestarting(deviceId: string): boolean },
-  ): void;
-  offlineEpisodes: Map<string, unknown>;
-  deviceDisconnectMisses: Map<string, number>;
 }
 
 /**
@@ -63,15 +53,18 @@ export function startDisconnectMonitor(scenario: LivenessScenario): DeviceListin
       new Set([...(await listed(ids))].flatMap(([id, state]) => (state === "offline" ? [id] : []))),
     recoverAndroidOfflineDevices: async () => {},
   });
-  const daemon = scenario.daemon.daemon as unknown as Daemon & DisconnectMonitorSurface;
+  const daemon = scenario.daemon.daemon;
+  if (!(daemon instanceof ScenarioDaemon)) {
+    throw new Error("startDisconnectMonitor: the scenario's daemon is not a ScenarioDaemon");
+  }
   daemon.startDeviceDisconnectMonitor(manager, async () => [], { isRestarting: () => false });
   return {
     set(deviceId, state) {
       states.set(deviceId, state);
       discovery.setBootedDevices("android", booted());
     },
-    episodes: () => [...daemon.offlineEpisodes.keys()],
-    misses: () => new Map(daemon.deviceDisconnectMisses),
+    episodes: () => daemon.offlineEpisodeDeviceIds(),
+    misses: () => daemon.disconnectMisses(),
   };
 }
 
@@ -141,9 +134,7 @@ export async function sessionInfo(
   sessionId: string,
 ): Promise<Record<string, unknown>> {
   const envelope = await scenario.daemonMethod("daemon/sessionInfo", { sessionId });
-  return envelope.success
-    ? (envelope.result as Record<string, unknown>)
-    : (envelope as unknown as Record<string, unknown>);
+  return envelope.success ? (envelope.result as Record<string, unknown>) : envelope;
 }
 
 /** The persisted row's status and reason. */

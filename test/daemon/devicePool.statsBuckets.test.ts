@@ -1,11 +1,12 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { makePool } from "../helpers/makePool";
 import { bindDevice, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
 import { afterEach, describe, expect, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, type PoolStatusBucket } from "../../src/daemon/devicePool";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { poolHoldFor } from "../../src/server/deviceDescription";
+import { poolHoldFor } from "../../src/daemon/deviceDescription";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -150,7 +151,7 @@ describe("every pooled device is in exactly one stats bucket matching its listed
     healthMarkers.mark("UNHEALTHY", pool.getDeviceIncarnation("UNHEALTHY") ?? 0, "app-cleanup");
     const busy = pool.getDevice("BUSY");
     if (busy) {
-      busy.status = "busy";
+      patchDeviceBinding(busy, { status: "busy" });
     }
   }
 
@@ -172,7 +173,7 @@ describe("every pooled device is in exactly one stats bucket matching its listed
   });
 
   arranged2("stats partition the pool and match each device's listed status", () => {
-    const expected: Record<string, string> = {
+    const expected: Record<string, PoolStatusBucket> = {
       BUSY: "assigned",
       ERR: "error",
       "ERR-RES": "error",
@@ -183,8 +184,12 @@ describe("every pooled device is in exactly one stats bucket matching its listed
     };
     const listed = listDevicePayloads(devices, pool, new Map());
     for (const entry of listed) {
-      expect(entry.runtime.poolStatus).toBe(expected[entry.runtime.deviceId]!);
-      expect(pool.poolBucket(entry.runtime.deviceId)).toBe(expected[entry.runtime.deviceId]!);
+      const deviceId = entry.runtime.deviceId;
+      if (deviceId === null) {
+        throw new Error("listed device has no deviceId");
+      }
+      expect(entry.runtime.poolStatus).toBe(expected[deviceId]!);
+      expect(pool.poolBucket(deviceId)).toBe(expected[deviceId]!);
     }
     for (const stats of [pool.getStats(), pool.getStatsForPlatform("ios")]) {
       expect(stats).toMatchObject({ total: 7, idle: 1, assigned: 4, error: 2 });

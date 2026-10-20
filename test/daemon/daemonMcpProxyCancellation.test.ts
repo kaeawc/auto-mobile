@@ -1,17 +1,18 @@
 import { Client } from "@modelcontextprotocol/client";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonRequestNotDeliveredError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
-import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
+import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -36,7 +37,7 @@ async function setup() {
     timer,
     ISOLATED_DAEMON_RECOVERY,
     null,
-    new FakeIdGenerator(),
+    { idGenerator: new FakeIdGenerator() },
   );
   daemonClient.testHooks.attachSocket(socket);
   const fake = new FakeDaemonClient();
@@ -89,12 +90,12 @@ describe("MCP proxy cancellation", () => {
         client.callTool({ name: "tapOn", arguments: {} }),
       ];
       await flush();
-      const requests = socket.getWrittenMessages<DaemonRequest>();
+      const requests = socket.getWrittenMessages(daemonRequestFrameSchema);
       expect(requests).toHaveLength(3);
       controller.abort(new Error("cancel requested"));
       await cancelled;
       await flush();
-      const frames = socket.getWrittenMessages<DaemonRequest>();
+      const frames = socket.getWrittenMessages(daemonRequestFrameSchema);
       expect(frames).toHaveLength(4);
       expect(frames[3]).toMatchObject({
         method: DAEMON_CANCEL_REQUEST_METHOD,
@@ -130,7 +131,7 @@ describe("MCP proxy cancellation", () => {
       expect(socket.getWrittenMessages()).toHaveLength(0);
       const result = client.callTool({ name: "tapOn", arguments: {} });
       await flush();
-      respond(socket.getWrittenMessages<DaemonRequest>()[0].id);
+      respond(socket.getWrittenMessages(daemonRequestFrameSchema)[0].id);
       await result;
       const response = messages.find((message) => "id" in message);
       if (!response || !("id" in response)) {
@@ -160,7 +161,7 @@ describe("MCP proxy cancellation", () => {
           (error: unknown) => error,
         );
       await flush();
-      respond(socket.getWrittenMessages<DaemonRequest>()[0].id);
+      respond(socket.getWrittenMessages(daemonRequestFrameSchema)[0].id);
       controller.abort();
       await result;
       await flush();
@@ -211,7 +212,7 @@ test("stdio MCP caller receives the daemon queue marker at its deadline", async 
   try {
     const result = client.callTool({ name: "tapOn", arguments: {} });
     await flush();
-    const request = socket.getWrittenMessages<DaemonRequest>()[0];
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
     timer.advanceTime(request.timeoutMs!);
     const message = "timed out in queue before admission";
     daemonClient.testHooks.simulateIncomingData(

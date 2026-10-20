@@ -12,7 +12,7 @@ import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
@@ -64,19 +64,13 @@ describe("exportPlan from a connection that does not hold the recording's device
     });
 
   const bind = (sessionUuid: string, device: BootedDevice, connection: string) =>
-    pool.bindOrReuseDeviceSession(
-      sessionUuid,
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      connection,
-    );
+    pool.bindOrReuseDeviceSession({
+      sessionId: sessionUuid,
+      deviceId: device.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: connection,
+    });
 
   /** Starts a recording through the real manager with a fake recorder that counts its stops. */
   const record = (device: BootedDevice, idPrefix: string, ownerSessionUuid?: string) =>

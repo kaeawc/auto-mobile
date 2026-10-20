@@ -10,14 +10,14 @@ import {
   getDeviceGestureRecordingStatus,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { noActiveDeviceSessionPayload } from "../../src/server/proxyServer";
+import { noActiveDeviceSessionPayload } from "../../src/daemon/deviceSessionResult";
 
 class TestableServer extends DeviceGestureRecordingSocketServer {
   invoke(request: DeviceGestureRecordingCommand) {
@@ -276,19 +276,13 @@ describe("device gesture recording start holder admission (#11665)", () => {
 
   arranged("the acquiring connection starts under the session it acquired", async () => {
     await manager.releaseSession("holder");
-    const acquired = await pool.bindOrReuseDeviceSession(
-      "connection-holder",
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "acquiring-connection",
-    );
+    const acquired = await pool.bindOrReuseDeviceSession({
+      sessionId: "connection-holder",
+      deviceId: device.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "acquiring-connection",
+    });
     expect(
       pool.resolveOwnedDeviceSessionForMcpSession("acquiring-connection", device.deviceId),
     ).toBe(acquired);

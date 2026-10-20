@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { describe, expect, test } from "bun:test";
 import type {
   Element,
@@ -35,7 +36,7 @@ function makeElement(bounds: Element["bounds"]): Element {
 }
 
 function makeHierarchy(): ViewHierarchyResult {
-  return { hierarchy: { node: {} } } as unknown as ViewHierarchyResult;
+  return { hierarchy: { node: {} } };
 }
 
 function makeSelection(
@@ -53,6 +54,7 @@ function makeSelection(
 
 function makeFocusObservation(viewHierarchy: ViewHierarchyResult): ObserveResult {
   return {
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     observationId: "focus-test",
     updatedAt: 1,
     screenSize: { width: 1080, height: 1920 },
@@ -246,10 +248,11 @@ async function executeFocusWithDuplicateEmail(
   const tapped: Element[] = [];
   const sourceObservation = makeFocusObservation(before);
   sourceObservation.observationId = "initial-capture";
-  tap.observedInteraction = async (action) => ({
-    ...(await action(sourceObservation)),
-    observation: makeFocusObservation(after),
-  });
+  tap.observedInteraction = (action, options) =>
+    runBlockWithEnvelope(sourceObservation, { observation: makeFocusObservation(after) })(
+      action,
+      options,
+    );
   tap.refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
   tap.executeAndroidTap = async (
     _action: string,
@@ -266,8 +269,8 @@ async function executeFocusWithDuplicateEmail(
     effect: undefined,
     observation,
   });
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
 
   const result = await tap.execute({ text: "Email", action: "focus", index: 0, [flag]: true });
@@ -377,7 +380,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       "tap",
       false,
     );
-    expect(checked).toBe(label);
+    expect<unknown>(checked).toBe(label);
     expect(failedRefind(result).error).toContain("matched label changed");
   });
 
@@ -564,7 +567,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
         bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       },
     },
-  } as unknown as ViewHierarchyResult;
+  };
 
   // Stub that reveals the target only from `appearsOnCall` onward. Optional per-poll
   // `refreshDelayMs` simulates real device fetch latency (FakeTimer refresh is otherwise
@@ -994,7 +997,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
           indexInMatches: 0,
           totalMatches: 0,
           strategy: "first",
-        } as unknown as ElementSelectionResult;
+        };
 
         const rebuilt = selectedMetadata(
           tap.rebuildSelectedElementMetadataAfterStability(previous, emptySelection),

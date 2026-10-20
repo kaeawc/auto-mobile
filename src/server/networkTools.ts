@@ -2,20 +2,20 @@ import { z } from "zod/v4";
 import { validateHeaderName } from "node:http";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import {
   NetworkState,
   simulationRemainingMs,
   type SimulatedErrorType,
   type SimulationConfig,
-} from "./NetworkState";
+} from "../utils/NetworkState";
 import {
   buildNetworkMockRules,
   describeInvalidMockPattern,
   type NetworkMockRuleSync,
   type NetworkMockSyncReport,
   type RejectedMockRule,
-} from "./networkMockRules";
+} from "../utils/networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";

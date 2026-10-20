@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
@@ -36,13 +37,12 @@ describe("CtrlProxyPackages (Android)", function () {
     fakeTimer.enableAutoAdvance();
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
 
     testDevice = {
       deviceId: "test-device-packages",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -254,6 +254,9 @@ describe("CtrlProxyPackages (Android)", function () {
       installDeviceDataStreamSocketServerForTesting(streamServer);
       await streamServer.start();
       const socketPath = DEVICE_DATA_STREAM_SOCKET_CONFIG.defaultPath;
+      if (!testOverrides.auxSocketDir) {
+        throw new Error("Expected auxiliary socket directory");
+      }
       expect(path.dirname(socketPath)).toBe(testOverrides.auxSocketDir);
       // Windows named-pipe sockets do not have a stat-able NTFS socket inode.
       if (process.platform !== "win32") {

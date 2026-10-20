@@ -1,5 +1,5 @@
 import type { DaemonStateAccess } from "../daemonRequestHandlers";
-import { executionTracker } from "../../server/executionTracker";
+import { executionTracker } from "../executionTracker";
 import { logger } from "../../utils/logger";
 import type { IdGenerator } from "../../utils/IdGenerator";
 import type { Timer } from "../../utils/SystemTimer";
@@ -221,7 +221,6 @@ export class RestartAdmission {
     }
   }
 
-  // eslint-disable-next-line complexity -- each refusal is a distinct security fence for this one-shot control RPC.
   restartAcceptanceSession(
     params: Record<string, unknown>,
     ownerSessionId: string | undefined,
@@ -251,27 +250,9 @@ export class RestartAdmission {
     ) {
       return { accepted: false, reason: "acceptance_capability_invalid" };
     }
-    const sessions = this.deps.getAllSessions();
-    if (!sessions) {
-      return { accepted: false, reason: "session_not_found" };
-    }
-    const session = sessions.find((candidate) => candidate.sessionId === scope.sessionUuid);
-    if (!session) {
-      return { accepted: false, reason: "session_not_found" };
-    }
-    if (
-      session.platform !== scope.platform ||
-      session.stableDeviceId !== scope.stableDeviceId ||
-      sessions.length !== 1
-    ) {
-      return {
-        accepted: false,
-        reason:
-          sessions.length !== 1 &&
-          sessions.some((candidate) => candidate.sessionId !== scope.sessionUuid)
-            ? "unrelated_sessions"
-            : "session_identity_mismatch",
-      };
+    const sessionRefusal = this.acceptanceRestartSessionRefusal(scope);
+    if (sessionRefusal) {
+      return sessionRefusal;
     }
     const admission = executionTracker.prepareForDaemonRestart();
     if (admission !== "accepted") {
@@ -298,6 +279,34 @@ export class RestartAdmission {
     // uncommitted fence; after commit the lease keeps new work fenced through
     // the signal even if the control socket drops.
     return { accepted: true, restartToken };
+  }
+
+  private acceptanceRestartSessionRefusal(
+    scope: AcceptanceSessionRestartScope,
+  ): DaemonAcceptanceSessionRestart | undefined {
+    const sessions = this.deps.getAllSessions();
+    if (!sessions) {
+      return { accepted: false, reason: "session_not_found" };
+    }
+    const session = sessions.find((candidate) => candidate.sessionId === scope.sessionUuid);
+    if (!session) {
+      return { accepted: false, reason: "session_not_found" };
+    }
+    if (
+      session.platform !== scope.platform ||
+      session.stableDeviceId !== scope.stableDeviceId ||
+      sessions.length !== 1
+    ) {
+      return {
+        accepted: false,
+        reason:
+          sessions.length !== 1 &&
+          sessions.some((candidate) => candidate.sessionId !== scope.sessionUuid)
+            ? "unrelated_sessions"
+            : "session_identity_mismatch",
+      };
+    }
+    return undefined;
   }
 
   /**
@@ -383,7 +392,6 @@ export class RestartAdmission {
     this.acceptanceRestartAdmissionExpiryTimer = undefined;
   }
 
-  // eslint-disable-next-line complexity -- validate every untrusted scope field before HMAC authorization.
   private acceptanceSessionRestartScope(value: unknown): AcceptanceSessionRestartScope | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return undefined;
@@ -396,13 +404,8 @@ export class RestartAdmission {
       (scope.platform !== "android" && scope.platform !== "ios") ||
       typeof scope.stableDeviceId !== "string" ||
       scope.stableDeviceId.length === 0 ||
-      typeof scope.expiresAt !== "number" ||
-      !Number.isFinite(scope.expiresAt) ||
-      !controls ||
-      typeof controls !== "object" ||
-      typeof controls.androidSiblingAvdName !== "string" ||
-      typeof controls.androidDuplicateSerial !== "string" ||
-      typeof controls.iosSameNameSiblingUdid !== "string"
+      !validRestartScopeExpiry(scope.expiresAt) ||
+      !validRestartControls(controls)
     ) {
       return undefined;
     }
@@ -418,4 +421,20 @@ export class RestartAdmission {
       expiresAt: scope.expiresAt,
     };
   }
+}
+
+function validRestartControls(
+  controls: AcceptanceSessionRestartScope["controls"] | undefined,
+): controls is AcceptanceSessionRestartScope["controls"] {
+  return !(
+    !controls ||
+    typeof controls !== "object" ||
+    typeof controls.androidSiblingAvdName !== "string" ||
+    typeof controls.androidDuplicateSerial !== "string" ||
+    typeof controls.iosSameNameSiblingUdid !== "string"
+  );
+}
+
+function validRestartScopeExpiry(expiresAt: number | undefined): expiresAt is number {
+  return typeof expiresAt === "number" && Number.isFinite(expiresAt);
 }

@@ -1,3 +1,4 @@
+import "./deviceLifecycleHost";
 import { z } from "zod/v4";
 import { startDeviceOutputSchema } from "./toolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
@@ -6,9 +7,9 @@ import {
   listDevicesEntrySchema,
   provisionedDeviceSchema,
   configuredImageSchema,
-} from "./deviceDescription";
-import { platformSchema, addSessionUuidToSchema } from "./toolSchemaHelpers";
-import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
+} from "../daemon/deviceDescription";
+import { platformSchema, addSessionUuidToSchema } from "../utils/schemaHelpers";
+import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { MAX_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createProvisionDeviceHandlers } from "./deviceToolsProvisioning";
 import { createAcquisitionHandlers } from "./deviceToolsAcquisition";
@@ -21,8 +22,6 @@ import {
 import { createLifecycleHandlers } from "./deviceToolsLifecycle";
 import { createListingHandlers } from "./deviceToolsListing";
 import {
-  TeardownDeviceArgs,
-  TeardownToolResponse,
   getAndroidSchema,
   getAppleSchema,
   getDeviceTeardownService,
@@ -30,6 +29,7 @@ import {
   provisionDeviceSchema,
   startDeviceSchema,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
+import { registerDaemonDeviceDeletion } from "../daemon/daemonDeviceDeletion";
 export * from "../features/deviceLifecycle/deviceLifecycleCore";
 
 export { reserveAndroidStartupLease } from "./deviceToolsStartupLease";
@@ -209,29 +209,16 @@ export const teardownDeviceSchema = addSessionUuidToSchema(
     .strict(),
 );
 
-/** Runs the verified `deleteDevice` workflow (stop, destroy, verify absence) on the daemon's behalf. */
-export type DaemonDeviceDeletion = (
-  args: TeardownDeviceArgs,
-  signal?: AbortSignal,
-) => Promise<TeardownToolResponse>;
-
-let daemonDeviceDeletion: DaemonDeviceDeletion | undefined;
-
-/** The daemon's delete workflow, once the device tools are registered in this process. */
-export function getDaemonDeviceDeletion(): DaemonDeviceDeletion | undefined {
-  return daemonDeviceDeletion;
-}
-
 export function registerDeviceTools() {
   const { listDeviceImagesHandler, listDevicesHandler } = createListingHandlers();
 
   const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
   // The daemon's own deletions (abandoned broker bindings, #11174) run the same verified workflow with
   // no caller: the broker binding and session-holder refusals guard callers, not the daemon itself.
-  daemonDeviceDeletion = (args, signal) => {
+  registerDaemonDeviceDeletion((args, signal) => {
     const deps = getDeviceToolsDependencies();
     return executeDeleteDevice(args, deps, signal, getDeviceTeardownService(deps));
-  };
+  });
 
   const provisionHandlers = createProvisionDeviceHandlers({
     bindBootedDeviceSession,

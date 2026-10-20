@@ -1,4 +1,6 @@
 import { makePool } from "../helpers/makePool";
+import { listDevicesOutputSchema } from "../../src/server/deviceTools";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -75,7 +77,7 @@ describe("a pooled device that discovery no longer lists", () => {
     const toolResponse = await ToolRegistry.getTool("listDevices")!.handler({
       platform: "android",
     });
-    const tool = JSON.parse(toolResponse.content?.[0]?.text ?? "{}");
+    const tool = listDevicesOutputSchema.parse(toolStructured(toolResponse));
     const state: DaemonStateAccess = {
       isInitialized: () => true,
       getSessionManager: () => sessionManager as never,
@@ -130,7 +132,11 @@ describe("a pooled device that discovery no longer lists", () => {
 
   test("a held device adb still lists offline stays counted as assigned", async () => {
     const { pool, manager } = await poolOf([android]);
-    await pool.bindOrReuseDeviceSession("held-1", android.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "held-1",
+      deviceId: android.deviceId,
+      platform: "android",
+    });
     manager.setBootedDevices("android", []);
     Object.assign(manager, {
       getAndroidListedDeviceStates: async () => new Map([[android.deviceId, "offline"]]),
@@ -146,7 +152,11 @@ describe("a pooled device that discovery no longer lists", () => {
     const { pool, manager } = await poolOf([]);
     manager.setBootedDevices("ios", [sim]);
     await pool.initializeWithDevices([sim]);
-    await pool.bindOrReuseDeviceSession("held-ios", sim.deviceId, "ios");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "held-ios",
+      deviceId: sim.deviceId,
+      platform: "ios",
+    });
     manager.setBootedDevices("ios", []);
 
     expect(await pool.getRefreshedStats()).toMatchObject({ total: 0, idle: 0, assigned: 0 });

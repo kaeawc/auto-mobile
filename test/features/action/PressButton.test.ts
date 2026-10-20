@@ -8,10 +8,11 @@ import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { describe, expect, spyOn, test } from "bun:test";
+import { createExecResult } from "../../../src/utils/execResult";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { BootedDevice } from "../../../src/models";
+import { BootedDevice, ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -63,7 +64,7 @@ describe("PressButton", () => {
       const pressButton = new PressButton(iosSimulator, null, timer, {
         executeCommandArgs: async (args) => {
           launches.push(args);
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         },
       });
 
@@ -93,7 +94,7 @@ describe("PressButton", () => {
       {
         executeCommandArgs: async () => {
           launches++;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         },
       },
       (signal, timeoutMs, send, onDispatch) =>
@@ -155,7 +156,7 @@ describe("PressButton", () => {
       const timer = new FakeTimer();
       const controller = new AbortController();
       const client = new FakeIOSCtrlProxy(timer);
-      const launch = Promise.withResolvers<{ stdout: string; stderr: string }>();
+      const launch = Promise.withResolvers<ExecResult>();
       const instance = spyOnIosClientInstance(client);
       const reads = spyOn(client, "requestHierarchySync");
       let sent = false;
@@ -200,14 +201,14 @@ describe("PressButton", () => {
           expect(answered).toBe(false);
           timer.advanceTime(1);
         } else {
-          launch.resolve({ stdout: "", stderr: "" });
+          launch.resolve(createExecResult("", ""));
         }
         await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
         expect(reads).not.toHaveBeenCalled();
         expect(marks).toBe(1);
       } finally {
         controller.abort();
-        launch.resolve({ stdout: "", stderr: "" });
+        launch.resolve(createExecResult("", ""));
         await pending.catch(() => {});
         reads.mockRestore();
         instance.mockRestore();
@@ -235,7 +236,7 @@ describe("PressButton", () => {
             await timer.sleep(timeoutMs);
             throw new SimctlCommandTimeoutError("busy host launch timed out");
           }
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         },
       });
       expect((await action.press("home")).success).toBe(true);
@@ -264,7 +265,7 @@ describe("PressButton", () => {
       executeCommandArgs: async () => {
         expect(marks).toBe(1);
         launches++;
-        return { stdout: "", stderr: "" };
+        return createExecResult("", "");
       },
     });
     try {
@@ -489,32 +490,30 @@ describe("PressButton", () => {
 
     // Fails the accessibility path (forcing the ADB fallback) after consuming
     // part of the shared deadline.
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    const globalActionClient = {
       requestGlobalAction: async (action: string, timeoutMs: number) => {
         globalActionTimeouts.push(timeoutMs);
         fakeTimer.advanceTime(300);
         return { success: false, action, totalTimeMs: 300, error: "WebSocket not connected" };
       },
-    });
+    };
 
     const fakeAdb = new FakeAdbExecutor();
 
-    try {
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      globalActionClient,
+    });
 
-      // "back" is a global-action button, so this exercises the two-call path.
-      const result = await pressButton.press("back", 500);
+    // "back" is a global-action button, so this exercises the two-call path.
+    const result = await pressButton.press("back", 500);
 
-      expect(result.success).toBe(true);
-      // Global action capped at min(3000, 500).
-      expect(globalActionTimeouts).toEqual([500]);
-      // ADB fallback receives the REMAINING budget after 300ms was consumed,
-      // proving total time is bounded by the caller's budget, not the sum of
-      // per-transport defaults.
-      expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([200]);
-    } finally {
-      getInstanceSpy.mockRestore();
-    }
+    expect(result.success).toBe(true);
+    // Global action capped at min(3000, 500).
+    expect(globalActionTimeouts).toEqual([500]);
+    // ADB fallback receives the REMAINING budget after 300ms was consumed,
+    // proving total time is bounded by the caller's budget, not the sum of
+    // per-transport defaults.
+    expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([200]);
   });
 
   test("android reports an indeterminate press when a dispatched global action exhausts the deadline", async () => {
@@ -526,7 +525,7 @@ describe("PressButton", () => {
 
     const fakeTimer = new FakeTimer();
 
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    const globalActionClient = {
       requestGlobalAction: async (
         ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
       ) => {
@@ -542,23 +541,21 @@ describe("PressButton", () => {
           acknowledged: false,
         };
       },
-    });
+    };
 
     const fakeAdb = new FakeAdbExecutor();
 
-    try {
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      globalActionClient,
+    });
 
-      const result = await pressButton.press("back", 500);
+    const result = await pressButton.press("back", 500);
 
-      // A lost reply after dispatch is indeterminate even when the deadline is exhausted.
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("may have been applied");
-      expect(result.error).toContain("timeout");
-      expect(fakeAdb.getCommandCalls()).toEqual([]);
-    } finally {
-      getInstanceSpy.mockRestore();
-    }
+    // A lost reply after dispatch is indeterminate even when the deadline is exhausted.
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("may have been applied");
+    expect(result.error).toContain("timeout");
+    expect(fakeAdb.getCommandCalls()).toEqual([]);
   });
 
   test("ios menu remains unsupported", async () => {
@@ -581,6 +578,7 @@ describe("PressButton", () => {
       success: false,
       dispatched: true,
       acknowledged: false,
+      totalTimeMs: 0,
       error: "reply lost",
     });
     const getInstanceSpy = spyOnIosClientInstance(client);
@@ -598,6 +596,7 @@ describe("PressButton", () => {
       success: false,
       dispatched: true,
       acknowledged: true,
+      totalTimeMs: 0,
       error: "runner failed",
     });
     const getInstanceSpy = spyOnIosClientInstance(client);
@@ -788,25 +787,6 @@ describe("PressButton", () => {
 });
 
 // Validate the actual fake-backed branch results before and after finalization.
-const executeForOutputSchema = PressButton.prototype.execute;
-let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
-beforeOutputSchema(() => {
-  executeOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "execute").mockImplementation(
-    async function (this: PressButton, ...args: Parameters<PressButton["execute"]>) {
-      const result = await executeForOutputSchema.apply(this, args);
-      const payload = { message: "Result", ...result };
-      expect(pressButtonResultSchema.parse(payload)).toBeDefined();
-      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
-        name: "pressButton",
-        outputSchema: pressButtonResultSchema,
-        artifactWriter: new FakeArtifactWriter(),
-      });
-      expect(pressButtonResultSchema.parse(finalized.structuredContent)).toBeDefined();
-      return result;
-    },
-  );
-});
-afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
 // Validate the actual fake-backed branch results before and after finalization.
 const pressForOutputSchema = PressButton.prototype.press;
 let pressOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;

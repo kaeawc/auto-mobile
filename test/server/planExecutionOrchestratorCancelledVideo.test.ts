@@ -8,7 +8,7 @@ import type {
   PlanExecutionResult,
   VideoRecordingMetadata,
 } from "../../src/models";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import type { RecordingHandle } from "../../src/features/video/VideoRecorderService";
@@ -133,7 +133,7 @@ describe("PlanExecutionOrchestrator video teardown of a cancelled plan (#9885)",
     const options = args[7] as PlanExecutionOptions | undefined;
     for (let rotation = 0; rotation < 2; rotation++) {
       timer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
-      await options?.onBeforePlanStep?.();
+      await options?.onBeforePlanStep?.({ stepIndex: rotation, totalSteps: 3 });
     }
     video.stopVideoRecording.mockClear();
     video.stopSignals.length = 0;

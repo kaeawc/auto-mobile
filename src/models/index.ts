@@ -1,5 +1,6 @@
 export * from "./AccessibilityResult";
 export * from "./ActionableError";
+export * from "./AppNotInstalledError";
 export * from "./ActiveWindowInfo";
 export * from "./AndroidDeviceShellToolResult";
 export * from "./AndroidDeviceResource";

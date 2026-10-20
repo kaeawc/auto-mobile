@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { CtrlProxyHierarchy } from "../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../src/features/observe/android/types";
+import {
+  createAndroidHierarchyConverter,
+  wireHierarchyFrom,
+} from "../helpers/androidHierarchyConverter";
+import type { AccessibilityHierarchy } from "../../src/features/observe/android/types";
 import {
   hasOwnPrototype,
   scopeObserveResultToLayer,
@@ -25,7 +25,6 @@ import {
   observationSummarySchema,
   viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { observationOf } from "../helpers/prototypeWindowCapture";
 
 const fixtureRoot = resolve(import.meta.dir, "../fixtures");
@@ -61,7 +60,7 @@ const wires = captures
     name,
     wire: JSON.parse(observation.rawViewHierarchy!.json!) as AccessibilityHierarchy,
   }));
-const subject = new CtrlProxyHierarchy({ timer: new FakeTimer() } as HierarchyDelegateContext);
+const subject = createAndroidHierarchyConverter();
 const nonNullableKeys = Object.entries(viewHierarchyResultSchema.shape)
   .filter(([, schema]) => !schema.safeParse(null).success)
   .map(([key]) => key);
@@ -70,6 +69,8 @@ const windowKeys = Object.entries(
 )
   .filter(([, schema]) => !schema.safeParse(null).success)
   .map(([key]) => key);
+const nullFields = (value: object): Set<string> =>
+  new Set(Object.entries(value).flatMap(([key, field]) => (field === null ? [key] : [])));
 function assertContract(out: ObserveResult): void {
   const parsed = observeResultSchema.safeParse(out);
   expect(
@@ -79,10 +80,12 @@ function assertContract(out: ObserveResult): void {
       : parsed.error.issues.map((issue) => `${issue.path.join("/")}: ${issue.message}`).join("\n"),
   ).toBe(true);
   const hierarchy = out.viewHierarchy;
-  const nulls = hierarchy ? nonNullableKeys.filter((key) => hierarchy[key] === null) : [];
+  const nulls = hierarchy ? nonNullableKeys.filter((key) => nullFields(hierarchy).has(key)) : [];
   for (const [index, window] of (hierarchy?.windows ?? []).entries()) {
     nulls.push(
-      ...windowKeys.filter((key) => window[key] === null).map((key) => `windows/${index}/${key}`),
+      ...windowKeys
+        .filter((key) => nullFields(window).has(key))
+        .map((key) => `windows/${index}/${key}`),
     );
   }
   expect(nulls).toEqual([]);
@@ -174,7 +177,7 @@ for (const mode of modes) {
 test("captured observation without a hierarchy keeps the key absent", () => {
   const observation = { ...captures[0].observation };
   delete observation.viewHierarchy;
-  const out = sanitizeObserveResult(observation, { project: "full" });
+  const out = sanitizeObserveResult(observation, { project: "full", dropElements: false });
   expect(Object.hasOwn(out, "viewHierarchy")).toBe(false);
 });
 
@@ -201,16 +204,18 @@ test("captured truncation array survives full output and lifts into skeleton", (
 
 test("rootless captured wire omits null optional objects and malformed reasons", () => {
   // Simulate the runner's optional-field sentinels on an otherwise captured payload.
-  const wire = Object.assign(structuredClone(wires[0].wire), {
+  const captured = structuredClone(wires[0].wire);
+  for (const window of captured.windows ?? []) {
+    Object.assign(window, { bounds: null, hierarchy: null });
+  }
+  const wire = wireHierarchyFrom({
+    ...captured,
     hierarchy: undefined,
     systemInsets: null,
     insets: null,
     truncationReasons: "max_nodes",
   });
-  for (const window of wire.windows ?? []) {
-    Object.assign(window, { bounds: null, hierarchy: null });
-  }
-  const hierarchy = subject.convertToViewHierarchyResult(wire as AccessibilityHierarchy);
+  const hierarchy = subject.convertToViewHierarchyResult(wire);
   for (const window of hierarchy.windows ?? []) {
     expect(Object.hasOwn(window, "bounds")).toBe(false);
     expect(Object.hasOwn(window, "hierarchy")).toBe(false);

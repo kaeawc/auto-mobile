@@ -114,9 +114,12 @@ class HierarchyControllerTest {
         serviceScope = backgroundScope,
         viewHierarchyExtractor = mockk(relaxed = true),
         displayController = DisplayController(mockk(relaxed = true)),
-        perfProvider = PerfProvider.instance,
-        timeProvider = FakeTimer(),
-        workStats = CtrlProxyWorkStats(),
+        diagnostics =
+          HierarchyDiagnosticsDependencies(
+            perfProvider = PerfProvider.instance,
+            timeProvider = FakeTimer(),
+            workStats = CtrlProxyWorkStats(),
+          ),
         jsonCompact = Json { encodeDefaults = true },
       )
       .also {
@@ -124,7 +127,10 @@ class HierarchyControllerTest {
           HierarchyDebouncer(
             scope = backgroundScope,
             timeProvider = FakeTimer(),
-            extractHierarchy = { _, options -> extract(options) },
+            dependencies =
+              HierarchyDebouncerDependencies(
+                extractHierarchy = { _, options -> extract(options) },
+              ),
           )
       }
 
@@ -219,9 +225,12 @@ class HierarchyControllerTest {
         serviceScope = backgroundScope,
         viewHierarchyExtractor = mockk(relaxed = true),
         displayController = DisplayController(mockk(relaxed = true)),
-        perfProvider = PerfProvider.instance,
-        timeProvider = FakeTimer(),
-        workStats = CtrlProxyWorkStats(),
+        diagnostics =
+          HierarchyDiagnosticsDependencies(
+            perfProvider = PerfProvider.instance,
+            timeProvider = FakeTimer(),
+            workStats = CtrlProxyWorkStats(),
+          ),
         jsonCompact = Json { encodeDefaults = true },
       )
 

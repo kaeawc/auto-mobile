@@ -33,7 +33,7 @@ import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
-import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
+import { loadSharp } from "../../utils/image/loadSharp";
 import {
   WebpBinaryResolver,
   type ResolvedWebpBinaries,
@@ -91,7 +91,8 @@ export interface ImageBackendDoctorLogger {
 export interface ImageBackendDoctorDependencies {
   platform?: NodeJS.Platform;
   hostPlatform?: NodeJS.Platform;
-  sharpLoader?: () => Promise<SharpFactory>;
+  /** Only load success matters; the loaded module is never inspected. */
+  sharpLoader?: () => Promise<unknown>;
   webpBinaryResolver?: { resolve(): Promise<ResolvedWebpBinaries> };
   logger?: ImageBackendDoctorLogger;
 }

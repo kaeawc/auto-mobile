@@ -14,15 +14,13 @@
  * metadata support; iOS Keychain / Core Data policy remains owned by #5161.
  */
 
-import {
-  describeDefaultAppFileProviderCoverage,
-  type AppFileProviderCoverage,
-} from "../../server/appFileService";
+import type { Platform } from "../../models/Platform";
+import { describeDefaultAppFileProviderCoverage } from "./defaultAppFileProviderCoverage";
 import {
   describeDefaultSharedStorageReadCoverage,
   IOS_MEDIA_READ_UNSUPPORTED_REASON,
   type SharedStorageReadCoverage,
-} from "../../server/sharedStorageReadService";
+} from "./sharedStorageReadCoverage";
 import type { KeystoreDiscoveryState } from "./keystoreDiscovery";
 
 /** Payload schema version. Bump when the report shape changes incompatibly. */
@@ -36,6 +34,16 @@ export type StorageDomain =
   | "key_value"
   | "databases"
   | "secure_state";
+
+export interface AppFileProviderCoverage {
+  readonly platform: Platform;
+  readonly domain: StorageDomain;
+  readonly write: boolean;
+  readonly list: boolean;
+  readonly read: boolean;
+  readonly namespaceReset: boolean;
+  readonly mediaIndexing: boolean;
+}
 
 /** Operations a domain may expose. */
 export type StorageOperation =

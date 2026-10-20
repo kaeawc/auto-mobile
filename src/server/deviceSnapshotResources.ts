@@ -1,7 +1,8 @@
 import { ResourceRegistry, type ResourceContent } from "./resourceRegistry";
-import { getDeviceSnapshotConfig, listDeviceSnapshots } from "./deviceSnapshotManager";
-import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "./deviceSnapshotResourceUris";
+import { getDeviceSnapshotConfig, listDeviceSnapshots } from "../daemon/deviceSnapshotManager";
+import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../daemon/deviceSnapshotResourceUris";
 import { logger } from "../utils/logger";
+import "./DeviceIncarnationInvalidator";
 
 async function getSnapshotArchive(): Promise<ResourceContent> {
   try {

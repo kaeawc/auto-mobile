@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import type { IosCtrlProxyBuilderSurface } from "../../src/ctrlProxy/IosCtrlProxyBuilderSurface";
+import { fakeIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
 import { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
 import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import {
@@ -52,18 +54,18 @@ test("test construction preserves injected dependencies and defaults undefined f
   const signing = new XcodeSigningManager();
   const apps = new DeviceAppManager();
   const ports = { isAvailable: async () => true };
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+  const manager = IOSCtrlProxyManager.createForTestingWithDeps({
     device,
     timer,
-    undefined,
-    executor,
-    signing,
-    apps,
-    undefined,
-    ports,
-    undefined,
-    undefined,
-  );
+    builder: undefined,
+    processExecutor: executor,
+    signingManager: signing,
+    deviceAppManager: apps,
+    remoteRunner: undefined,
+    hostPortAvailabilityChecker: ports,
+    xcodebuild: undefined,
+    processClient: undefined,
+  });
   expect(manager.diagnostics.timer).toBe(timer);
   expect(manager.diagnostics.processExecutor).toBe(executor);
   expect(manager.diagnostics.signingManager).toBe(signing);
@@ -77,10 +79,9 @@ test("test construction preserves injected dependencies and defaults undefined f
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
-// These nominal class dependencies are identity-only sentinels. With no prototype,
-// accidental method use fails instead of reaching a builder or a real device.
-function builderStub(): IosCtrlProxyBuilder {
-  return Object.create(null);
+// An identity-only sentinel: every builder member throws if the constructor uses it.
+function builderStub(): IosCtrlProxyBuilderSurface {
+  return fakeIosCtrlProxyBuilder({});
 }
 
 test("test construction preserves every injected dependency", () => {
@@ -94,7 +95,7 @@ test("test construction preserves every injected dependency", () => {
     throw new Error("Constructor must not perform operations");
   };
   const remoteRunner: NonNullable<
-    Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]
+    Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[0]["remoteRunner"]
   > = {
     isEnabled: () => false,
     isRunningInDocker: () => false,
@@ -117,18 +118,18 @@ test("test construction preserves every injected dependency", () => {
     startStreaming: unexpectedOperation,
   };
   const processClient = new IosCtrlProxyProcessClient(executor, timer);
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+  const manager = IOSCtrlProxyManager.createForTestingWithDeps({
     device,
     timer,
     builder,
-    executor,
-    signing,
-    apps,
+    processExecutor: executor,
+    signingManager: signing,
+    deviceAppManager: apps,
     remoteRunner,
-    ports,
+    hostPortAvailabilityChecker: ports,
     xcodebuild,
     processClient,
-  );
+  });
   expect(manager.diagnostics.device).toBe(device);
   expect(manager.diagnostics.timer).toBe(timer);
   expect(manager.diagnostics.builder).toBe(builder);

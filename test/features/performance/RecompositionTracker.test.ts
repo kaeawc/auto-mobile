@@ -3,7 +3,7 @@ import { RecompositionTracker } from "../../../src/features/performance/Recompos
 import type { BootedDevice, ObserveResult, RecompositionNodeInfo } from "../../../src/models";
 import { createTestDatabase } from "../../db/testDbHelper";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { createObserveResultForTest } from "../observe/observeScreenTestBuilders";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 import { wireCapture } from "../../helpers/wireCapture";
 
 /**
@@ -24,10 +24,11 @@ function node(recomposition: WireRecompositionNodeInfo, children: unknown[] = []
   return { recomposition, node: children };
 }
 
-function observation(nodes: unknown[], updatedAt?: number): ObserveResult {
+/** Without an explicit `updatedAt` the capture carries an unparseable one, so the tracker uses its clock. */
+function observation(nodes: unknown[], updatedAt: number | string = "unavailable"): ObserveResult {
   return {
     ...createObserveResultForTest({ viewHierarchy: wireCapture({ hierarchy: { node: nodes } }) }),
-    ...(updatedAt === undefined ? {} : { updatedAt }),
+    updatedAt,
   };
 }
 
@@ -134,7 +135,7 @@ describe("RecompositionTracker", () => {
     expect(result.recompositionSummary?.averageRecompositionDurationMs).toBe(20);
   });
 
-  it("falls back to the injected clock for the observation timestamp when updatedAt is absent", async () => {
+  it("falls back to the injected clock for the observation timestamp when updatedAt is not a usable timestamp", async () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1000);
     const tracker = new RecompositionTracker(timer);
@@ -145,7 +146,7 @@ describe("RecompositionTracker", () => {
       device,
     );
 
-    // Advance the fake clock 4s, then observe again with no updatedAt.
+    // Advance the fake clock 4s, then observe again with an unparseable updatedAt.
     timer.advanceTime(4000);
     const second = observation([node({ id: "a", total: 50, rolling1sAverage: 0 })]);
     await tracker.processObservation(second, device);

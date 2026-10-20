@@ -11,7 +11,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
@@ -171,21 +171,19 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
     tools = new RealToolCallPath([held, free, spare]).install();
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     manager.setDeviceReadiness(HOLDER, "automationReady");
-    await pool.bindOrReuseDeviceSession(OWNERLESS, free.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: OWNERLESS,
+      deviceId: free.deviceId,
+      platform: "android",
+    });
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
     // The server registered its real tools. A plain tool's handler is its device work: stub it,
@@ -215,7 +213,7 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await arrangeHarness();

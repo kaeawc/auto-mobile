@@ -1,5 +1,6 @@
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
+import { PLAN_SKELETON } from "./toolRegistryTypes";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BiometricAuth } from "../features/action/BiometricAuth";
 import { ActionableError, BootedDevice } from "../models";
@@ -8,7 +9,7 @@ import {
   addDeviceTargetingToSchema,
   addSessionUuidToSchema,
   responseShapeControlFields,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import { biometricAuthResultSchema } from "./biometricToolOutputSchemas";
 import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulatorCapabilities";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
@@ -164,6 +165,11 @@ export function registerBiometricTools() {
     "Simulate biometric auth: Android emulator/SDK hook, or iOS via the app's AutoMobile SDK or Simulator.",
     biometricAuthSchema,
     biometricAuthHandler,
-    { defaultEnabled: false, supportsProgress: true, outputSchema: biometricAuthResultSchema },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: biometricAuthResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 }

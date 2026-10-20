@@ -11,6 +11,7 @@ import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 class TestDeviceServiceClient extends DeviceServiceClient {
+  cancelScreenshotBackoff(): void {}
   protected readonly logTag = "TestConcurrentConnectClient";
   private readonly setup: (signal: AbortSignal) => Promise<void>;
 

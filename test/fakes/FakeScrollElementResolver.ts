@@ -1,4 +1,4 @@
-import type { ResolverSelector } from "../../src/server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../src/models/elementSelectorSchemas";
 import type {
   ElementResolver,
   ElementResolution,
@@ -33,7 +33,7 @@ export class FakeScrollElementResolver implements Pick<ElementResolver, "resolve
     const roots = snapshot.nodes
       .filter((node) => node.parentIndex === undefined)
       .map((node) => node.source);
-    const hierarchy = { hierarchy: { node: roots.length === 1 ? roots[0] : roots } };
+    const hierarchy = { hierarchy: { node: roots.length === 1 ? roots[0] : { node: roots } } };
     const element =
       selector.text !== undefined
         ? this.lookup.findElementByText(hierarchy, selector.text, selector.container)
@@ -43,7 +43,7 @@ export class FakeScrollElementResolver implements Pick<ElementResolver, "resolve
             ? this.scrollableContainer()
             : null;
     const entry = element
-      ? new SearchableHierarchy().project({ hierarchy: { node: element } })[0]
+      ? new SearchableHierarchy().project({ hierarchy: { node: { $: { ...element } } } })[0]
       : null;
     return {
       chosen: entry,

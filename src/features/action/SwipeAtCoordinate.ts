@@ -322,23 +322,21 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
       let reason: string | undefined;
       try {
-        const result = await this.androidClient.requestSwipe(
-          from.x,
-          from.y,
-          to.x,
-          to.y,
+        const result = await this.androidClient.requestSwipe({
+          x1: from.x,
+          y1: from.y,
+          x2: to.x,
+          y2: to.y,
           duration,
-          undefined,
           perf,
-          undefined,
-          () => {
+          onDispatch: () => {
             dispatched = true;
             onDispatch();
           },
           signal,
           displayId,
-          target.assertCurrent,
-        );
+          beforeSend: target.assertCurrent,
+        });
         throwIfAborted(signal);
         if (result.success) {
           return { success: true, ...base, duration };

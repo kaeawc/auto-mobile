@@ -148,7 +148,7 @@ describe("DevicePool", () => {
     const manager = new FakeDeviceManager([image]);
     devicePool = makePool({
       deviceManager: manager,
-      androidDeviceReboot: { run: async () => false },
+      androidDeviceReboot: { run: async () => false, clear: () => {} },
     });
     await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
     await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -790,9 +790,21 @@ describe("DevicePool", () => {
 
       // Touch devices in reverse insertion order so lastUsedAt ordering
       // (c < b < a) differs from map insertion order (a, b, c).
-      await devicePool.bindOrReuseDeviceSession("seed-c", "dev-c", "android");
-      await devicePool.bindOrReuseDeviceSession("seed-b", "dev-b", "android");
-      await devicePool.bindOrReuseDeviceSession("seed-a", "dev-a", "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "seed-c",
+        deviceId: "dev-c",
+        platform: "android",
+      });
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "seed-b",
+        deviceId: "dev-b",
+        platform: "android",
+      });
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "seed-a",
+        deviceId: "dev-a",
+        platform: "android",
+      });
 
       await devicePool.releaseDevice("dev-a", "seed-a");
       await devicePool.releaseDevice("dev-b", "seed-b");
@@ -802,7 +814,11 @@ describe("DevicePool", () => {
       // which should be ignored because it is no longer idle). Idle pool is
       // now {dev-a, dev-b}; insertion order would yield dev-a, but dev-b is
       // less recently used and must win.
-      await devicePool.bindOrReuseDeviceSession("seed-c2", "dev-c", "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "seed-c2",
+        deviceId: "dev-c",
+        platform: "android",
+      });
 
       const assignments = await devicePool.assignMultipleDevicesByCriteria(
         [

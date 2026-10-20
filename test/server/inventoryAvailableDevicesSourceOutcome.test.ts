@@ -147,7 +147,7 @@ describe("available-devices gives one answer per pooled discovery-source outcome
     };
   }
 
-  const everySurface = (answer: unknown) => ({
+  const everySurface = (answer: string | number) => ({
     poolStats: answer,
     daemonAvailableDevices: answer,
     cliInDaemon: answer,

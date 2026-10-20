@@ -88,19 +88,13 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     tools = new RealToolCallPath([held, free]).install();
     executor = new DefaultPlanStepExecutor<RegisteredTool>(ToolRegistry, () => true, timer);
-    await pool.bindOrReuseDeviceSession(
-      SESSION,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
   }
 
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
@@ -205,7 +199,11 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     arranged(
       "a plan with its own session overrides the step's UUID and is not refused",
       async () => {
-        await pool.bindOrReuseDeviceSession(PLAN_SESSION, free.deviceId, "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: PLAN_SESSION,
+          deviceId: free.deviceId,
+          platform: "android",
+        });
 
         const result = await runWithToolSelectionContext(
           planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: OTHER }),
@@ -290,7 +288,11 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       arranged(
         `an ${name} plan session keeps the connection's ambient session override`,
         async () => {
-          await pool.bindOrReuseDeviceSession(OWN_SESSION, free.deviceId, "android");
+          await pool.bindOrReuseDeviceSession({
+            sessionId: OWN_SESSION,
+            deviceId: free.deviceId,
+            platform: "android",
+          });
 
           const result = await runWithPlanSession(tap, blank, OWN_SESSION);
 
@@ -304,7 +306,11 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       arranged(
         `a device-aware call with an ${name} sessionUuid runs on the ambient session`,
         async () => {
-          await pool.bindOrReuseDeviceSession(OWN_SESSION, free.deviceId, "android");
+          await pool.bindOrReuseDeviceSession({
+            sessionId: OWN_SESSION,
+            deviceId: free.deviceId,
+            platform: "android",
+          });
 
           await runWithToolSelectionContext({ routingSessionUuid: OWN_SESSION }, () =>
             tools.call("tapAt", { x: 10, y: 10, sessionUuid: blank }),

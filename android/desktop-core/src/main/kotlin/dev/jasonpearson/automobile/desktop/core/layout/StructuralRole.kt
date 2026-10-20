@@ -47,69 +47,60 @@ enum class StructuralRole {
  * `UITextView` is matched before static [Text] because it contains `TextView` (Android's static
  * label). Unrecognised classes map to [Other].
  */
-fun structuralRole(className: String): StructuralRole =
-  when {
+fun structuralRole(className: String): StructuralRole {
+  val listRole = structuralListRole(className)
+  return when {
     // Editable text entry. Android EditText; iOS UITextField/UISecureTextField/UISearchBar and the
     // editable UITextView (matched explicitly here — before the static Text branch — so it is not
     // mistaken for Android's static TextView); plus the XCUITest-native equivalents.
-    className.contains("EditText") ||
-      className.contains("TextField") ||
-      className.contains("SearchField") ||
-      className.contains("SearchBar") ||
-      className.contains("UITextView") ||
-      className.contains("XCUIElementTypeTextView") -> StructuralRole.TextField
+    listOf(
+        "EditText",
+        "TextField",
+        "SearchField",
+        "SearchBar",
+        "UITextView",
+        "XCUIElementTypeTextView",
+      )
+      .any(className::contains) -> StructuralRole.TextField
     // Checkboxes, radio buttons, and toggles/switches — before Button, since
     // ToggleButton/CompoundButton/RadioButton all contain the "Button" substring. Android's
     // RadioButton folds into Checkbox: the iOS runner reports a radio as a checkable `UIView` with
     // no distinct class, which structuralRoleOf promotes to Checkbox, so a shared checkable role is
     // the only one that pairs the two (issue #4872 review).
-    className.contains("CheckBox") ||
-      className.contains("XCUIElementTypeCheckBox") ||
-      className.contains("RadioButton") -> StructuralRole.Checkbox
+    listOf("CheckBox", "XCUIElementTypeCheckBox", "RadioButton").any(className::contains) ->
+      StructuralRole.Checkbox
     // "Switch" also matches iOS UISwitch and XCUIElementTypeSwitch.
-    className.contains("Switch") ||
-      className.contains("ToggleButton") ||
-      className.contains("XCUIElementTypeToggle") -> StructuralRole.Switch
+    listOf("Switch", "ToggleButton", "XCUIElementTypeToggle").any(className::contains) ->
+      StructuralRole.Switch
     // Buttons: Android Button/ImageButton/MaterialButton, iOS UIButton / XCUIElementTypeButton.
-    className.contains("Button") || className.contains("XCUIElementTypeButton") ->
-      StructuralRole.Button
+    listOf("Button", "XCUIElementTypeButton").any(className::contains) -> StructuralRole.Button
     // Static text labels: Android TextView, iOS UILabel / XCUIElementTypeStaticText.
-    className.contains("TextView") ||
-      className.contains("UILabel") ||
-      className.contains("XCUIElementTypeStaticText") -> StructuralRole.Text
+    listOf("TextView", "UILabel", "XCUIElementTypeStaticText").any(className::contains) ->
+      StructuralRole.Text
     // Images: Android ImageView, iOS UIImageView / XCUIElementTypeImage.
-    className.contains("ImageView") || className.contains("XCUIElementTypeImage") ->
-      StructuralRole.Image
+    listOf("ImageView", "XCUIElementTypeImage").any(className::contains) -> StructuralRole.Image
     // A single row/cell within a list — before List, since UITableViewCell contains "TableView".
     // Catches iOS UITableViewCell/UICollectionViewCell and XCUIElementTypeCell.
-    className.contains("Cell") -> StructuralRole.ListItem
-    // List / collection containers: Android RecyclerView/ListView/GridView, iOS UITableView/
-    // UICollectionView, and the XCUITest-native XCUIElementTypeTable.
-    className.contains("RecyclerView") ||
-      className.contains("ListView") ||
-      className.contains("GridView") ||
-      className.contains("TableView") ||
-      className.contains("CollectionView") ||
-      className.contains("XCUIElementTypeTable") -> StructuralRole.List
+    listRole != null -> listRole
     // Top/bottom chrome: toolbars, action/nav bars, tab bars. Android Toolbar/ActionBar; iOS
     // UIToolbar/UINavigationBar/UITabBar and the XCUITest-native equivalents (all covered by the
     // "Toolbar"/"NavigationBar"/"TabBar" substrings).
-    className.contains("Toolbar") ||
-      className.contains("ActionBar") ||
-      className.contains("NavigationBar") ||
-      className.contains("TabBar") -> StructuralRole.Toolbar
+    listOf("Toolbar", "ActionBar", "NavigationBar", "TabBar").any(className::contains) ->
+      StructuralRole.Toolbar
     // Progress indicators: Android ProgressBar, iOS UIProgressView/UIActivityIndicatorView.
-    className.contains("ProgressBar") ||
-      className.contains("UIProgressView") ||
-      className.contains("UIActivityIndicatorView") ||
-      className.contains("XCUIElementTypeActivityIndicator") -> StructuralRole.Progress
+    listOf(
+        "ProgressBar",
+        "UIProgressView",
+        "UIActivityIndicatorView",
+        "XCUIElementTypeActivityIndicator",
+      )
+      .any(className::contains) -> StructuralRole.Progress
     // Scroll containers: Android ScrollView/NestedScrollView, iOS UIScrollView, XCUITest
     // ScrollView.
-    className.contains("ScrollView") || className.contains("XCUIElementTypeScrollView") ->
+    listOf("ScrollView", "XCUIElementTypeScrollView").any(className::contains) ->
       StructuralRole.ScrollView
     // Web content: Android WebView, iOS WKWebView / XCUIElementTypeWebView.
-    className.contains("WebView") || className.contains("XCUIElementTypeWebView") ->
-      StructuralRole.WebView
+    listOf("WebView", "XCUIElementTypeWebView").any(className::contains) -> StructuralRole.WebView
     // Generic containers: Android layouts/view groups/Compose host; iOS structural wrappers. The
     // runner emits XCUIApplication + UIWindow for the mandatory root and window and UIView for any
     // non-semantic wrapper, so these must land in the same role as Android's FrameLayout/ViewGroup
@@ -122,26 +113,42 @@ fun structuralRole(className: String): StructuralRole =
     // Container, and since every descendant key includes the root segment the two live trees would
     // stay wholly disjoint (issue #4872 review). A plain `View` is a generic wrapper regardless, so
     // this also mirrors iOS's `UIView -> Container` for non-root spacers.
-    className == "android.view.View" ||
-      className == "View" ||
-      className.contains("Layout") ||
-      className.contains("ViewGroup") ||
-      className.contains("ComposeView") ||
-      className.contains("XCUIApplication") ||
-      className.contains("UIWindow") ||
-      className.contains("UIView") ||
-      className.contains("XCUIElementTypeApplication") ||
-      className.contains("XCUIElementTypeWindow") ||
-      className.contains("XCUIElementTypeGroup") ||
-      className.contains("XCUIElementTypeOther") ||
-      // Catch-all for custom Android View subclasses (e.g. `com.example.ProfileView`) and iOS
-      // structural views like `UIStackView`: the specific `*View` families (TextView, ImageView,
-      // ScrollView, WebView, RecyclerView, …) are matched above, so anything else ending in `View`
-      // is a bespoke container. It lands in Container to mirror the iOS runner, which reports an
-      // equivalent custom `.other` element as `UIView -> Container`; otherwise the custom subtree
-      // keys as Other on one side and Container on the other and reads as disjoint (issue #4872
-      // review).
-      className.endsWith("View") ||
-      className == MULTI_WINDOW_ROOT_CLASS_NAME -> StructuralRole.Container
+    isStructuralContainer(className) -> StructuralRole.Container
     else -> StructuralRole.Other
+  }
+}
+
+private fun isStructuralContainer(className: String): Boolean {
+  val plainOrSyntheticView =
+    className in setOf("android.view.View", "View", MULTI_WINDOW_ROOT_CLASS_NAME)
+  val frameworkContainer =
+    listOf(
+        "Layout",
+        "ViewGroup",
+        "ComposeView",
+        "XCUIApplication",
+        "UIWindow",
+        "UIView",
+        "XCUIElementTypeApplication",
+        "XCUIElementTypeWindow",
+        "XCUIElementTypeGroup",
+        "XCUIElementTypeOther",
+      )
+      .any(className::contains)
+  return plainOrSyntheticView || frameworkContainer || className.endsWith("View")
+}
+
+private fun structuralListRole(className: String): StructuralRole? =
+  when {
+    className.contains("Cell") -> StructuralRole.ListItem
+    listOf(
+        "RecyclerView",
+        "ListView",
+        "GridView",
+        "TableView",
+        "CollectionView",
+        "XCUIElementTypeTable",
+      )
+      .any(className::contains) -> StructuralRole.List
+    else -> null
   }

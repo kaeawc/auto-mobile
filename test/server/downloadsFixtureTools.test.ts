@@ -1,4 +1,5 @@
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
+import { toolJson } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerDownloadsFixtureTools } from "../../src/server/downloadsFixtureTools";
@@ -48,9 +49,9 @@ describe("stageSessionDownloads tool (#7007)", () => {
       (tool) => tool.name === "stageSessionDownloads",
     );
     expect(definition).toBeDefined();
-    expect(definition!.inputSchema.properties.sessionUuid).toBeDefined();
-    expect(definition!.inputSchema.properties.directory).toBeDefined();
-    expect(definition!.inputSchema.properties.files).toBeDefined();
+    expect(definition!.inputSchema.properties).toHaveProperty("sessionUuid");
+    expect(definition!.inputSchema.properties).toHaveProperty("directory");
+    expect(definition!.inputSchema.properties).toHaveProperty("files");
     expect(ToolRegistry.getTool("stageSessionDownloads")!.defaultEnabled).toBe(false);
     // Device-aware registration is what makes the MCP boundary's #6069
     // cross-session ownership guard run for this tool.
@@ -176,7 +177,7 @@ describe("stageSessionDownloads tool (#7007)", () => {
       reset: true,
       indexMedia: false,
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
     expect(payload).toMatchObject({
       success: true,
       sessionUuid: "session-1",

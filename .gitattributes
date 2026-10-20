@@ -3,6 +3,7 @@ test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
 test/fixtures/ci-time-to-green/*.json text eol=lf
+test/fixtures/prototype-capabilities/*.json text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
@@ -57,7 +58,6 @@ test/fixtures/identify-interactions/playground-text-fields.json text eol=lf
 # Pin byte-exact captured plutil output to LF across Windows checkouts.
 test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
 test/features/observe/windowDumps/*.txt text eol=lf
-scripts/utils-import-direction-baseline.txt text eol=lf
 # Generated MDM profile asserted byte-for-byte against its generator (#10595).
 docs/assets/mdm/*.mobileconfig text eol=lf
 scripts/unit-test-host-spawn-allowlist.txt text eol=lf
@@ -168,7 +168,6 @@ test/fixtures/android-apk-signing/*.txt text eol=lf
 test/fixtures/refusal-wire/*.json text eol=lf
 test/fixtures/refusal-wire/surfaces/*.json text eol=lf
 test/fixtures/refusal-wire-hints/*.json text eol=lf
-test/lint/*-baseline.txt text eol=lf
 
 test/fixtures/android-boot-admission/README.md text eol=lf
 test/fixtures/gradle-retry/*.log text eol=lf
@@ -191,3 +190,6 @@ test/fixtures/android-system-image-37/** text eol=lf
 test/fixtures/input-route-params/*.json text eol=lf
 test/fixtures/ide-route-params/*.json text eol=lf
 test/fixtures/docs-site/*.html text eol=lf
+test/fixtures/android-pin-dialog/*.json text eol=lf
+test/fixtures/android-pin-dialog/*.xml text eol=lf
+test/fixtures/android-pin-dialog/*.md text eol=lf

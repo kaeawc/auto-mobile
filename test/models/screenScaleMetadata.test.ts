@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   readScreenScaleMetadata,
+  readScreenScaleMetadataInput,
   screenScaleMetadataSpread,
 } from "../../src/models/ScreenScaleMetadata";
 
@@ -41,8 +42,8 @@ describe("readScreenScaleMetadata (#4548)", () => {
     expect(readScreenScaleMetadata({ ...valid, pixelHeight: Number.POSITIVE_INFINITY })).toBeNull();
     // A coercible impostor (e.g. a string that survived JSON parsing) must not pass.
     expect(
-      readScreenScaleMetadata({
-        nativeScale: "3" as unknown as number,
+      readScreenScaleMetadataInput({
+        nativeScale: "3",
         pixelWidth: 1179,
         pixelHeight: 2553,
       }),

@@ -4,7 +4,7 @@ import {
   mapStorageSdkError,
   iosSqlErrorMessage,
   iosStorageErrorMessage,
-} from "../../src/server/storageSdkErrors";
+} from "../../src/utils/storageSdkErrors";
 
 describe("storage SDK error mapping", () => {
   test("invalid suite errors explain standard aliases and suite validity", () => {

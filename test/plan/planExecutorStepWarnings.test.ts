@@ -9,7 +9,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
@@ -29,7 +29,7 @@ const interactionDeps: InteractionToolDependencies = {};
 describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
   const warning = "The matched element is disabled; the tap may have no effect.";
   const device = { platform: "android" as const, deviceId: "fake-device", name: "Fake" };
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let coordinator: CriticalSectionCoordinator;
   let restoreTools: () => void;
   let restoreCoordinator: () => void;
@@ -47,7 +47,7 @@ describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
 
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
-    executor = new DefaultPlanExecutor(new FakeTimer());
+    executor = createDefaultPlanExecutor(new FakeTimer());
     coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
     restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
     interactionDeps.tapOnElementFactory = () => ({
@@ -147,7 +147,7 @@ describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
  * a screen the caller thinks is in a different state.
  */
 describe("PlanExecutor — best-effort warnings in debug.steps", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
 
   const sendKeysSchema = z.object({
     commands: z.array(z.object({ action: z.string() })),
@@ -157,7 +157,7 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
   });
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
   });
 
   afterEach(() => {
@@ -298,7 +298,7 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
 });
 
 describe("PlanExecutor — failed criticalSection warnings", () => {
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let timer: FakeTimer;
   let restoreTools: () => void;
   let restoreCoordinator: () => void;
@@ -315,7 +315,7 @@ describe("PlanExecutor — failed criticalSection warnings", () => {
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
     timer = new FakeTimer();
-    executor = new DefaultPlanExecutor(timer);
+    executor = createDefaultPlanExecutor(timer);
     coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
     restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
     registerCriticalSectionTools();

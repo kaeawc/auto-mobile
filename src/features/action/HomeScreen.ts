@@ -14,7 +14,7 @@ import {
   ViewHierarchyResult,
 } from "../../models";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -77,15 +77,21 @@ export class HomeScreen extends BaseVisualChange {
   // SpringBoard launch is idempotent; retry timeouts briefly within the Home budget (#11946).
   private static readonly IOS_SIMCTL_LAUNCH_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400];
 
+  private readonly globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
-    collaborators: DisplayFenceDependencies = {},
+    collaborators: DisplayFenceDependencies & {
+      /** Defaults to the device's real CtrlProxy client. */
+      globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+    } = {},
   ) {
     super(device, adb, timer, undefined, collaborators);
     this.device = device;
+    this.globalActionClient = collaborators.globalActionClient;
   }
 
   async execute(call?: ActionCall): Promise<HomeScreenResult>;
@@ -238,15 +244,11 @@ export class HomeScreen extends BaseVisualChange {
       return false;
     }
     if (
-      !(await isForegroundLauncher(
-        launcherPackage,
-        this.adb,
-        this.device.deviceId,
-        this.timer,
-        deviceIncarnationToken(this.device.deviceId),
+      !(await isForegroundLauncher(launcherPackage, this.adb, this.device.deviceId, this.timer, {
+        incarnationToken: deviceIncarnationToken(this.device.deviceId),
         signal,
-        5000,
-      ))
+        timeoutMs: 5000,
+      }))
     ) {
       return false;
     }
@@ -292,7 +294,8 @@ export class HomeScreen extends BaseVisualChange {
 
     let globalActionSucceeded = false;
     try {
-      const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+      const client =
+        this.globalActionClient ?? AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
       const result = await client.requestGlobalAction("home", 3000);
       globalActionSucceeded = result.success;
       if (!globalActionSucceeded) {
@@ -438,7 +441,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async tryIosRunnerHome(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     timeoutMs: number,
     perf: PerformanceTracker | undefined,
     frameContext: string | undefined,
@@ -473,7 +476,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async verifyIosHomeForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     perf?: PerformanceTracker,
     retryDelaysMs: readonly number[] = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
     timeoutMs: number = HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
@@ -548,7 +551,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async readIosHomeForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     perf: PerformanceTracker | undefined,
     remainingMs: number,
     signal?: AbortSignal,
@@ -573,7 +576,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private throwIosHomeNotForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     lastHierarchy: CtrlProxyHierarchy | undefined,
   ): never {
     const foregroundApp = lastHierarchy?.packageName ?? "unknown app";

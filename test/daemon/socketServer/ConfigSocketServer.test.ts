@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import {
   ConfigSocketRequest,
-  ConfigSocketResponse,
   ConfigSocketServer,
 } from "../../../src/daemon/socketServer/ConfigSocketServer";
 import { DeviceSnapshotSocketServer } from "../../../src/daemon/deviceSnapshotSocketServer";
@@ -31,23 +30,12 @@ type DeviceSnapshotSocketRequest = ConfigSocketRequest<
   "device_snapshot_request",
   DeviceSnapshotConfigInput
 >;
-type DeviceSnapshotSocketResponse = ConfigSocketResponse<
-  "device_snapshot_response",
-  DeviceSnapshotConfig,
-  "evictedSnapshotNames"
->;
 type VideoRecordingSocketRequest = ConfigSocketRequest<
   "video_recording_request",
   VideoRecordingConfigInput
 >;
-type VideoRecordingSocketResponse = ConfigSocketResponse<
-  "video_recording_response",
-  VideoRecordingConfig,
-  "evictedRecordingIds"
->;
 
 type TestRequest = ConfigSocketRequest<"test_config_request", TestConfigInput>;
-type TestResponse = ConfigSocketResponse<"test_config_response", TestConfig, "evictedItemIds">;
 
 class TestableConfigSocketServer extends ConfigSocketServer<
   TestConfig,
@@ -113,7 +101,7 @@ describe("ConfigSocketServer", () => {
 
     await server.simulateLine(socket, JSON.stringify(request));
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages();
     expect(server.getCalls).toBe(1);
     expect(messages).toEqual([
       {
@@ -139,7 +127,7 @@ describe("ConfigSocketServer", () => {
 
     await server.simulateLine(socket, JSON.stringify(request));
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages();
     expect(server.updateCalls).toEqual([{ enabled: false }]);
     expect(messages).toEqual([
       {
@@ -166,7 +154,7 @@ describe("ConfigSocketServer", () => {
 
     await server.simulateLine(socket, JSON.stringify(request));
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages();
     expect(server.updateCalls).toEqual([null]);
     expect(messages).toEqual([
       {
@@ -189,7 +177,7 @@ describe("ConfigSocketServer", () => {
 
     await server.simulateLine(socket, JSON.stringify(request));
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages();
     expect(server.updateCalls).toEqual([]);
     expect(messages).toEqual([
       {
@@ -210,7 +198,7 @@ describe("ConfigSocketServer", () => {
 
     await server.simulateLine(socket, JSON.stringify(request));
 
-    const messages = socket.getWrittenMessages<TestResponse>();
+    const messages = socket.getWrittenMessages();
     expect(messages).toEqual([
       {
         id: "bad-method",
@@ -268,7 +256,7 @@ describe("config socket wrappers", () => {
     await server.simulateLine(socket, JSON.stringify(request));
 
     expect(updates).toEqual([{ includeAppData: true }]);
-    expect(socket.getWrittenMessages<DeviceSnapshotSocketResponse>()).toEqual([
+    expect(socket.getWrittenMessages()).toEqual([
       {
         id: "device-set",
         type: "device_snapshot_response",
@@ -316,7 +304,7 @@ describe("config socket wrappers", () => {
     await server.simulateLine(socket, JSON.stringify(request));
 
     expect(updates).toEqual([{ format: "mp4" }]);
-    expect(socket.getWrittenMessages<VideoRecordingSocketResponse>()).toEqual([
+    expect(socket.getWrittenMessages()).toEqual([
       {
         id: "video-set",
         type: "video_recording_response",

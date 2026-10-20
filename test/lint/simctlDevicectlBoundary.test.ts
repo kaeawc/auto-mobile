@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative } from "node:path";
 import ts from "typescript";
 import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
@@ -32,7 +33,7 @@ const OWNED_CONCERNS = new Map<string, string>([
 ]);
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     return entry.isDirectory() ? sourceFiles(path) : entry.name.endsWith(".ts") ? [path] : [];
   });
@@ -238,7 +239,7 @@ let sourceOffenders: BoundaryOffender[];
 beforeAll(() => {
   sourceOffenders = sourceFiles(join(ROOT, "src")).flatMap((file) => {
     const repoPath = relative(ROOT, file).replace(/\\/g, "/");
-    return findOffenders(readFileSync(file, "utf8"), repoPath);
+    return findOffenders(readGuardFile(file), repoPath);
   });
 }, TREE_SCAN_HOOK_TIMEOUT_MS);
 

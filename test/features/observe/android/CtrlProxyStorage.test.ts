@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
@@ -26,15 +27,14 @@ describe("CtrlProxyStorage (Android)", function () {
     fakeTimer.enableAutoAdvance();
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
     // The inspected app has a live process unless a test says otherwise (#10246).
-    fakeAdb.setCommandResponse("pidof", { stdout: "4242\n", stderr: "" });
+    fakeAdb.setCommandResponse("pidof", createExecResult("4242\n", ""));
 
     testDevice = {
       deviceId: "test-device-storage",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -146,7 +146,7 @@ describe("CtrlProxyStorage (Android)", function () {
       const pending = client.discoverKeystore("com.example");
       await waitForSentMessages(socket, count + 1);
       const request = findSentMessage(socket!, "discover_keystore");
-      const state = {
+      const state: Awaited<ReturnType<AndroidCtrlProxyClient["discoverKeystore"]>> = {
         schemaVersion: 1,
         capability: "storage.keystore",
         outcome: "disabled",
@@ -198,7 +198,10 @@ describe("CtrlProxyStorage (Android)", function () {
     }
   });
 
-  const sdkSnapshot = {
+  const sdkSnapshot: Extract<
+    Awaited<ReturnType<AndroidCtrlProxyClient["getSdkCapabilities"]>>,
+    { status: "available" }
+  >["snapshot"] = {
     schemaVersion: 1,
     capabilities: [
       { id: "network.control", state: "SUPPORTED" },
@@ -360,7 +363,7 @@ describe("CtrlProxyStorage (Android)", function () {
 
   describe("subscribeStorage", function () {
     test("refuses a stopped app before any provider request and never starts it (#10246)", async function () {
-      fakeAdb.setCommandResponse("pidof", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("pidof", createExecResult("", ""));
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
       const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
         webSocketFactory: factory,
@@ -466,7 +469,7 @@ describe("CtrlProxyStorage (Android)", function () {
   });
 
   describe("unsubscribeStorage", function () {
-    // CtrlProxyMessageHandlerTest.kt's `unsubscribe_storage with only subscriptionId resolves
+    // CtrlProxyMessageHandlerStorageTest.kt's `unsubscribe_storage with only subscriptionId resolves
     // packageName and fileName` uses the same JSON shape; changing either side must change both.
     const subscriptionId = "com.example:settings.xml";
 

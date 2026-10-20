@@ -2,10 +2,9 @@ import { makePool } from "../helpers/makePool";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
 import { ActionableError } from "../../src/models/ActionableError";
-import { type PooledDevice } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossIncidentStore,
@@ -29,7 +28,6 @@ import {
   KillTrackingShutdownManager,
   setup,
   setupPassiveRestart,
-  DevicePoolProcessExitInternals,
   assertNoRecoveryReservationsRemain,
   flush,
 } from "../helpers/devicePoolRecoveryShutdownHarness";
@@ -138,14 +136,13 @@ test("same-serial emulator continuity is enabled when the recovery environment i
     });
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session",
-      original.deviceId,
-      "android",
-      image,
-      undefined,
-      original,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      expectedIdentity: original,
+    });
     const captured = pool.getDevice(original.deviceId)!;
     try {
       expect(pool.getRecoveryPolicy().onLoss).toBe(false);
@@ -191,14 +188,13 @@ test("continuity releases an externally closed emulator without relaunch and reh
   });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   const originalConnectionId = `${captured.id}#${captured.incarnation}`;
   const incidentId = await pool.recordEmulatorLossIncident(
@@ -281,7 +277,7 @@ test("a pool-allocated emulator without a recorded image still persists as devic
       pool.recoverSessionBoundAndroidDeviceAfterLoss(
         original.deviceId,
         undefined,
-        pool.getDevice(original.deviceId),
+        pool.getDevice(original.deviceId) ?? undefined,
       ),
     ).resolves.toBe("released");
     expect(manager.kills).toEqual([]);
@@ -331,7 +327,7 @@ test("onLoss recovery does not actively relaunch a pool-allocated emulator witho
       pool.recoverSessionBoundAndroidDeviceAfterLoss(
         original.deviceId,
         undefined,
-        pool.getDevice(original.deviceId),
+        pool.getDevice(original.deviceId) ?? undefined,
       ),
     ).resolves.toBe("released");
     // Active relaunch stays gated on a recorded configured image even though
@@ -361,14 +357,13 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
   });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   const incidentId = await pool.recordEmulatorLossIncident(
     original.deviceId,
@@ -378,14 +373,8 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
     throw new Error("Expected emulator-loss incident to be recorded");
   }
   try {
-    const eviction = pool as unknown as {
-      evictMissingPooledDevice(
-        device: PooledDevice,
-        reason: string,
-        options: { attemptDeviceLossRecovery: boolean; incidentId: string },
-      ): Promise<void>;
-    };
-    await eviction.evictMissingPooledDevice(captured, "not present in adb devices", {
+    const eviction = pool.testHooks;
+    await eviction.evictMissingPooledDevice.call(captured, "not present in adb devices", {
       attemptDeviceLossRecovery: true,
       incidentId,
     });
@@ -609,7 +598,7 @@ test("last joined restart waiter aborts slow discovery and fences its late devic
   expect(String(await first)).toContain("Cannot safely recover session");
   expect(secondSettled).toBe(false);
   manager.bootedDevices = [original];
-  const lateDiscovery = await originalDiscovery();
+  const lateDiscovery = await originalDiscovery("android");
   timer.advanceTime(1_000);
   // Resolve in the same turn as the final deadline, before rejection cleanup runs.
   discovery.resolve(lateDiscovery);
@@ -702,7 +691,9 @@ test.each([
         );
     const startupCaller = new AbortController();
     const first = rehydration
-      ? runWithAbortSignal(startupCaller.signal, () => sessions.rehydratePersistedSessions(pool))
+      ? runWithAbortSignal(startupCaller.signal, () =>
+          sessions.rehydratePersistedSessions(pool, { signal: startupCaller.signal }),
+        )
       : acquire(3_500);
     await drainUntilQuiescent(timer);
     expect(reads).toBe(1);
@@ -754,10 +745,11 @@ test.each(["deadline", "abort"] as const)(
     const onUnhandled = (error: unknown) => unhandled.push(error);
     process.on("unhandledRejection", onUnhandled);
     try {
-      const acquire = (requestDeadlineMs: number | undefined) =>
+      const acquire = (requestDeadlineMs: number | undefined, signal?: AbortSignal) =>
         sessions
           .getOrCreateSession("session", pool, "android", undefined, true, {
             requestDeadlineMs,
+            signal,
           })
           .then(
             (session) => session,
@@ -772,7 +764,7 @@ test.each(["deadline", "abort"] as const)(
       const caller = new AbortController();
       let settled = false;
       const second = runWithAbortSignal(caller.signal, () =>
-        acquire(cancellation === "deadline" ? 5_000 : undefined),
+        acquire(cancellation === "deadline" ? 5_000 : undefined, caller.signal),
       ).then((result) => {
         settled = true;
         return result;
@@ -907,21 +899,16 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
     emulatorLossIncidentStore: incidents,
     recoveryPolicy: { onLoss: false, maxAttempts: 1 },
   });
-  const child = Object.assign(new EventEmitter(), {
-    exitCode: null as number | null,
-    signalCode: null,
-    stdout: null,
-    stderr: null,
-  }) as ChildProcess;
+  const child = new StreamlessChildProcess();
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "owner",
-    original.deviceId,
-    "android",
-    image,
-    child,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    childProcess: child,
+    expectedIdentity: original,
+  });
   await sessions.releaseSession("owner");
   await pool.releaseDevice(original.deviceId, "owner");
   expect(pool.getDevice(original.deviceId)).toMatchObject({ status: "idle", sessionId: null });
@@ -930,14 +917,14 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
   await incidents.writeStarted.promise;
   let failure: unknown;
   try {
-    const binding = pool.bindOrReuseDeviceSession(
-      "new-session",
-      original.deviceId,
-      "android",
-      image,
-      child,
-      original,
-    );
+    const binding = pool.bindOrReuseDeviceSession({
+      sessionId: "new-session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      childProcess: child,
+      expectedIdentity: original,
+    });
     await drainUntil(() => timer.getPendingTimeouts().includes(1_000), {
       description: "bind armed the shared incident deadline",
     });
@@ -960,13 +947,8 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
   expect(sessions.getSession("new-session")).toBeNull();
 });
 
-function exitedChild(): ChildProcess & { exitCode: number | null } {
-  return Object.assign(new EventEmitter(), {
-    exitCode: null as number | null,
-    signalCode: null,
-    stdout: null,
-    stderr: null,
-  }) as ChildProcess & { exitCode: number | null };
+function exitedChild(): StreamlessChildProcess {
+  return new StreamlessChildProcess();
 }
 
 async function setupProcessExitPool(
@@ -989,16 +971,16 @@ async function setupProcessExitPool(
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   const child = exitedChild();
-  const internals = pool as unknown as DevicePoolProcessExitInternals;
-  await internals.trackStartedDeviceProcess(original, child);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    child,
-    original,
-  );
+  const internals = pool.testHooks;
+  await internals.trackStartedDeviceProcess.call(original, child);
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    childProcess: child,
+    expectedIdentity: original,
+  });
   return { timer, store, sessions, pool, manager, child, internals };
 }
 
@@ -1082,8 +1064,8 @@ test("a late dead-child track records a fresh loss and keeps its settlement guar
   expect(first).toMatchObject({ recovery: { outcome: "recovered" }, session: { state: "active" } });
   expect(recoveryInternals(pool).emulatorLossRecoverySettlements.size).toBe(0);
   manager.bootedDevices = [];
-  const late = internals
-    .trackStartedDeviceProcess(original, child)
+  const late = internals.trackStartedDeviceProcess
+    .call(original, child)
     .catch((error: unknown) => error);
   try {
     const secondId = await store.completed.promise;

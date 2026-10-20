@@ -287,13 +287,16 @@ class DragStrokeSessionTest {
     val errors = mutableListOf<Exception>()
     val session =
       DragStrokeSession(
-        dragStrokePlan(from, to, press, duration, hold),
-        dispatcher,
-        scheduler,
-        7,
-        { errors.add(it) },
-        { success, error -> results.add(Result(scheduler.nowMs, success, error)) },
-        nowMs = { scheduler.nowMs },
+        plan = dragStrokePlan(from, to, press, duration, hold),
+        dispatcher = dispatcher,
+        timing =
+          DragStrokeDependencies(
+            deadline = scheduler,
+            nowMs = { scheduler.nowMs },
+          ),
+        displayId = 7,
+        logError = { errors.add(it) },
+        onFinished = { success, error -> results.add(Result(scheduler.nowMs, success, error)) },
       )
 
     fun start() {
@@ -349,13 +352,16 @@ class DragStrokeSessionTest {
     val errors = mutableListOf<Exception>()
     val session =
       DragStrokeSession(
-        plan,
-        dispatcher,
-        timer,
-        7,
-        { errors.add(it) },
-        { success, error -> results.add(success to error) },
-        nowMs = { clock.nowMs },
+        plan = plan,
+        dispatcher = dispatcher,
+        timing =
+          DragStrokeDependencies(
+            deadline = timer,
+            nowMs = { clock.nowMs },
+          ),
+        displayId = 7,
+        logError = { errors.add(it) },
+        onFinished = { success, error -> results.add(success to error) },
       )
 
     fun complete(elapsedMs: Long = dispatcher.calls.last().stroke.segment.durationMs) {

@@ -7,7 +7,7 @@ import {
   deviceLossOutcomeFromError,
   enrichDeviceLossOutcome,
   remainingDeviceLossIncidentWaitMs,
-} from "../../src/server/deviceLossOutcome";
+} from "../../src/utils/deviceLossOutcome";
 
 describe("device-loss outcome", () => {
   test("makes confirmed device loss distinguishable from an ordinary tool failure", () => {

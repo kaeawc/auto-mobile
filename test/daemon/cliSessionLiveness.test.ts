@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
@@ -190,7 +191,7 @@ describe("CLI-owned session liveness (#6870)", () => {
       timeoutMs: 30 * 60_000,
     });
     sessionManager.adoptCliLivenessPolicy("cli");
-    sessionManager.recordHeartbeat("mcp");
+    await deliverDaemonHeartbeat(sessionManager, "mcp");
 
     const reaped: Array<{ sessionId: string; reason: string }> = [];
     const monitor = monitorWith(reaped);

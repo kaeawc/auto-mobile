@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 // Declared manifest of lint-chain configuration and baseline reads. Update it
@@ -17,15 +18,7 @@ const LINT_READ_FILES = {
   "turbo.json": "oxfmt formats the task configuration",
   "scripts/oxlint-baseline.txt": "oxlint-baseline.sh",
   "scripts/file-size-baseline.txt": "file-size-baseline.sh",
-  "scripts/utils-import-direction-baseline.txt":
-    "check-utils-import-direction.ts via check-boundaries.sh",
-  "scripts/import-direction-baselines/db.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
-  "scripts/import-direction-baselines/devices.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
   "scripts/import-direction-baselines/ctrlProxy.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
-  "scripts/import-direction-baselines/features.txt":
     "check-tier-import-direction.ts via check-boundaries.sh",
   "scripts/import-direction-baselines/daemon.txt":
     "check-tier-import-direction.ts via check-boundaries.sh",
@@ -46,7 +39,7 @@ function coveredBy(inputs: readonly string[], path: string): boolean {
 
 describe("turbo lint inputs cover declared configuration and baseline reads", () => {
   const root = join(import.meta.dir, "../..");
-  const turbo = JSON.parse(readFileSync(join(root, "turbo.json"), "utf8")) as {
+  const turbo = JSON.parse(readGuardFile(join(root, "turbo.json"))) as {
     tasks: { lint: { inputs: string[]; env: string[] } };
   };
 
@@ -57,7 +50,7 @@ describe("turbo lint inputs cover declared configuration and baseline reads", ()
   });
 
   test("configured oxlint plugins are represented in the manifest", () => {
-    const config = Bun.JSONC.parse(readFileSync(join(root, ".oxlintrc.json"), "utf8")) as {
+    const config = Bun.JSONC.parse(readGuardFile(join(root, ".oxlintrc.json"))) as {
       jsPlugins: string[];
     };
     expect(config.jsPlugins.length).toBeGreaterThan(0);
@@ -69,7 +62,7 @@ describe("turbo lint inputs cover declared configuration and baseline reads", ()
   });
 
   test("baseline globs are precise and turbo exclusions take precedence", () => {
-    const path = "scripts/utils-import-direction-baseline.txt";
+    const path = "scripts/file-size-baseline.txt";
     expect(coveredBy(["scripts/*-baseline.txt"], path)).toBe(true);
     expect(coveredBy(["scripts/*-baseline.txt"], "scripts/nested/other-baseline.txt")).toBe(false);
     expect(coveredBy(["scripts/*-baseline.txt"], "scripts/not-a-baseline.json")).toBe(false);

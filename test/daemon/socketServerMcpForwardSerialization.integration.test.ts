@@ -126,6 +126,7 @@ function createFakeDaemonState(
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: (sessionId: string) => sessionDevices.has(sessionId),
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);
         return assignedDevice
@@ -477,9 +478,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           }
           return adbDeviceListResult("emulator-5556");
         },
-        null,
-        undefined,
-        inventoryTimer,
+        { timer: inventoryTimer },
       );
       const emulator = createFakeAndroidEmulator({
         getBootedDevicesChecked: async (_onlyEmulators, _options, signal) =>

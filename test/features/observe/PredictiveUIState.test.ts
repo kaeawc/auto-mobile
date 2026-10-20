@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import {
   afterAll,
   afterEach,
@@ -23,8 +24,18 @@ import {
 } from "../../helpers/navigationTestHarness";
 
 type Interactable = InteractableElement;
-const observation: ObserveResult = { updatedAt: 1, viewHierarchy: { hierarchy: {} } };
-const button: Element = { text: "Open", "resource-id": "open", clickable: true };
+const observation: ObserveResult = buildObserveResult({
+  updatedAt: 1,
+  screenSize: { width: 100, height: 100 },
+  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+  viewHierarchy: { hierarchy: {} },
+});
+const button: Element = {
+  bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+  text: "Open",
+  "resource-id": "open",
+  clickable: true,
+};
 
 function edge(toolName: string, args: Record<string, unknown> = {}): NavigationEdge {
   return {
@@ -74,7 +85,11 @@ describe("PredictiveUIState characterization", () => {
   });
 
   test("returns no predictions for missing hierarchy, screen, or a different foreground app", async () => {
-    expect(await state.generate({ updatedAt: 0 })).toBeUndefined();
+    expect(
+      await state.generate(
+        buildObserveResult({ ...observation, updatedAt: 0, viewHierarchy: undefined }),
+      ),
+    ).toBeUndefined();
     currentScreen.mockReturnValue(null);
     expect(await state.generate(observation)).toBeUndefined();
     currentScreen.mockReturnValue("Home");
@@ -189,14 +204,16 @@ describe("PredictiveUIState characterization", () => {
   test("generates without an app id and skips invalid swipe targets", async () => {
     currentApp.mockReturnValue(null);
     expect((await state.generate(observation))?.likelyActions[0].confidence).toBe(0.5);
-    parser.nextFlattenedElements = [{ element: { scrollable: true }, index: 0, depth: 0 }];
+    parser.nextFlattenedElements = [
+      { element: { bounds: button.bounds, scrollable: true }, index: 0, depth: 0 },
+    ];
     edges.mockResolvedValue([edge("swipeOn", { container: { text: "No match" } })]);
     expect(await state.generate(observation)).toBeUndefined();
   });
 
   test("tap targets preserve nullish precedence and reject empty identifiers", () => {
     const interactable: Interactable = {
-      element: {},
+      element: { bounds: button.bounds },
       clickable: true,
       scrollable: false,
       text: "Fallback",
@@ -215,7 +232,11 @@ describe("PredictiveUIState characterization", () => {
       contentDesc: "Description",
     });
     expect(
-      buildPredictionTarget(edge("tapOn"), { element: {}, clickable: true, scrollable: false }),
+      buildPredictionTarget(edge("tapOn"), {
+        element: { bounds: button.bounds },
+        clickable: true,
+        scrollable: false,
+      }),
     ).toBeNull();
     expect(buildPredictionTarget(edge("unknown"), interactable)).toBeNull();
     expect(
@@ -224,7 +245,11 @@ describe("PredictiveUIState characterization", () => {
   });
 
   test("swipe targets retain args precedence, uiState fallbacks, and empty target rejection", () => {
-    const interactable: Interactable = { element: {}, clickable: false, scrollable: true };
+    const interactable: Interactable = {
+      element: { bounds: button.bounds },
+      clickable: false,
+      scrollable: true,
+    };
     const swipe = edge("swipeOn", {
       container: { text: "Args", elementId: "", resourceId: "args-id" },
       lookFor: { contentDesc: "Goal", elementId: "goal-id", resourceId: "ignored" },

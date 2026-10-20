@@ -4,7 +4,7 @@ import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
-} from "../../src/server/deviceSessionResult";
+} from "../../src/daemon/deviceSessionResult";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerDeviceTools } from "../../src/server/deviceTools";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -46,7 +46,8 @@ describe("advertised device-session recovery tools", () => {
         !ToolRegistry.getRegisteredTool(name)?.hidden &&
         ToolRegistry.getRegisteredTool(name)?.defaultEnabled === true,
     );
-    expect([...DEVICE_SESSION_RECOVERY_TOOLS]).toEqual([...discoverable]);
+    const advertised: string[] = [...DEVICE_SESSION_RECOVERY_TOOLS];
+    expect(advertised).toEqual([...discoverable]);
   });
 
   test("excludes acquisition tools that are not enabled on a default connection", () => {

@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonMcpProxy } from "../../../src/daemon/daemonMcpProxy";
 import { DaemonRestartDeferredError } from "../../../src/daemon/daemonRestartAdmission";
+import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { DaemonManager, type DaemonManagerLike } from "../../../src/daemon/manager";
 import type { DaemonProcessSignaler } from "../../../src/daemon/processTable";
 import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { DaemonOptions, DaemonStatus, PidFileData } from "../../../src/daemon/types";
-import { executionTracker } from "../../../src/server/executionTracker";
+import { executionTracker } from "../../../src/daemon/executionTracker";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { sendSocketRequest } from "../helpers/socketRequest";
@@ -16,12 +17,18 @@ import { sendSocketRequest } from "../helpers/socketRequest";
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
     }),
+    getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
 }
 
@@ -121,6 +128,10 @@ describe("concurrent client restart during provisionDevice", () => {
           await restartAllowed;
           return await realManager.restart(options, expectedDaemon);
         },
+        recoverControlState: (options, isProtocolHealthy, signal) =>
+          realManager.recoverControlState(options, isProtocolHealthy, signal),
+        restartAdmitted: (options, maintenanceToken) =>
+          realManager.restartAdmitted(options, maintenanceToken),
         waitForReady: (...args) => realManager.waitForReady(...args),
         isStartupLockHeldByLiveProcess: () => realManager.isStartupLockHeldByLiveProcess(),
         waitForLockHolderReadiness: (timeoutMs) =>

@@ -3,7 +3,7 @@
 ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 
 # Shared git file-selection helpers (issue #2823).
-# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+# shellcheck source=scripts/lib/file-selection.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
 
 # Per-tool file regex for the shared collectors (issue #2823).

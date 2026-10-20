@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import iosFixture from "../../fixtures/observe/ios-fractional-bounds.json";
 import type { ViewHierarchyResult } from "../../../src/models";
@@ -48,7 +49,7 @@ async function harness(platform: "android" | "ios" = "android") {
   let admitted = 0;
   let canStart = true;
   let onSetup: ((request: RunnerReadinessRequest) => Promise<void>) | undefined;
-  const hierarchy: ViewHierarchyResult =
+  const hierarchy: ViewHierarchyResult = wireCapture(
     platform === "ios"
       ? { ...structuredClone(iosFixture.viewHierarchy), updatedAt: 1, fresh: true }
       : {
@@ -68,7 +69,8 @@ async function harness(platform: "android" | "ios" = "android") {
           screenHeight: 100,
           updatedAt: 1,
           fresh: true,
-        };
+        },
+  );
   let beforeAdmission: (() => void) | undefined;
   const client: HierarchySyncClient = {
     connectForObservationRead: async () => connected,
@@ -227,7 +229,12 @@ test.each(["reservation", "shutdown", "deferred release"])(
       release = reservation?.release;
     }
     if (kind === "deferred release") {
-      Reflect.get(h.pool, "deferredDeviceReleases").set(h.device.deviceId, {});
+      h.pool.testHooks.deferredDeviceReleases.set(h.device.deviceId, {
+        device: h.pool.getDevice(h.device.deviceId)!,
+        sessionId: "pending",
+        assignmentCount: 0,
+        cleanup: Promise.resolve(),
+      });
     }
     try {
       const result = await h.screen.executeDeviceRead(undefined, "none");
@@ -257,7 +264,15 @@ test("acquisition holding readiness lock declines setup", async () => {
 test("ownership flipping before the lock re-check prevents mutating setup", async () => {
   const h = await harness();
   h.setBeforeAdmission(() => {
-    h.pool.getDevice(h.device.deviceId)!.sessionId = "new-owner";
+    const device = h.pool.getDevice(h.device.deviceId);
+    if (!device) {
+      throw new Error("Expected pooled device");
+    }
+    const ownership = spyOn(h.pool, "getDevice").mockReturnValue({
+      ...device,
+      sessionId: "new-owner",
+    });
+    cleanups.push(() => ownership.mockRestore());
   });
   await expect(h.read()).rejects.toThrow("changed while waiting for readiness");
   expect(h.calls()).toBe(1);

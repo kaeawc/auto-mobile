@@ -10,6 +10,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import type { Platform } from "../../src/models";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 
 for (const criteria of [false, true]) {
   describe(`${criteria ? "criteria" : "platform"} multi-device scheduling`, () => {
@@ -99,7 +100,11 @@ for (const criteria of [false, true]) {
         const device = { deviceId, name: deviceId, platform: "ios" as const };
         discovery.bootedDevices.push(device);
         await pool.addDevice(device);
-        await pool.bindOrReuseDeviceSession(`owner:${deviceId}`, deviceId, "ios");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: `owner:${deviceId}`,
+          deviceId,
+          platform: "ios",
+        });
       }
       const head = allocate(["h:a", "h:b"], "ios");
       await drainUntilQuiescent(timer);
@@ -111,7 +116,11 @@ for (const criteria of [false, true]) {
     arranged(
       "overlapping follower retains its deadline budget while waiting for a turn",
       async () => {
-        await pool.bindOrReuseDeviceSession("owner", "b", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "b",
+          platform: "android",
+        });
         const head = allocate(["h:a", "h:b"]);
         await drainUntilQuiescent(timer);
         const follower = allocate(["f:a", "f:b"], "android", 2_000);
@@ -159,7 +168,11 @@ for (const criteria of [false, true]) {
     arranged(
       "last device release wakes head before the next poll without session churn",
       async () => {
-        await pool.bindOrReuseDeviceSession("owner", "b", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "b",
+          platform: "android",
+        });
         const creates = spyOn(persistence, "upsertActiveSession");
         try {
           const head = allocate(["h:a", "h:b"]);
@@ -239,7 +252,7 @@ for (const criteria of [false, true]) {
       discovery.bootedDevices = discovery.bootedDevices.filter((device) => device.deviceId === "a");
       // A busy pool entry can outlive its session during disconnect handling.
       const device = pool.getDevice("a")!;
-      device.status = "busy";
+      patchDeviceBinding(device, { status: "busy" });
       const head = allocate(["h:a"], "android", 300_000);
       await drainUntilQuiescent(timer);
       expect(head.settled()).toBe(false);
@@ -323,7 +336,11 @@ for (const criteria of [false, true]) {
     arranged(
       "round-2: timeout reports required capacity without a rolled-back allocation count",
       async () => {
-        await pool.bindOrReuseDeviceSession("owner", "b", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "b",
+          platform: "android",
+        });
         const head = allocate(["h:a", "h:b"], "android", 2_000);
         await drainUntilQuiescent(timer);
         for (let poll = 0; poll < 2; poll++) {

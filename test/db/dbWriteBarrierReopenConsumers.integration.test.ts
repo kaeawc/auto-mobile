@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTelemetryRepository as FakeRepository } from "../fakes/FakeTelemetryRepository";
@@ -72,10 +73,13 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       return {
         timestamp: 1000,
         applicationId: "com.example",
-        level: "info",
+        level: 4,
+        deviceId: null,
+        sessionId: null,
+        filterName: "",
         tag: "t",
         message: "m",
-      } as RecordLogEventInput;
+      };
     }
 
     test("resolves the barrier per write, not the construction-time instance (acceptance #1)", async () => {
@@ -158,7 +162,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
         const reopened = new FakeDbWriteBarrier();
         current = reopened;
 
-        mgr.recordHeartbeat("s1");
+        await deliverDaemonHeartbeat(mgr, "s1");
         await Promise.resolve();
 
         expect(activity).toContain("s1");
@@ -177,7 +181,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       const mgr = new SessionManager(timer, repo, { barrier: () => draining });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
-        mgr.recordHeartbeat("s1");
+        await deliverDaemonHeartbeat(mgr, "s1");
         await Promise.resolve();
         expect(activity).toHaveLength(0);
       } finally {
@@ -197,7 +201,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
 
         reopenSharedBarrier();
 
-        mgr.recordHeartbeat("s1");
+        await deliverDaemonHeartbeat(mgr, "s1");
         await Promise.resolve();
 
         // Resolves the fresh singleton, not the pinned drained one.

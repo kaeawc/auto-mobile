@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { highlightResultSchema } from "./highlightToolOutputSchemas";
 import {
@@ -12,8 +12,12 @@ import {
   Platform,
   ViewHierarchyResult,
 } from "../models";
-import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/VisualHighlight";
-import { generateHighlightId, recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
+import { highlightShapeSchema } from "../features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../features/debug/VisualHighlightClient";
+import {
+  generateHighlightId,
+  recordVideoRecordingHighlightAdded,
+} from "../daemon/videoRecordingManager";
 import type { HierarchyCapture, HierarchySnapshot } from "../features/observe/HierarchyCapture";
 import {
   createDeviceHierarchyCapture,
@@ -34,7 +38,7 @@ import {
   nestedElementContainerSchema,
   resolverSelectionStrategySchema,
   validateElementIdTextSelector,
-} from "./elementSelectorSchemas";
+} from "../models/elementSelectorSchemas";
 import { logger } from "../utils/logger";
 import { boundsEqual } from "../utils/bounds";
 

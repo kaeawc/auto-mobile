@@ -1,3 +1,4 @@
+import { buildElement } from "../../helpers/elementBuilder";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 
@@ -11,9 +12,12 @@ export class HierarchyTalkBackDriver extends FakeTalkBackNavigationDriver {
     }
     return {
       hierarchy: {
-        node: (this.elements.length ? this.elements : [{ "resource-id": "test:id/button" }]).map(
-          (element) => ({ $: element }),
-        ),
+        node: {
+          node: (this.elements.length
+            ? this.elements
+            : [buildElement({ "resource-id": "test:id/button" })]
+          ).map((element) => ({ $: element })),
+        },
       },
     };
   }

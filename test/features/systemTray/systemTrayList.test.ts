@@ -1,3 +1,4 @@
+import { toolIsError, toolJson } from "../../helpers/toolResponse";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,6 +25,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { NodeAttributes, ViewHierarchyNode } from "../../../src/models/ViewHierarchyResult";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -58,7 +60,9 @@ const headerlessTwoNotificationGroups = {
     ) as ObserveResult
   ).viewHierarchy,
 };
-const node = (id: string, text = "", children: any[] = []) => ({
+type TrayNode = ViewHierarchyNode & { $: NodeAttributes; node: ViewHierarchyNode[] };
+type TrayPage = ObserveResult & { viewHierarchy: { hierarchy: { node: TrayNode } } };
+const node = (id: string, text = "", children: ViewHierarchyNode[] = []): TrayNode => ({
   $: { "resource-id": id, text, package: "com.android.systemui", bounds: "[0,200][1000,1600]" },
   node: children,
 });
@@ -79,7 +83,9 @@ const positionedRow = (title: string, top: number, app = "Messages") => {
   result.$.bounds = `[0,${top}][1000,${top + 100}]`;
   return result;
 };
-const page = (...rows: any[]): ObserveResult => ({
+const page = (...rows: ViewHierarchyNode[]): TrayPage => ({
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  observationId: "tray-page",
   updatedAt: 0,
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -88,19 +94,18 @@ const page = (...rows: any[]): ObserveResult => ({
   },
 });
 // API 35 includes this explicit scroll state on the notification scroller.
-const api35Page = (...rows: any[]): ObserveResult => {
+const api35Page = (...rows: ViewHierarchyNode[]): TrayPage => {
   const result = page(...rows);
   Object.assign(result.viewHierarchy!.hierarchy!.node.$, { scrollable: true });
   return result;
 };
 // Before API 33, the extractor omits `scrollable` when the scroller cannot move.
-const preApi33Page = (...rows: any[]): ObserveResult => page(...rows);
+const preApi33Page = (...rows: ViewHierarchyNode[]): TrayPage => page(...rows);
 function setup(pages: ObserveResult[], markScrollBoundary = true) {
   for (const [index, page] of pages.entries()) {
-    if (markScrollBoundary && page.viewHierarchy!.hierarchy!.node.$.scrollable === undefined) {
-      Object.assign(page.viewHierarchy!.hierarchy!.node.$, {
-        scrollable: index < pages.length - 1,
-      });
+    const scrollerAttributes = page.viewHierarchy?.hierarchy?.node?.$;
+    if (markScrollBoundary && scrollerAttributes && scrollerAttributes.scrollable === undefined) {
+      scrollerAttributes.scrollable = index < pages.length - 1;
     }
   }
   const adb = new FakeAdbExecutor();
@@ -493,9 +498,11 @@ describe("systemTray list", () => {
       action: "list",
       notification: { appId: "com.example.messages" },
     });
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.notifications[0]).toMatchObject({ title: "read me", body: "Body of read me" });
-    expect(payload.success).toBe(true);
+    const payload = toolJson(result);
+    expect(payload).toMatchObject({
+      notifications: [{ title: "read me", body: "Body of read me" }],
+      success: true,
+    });
   });
   test("passes the request signal into the fresh app inventory", async () => {
     setup([page(row("read me"))]);
@@ -971,7 +978,7 @@ describe("systemTray list silent-section ownership", () => {
       action: "list",
       notification: { appId: "com.example.messages" },
     });
-    const payload = JSON.parse(result.content[0].text);
+    const payload = toolJson(result);
     expect(payload.notifications).toEqual([]);
     expect(payload.unattributedRows).toBe(1);
     expect(payload.message).toContain("1 shade row");
@@ -1218,7 +1225,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({
         dismissedCount: 1,
         expectedCount: 1,
@@ -1262,7 +1269,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({
         dismissedCount: 3,
         expectedCount: 3,
@@ -1300,7 +1307,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({
         dismissedCount: 2,
         expectedCount: 2,
@@ -1327,7 +1334,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({
         dismissedCount: 1,
         expectedCount: 1,
@@ -1353,7 +1360,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({
         dismissedCount: 2,
         expectedCount: 2,
@@ -1450,7 +1457,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       const installedAppsSpy = mockInstalledApps([SHELL]);
       try {
         const response = await clearAll();
-        expect(JSON.parse(response.content[0].text).success).toBe(false);
+        expect(toolJson(response).success).toBe(false);
         expect(
           commands()
             .filter((command) => command.includes("shell cmd statusbar"))
@@ -1460,7 +1467,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
             ? "shell cmd statusbar expand-notifications"
             : "shell cmd statusbar collapse",
         );
-        expect(response.isError).toBe(true);
+        expect(toolIsError(response)).toBe(true);
         expect(
           commands().filter((command) => command.startsWith("shell input swipe")),
         ).toHaveLength(1);
@@ -1476,9 +1483,9 @@ describe("systemTray clearAll dumpsys ownership", () => {
       action: "clearAll",
       notification: { title: "Shell notification" },
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
     expect(payload).toMatchObject({ success: false, dismissedCount: 0 });
-    expect(payload.message).toContain("matching notification remains");
+    expect(payload.message).toContain("matching notification may remain");
     expect(payload.message).not.toContain("No notifications found");
     expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(1);
     expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
@@ -1498,11 +1505,11 @@ describe("systemTray clearAll dumpsys ownership", () => {
           notification: { title: "Shell notification" },
           awaitTimeout: 625,
         });
-        expect(JSON.parse(response.content[0].text)).toMatchObject({
+        expect(toolJson(response)).toMatchObject({
           success: false,
           dismissedCount: 0,
         });
-        expect(response.isError).toBe(true);
+        expect(toolIsError(response)).toBe(true);
         expect(commands().filter((command) => command.includes("shell cmd statusbar"))).toEqual([
           "shell cmd statusbar expand-notifications",
         ]);
@@ -1530,10 +1537,10 @@ describe("systemTray clearAll dumpsys ownership", () => {
     const installedAppsSpy = mockInstalledApps([SHELL]);
     try {
       const response = await clearAll();
-      const payload = JSON.parse(response.content[0].text);
+      const payload = toolJson(response);
       expect(payload).toMatchObject({ success: true, remainingCount: 0, dismissedCount: 1 });
       expect(payload.message).toContain("Warning: a matching notification remains");
-      expect(response.isError).not.toBe(true);
+      expect(toolIsError(response)).not.toBe(true);
       expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(
         1,
       );
@@ -1626,12 +1633,12 @@ describe("systemTray clearAll dumpsys ownership", () => {
     const installedAppsSpy = mockInstalledApps([SHELL]);
     try {
       const response = await clearAll();
-      expect(JSON.parse(response.content[0].text)).toMatchObject({
+      expect(toolJson(response)).toMatchObject({
         dismissedCount: 1,
         remainingCount: 0,
         success: true,
       });
-      expect(response.isError).not.toBe(true);
+      expect(toolIsError(response)).not.toBe(true);
       expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(
         1,
       );
@@ -1705,7 +1712,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       const { timer, swipes } = setupDelayedClear(readyAfterMs, 0, staleHierarchy);
       const installedAppsSpy = mockInstalledApps([SHELL]);
       try {
-        expect(JSON.parse((await clearAll()).content[0].text)).toMatchObject({
+        expect(toolJson(await clearAll())).toMatchObject({
           success: true,
           dismissedCount: 2,
         });
@@ -1722,7 +1729,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     const { timer, swipes } = setupDelayedClear(0, 1000);
     const installedAppsSpy = mockInstalledApps([SHELL]);
     try {
-      expect(JSON.parse((await clearAll()).content[0].text)).toMatchObject({
+      expect(toolJson(await clearAll())).toMatchObject({
         success: true,
         dismissedCount: 2,
       });
@@ -1764,7 +1771,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     ]);
     const installedAppsSpy = mockInstalledApps([SHELL]);
     try {
-      expect(JSON.parse((await clearAll()).content[0].text)).toMatchObject({
+      expect(toolJson(await clearAll())).toMatchObject({
         success: true,
         dismissedCount: 3,
       });
@@ -1789,11 +1796,11 @@ describe("systemTray clearAll dumpsys ownership", () => {
       action: "clearAll",
       notification: { title: "Match" },
     });
-    expect(JSON.parse(response.content[0].text)).toMatchObject({
+    expect(toolJson(response)).toMatchObject({
       success: true,
       dismissedCount: 3,
     });
-    expect(response.isError).not.toBe(true);
+    expect(toolIsError(response)).not.toBe(true);
     expect(
       adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe")),
     ).toHaveLength(3);
@@ -1813,11 +1820,11 @@ describe("systemTray clearAll dumpsys ownership", () => {
       action: "clearAll",
       notification: { title: "Match" },
     });
-    expect(JSON.parse(response.content[0].text)).toMatchObject({
+    expect(toolJson(response)).toMatchObject({
       success: false,
       dismissedCount: 25,
     });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(
       adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe")),
     ).toHaveLength(25);
@@ -1831,11 +1838,11 @@ describe("systemTray clearAll dumpsys ownership", () => {
       notification: { body: "Body of" },
       awaitTimeout: 375,
     });
-    expect(JSON.parse(response.content[0].text)).toMatchObject({
+    expect(toolJson(response)).toMatchObject({
       success: false,
       dismissedCount: 1,
     });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(swipes()).toHaveLength(2);
     expect(timer.getSleepHistory()).toEqual([250, 125]);
     expect(timer.now()).toBe(375);
@@ -1865,7 +1872,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     const installedAppsSpy = mockInstalledApps([SHELL]);
     try {
       const response = await clearAll();
-      expect(JSON.parse(response.content[0].text)).toMatchObject({
+      expect(toolJson(response)).toMatchObject({
         success: false,
         dismissedCount: 2,
         remainingCount: 2,
@@ -1924,31 +1931,47 @@ describe("systemTray clearAll dumpsys ownership", () => {
     }
   });
 
-  test("an unreadable post-dismissal shade fails with its cause and is closed", async () => {
-    const { adb, timer, observer, swipes } = setupDelayedClear(0);
-    const execute = observer.execute.bind(observer);
-    const executeSpy = spyOn(observer, "execute").mockImplementation((options) =>
-      swipes().length > 0
-        ? Promise.resolve({ ...page(), viewHierarchy: undefined })
-        : execute(options),
-    );
-    const installedAppsSpy = mockInstalledApps([SHELL]);
-    try {
-      await expect(
-        handler()(device, {
+  for (const readTimesOut of [false, true]) {
+    test(`an unreadable post-dismissal shade reports partial counts (read timeout: ${readTimesOut})`, async () => {
+      const { adb, timer, observer, swipes } = setupDelayedClear(0);
+      const unchangedDump = execResult(
+        dumpsys(record(1, "Alpha", "Body of Alpha"), record(2, "Beta", "Body of Beta")),
+      );
+      adb.setCommandResponseSequence("dumpsys notification", [unchangedDump, unchangedDump]);
+      const execute = observer.execute.bind(observer);
+      const executeSpy = spyOn(observer, "execute").mockImplementation((options) =>
+        swipes().length > 0
+          ? readTimesOut && options?.requireFreshExtraction
+            ? new Promise<ObserveResult>(() => {})
+            : Promise.resolve({ ...page(), viewHierarchy: undefined })
+          : execute(options),
+      );
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        const response = await handler()(device, {
           action: "clearAll",
           notification: { appId: SHELL },
           awaitTimeout: 625,
-        }),
-      ).rejects.toThrow("shade not readable after dismissal");
-      expect(swipes()).toHaveLength(1);
-      expect(timer.now()).toBe(625);
-      expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
-    } finally {
-      installedAppsSpy.mockRestore();
-      executeSpy.mockRestore();
-    }
-  });
+        });
+        expect(toolJson(response)).toMatchObject({
+          success: false,
+          stalled: true,
+          swipeCount: 1,
+          dismissedCount: 0,
+          expectedCount: 2,
+          remainingCount: 2,
+        });
+        expect(toolJson(response).message).toContain("Cleared 0 of 2 notification(s)");
+        expect(toolIsError(response)).toBe(true);
+        expect(swipes()).toHaveLength(1);
+        expect(timer.now()).toBe(625);
+        expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
+      } finally {
+        installedAppsSpy.mockRestore();
+        executeSpy.mockRestore();
+      }
+    });
+  }
 
   test("clearAll expands a real collapsed group before dismissing a child", async () => {
     const { adb, timer } = setup(
@@ -1981,7 +2004,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
     const installedAppsSpy = mockInstalledApps([SHELL]);
     try {
-      expect(JSON.parse((await clearAll()).content[0].text).success).toBe(true);
+      expect(toolJson(await clearAll()).success).toBe(true);
       const actions = adb
         .getExecutedCommands()
         .filter((command) => /shell input (tap|swipe)/.test(command));
@@ -2102,7 +2125,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({
         dismissedCount: 0,
         expectedCount: 2,
@@ -2132,7 +2155,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({
         arrivedCount: 1,
         dismissedCount: 2,
@@ -2186,7 +2209,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({
         dismissedCount: 1,
         expectedCount: 2,
@@ -2207,7 +2230,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
+      const payload = toolJson(await clearAll());
       expect(payload).toMatchObject({ dismissedCount: 0, expectedCount: 0, success: true });
       expect(payload.message).toBe(`No notifications found for ${SHELL}`);
     } finally {
@@ -2374,7 +2397,7 @@ test("lists topmost window rows once when also nested in the primary hierarchy",
   const sharedTop = identifiedRow("top-window");
   const observation = page(identifiedRow("primary"), sharedTop);
   observation.viewHierarchy!.windows = [
-    { windowLayer: 10, hierarchy: page(sharedTop).viewHierarchy!.hierarchy },
+    { windowLayer: 10, hierarchy: page(sharedTop).viewHierarchy.hierarchy.node },
   ];
   setup([observation]);
   const result = await list();
@@ -2386,7 +2409,7 @@ test("matching identical notification titles prefers the topmost window before s
   const upper = positionedRow("Same", 900);
   const observation = page(primary);
   observation.viewHierarchy!.windows = [
-    { windowLayer: 10, hierarchy: page(upper).viewHierarchy!.hierarchy },
+    { windowLayer: 10, hierarchy: page(upper).viewHierarchy.hierarchy.node },
   ];
   setup([observation]);
   const result = await waitForNotificationMatch(device, { title: "Same" }, [], 1000);

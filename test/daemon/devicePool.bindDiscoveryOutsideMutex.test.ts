@@ -132,19 +132,13 @@ function acquire(path: "bind" | "autolock", device: BootedDevice, owner = "a") {
   let settled = false;
   const result = runWithAbortSignal(controller.signal, () =>
     path === "bind"
-      ? pool.bindOrReuseDeviceSession(
-          owner,
-          device.deviceId,
-          device.platform,
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          owner,
-        )
+      ? pool.bindOrReuseDeviceSession({
+          sessionId: owner,
+          deviceId: device.deviceId,
+          platform: device.platform,
+          allowSessionRebind: false,
+          mcpSessionId: owner,
+        })
       : pool.autolockDevice(device.deviceId, device.platform, owner),
   ).then(
     (value) => {
@@ -188,7 +182,7 @@ for (const path of ["bind", "autolock"] as const) {
       gate.release.resolve();
       expect(typeof (await acquisition.result)).toBe("string");
       expect(pool.getDevice(device.deviceId)?.name).toBe("Pixel new");
-      expect(pool.getDevice(device.deviceId)?.sessionId).toBe(await acquisition.result);
+      expect(await acquisition.result).toBe(pool.getDevice(device.deviceId)?.sessionId);
     });
 
     test("unpooled emulator refuses ownership if its fresh confirmation source fails", async () => {
@@ -264,7 +258,7 @@ for (const path of ["bind", "autolock"] as const) {
       manager.setBootedDevices("android", []);
       gate.release.resolve();
       expect(typeof (await acquisition.result)).toBe("string");
-      expect(pool.getDevice(android[0].deviceId)?.sessionId).toBe(await acquisition.result);
+      expect(await acquisition.result).toBe(pool.getDevice(android[0].deviceId)?.sessionId);
     });
 
     test("failed same-owner acquisition leaves the dead-device session for the disconnect monitor", async () => {
@@ -273,7 +267,7 @@ for (const path of ["bind", "autolock"] as const) {
       expect(typeof first).toBe("string");
       manager.setBootedDevices("android", []);
       expect(String(await acquire(path, android[0]).result)).toContain("not available");
-      expect(pool.getDevice(android[0].deviceId)?.sessionId).toBe(first);
+      expect(first).toBe(pool.getDevice(android[0].deviceId)?.sessionId);
       expect(sessions.getSession(String(first))).not.toBeNull();
     });
 
@@ -291,7 +285,7 @@ for (const path of ["bind", "autolock"] as const) {
         manager.failedSources.add(device === ios ? "ios-physical" : "ios-simulator");
         const acquisition = acquire(path, device);
         expect(typeof (await acquisition.result)).toBe("string");
-        expect(pool.getDevice(device.deviceId)?.sessionId).toBe(await acquisition.result);
+        expect(await acquisition.result).toBe(pool.getDevice(device.deviceId)?.sessionId);
       });
     }
 
@@ -378,7 +372,7 @@ for (const path of ["bind", "autolock"] as const) {
         }
         if (mutation === "claim") {
           expect(String(await a.result)).toContain("already assigned");
-          expect(pool.getDevice(android[0].deviceId)?.sessionId).toBe(await competitor!.result);
+          expect(await competitor!.result).toBe(pool.getDevice(android[0].deviceId)?.sessionId);
         } else {
           expect(manager.calls).toEqual(["android", "android"]);
           expect(old?.sessionId ?? null).toBeNull();
@@ -505,7 +499,7 @@ for (const path of ["bind", "autolock"] as const) {
         expect(notifications).toHaveBeenCalledTimes(1);
         notifications.mockRestore();
         expect(pool.getDevice(device.deviceId)?.identityUnresolved ?? false).toBe(false);
-        expect(pool.getDevice(device.deviceId)?.sessionId).toBe(await a.result);
+        expect(await a.result).toBe(pool.getDevice(device.deviceId)?.sessionId);
       });
 
       test(`ambient abort during hung ${kind} discovery preserves original reason`, async () => {

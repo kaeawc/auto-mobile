@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DeviceCleanupInProgressError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -59,7 +59,11 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
         let setup: Promise<void> | undefined;
         let release: Promise<string | null> | undefined;
         try {
-          await pool.bindOrReuseDeviceSession("old-owner", device.deviceId, "android");
+          await pool.bindOrReuseDeviceSession({
+            sessionId: "old-owner",
+            deviceId: device.deviceId,
+            platform: "android",
+          });
           if (cleanupKind === "setup") {
             setup = manager.trackSessionSetup(manager.getSession("old-owner")!, restore);
             await started.promise;
@@ -98,15 +102,12 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
                 }),
                 "new-owner")
               : route === "direct"
-                ? pool.bindOrReuseDeviceSession(
-                    "new-owner",
-                    device.deviceId,
-                    "android",
-                    undefined,
-                    undefined,
-                    undefined,
-                    true,
-                  )
+                ? pool.bindOrReuseDeviceSession({
+                    sessionId: "new-owner",
+                    deviceId: device.deviceId,
+                    platform: "android",
+                    allowSessionRebind: true,
+                  })
                 : pool.autolockDevice(device.deviceId, "android", "new-client");
           // Typed and retryable, so clients wait on it like a held device (#10960).
           const refusal = await acquire().then(
@@ -167,16 +168,25 @@ test("a bind during a capped pending cleanup is refused with the cleanup's remai
   const cleanup = Promise.withResolvers<void>();
   try {
     await pool.initializeWithDevices([device]);
-    await pool.bindOrReuseDeviceSession("test-1", device.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "test-1",
+      deviceId: device.deviceId,
+      platform: "android",
+    });
     // A 12 s finalize (e.g. a recording) registered when test-1 is released.
     manager.onSessionRelease((_sessionId, deviceId) => {
       manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
     });
-    await manager.releaseSession("test-1", "released", { allowExpired: true });
+    await manager.releaseSession("test-1", "superseded", { allowExpired: true });
     await pool.releaseDevice(device.deviceId, "test-1");
     timer.advanceTime(2_000);
 
-    const bind = () => pool.bindOrReuseDeviceSession("test-2", device.deviceId, "android");
+    const bind = () =>
+      pool.bindOrReuseDeviceSession({
+        sessionId: "test-2",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
     const refusal = await bind().then(
       () => undefined,
       (error: unknown) => error,
@@ -215,17 +225,21 @@ test("a deferred release never frees a same-id replacement entry after late tear
   const cleanup = Promise.withResolvers<void>();
   try {
     await pool.initializeWithDevices([device]);
-    await pool.bindOrReuseDeviceSession("test-1", device.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "test-1",
+      deviceId: device.deviceId,
+      platform: "android",
+    });
     manager.onSessionRelease((_sessionId, deviceId) => {
       manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
     });
-    await manager.releaseSession("test-1", "released", { allowExpired: true });
+    await manager.releaseSession("test-1", "superseded", { allowExpired: true });
     await pool.releaseDevice(device.deviceId, "test-1");
 
     const original = pool.getDevice(device.deviceId)!;
     expect(original.sessionId).toBe("test-1");
     const replacement = { ...original, incarnation: original.incarnation + 1 };
-    pool["devices"].set(device.deviceId, replacement);
+    pool.testHooks.devices.set(device.deviceId, replacement);
 
     cleanup.resolve();
     await manager.getPendingDeviceCleanup(device.deviceId);
@@ -235,7 +249,7 @@ test("a deferred release never frees a same-id replacement entry after late tear
     expect(replacement.sessionId).toBe("test-1");
     expect(original.sessionId).toBe("test-1");
     // The stale deferred entry is cleared, so it cannot keep reporting a hold on the replacement.
-    expect(pool["deferredDeviceReleases"].has(device.deviceId)).toBe(false);
+    expect(pool.testHooks.deferredDeviceReleases.has(device.deviceId)).toBe(false);
   } finally {
     cleanup.resolve();
     manager.stopCleanupTimer();

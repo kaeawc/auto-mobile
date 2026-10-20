@@ -19,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
+# shellcheck source=scripts/lib/shell-core.sh
 source "$SCRIPT_DIR/lib/shell-core.sh"
 
 CHECK_NAMES=()
@@ -37,7 +37,6 @@ add_check() {
 add_check "ktfmt" "ONLY_TOUCHED_FILES=${KTFMT_ONLY_TOUCHED_FILES:-true} \"$PROJECT_ROOT/scripts/ktfmt/validate_ktfmt.sh\"" "format,kotlin" "Validate Kotlin formatting"
 add_check "element-resolution-ratchet" "bash \"$PROJECT_ROOT/scripts/check-element-resolution-ratchet.sh\"" "lint,typescript" "Forbid growth of finding-keyed element-resolution exceptions"
 add_check "shared-process-allowlist" "bun \"$PROJECT_ROOT/scripts/test/classify-shared-safe.ts\" --check" "lint,conventions,typescript" "Keep unit files that share Bun processes free of shared-state signals (#10583)"
-add_check "test-as-any-ratchet" "bash \"$PROJECT_ROOT/scripts/test-as-any-baseline.sh\"" "lint,conventions,typescript" "Forbid growth of test as-any assertions"
 add_check "node-format" "bun --cwd \"$PROJECT_ROOT\" run format:check" "format,typescript" "Check Node TypeScript formatting"
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"
 add_check "ctrl-proxy-project-sources" "\"$PROJECT_ROOT/scripts/check-ctrl-proxy-project-sources.sh\"" "config,ios" "Check CtrlProxy Swift sources are in its Xcode project"
@@ -137,6 +136,16 @@ split_csv() {
   echo ${items[@]+"${items[@]}"}
 }
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
 contains_item() {
   local needle="$1"
   shift
@@ -159,7 +168,8 @@ groups_intersect() {
   fi
   local group
   for group in ${check_group_list[@]+"${check_group_list[@]}"}; do
-    if contains_item "$group" "${selected_groups[@]}"; then
+    run_capture_status contains_item "$group" "${selected_groups[@]}"
+    if (( RUN_STATUS == 0 )); then
       return 0
     fi
   done
@@ -256,7 +266,8 @@ fi
 
 if [[ -n "${only_list[*]-}" ]]; then
   for requested in "${only_list[@]}"; do
-    if ! contains_item "$requested" ${CHECK_NAMES[@]+"${CHECK_NAMES[@]}"}; then
+    run_capture_status contains_item "$requested" ${CHECK_NAMES[@]+"${CHECK_NAMES[@]}"}
+    if (( RUN_STATUS != 0 )); then
       echo "Unknown check in --only: $requested" >&2
       exit 1
     fi
@@ -265,7 +276,8 @@ fi
 
 if [[ -n "${skip_list[*]-}" ]]; then
   for requested in "${skip_list[@]}"; do
-    if ! contains_item "$requested" ${CHECK_NAMES[@]+"${CHECK_NAMES[@]}"}; then
+    run_capture_status contains_item "$requested" ${CHECK_NAMES[@]+"${CHECK_NAMES[@]}"}
+    if (( RUN_STATUS != 0 )); then
       echo "Unknown check in --skip: $requested" >&2
       exit 1
     fi
@@ -280,18 +292,21 @@ for idx in "${!CHECK_NAMES[@]}"; do
 
   if [[ -n "${only_list[*]-}" ]]; then
     include=0
-    if contains_item "$name" "${only_list[@]}"; then
+    run_capture_status contains_item "$name" "${only_list[@]}"
+    if (( RUN_STATUS == 0 )); then
       include=1
     fi
   elif [[ -n "${group_list[*]-}" ]]; then
     include=0
-    if groups_intersect "$groups" ${group_list[@]+"${group_list[@]}"}; then
+    run_capture_status groups_intersect "$groups" ${group_list[@]+"${group_list[@]}"}
+    if (( RUN_STATUS == 0 )); then
       include=1
     fi
   fi
 
   if [[ "$include" -eq 1 ]] && [[ -n "${skip_list[*]-}" ]]; then
-    if contains_item "$name" "${skip_list[@]}"; then
+    run_capture_status contains_item "$name" "${skip_list[@]}"
+    if (( RUN_STATUS == 0 )); then
       include=0
     fi
   fi

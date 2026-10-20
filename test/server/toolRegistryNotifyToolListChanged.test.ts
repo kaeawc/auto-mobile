@@ -1,7 +1,7 @@
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 
 // Minimal MCP-server stand-in: registerWithServer only calls registerTool (no-op
 // here), tracks the server, and hooks the underlying Protocol onclose for

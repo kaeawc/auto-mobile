@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
 import { describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -19,7 +20,6 @@ import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 const androidDevice: BootedDevice = {
   deviceId: "command-support-android",
   platform: "android",
-  isEmulator: true,
   name: "Android",
 };
 const iosDevice: BootedDevice = {
@@ -75,7 +75,7 @@ async function sendWithClientContext(client: AndroidCtrlProxyClient, messageType
 
 function androidClient(): AndroidCtrlProxyClient {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setScreenState(true);
   const timer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();
@@ -127,6 +127,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("tap_double_v1")).toBe(true);
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_select_all",
     });
     expect(context.isCommandSupported?.("request_select_all")).toBe(false);
@@ -221,6 +222,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_future_command")).toBe(false);
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_set_text",
     });
     expect(context.isCommandSupported?.("request_set_text")).toBe(false);
@@ -296,6 +298,7 @@ describe("CtrlProxy command support", () => {
     const context = client["createDelegateContext"]();
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_select_all",
     });
     expect(context.isCommandSupported?.("request_select_all")).toBe(false);
@@ -310,6 +313,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
     client["processMessage"]({
       type: "error",
+      success: false,
       requestId: "unknown-command",
       error: "Unknown command type: request_select_all",
     });

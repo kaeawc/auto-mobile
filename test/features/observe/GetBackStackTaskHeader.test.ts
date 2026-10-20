@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -74,7 +75,7 @@ const device: BootedDevice = { name: "test", platform: "android", deviceId: "tes
 
 async function parse(stdout: string): Promise<BackStackInfo> {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("dumpsys activity activities", { stdout, stderr: "" });
+  adb.setCommandResponse("dumpsys activity activities", createExecResult(stdout, ""));
   return new GetBackStack(device, new FakeAdbClientFactory(adb)).execute();
 }
 

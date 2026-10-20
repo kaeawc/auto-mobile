@@ -1,4 +1,5 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
+import { createHarnessServer as createTestUnixSocketServer } from "./helpers/UnixSocketServerHarness";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -90,21 +91,15 @@ async function harness(withControlVeto = false) {
     receipt?: AcquisitionReceipt,
     connection = CONNECTION,
   ) =>
-    pool.bindOrReuseDeviceSession(
-      id,
-      DEVICE.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      connection,
+    pool.bindOrReuseDeviceSession({
+      sessionId: id,
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: connection,
       oneShotCli,
       receipt,
-    );
+    });
   const mint = async (autolock: boolean) =>
     autolock
       ? (await pool.autolockDevice(
@@ -124,8 +119,8 @@ async function harness(withControlVeto = false) {
   const settle = (ms = 0) =>
     timer.advanceTimeAsync(ms, () => drainMicrotasks(FAKE_TIMER_QUIET_TURNS));
   const assertClean = () => {
-    expect(pool["mcpSessionUndeliveredMints"]?.has(CONNECTION) ?? false).toBe(false);
-    expect(pool["mcpSessionUndeliveredMints"]?.size ?? 0).toBe(0);
+    expect(pool.testHooks.mcpSessionUndeliveredMints?.has(CONNECTION) ?? false).toBe(false);
+    expect(pool.testHooks.mcpSessionUndeliveredMints?.size ?? 0).toBe(0);
   };
   const assertReleased = async (id: string) => {
     await settle();
@@ -164,7 +159,7 @@ test("#11999 an unidentified tool-call claim ends idempotently without retaining
   const end = h.pool.beginMcpToolCall?.(undefined) ?? h.pool.beginMcpBind(undefined);
   end();
   end();
-  expect(h.pool["mcpBindsInFlight"].size).toBe(0);
+  expect(h.pool.testHooks.mcpBindsInFlight.size).toBe(0);
   h.assertClean();
 });
 
@@ -182,11 +177,11 @@ for (const autolock of [false, true]) {
       if (!closedAtCommit) {
         h.pool.releaseMcpSessionBindings(CONNECTION);
       }
-      expect(h.pool["ownerDisconnectRelease"].remainingMs(id)).toBe(0);
+      expect(h.pool.testHooks.ownerDisconnectRelease.remainingMs(id)).toBe(0);
       end(false);
       end(false);
       await h.assertReleased(id);
-      expect(h.pool["mcpBindsInFlight"].has(CONNECTION)).toBe(false);
+      expect(h.pool.testHooks.mcpBindsInFlight.has(CONNECTION)).toBe(false);
       h.pool.releaseMcpSessionBindings(CONNECTION);
       await h.settle(OWNER_DISCONNECT_GRACE_MS);
       expect(h.reasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
@@ -213,7 +208,7 @@ for (const closedAtCommit of [false, true]) {
     if (!closedAtCommit) {
       h.pool.releaseMcpSessionBindings(CONNECTION);
     }
-    expect(h.pool["ownerDisconnectRelease"].remainingMs(id)).toBe(OWNER_DISCONNECT_GRACE_MS);
+    expect(h.pool.testHooks.ownerDisconnectRelease.remainingMs(id)).toBe(OWNER_DISCONNECT_GRACE_MS);
     end();
     await h.settle();
     expect(h.manager.hasSession(id)).toBe(true);
@@ -231,12 +226,12 @@ test("#11999 an undelivered claim retains its mint until close and a later undel
   const id = await h.mint(false);
   end(false);
   end(true);
-  expect(h.pool["mcpBindsInFlight"].get(CONNECTION)?.pending).toBe(1);
-  expect(h.pool["mcpSessionUndeliveredMints"].get(CONNECTION)?.has(id)).toBe(true);
+  expect(h.pool.testHooks.mcpBindsInFlight.get(CONNECTION)?.pending).toBe(1);
+  expect(h.pool.testHooks.mcpSessionUndeliveredMints.get(CONNECTION)?.has(id)).toBe(true);
   h.pool.releaseMcpSessionBindings(CONNECTION);
   h.assertClean();
   laterEnd(false);
-  expect(h.pool["mcpBindsInFlight"].has(CONNECTION)).toBe(false);
+  expect(h.pool.testHooks.mcpBindsInFlight.has(CONNECTION)).toBe(false);
   await h.assertReleased(id);
 });
 
@@ -261,7 +256,7 @@ test("#11999 a closed one-shot CLI mint survives the zero-delay attempt under cl
   await h.settle(OWNER_DISCONNECT_GRACE_MS);
   expect(h.manager.getSession(id)?.livenessPolicy).toBe("cli-idle");
   expect(h.reasons).toEqual([]);
-  expect(h.pool["ownerDisconnectRelease"].isPending(id)).toBe(false);
+  expect(h.pool.testHooks.ownerDisconnectRelease.isPending(id)).toBe(false);
   h.assertClean();
 });
 
@@ -321,9 +316,9 @@ test("#11999 a zero-delay release vetoed by control re-arms when control ends", 
   end();
   await h.settle();
   expect(h.manager.hasSession(id)).toBe(true);
-  expect(h.pool["ownerDisconnectRelease"]["pending"].get(id)?.deferred).toBe(true);
-  expect(h.pool["ownerDisconnectRelease"].isPending(id)).toBe(true);
-  expect(h.pool["ownerDisconnectRelease"].remainingMs(id)).toBeUndefined();
+  expect(h.pool.testHooks.ownerDisconnectRelease.testHooks.pending.get(id)?.deferred).toBe(true);
+  expect(h.pool.testHooks.ownerDisconnectRelease.isPending(id)).toBe(true);
+  expect(h.pool.testHooks.ownerDisconnectRelease.remainingMs(id)).toBeUndefined();
   h.control(false);
   h.pool.sessionExecutionsEnded([id]);
   await h.assertReleased(id);
@@ -338,7 +333,7 @@ test("#11999 a new owner cancels the zero-delay release", async () => {
   end();
   await h.settle();
   expect(h.manager.hasSession(id)).toBe(true);
-  expect(h.pool["ownerDisconnectRelease"].isPending(id)).toBe(false);
+  expect(h.pool.testHooks.ownerDisconnectRelease.isPending(id)).toBe(false);
   expect(h.reasons).toEqual([]);
   h.assertClean();
 });
@@ -349,7 +344,7 @@ test("#11999 another connection ending does not acknowledge this connection's mi
   const otherEnd = h.claim("other-connection");
   const id = await h.mint(false);
   otherEnd();
-  expect(h.pool["mcpSessionUndeliveredMints"]?.get(CONNECTION)?.has(id)).toBe(true);
+  expect(h.pool.testHooks.mcpSessionUndeliveredMints?.get(CONNECTION)?.has(id)).toBe(true);
   h.pool.releaseMcpSessionBindings(CONNECTION);
   end();
   await h.assertReleased(id);
@@ -394,7 +389,7 @@ test("#11999 releasing a session clears its mint while its connection and claim 
   const h = await harness();
   const end = h.claim();
   const id = await h.mint(false);
-  expect(h.pool["mcpSessionUndeliveredMints"]?.get(CONNECTION)?.has(id)).toBe(true);
+  expect(h.pool.testHooks.mcpSessionUndeliveredMints?.get(CONNECTION)?.has(id)).toBe(true);
   await h.manager.releaseSession(id, "explicit-release");
   h.assertClean();
   h.pool.releaseMcpSessionBindings(CONNECTION);
@@ -423,7 +418,7 @@ for (const blocker of ["cli-idle", "awaiting-owner", "handoff"] as const) {
     end();
     await h.settle();
     expect(h.manager.hasSession(id)).toBe(true);
-    expect(h.pool["ownerDisconnectRelease"].isPending(id)).toBe(false);
+    expect(h.pool.testHooks.ownerDisconnectRelease.isPending(id)).toBe(false);
     expect(h.reasons).toEqual([]);
     h.assertClean();
   });
@@ -456,7 +451,7 @@ for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] 
     const events: string[] = [];
     const deliveries: Array<boolean | undefined> = [];
     const socket = new FakeSocket();
-    server["clientSockets"].set(CONNECTION, socket);
+    server.state.clientSockets.set(CONNECTION, socket);
     h.pool.beginMcpToolCall = (connection) => {
       expect(connection).toBe(CONNECTION);
       events.push("begin");
@@ -465,17 +460,17 @@ for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] 
         deliveries.push(delivered);
       };
     };
-    server["handleRequest"] = async () => {
+    server.requestHandler = async () => {
       events.push("forward");
       expect(events).toEqual(["begin", "forward"]);
       if (outcome === "throw") {
         throw new Error("test forward failed");
       }
       if (outcome === "replaced") {
-        server["clientSockets"].set(CONNECTION, new FakeSocket());
+        server.state.clientSockets.set(CONNECTION, new FakeSocket());
       }
       if (outcome === "terminal") {
-        for (const pending of server["pendingSocketRequests"]) {
+        for (const pending of server.pendingRequests) {
           pending.terminal = true;
         }
       }
@@ -483,11 +478,11 @@ for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] 
         ? undefined
         : { id: "mint", type: "mcp_response", success: true };
     };
-    server["writeTerminalSocketResponse"] = () => {
+    server.testHooks.transport.writeTerminalSocketResponse = () => {
       events.push("write");
       expect(events).toEqual(["begin", "forward", "write"]);
     };
-    await server["processSocketRequestLine"](
+    await server.testHooks.transport.processSocketRequestLine(
       CONNECTION,
       socket,
       JSON.stringify({
@@ -527,15 +522,15 @@ test("#11999 a failed optional socket claim still forwards and writes the answer
     events.push("begin");
     throw claimError;
   };
-  server["handleRequest"] = async () => {
+  server.requestHandler = async () => {
     events.push("forward");
     return { id: "mint", type: "mcp_response", success: true };
   };
-  server["writeTerminalSocketResponse"] = () => {
+  server.testHooks.transport.writeTerminalSocketResponse = () => {
     events.push("write");
   };
   try {
-    await server["processSocketRequestLine"](
+    await server.testHooks.transport.processSocketRequestLine(
       CONNECTION,
       new FakeSocket(),
       JSON.stringify({
@@ -569,34 +564,28 @@ test("#11999 socket close around the mint's answer uses its delivery status", as
       },
       h.timer,
     );
-    server["acceptingRequests"] = true;
+    server.allowRequests();
     const socket = new FakeSocket();
-    server["handleConnection"](socket);
-    const connection = [...server["sessions"].keys()][0]!;
+    server.connect(socket);
+    const connection = server.sessionIds[0]!;
     const minted = Promise.withResolvers<string>();
     const answer = Promise.withResolvers<void>();
-    server.mcpClientFactory = async () => ({
-      callTool: async ({ arguments: args }) => {
-        const id = await h.pool.bindOrReuseDeviceSession(
-          "socket-mint",
-          DEVICE.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          String(args?.__mcpSessionId),
-        );
-        minted.resolve(id);
-        await answer.promise;
-        return { content: [] };
-      },
-      close: async () => {},
-    });
-    const request = server["processSocketRequestLine"](
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async ({ arguments: args }) => {
+          const id = await h.pool.bindOrReuseDeviceSession({
+            sessionId: "socket-mint",
+            deviceId: DEVICE.deviceId,
+            platform: "android",
+            allowSessionRebind: false,
+            mcpSessionId: String(args?.__mcpSessionId),
+          });
+          minted.resolve(id);
+          await answer.promise;
+          return { content: [] };
+        },
+      });
+    const request = server.testHooks.transport.processSocketRequestLine(
       connection,
       socket,
       JSON.stringify({
@@ -618,11 +607,11 @@ test("#11999 socket close around the mint's answer uses its delivery status", as
     answer.resolve();
     await request;
     if (closeTiming === "after-answer") {
-      expect(h.pool["mcpSessionUndeliveredMints"].get(connection)?.has(id)).toBe(true);
-      expect(h.pool["mcpBindsInFlight"].has(connection)).toBe(false);
+      expect(h.pool.testHooks.mcpSessionUndeliveredMints.get(connection)?.has(id)).toBe(true);
+      expect(h.pool.testHooks.mcpBindsInFlight.has(connection)).toBe(false);
       socket.emit("close");
     } else if (closeTiming === "delivered") {
-      expect(h.pool["mcpSessionUndeliveredMints"].has(connection)).toBe(false);
+      expect(h.pool.testHooks.mcpSessionUndeliveredMints.has(connection)).toBe(false);
       expect(socket.getWrittenMessages()).toContainEqual({
         id: "socket-mint",
         type: "mcp_response",
@@ -635,6 +624,6 @@ test("#11999 socket close around the mint's answer uses its delivery status", as
       await h.settle(1);
     }
     await h.assertReleased(id);
-    expect(h.pool["mcpSessionUndeliveredMints"]?.has(connection) ?? false).toBe(false);
+    expect(h.pool.testHooks.mcpSessionUndeliveredMints?.has(connection) ?? false).toBe(false);
   }
 });

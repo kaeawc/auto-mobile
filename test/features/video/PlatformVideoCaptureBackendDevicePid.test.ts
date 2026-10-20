@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 import { DeviceUnreachableError } from "../../../src/models/DeviceUnreachableError";
@@ -299,12 +300,12 @@ describe("orphaned Android recorder teardown", () => {
   }
   test.each(["thrown", "returned"])("unanswered orphan probe is unreachable (%s)", async (mode) => {
     const { backend, client } = harness();
-    const cause = new Error("probe timed out");
+    const cause = mode === "thrown" ? new Error("probe timed out") : "probe timed out";
     const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
-      if (mode === "thrown") {
+      if (cause instanceof Error) {
         throw cause;
       }
-      return { stdout: "", stderr: "", error: cause };
+      return { ...createExecResult("", ""), error: cause };
     });
     try {
       const error = await backend
@@ -321,12 +322,12 @@ describe("orphaned Android recorder teardown", () => {
     "live recorder probe retains its original error (%s)",
     async (mode) => {
       const { backend, client } = harness();
-      const cause = new Error("probe timed out");
+      const cause = mode === "thrown" ? new Error("probe timed out") : "probe timed out";
       const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
-        if (mode === "thrown") {
+        if (cause instanceof Error) {
           throw cause;
         }
-        return { stdout: "", stderr: "", error: cause };
+        return { ...createExecResult("", ""), error: cause };
       });
       try {
         for (const kind of [2, 9] as const) {

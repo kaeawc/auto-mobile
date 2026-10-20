@@ -30,9 +30,9 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkCreate: Promise<void> | undefined;
   parkRelease: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
     await this.parkCreate;
-    await super.upsertActiveSession(record);
+    return await super.upsertActiveSession(record);
   }
 
   override async markReleased(
@@ -52,7 +52,9 @@ class NeverSettlingReleaseManager extends SessionManager {
   stuck = false;
 
   constructor(private readonly fakeTimer: FakeTimer) {
-    super(fakeTimer, new FakeDeviceSessionPersistence(), () => new FakeDbWriteBarrier());
+    super(fakeTimer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
   }
 
   override async waitForSessionReleaseWithin(sessionId: string, timeoutMs: number) {
@@ -117,7 +119,13 @@ describe("createSessionOrRestore's release wait is bounded (#10836)", () => {
       const createGate = Promise.withResolvers<void>();
       persistence.parkCreate = createGate.promise;
 
-      const bind = track(pool.bindOrReuseDeviceSession("racing", first.deviceId, "android"));
+      const bind = track(
+        pool.bindOrReuseDeviceSession({
+          sessionId: "racing",
+          deviceId: first.deviceId,
+          platform: "android",
+        }),
+      );
       await flush();
       persistence.parkRelease = new Promise<void>(() => {});
       const release = track(manager.releaseSession("racing", "explicit-release"));
@@ -156,7 +164,11 @@ describe("createSessionOrRestore's release wait is bounded (#10836)", () => {
       manager.stuck = true;
 
       const bind = pool
-        .bindOrReuseDeviceSession("stuck", first.deviceId, "android")
+        .bindOrReuseDeviceSession({
+          sessionId: "stuck",
+          deviceId: first.deviceId,
+          platform: "android",
+        })
         .catch((error: unknown) => error);
       await flush();
       const unrelated = track(pool.assignDeviceToSession("unrelated", "android"));
@@ -199,7 +211,11 @@ describe("createSessionOrRestore's release wait is bounded (#10836)", () => {
       acquisitionCancellations.push([deviceId, sessionId]);
     });
 
-    await pool.bindOrReuseDeviceSession("plain", first.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "plain",
+      deviceId: first.deviceId,
+      platform: "android",
+    });
 
     expect(pool.getDevice(first.deviceId)?.sessionId).toBe("plain");
     // A committed create still cancels sessionless calls on its device, once (#10905).

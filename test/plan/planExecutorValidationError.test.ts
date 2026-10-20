@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
@@ -11,11 +11,11 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 // of the same `formatToolParamError` rendering the MCP boundary produces. This
 // pins that the plan path now names the constraint the same way.
 describe("PlanExecutor validation error rendering (#5854)", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   const TOOL = "validationErrorTool5854";
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
 
     ToolRegistry.register(
       TOOL,

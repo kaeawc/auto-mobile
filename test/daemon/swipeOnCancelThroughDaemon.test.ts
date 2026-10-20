@@ -1,19 +1,23 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest } from "../../src/daemon/types";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { NonThrowingFakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
+import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
 
 /**
  * #10151: a client that cancels a long `swipeOn` `lookFor` search must stop the search before its
@@ -26,47 +30,54 @@ import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
  * swipe. The search loop's own abort checks are pinned in the ScrollUntilVisible and SwipeOn suites.
  */
 
-class DaemonSideSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
+class DaemonSideSocket extends NonThrowingFakeSocket {
   /** Where frames the daemon writes are delivered (the client's read side). */
   deliver: (frame: string) => void = () => {};
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    this.deliver(data);
-    callback?.();
-    return true;
-  }
-  destroy(): this {
-    this.destroyed = true;
-    this.emit("close", false);
-    return this;
+  write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
+  write(
+    str: string | Uint8Array,
+    encoding?: BufferEncoding,
+    cb?: (err?: Error | null) => void,
+  ): boolean;
+  write(
+    data: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
+    const accepted = super.write(data, callback);
+    this.deliver(typeof data === "string" ? data : Buffer.from(data).toString());
+    return accepted;
   }
   receive(frame: string): void {
-    this.emit("data", Buffer.from(frame));
+    this.simulateData(frame);
   }
 }
 
 /** The client's write side: every frame the proxy writes reaches the daemon socket. */
-class ClientSideSocket extends EventEmitter {
-  destroyed = false;
-  readonly frames: DaemonRequest[] = [];
+class ClientSideSocket extends NonThrowingFakeSocket {
   constructor(private readonly daemonSide: DaemonSideSocket) {
     super();
   }
-  write(data: string): boolean {
-    this.frames.push(JSON.parse(data) as DaemonRequest);
-    this.daemonSide.receive(data);
-    return true;
+  /** The request frames the client wrote, in order. */
+  get frames(): DaemonRequest[] {
+    return this.getWrittenMessages(daemonRequestFrameSchema);
   }
-  destroy(): this {
-    this.destroyed = true;
-    this.emit("close", false);
-    return this;
+  write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
+  write(
+    str: string | Uint8Array,
+    encoding?: BufferEncoding,
+    cb?: (err?: Error | null) => void,
+  ): boolean;
+  write(
+    data: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
+    const accepted = super.write(data, callback);
+    this.daemonSide.receive(typeof data === "string" ? data : Buffer.from(data).toString());
+    return accepted;
   }
 }
 
@@ -75,13 +86,6 @@ interface LoopbackCall {
   /** Swipes the fake search dispatched. */
   swipes: number;
   settled: Promise<unknown>;
-}
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  mcpClientFactory(): Promise<Pick<Client, "callTool" | "close">>;
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -113,7 +117,7 @@ async function connectProxy(fake: FakeDaemonClient, timer: FakeTimer) {
 
 describe("swipeOn lookFor cancellation through the daemon request path (#10151)", () => {
   let timer: FakeTimer;
-  let internals: Internals;
+  let internals: UnixSocketServerHarness;
   let daemonSide: DaemonSideSocket;
   let clientSide: ClientSideSocket;
   let daemonClient: DaemonClient;
@@ -155,49 +159,43 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     timer = new FakeTimer();
     loopbackCalls = [];
     nextSwipe = [];
-    const server = createTestUnixSocketServer(
+    internals = createHarnessServer(
       "unused",
-      { isInitialized: () => false } as DaemonStateAccess,
+      { ...createFakeDaemonState(), isInitialized: () => false },
       timer,
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
-    internals.mcpClientFactory = async () => ({
-      close: async () => {},
-      callTool: (_params, options) => {
-        const call: LoopbackCall = {
-          signal: options?.signal,
-          swipes: 0,
-          settled: Promise.resolve(),
-        };
-        call.settled = searchLoop(options?.signal, call).catch((error: unknown) => error);
-        loopbackCalls.push(call);
-        return new Promise<never>((_resolve, reject) =>
-          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
-            once: true,
-          }),
-        );
-      },
-    });
+    internals.allowRequests();
+    internals.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: (_params, options) => {
+          const call: LoopbackCall = {
+            signal: options?.signal,
+            swipes: 0,
+            settled: Promise.resolve(),
+          };
+          call.settled = searchLoop(options?.signal, call).catch((error: unknown) => error);
+          loopbackCalls.push(call);
+          return new Promise<never>((_resolve, reject) =>
+            options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+              once: true,
+            }),
+          );
+        },
+      });
     daemonSide = new DaemonSideSocket();
     clientSide = new ClientSideSocket(daemonSide);
-    internals.handleConnection(daemonSide as unknown as Socket);
-    daemonClient = new DaemonClient(
-      "/fake/socket",
-      60_000,
-      timer,
-      ISOLATED_DAEMON_RECOVERY,
-      null,
-      new FakeIdGenerator(),
-    );
-    daemonClient.testHooks.attachSocket(clientSide as never);
+    internals.connect(daemonSide);
+    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      idGenerator: new FakeIdGenerator(),
+    });
+    daemonClient.testHooks.attachSocket(clientSide);
     daemonSide.deliver = (frame) => daemonClient.testHooks.simulateIncomingData(Buffer.from(frame));
   });
 
   afterEach(async () => {
     await daemonClient.close();
     daemonSide.destroy();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals.state.activeRequestHandlers]);
   });
 
   const lookForArgs = { direction: "up", lookFor: { text: "NeverAppears39" } };
@@ -227,7 +225,9 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     ]);
     expect(clientSide.frames[1].params).toEqual({ requestId: clientSide.frames[0].id });
     expect(loopback.signal?.aborted).toBe(true);
-    expect(((await call) as Error).message).toBe("client-cancel");
+    const failure = await call;
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).toHaveProperty("message", "client-cancel");
 
     // The search was parked mid-swipe; letting that swipe finish must not start another one.
     await finishSwipe();

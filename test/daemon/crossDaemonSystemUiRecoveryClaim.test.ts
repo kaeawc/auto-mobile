@@ -2,7 +2,7 @@ import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import type { DeviceInfo } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -67,7 +67,12 @@ describe("cross-daemon claim across System UI ANR recovery", () => {
       foreignDeviceOwnership: daemonA,
     });
     await pool.initializeWithDevices([original]);
-    await pool.bindOrReuseDeviceSession("owner-session", original.deviceId, "android", sourceImage);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage,
+    });
     expect(claims.get(original.deviceId)).toBe(DAEMON_A_PID);
 
     const reservation = await pool.reserveDeviceForShutdown(original.deviceId);
@@ -107,7 +112,12 @@ describe("cross-daemon claim across System UI ANR recovery", () => {
       foreignDeviceOwnership: daemonA,
     });
     await pool.initializeWithDevices([original]);
-    await pool.bindOrReuseDeviceSession("owner-session", original.deviceId, "android", sourceImage);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage,
+    });
     claims.set(replacement.deviceId, DAEMON_B_PID);
 
     const reservation = await pool.reserveDeviceForShutdown(original.deviceId);

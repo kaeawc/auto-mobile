@@ -10,15 +10,16 @@ import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -143,7 +144,7 @@ describe("the previous owner fetches the announced device gesture recording whil
     });
     finishStop();
     await finalized;
-    const payload = JSON.parse((await pending).content?.[0]?.text ?? "{}");
+    const payload = toolJson(await pending);
 
     expect(payload.error).toBeUndefined();
     expect(payload.recordingId).toBe(announcedId);
@@ -235,7 +236,7 @@ describe("the previous owner fetches the announced device gesture recording whil
             recordingId,
             sessionUuid,
           });
-          const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+          const payload = toolJson(response);
           expect(payload.error).toBe("No active recording. Start a recording before exporting.");
           expect(payload.planContent).toBeUndefined();
         } else {
@@ -254,7 +255,7 @@ describe("the previous owner fetches the announced device gesture recording whil
         surface === "exportPlan"
           ? ToolRegistry.getTool("exportPlan")!
               .handler({ recordingId: id, sessionUuid: OWNER })
-              .then((response) => JSON.parse(response.content?.[0]?.text ?? "{}"))
+              .then((response) => toolJson(response))
           : endedSessionServer()
               .invoke({ command: "stop", recordingId: id, sessionUuid: OWNER })
               .then(

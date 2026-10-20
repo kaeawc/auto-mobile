@@ -22,7 +22,7 @@ import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttp
 import { createStatelessMcpServer } from "../../src/daemon/statelessMcpServerFactory";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -35,6 +35,7 @@ import {
   sendRawSocketRequest,
   sendRequestOnPersistentSocket,
 } from "./helpers/socketRequest";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 
 /**
  * Control-socket forwards run in process (#11820): every forward reaches its own real
@@ -48,6 +49,7 @@ function fakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
@@ -58,6 +60,7 @@ function fakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
 }
 

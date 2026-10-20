@@ -1,3 +1,4 @@
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -61,18 +62,23 @@ describe("TapOnElement iOS semantic-link owner identity with SDK copies (#10843)
   test("accepts the XCUITest owner despite sdkWalker copies of its resource-id", () => {
     const hierarchy = loadHierarchy();
     const owner = ownerCandidates(hierarchy).find((element) => !isInjected(element));
-    expect(createTapOnElement()["hasUniqueSemanticLinkOwner"](owner, hierarchy)).toBe(true);
+    if (!owner) {
+      throw new Error("Expected captured owner");
+    }
+    expect(createTapOnElement().testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
   test("the id-only container resolves to an owner that passes the identity check", () => {
     const hierarchy = loadHierarchy();
     const tapOnElement = createTapOnElement();
-    const owner = tapOnElement["resolveContainerElement"](hierarchy, {
-      container: { elementId: OWNER_ID },
-      accessibilityLink: "Terms of Service",
+    const owner = new ResolverElementSelector().resolveContainer(hierarchy, {
+      elementId: OWNER_ID,
     });
     expect(owner?.["resource-id"]).toBe(OWNER_ID);
-    expect(tapOnElement["hasUniqueSemanticLinkOwner"](owner, hierarchy)).toBe(true);
+    if (!owner) {
+      throw new Error("Expected resolved owner");
+    }
+    expect(tapOnElement.testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
   test("still rejects an owner whose resource-id two XCUITest nodes carry", () => {
@@ -87,7 +93,7 @@ describe("TapOnElement iOS semantic-link owner identity with SDK copies (#10843)
     });
     expect(promoted).toBe(true);
     const owner = ownerCandidates(hierarchy)[0];
-    expect(createTapOnElement()["hasUniqueSemanticLinkOwner"](owner, hierarchy)).toBe(false);
+    expect(createTapOnElement().testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(false);
   });
 
   test("counts SDK copies when XCUITest captured no node with the resource-id", () => {
@@ -98,6 +104,6 @@ describe("TapOnElement iOS semantic-link owner identity with SDK copies (#10843)
       }
     });
     const owner = ownerCandidates(hierarchy)[0];
-    expect(createTapOnElement()["hasUniqueSemanticLinkOwner"](owner, hierarchy)).toBe(false);
+    expect(createTapOnElement().testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(false);
   });
 });

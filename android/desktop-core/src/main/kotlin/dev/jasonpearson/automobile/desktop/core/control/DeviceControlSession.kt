@@ -5,11 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
-import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
+import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesture
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
@@ -24,7 +24,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.withContext
 
 /**
  * The one seam client device control runs through (issue #3348).
@@ -71,16 +70,16 @@ import kotlinx.coroutines.withContext
  *   banner write are serialized. Production passes `Dispatchers.Main`.
  * @param ioDispatcher where the blocking daemon call runs.
  */
-class DeviceControlSession(
-  scope: CoroutineScope,
-  private val clientProvider: () -> AutoMobileClient?,
-  private val platform: () -> String,
-  private val nowMs: () -> Long,
-  private val publishError: (String?) -> Unit,
-  private val uiContext: CoroutineContext = Dispatchers.Main,
-  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-  private val forwarder: DeviceControlInputForwarder = DeviceControlInputForwarder(),
-  private val refreshTracker: PostInputRefreshTracker = PostInputRefreshTracker(),
+data class DeviceControlSessionOptions(
+  val scope: CoroutineScope,
+  val clientProvider: () -> AutoMobileClient?,
+  val platform: () -> String,
+  val nowMs: () -> Long,
+  val publishError: (String?) -> Unit,
+  val uiContext: CoroutineContext = Dispatchers.Main,
+  val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  val forwarder: DeviceControlInputForwarder = DeviceControlInputForwarder(),
+  val refreshTracker: PostInputRefreshTracker = PostInputRefreshTracker(),
   /**
    * Feature flag for streaming (real-time) drag input (issue: streaming gesture input). Off by
    * default: [beginGestureStream] returns null, so the view keeps dispatching a drag as one atomic
@@ -88,8 +87,20 @@ class DeviceControlSession(
    * falls back to the same atomic swipe inside the consumer, so the view's behavior is identical
    * either way from its own perspective.
    */
-  private val streamingEnabled: Boolean = false,
-) {
+  val streamingEnabled: Boolean = false,
+)
+
+class DeviceControlSession(options: DeviceControlSessionOptions) {
+  private val scope = options.scope
+  private val clientProvider = options.clientProvider
+  private val platform = options.platform
+  internal val nowMs = options.nowMs
+  internal val publishError = options.publishError
+  internal val uiContext = options.uiContext
+  internal val ioDispatcher = options.ioDispatcher
+  internal val forwarder = options.forwarder
+  internal val refreshTracker = options.refreshTracker
+  private val streamingEnabled = options.streamingEnabled
   /** Monotonic id for each streamed gesture, correlating its start/move/end frames on the wire. */
   private val gestureStreamSeq = AtomicLong(0L)
   /**
@@ -98,9 +109,9 @@ class DeviceControlSession(
    * completes on the IO dispatcher, publishes its error only while the token is still current — so
    * a late failure from a superseded attempt cannot resurrect a banner a newer attempt cleared.
    */
-  private val errorToken = AtomicLong(0L)
+  internal val errorToken = AtomicLong(0L)
 
-  private val dispatcher = DeviceControlInputDispatcher(scope) { command -> execute(command) }
+  internal val dispatcher = DeviceControlInputDispatcher(scope) { command -> execute(command) }
 
   /**
    * Remembers the last [CoordinateSpace] observed at one point in the pipeline and reports whether
@@ -110,7 +121,7 @@ class DeviceControlSession(
    * only the former can be flipped AWAY from, so the first observation must be a baseline rather
    * than a transition. [forget] restores that state for a new control context.
    */
-  private class SpaceTracker {
+  internal class SpaceTracker {
     private var seen: Boolean = false
     private var last: CoordinateSpace? = null
 
@@ -135,7 +146,7 @@ class DeviceControlSession(
   }
 
   /** Same transition and dispatch-time agreement rules as [SpaceTracker], for native scale. */
-  private class NativeScaleTracker {
+  internal class NativeScaleTracker {
     private var seen: Boolean = false
     private var last: Double? = null
 
@@ -155,7 +166,7 @@ class DeviceControlSession(
   }
 
   /** Records the newest frame context observed from the stream. */
-  private class FrameContextTracker {
+  internal class FrameContextTracker {
     private var seen: Boolean = false
     private var last: String? = null
 
@@ -177,11 +188,11 @@ class DeviceControlSession(
   // The declaration seen at STREAM RECEIPT — the earliest point in the pipeline, ahead of hierarchy
   // parsing and the layout state's debounce. This is the one that matters (see
   // [onObservationSpaceDeclared]).
-  private val streamSpace = SpaceTracker()
-  private val streamNativeScale = NativeScaleTracker()
+  internal val streamSpace = SpaceTracker()
+  internal val streamNativeScale = NativeScaleTracker()
 
   // Like [streamSpace], but carries the device-authored identity that makes input actionable.
-  private val streamFrameContext = FrameContextTracker()
+  internal val streamFrameContext = FrameContextTracker()
 
   // Newest capture identity whose coordinate space has been observed at receipt, so a late frame
   // carrying an older binding cannot roll the tracked space backward (see
@@ -195,14 +206,14 @@ class DeviceControlSession(
   // The latest proven device rotations, for the dispatch-time gate. Null until one is observed,
   // one value when every proving source agrees, and multiple values latched during a disagreement
   // until currently reported sources prove they agree again.
-  @Volatile private var lastProvenRotations: Set<Int>? = null
+  @Volatile internal var lastProvenRotations: Set<Int>? = null
 
   // Backstop trackers on the frame FACTS, for updates that never came through the stream collectors
   // (see [resetOnCoordinateSpaceTransition]).
-  private val screenshotFactSpace = SpaceTracker()
-  private val hierarchyFactSpace = SpaceTracker()
-  private val screenshotFactNativeScale = NativeScaleTracker()
-  private val hierarchyFactNativeScale = NativeScaleTracker()
+  internal val screenshotFactSpace = SpaceTracker()
+  internal val hierarchyFactSpace = SpaceTracker()
+  internal val screenshotFactNativeScale = NativeScaleTracker()
+  internal val hierarchyFactNativeScale = NativeScaleTracker()
 
   /** The post-input refresh state a client should be rendering; see [PostInputRefreshTracker]. */
   val refreshState: PostInputRefreshState
@@ -224,7 +235,7 @@ class DeviceControlSession(
    * Compose-OBSERVABLE (issue #4550). See [interactionSnapshot] for why that matters.
    */
   var renderSnapshot by mutableStateOf<DeviceFrameSnapshot?>(null)
-    private set
+    internal set
 
   /**
    * The snapshot a click must be mapped and dispatched through, or null when control is
@@ -252,14 +263,14 @@ class DeviceControlSession(
    * or the early detection buys nothing.
    */
   var interactionSnapshot by mutableStateOf<DeviceFrameSnapshot?>(null)
-    private set
+    internal set
 
   /**
    * Frame context of a snapshot the daemon rejected as stale. The rendered snapshot remains useful
    * for inspection, but its coordinates are no longer actionable until the device reports a
    * different context.
    */
-  private var staleContextRejectedFrameContext: String? = null
+  internal var staleContextRejectedFrameContext: String? = null
 
   /**
    * Evaluate control availability for [inputs] and, on the way, offer the resulting snapshot to the
@@ -309,81 +320,6 @@ class DeviceControlSession(
         live?.takeIf { streamFrameContext.matches(it.frameContext) }
       }
     return decision
-  }
-
-  /**
-   * The retained frame, or null once it is no longer safe to act through.
-   *
-   * Four independent signals retire it, because any one can be the first to notice:
-   * - the live decision reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped
-   *   producing),
-   * - the live decision reporting [DeviceControlBlockReason.RotationMismatch] (the displayed bounds
-   *   are no longer safe to map through) — issue #4502,
-   * - a valid incoming source rotation differing from the retained snapshot, since a partial
-   *   rotation update can otherwise be unpaired (issue #4502), and
-   * - the retained frame's own age (nothing new has arrived to make the live decision say
-   *   anything).
-   *
-   * A **coordinate-space transition** (issue #4550) is deliberately NOT one of them: it is a change
-   * of control *context* rather than a property of this one frame, so it is handled one layer up by
-   * [resetOnCoordinateSpaceTransition] / [onObservationSpaceDeclared], which also drain the queued
-   * backlog. Rotation and coordinate space are complementary gates — a frame is actionable only
-   * when both are current — and neither subsumes the other.
-   */
-  private fun retainedIfStillActionable(
-    decision: DeviceControlDecision,
-    inputs: DeviceControlInputs,
-    nowMs: Long,
-  ): DeviceFrameSnapshot? {
-    val retained = renderSnapshot ?: return null
-    when ((decision as? DeviceControlDecision.Blocked)?.reason) {
-      DeviceControlBlockReason.StaleFrame,
-      DeviceControlBlockReason.RotationMismatch -> return null
-      else -> Unit
-    }
-    if (inputs.hasProvenRotationDifferentFrom(retained.rotation)) return null
-    return retained.takeIf { DeviceControlPolicy.isSnapshotFresh(it, nowMs) }
-  }
-
-  /**
-   * BACKSTOP for a [CoordinateSpace] change that reaches the frame facts without having passed
-   * through [onObservationSpaceDeclared] (issue #4550).
-   *
-   * The primary detection is at stream receipt, which is strictly earlier than this and is the only
-   * point early enough to beat the debounce. This check earns its place because not every fact
-   * update comes from a stream message:
-   * [dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState] is also written by
-   * programmatic paths (an initial hierarchy fetch, a manual refresh) that carry their own
-   * declaration and never reach the collectors. A frame installed that way could otherwise
-   * re-establish a space the stream had already moved off, with no reset.
-   *
-   * Both paths funnel into the same reset, so this is one mechanism observed at two points, not two
-   * mechanisms. Each source is tracked independently because either can be the first to change, and
-   * a source not seen yet is a baseline rather than a transition.
-   *
-   * Scope note: receipt-time detection plus this backstop close the windows the client can observe.
-   * The residual sub-dispatch race — metadata flipping after a command has already left the queue —
-   * cannot be closed from the client at all; it needs the input endpoints to accept a
-   * caller-declared space, which is a wire change and deliberately out of scope here.
-   */
-  private fun resetOnCoordinateSpaceTransition(inputs: DeviceControlInputs) {
-    val screenshotFlipped =
-      inputs.screenshot?.let { screenshotFactSpace.observe(it.coordinateSpace) }
-    val hierarchyFlipped = inputs.hierarchy?.let { hierarchyFactSpace.observe(it.coordinateSpace) }
-    val screenshotScaleChanged =
-      inputs.screenshot?.let { screenshotFactNativeScale.observe(it.nativeScale) }
-    val hierarchyScaleChanged =
-      inputs.hierarchy?.let { hierarchyFactNativeScale.observe(it.nativeScale) }
-    // The trackers already hold the new space, so this reset must NOT forget them — otherwise the
-    // very next evaluate would re-establish a baseline and could see the same flip twice.
-    if (
-      screenshotFlipped == true ||
-        hierarchyFlipped == true ||
-        screenshotScaleChanged == true ||
-        hierarchyScaleChanged == true
-    ) {
-      resetPreservingSpaceBaseline()
-    }
   }
 
   /**
@@ -450,74 +386,6 @@ class DeviceControlSession(
   }
 
   /**
-   * Whether [snapshot]'s coordinates can still be sent to the device: its declared
-   * [CoordinateSpace] AND its capture rotation are both the ones the device is currently reporting
-   * (issues #4550, #4502).
-   *
-   * Defence in depth, at the last possible moment. [onObservationSpaceDeclared] retires the
-   * interaction snapshot as soon as the flip is observed, and that state is Compose-observable so
-   * the view drops it promptly. Neither closes the gap for a click ALREADY in flight: a pointer
-   * event captured the snapshot before the flip and reaches dispatch after it, and the view cannot
-   * un-capture it. This is where that click stops.
-   *
-   * Only the coordinate-bearing actions consult it. [key] and its siblings carry no coordinate —
-   * they use the snapshot solely for its device id, which a space change does not invalidate — so
-   * rejecting them here would drop keystrokes for a reason that does not apply to them.
-   *
-   * Both properties are checked because both can invalidate a coordinate independently: a space
-   * flip changes the UNIT the numbers are in, a rotation changes the AXES they are measured on, and
-   * a frame is dispatchable only when both are current. Each reuses the value its own fix already
-   * records — the stream space tracker and the proven source rotations — rather than introducing a
-   * third notion of "current". A session that has observed neither accepts everything: there is
-   * nothing to contradict.
-   */
-  private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
-    staleContextRejectedFrameContext == null &&
-      streamSpace.matches(snapshot.coordinateSpace) &&
-      streamNativeScale.matches(snapshot.nativeScale) &&
-      streamFrameContext.matches(snapshot.frameContext) &&
-      rotationIsStillDispatchable(snapshot)
-
-  private fun rotationIsStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
-    lastProvenRotations.let { rotations ->
-      rotations == null || (rotations.size == 1 && snapshot.rotation in rotations)
-    }
-
-  /**
-   * A source can arrive before it pairs with its counterpart during a rotation. That unpaired
-   * source still proves the device no longer has [retainedRotation], so retain display pixels if
-   * useful but never retain their old coordinate mapping for a second input.
-   */
-  private fun DeviceControlInputs.hasProvenRotationDifferentFrom(retainedRotation: Int): Boolean =
-    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).any {
-      it in 0..3 && it != retainedRotation
-    }
-
-  /** All rotations any source has PROVEN (values in `0..3`), independent of source order. */
-  private fun DeviceControlInputs.provenRotations(): Set<Int> =
-    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation)
-      .filter { it in 0..3 }
-      .toSet()
-
-  /**
-   * Keep a proven disagreement until every currently reported source can prove an agreeing
-   * rotation. A missing or malformed value cannot prove the device returned to the prior rotation.
-   */
-  private fun updateProvenRotations(inputs: DeviceControlInputs) {
-    val rotations = inputs.provenRotations()
-    if (rotations.isEmpty()) return
-    if ((lastProvenRotations?.size ?: 0) > 1 && inputs.hasUnprovenReportedRotation()) return
-    lastProvenRotations = rotations
-  }
-
-  private fun DeviceControlInputs.hasUnprovenReportedRotation(): Boolean =
-    screenshot?.let { !it.rotation.isProvenRotation() } == true ||
-      hierarchy?.let { !it.rotation.isProvenRotation() } == true ||
-      liveFrame?.let { !it.rotation.isProvenRotation() } == true
-
-  private fun Int?.isProvenRotation(): Boolean = this != null && this in 0..3
-
-  /**
    * Enqueue a tap on [snapshot] at the mapped device coordinate [point], in click order.
    *
    * [snapshot] is the frame the user actually clicked, captured by the view atomically with
@@ -568,17 +436,20 @@ class DeviceControlSession(
     if (!coordinatesAreStillDispatchable(snapshot)) return false
     val decision =
       DeviceDragGesturePolicy.evaluate(
-        start = start,
-        end = end,
-        deviceWidth = snapshot.deviceWidth,
-        deviceHeight = snapshot.deviceHeight,
-        // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
-        // endpoints are in. Read from the clicked snapshot, never from current stream state.
-        coordinateSpace = snapshot.coordinateSpace,
-        nativeScale = snapshot.nativeScale,
-        // Replay the swipe at the speed the user flicked, so an inspector swipe flings like a real
-        // one; null (an older caller) keeps the fixed fallback duration.
-        gestureDurationMs = gestureDurationMs,
+        DeviceDragGesture(
+          start = start,
+          end = end,
+          deviceWidth = snapshot.deviceWidth,
+          deviceHeight = snapshot.deviceHeight,
+          // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
+          // endpoints are in. Read from the clicked snapshot, never from current stream state.
+          coordinateSpace = snapshot.coordinateSpace,
+          nativeScale = snapshot.nativeScale,
+          // Replay the swipe at the speed the user flicked, so an inspector swipe flings like a
+          // real
+          // one; null (an older caller) keeps the fixed fallback duration.
+          gestureDurationMs = gestureDurationMs,
+        ),
       )
     // Ignored is not a failure: it means the gesture was never a swipe. Nothing is sent, nothing is
     // surfaced, and the refresh tracker is left alone.
@@ -760,292 +631,8 @@ class DeviceControlSession(
     lastProvenRotations = null
   }
 
-  /**
-   * Everything [reset] does except forgetting the observed coordinate spaces.
-   *
-   * Used by the space-transition paths, which have already recorded the NEW space as their
-   * baseline: forgetting it there would make the next observation re-establish a baseline and could
-   * report the same flip twice. Every other caller wants the full [reset] — a new device or a
-   * reconnected stream must not be compared against the previous context's space.
-   */
-  private fun resetPreservingSpaceBaseline() {
-    dispatcher.reset()
-    errorToken.incrementAndGet()
-    refreshTracker.reset()
-    staleContextRejectedFrameContext = null
-    renderSnapshot = null
-    interactionSnapshot = null
-    publishError(null)
-  }
-
-  private suspend fun execute(command: DeviceControlInputCommand) {
-    // A streamed drag holds this slot for its whole lifetime and runs its own consumer loop, so it
-    // bypasses the one-shot machinery below (which assumes a single request per command).
-    if (command is DeviceControlInputCommand.StreamGesture) {
-      executeStreamGesture(command)
-      return
-    }
-    // A command can wait behind another input while the sources rotate. Recheck at the FIFO
-    // consumer boundary so a coordinate captured before disagreement cannot reach the daemon.
-    if (
-      (command is DeviceControlInputCommand.Tap || command is DeviceControlInputCommand.Swipe) &&
-        !coordinatesAreStillDispatchable(command.snapshot)
-    ) {
-      command.client?.close()
-      return
-    }
-    var error: String? = null
-    val forwarded =
-      try {
-        withContext(ioDispatcher) {
-          // The main-to-IO dispatcher hop admits another observation before the daemon call.
-          // This volatile read is the final rotation gate before coordinates leave the process.
-          if (
-            (command is DeviceControlInputCommand.Tap ||
-              command is DeviceControlInputCommand.Swipe) &&
-              !rotationIsStillDispatchable(command.snapshot)
-          ) {
-            false
-          } else {
-            forward(command) { message -> error = message }
-            true
-          }
-        }
-      } finally {
-        command.client?.close()
-      }
-    if (!forwarded) return
-    val message = error
-    withContext(uiContext) {
-      if (message == null) {
-        // Success: the device changed, so wait for the observation stream to supersede the snapshot
-        // this input was dispatched through. No polling, no client-side re-observe.
-        refreshTracker.onInputSucceeded(command.snapshot, nowMs())
-      } else {
-        // Failure: the device did not change, so nothing on screen is stale and nothing is cleared.
-        refreshTracker.onInputFailed()
-        if (isStaleFrameContextError(message)) {
-          // Inputs already queued against the rejected snapshot must not become implicit retries,
-          // but a user can receive a newer paired frame and enqueue a valid command while this
-          // one is in flight. Reject only this context so that newer command stays in gesture
-          // order and can still reach the device.
-          val newestDiscardedToken = dispatcher.discardFrameContext(command.snapshot.frameContext)
-          if (newestDiscardedToken == errorToken.get()) {
-            // A discarded retry owned the current claim. Its removal must not also suppress the
-            // stale rejection that explains why control is unavailable.
-            errorToken.set(command.token)
-          }
-          if (!hasDifferentInteractionFrameContextThan(command.snapshot)) {
-            staleContextRejectedFrameContext = command.snapshot.frameContext
-            interactionSnapshot = null
-          }
-        }
-        // Serialize the claim check with the banner write on the UI context so a superseded
-        // attempt's stale error cannot resurrect a banner a newer attempt already cleared.
-        if (command.token == errorToken.get()) publishError(message)
-      }
-    }
-  }
-
-  /**
-   * Hand one command to the matching typed forwarder. The device id comes from the command's own
-   * snapshot in EVERY branch, never from a selection resolved at dispatch time.
-   */
-  private fun forward(command: DeviceControlInputCommand, onError: (String) -> Unit) {
-    when (command) {
-      is DeviceControlInputCommand.Tap ->
-        forwarder.forwardTap(
-          point = command.point,
-          client = command.client,
-          platform = command.platform,
-          deviceId = command.snapshot.deviceId,
-          frameContext = command.snapshot.frameContext,
-          onError = onError,
-        )
-      is DeviceControlInputCommand.Swipe ->
-        forwarder.forwardSwipe(
-          start = command.start,
-          end = command.end,
-          durationMs = command.durationMs,
-          client = command.client,
-          platform = command.platform,
-          deviceId = command.snapshot.deviceId,
-          frameContext = command.snapshot.frameContext,
-          onError = onError,
-        )
-      is DeviceControlInputCommand.PressButton ->
-        forwarder.forwardPressButton(
-          button = command.button,
-          client = command.client,
-          platform = command.platform,
-          deviceId = command.snapshot.deviceId,
-          frameContext = command.snapshot.frameContext,
-          onError = onError,
-        )
-      is DeviceControlInputCommand.TypeText ->
-        forwarder.forwardTypeText(
-          text = command.text,
-          client = command.client,
-          platform = command.platform,
-          deviceId = command.snapshot.deviceId,
-          frameContext = command.snapshot.frameContext,
-          onError = onError,
-        )
-      is DeviceControlInputCommand.SendKey ->
-        forwarder.forwardKey(
-          key = command.key,
-          client = command.client,
-          platform = command.platform,
-          deviceId = command.snapshot.deviceId,
-          frameContext = command.snapshot.frameContext,
-          onError = onError,
-        )
-      is DeviceControlInputCommand.StreamGesture ->
-        // Streamed gestures are driven by executeStreamGesture, never the one-shot forwarder.
-        error("StreamGesture is executed directly, not forwarded")
-    }
-  }
-
-  /**
-   * Run one streamed drag to completion, holding the FIFO slot for its lifetime. Mirrors
-   * [execute]'s outer shape — dispatchability recheck, IO-hop, client close, single success/failure
-   * settle — but the actual work is the streaming consumer [streamGesture], which either streams
-   * live or, when the client cannot, drains the events into one atomic swipe. One `refreshTracker`
-   * settle fires at the end (the drag changed the device exactly once, on release), not per move.
-   */
-  private suspend fun executeStreamGesture(command: DeviceControlInputCommand.StreamGesture) {
-    if (!coordinatesAreStillDispatchable(command.snapshot)) {
-      drainAndClose(command.events)
-      command.client?.close()
-      return
-    }
-    var error: String? = null
-    val forwarded =
-      try {
-        withContext(ioDispatcher) {
-          if (!rotationIsStillDispatchable(command.snapshot)) {
-            drainAndClose(command.events)
-            false
-          } else {
-            streamGesture(command) { message -> error = message }
-            true
-          }
-        }
-      } finally {
-        command.client?.close()
-      }
-    if (!forwarded) return
-    val message = error
-    withContext(uiContext) {
-      if (message == null) {
-        refreshTracker.onInputSucceeded(command.snapshot, nowMs())
-      } else {
-        refreshTracker.onInputFailed()
-        if (command.token == errorToken.get()) publishError(message)
-      }
-    }
-  }
-
-  /**
-   * The streaming consumer. Opens a persistent gesture stream when the client supports it and
-   * relays start → moves → end live; otherwise drains the events and dispatches one atomic swipe,
-   * so the caller emits the same event sequence regardless of daemon/runner capability.
-   */
-  private suspend fun streamGesture(
-    command: DeviceControlInputCommand.StreamGesture,
-    onError: (String) -> Unit,
-  ) {
-    val stream = command.client?.openGestureStream(command.platform, command.snapshot.deviceId)
-    if (stream == null) {
-      fallbackAtomicSwipe(command, onError)
-      return
-    }
-    var failure: String? = null
-    try {
-      val started =
-        stream.start(command.gestureId, command.start.x.toDouble(), command.start.y.toDouble())
-      failure = if (started.success) null else started.error ?: "Gesture start failed"
-      if (failure == null) {
-        for (event in command.events) {
-          when (event) {
-            is GestureStreamEvent.Move -> {
-              val result =
-                stream.move(command.gestureId, event.point.x.toDouble(), event.point.y.toDouble())
-              if (!result.success) {
-                failure = result.error ?: "Gesture move failed"
-                break
-              }
-            }
-            is GestureStreamEvent.End -> {
-              val result =
-                stream.end(
-                  command.gestureId,
-                  event.point.x.toDouble(),
-                  event.point.y.toDouble(),
-                  event.cancel,
-                )
-              if (!result.success) failure = result.error ?: "Gesture end failed"
-              break
-            }
-          }
-        }
-      }
-    } finally {
-      stream.close()
-    }
-    if (failure != null) onError(failure)
-  }
-
-  /**
-   * Fallback for a client that cannot stream: collect the drag's release point and dispatch a
-   * single atomic swipe, applying the same [DeviceDragGesturePolicy] the one-shot [swipe] path uses
-   * (a below-threshold or cancelled drag sends nothing).
-   */
-  private suspend fun fallbackAtomicSwipe(
-    command: DeviceControlInputCommand.StreamGesture,
-    onError: (String) -> Unit,
-  ) {
-    for (event in command.events) {
-      if (event is GestureStreamEvent.End) {
-        if (event.cancel) return
-        val decision =
-          DeviceDragGesturePolicy.evaluate(
-            start = command.start,
-            end = event.point,
-            deviceWidth = command.snapshot.deviceWidth,
-            deviceHeight = command.snapshot.deviceHeight,
-            coordinateSpace = command.snapshot.coordinateSpace,
-            nativeScale = command.snapshot.nativeScale,
-          )
-        if (decision is DeviceDragDecision.Swipe) {
-          forwarder.forwardSwipe(
-            start = decision.start,
-            end = decision.end,
-            durationMs = decision.durationMs,
-            client = command.client,
-            platform = command.platform,
-            deviceId = command.snapshot.deviceId,
-            frameContext = command.snapshot.frameContext,
-            onError = onError,
-          )
-        }
-        return
-      }
-    }
-  }
-
-  /** Drain and close a gesture event channel without acting on it (a rejected/aborted stream). */
-  private suspend fun drainAndClose(events: Channel<GestureStreamEvent>) {
-    for (event in events) {
-      if (event is GestureStreamEvent.End) break
-    }
-  }
-
-  private fun hasDifferentInteractionFrameContextThan(snapshot: DeviceFrameSnapshot): Boolean =
-    interactionSnapshot?.frameContext?.let { it != snapshot.frameContext } == true
-
   companion object {
-    private fun isStaleFrameContextError(message: String): Boolean =
+    internal fun isStaleFrameContextError(message: String): Boolean =
       message.contains("stale frame context", ignoreCase = true) ||
         (message.contains("frameContext", ignoreCase = true) &&
           message.contains("stale or unavailable", ignoreCase = true))

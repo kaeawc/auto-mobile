@@ -123,7 +123,11 @@ for (const criteria of [false, true]) {
     arranged(
       "partial availability keeps the idle device free until the other is released",
       async () => {
-        await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "d2",
+          platform: "android",
+        });
         const waiter = observe(["a", "b"]);
         await drainUntilQuiescent(timer);
         const idle = pool.getDevice("d1")?.status;
@@ -136,7 +140,11 @@ for (const criteria of [false, true]) {
     arranged(
       "aborted head releases no other owner's device and lets a follower acquire",
       async () => {
-        await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "d2",
+          platform: "android",
+        });
         const head = observe(["a", "b"]);
         await drainUntilQuiescent(timer);
         const follower = observe(["later"]);
@@ -154,7 +162,11 @@ for (const criteria of [false, true]) {
     );
 
     arranged("aborted queued waiter is removed without blocking the next request", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: "d2",
+        platform: "android",
+      });
       const head = observe(["a", "b"]);
       await drainUntilQuiescent(timer);
       const cancelled = observe(["cancelled"]);
@@ -172,7 +184,11 @@ for (const criteria of [false, true]) {
     });
 
     arranged("earlier pair precedes a later singleton across both multi-device APIs", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: "d2",
+        platform: "android",
+      });
       const head = observe(["a", "b"]);
       await drainUntilQuiescent(timer);
       const follower = observe(["later"], 8_000, new AbortController(), !criteria);
@@ -195,8 +211,16 @@ for (const criteria of [false, true]) {
         const third = { deviceId: "d3", name: "d3", platform: "android" as const };
         manager.bootedDevices.push(third);
         await pool.addDevice(third);
-        await pool.bindOrReuseDeviceSession("owner:2", "d2", "android");
-        await pool.bindOrReuseDeviceSession("owner:3", "d3", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner:2",
+          deviceId: "d2",
+          platform: "android",
+        });
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner:3",
+          deviceId: "d3",
+          platform: "android",
+        });
         const controller = new AbortController();
         const head = criteria
           ? runWithAbortSignal(controller.signal, () =>
@@ -277,12 +301,20 @@ for (const criteria of [false, true]) {
     arranged(
       "already held session survives waiting and abort; additional claims do not",
       async () => {
-        await pool.bindOrReuseDeviceSession("base", "d1", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "base",
+          deviceId: "d1",
+          platform: "android",
+        });
         const held = sessions.getSession("base");
         const third = { deviceId: "d3", name: "d3", platform: "android" as const };
         manager.bootedDevices.push(third);
         await pool.addDevice(third);
-        await pool.bindOrReuseDeviceSession("other-owner", "d3", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "other-owner",
+          deviceId: "d3",
+          platform: "android",
+        });
         const waiter = observe(["base", "extra:a", "extra:b"]);
         await drainUntilQuiescent(timer);
         const idleWhileWaiting = pool.getDevice("d2")?.status;

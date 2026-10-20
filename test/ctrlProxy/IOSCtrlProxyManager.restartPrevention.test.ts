@@ -3,9 +3,9 @@ import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
+import type { ExecResult } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
 import { logger } from "../../src/utils/logger";
@@ -44,12 +44,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("start() skips spawning when tracked CtrlProxy PID is alive (simulator)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice, // simulator UUID
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       // Simulate an already-tracked process (as if startOnSimulator ran previously)
       manager.testHooks.setState({ xcTestProcessId: 12345 });
@@ -165,12 +165,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("stop() does not kill a recycled tracked PID that is no longer our runner (#2847)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 912348 });
       const recycledProcess: FakeListeningProcess = {
         pid: 912348,
@@ -225,7 +225,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
             await releaseStartup.promise;
             manager.testHooks.trackRunner({
               pid: runner.pid!,
-              process: runner as unknown as ChildProcess,
+              process: runner,
               abortController: runnerController,
             });
           },
@@ -267,12 +267,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("forceStopForShutdown does not signal a recycled tracked PID that is no longer our runner (#6579)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 912349 });
       const foreignProcess: FakeListeningProcess = {
         pid: 912349,
@@ -297,12 +297,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("forceStopForShutdown does not signal another daemon runner for the same device", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 912349 });
       const foreignProcess: FakeListeningProcess = {
         pid: 912349,
@@ -355,12 +355,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       },
     );
     test("forceStopForShutdown still tree-kills a re-verified owned runner (#6579)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 912350 });
       const ownedRunner = { ...ownRunnerProcess(912350), ppid: process.pid };
       installListeningProcessFakes(fakeExecutor, [ownedRunner]);
@@ -481,12 +481,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("forceStopForShutdown kills a surviving owned process group after its root exits (#6579)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       const runnerPid = 912351;
       manager.testHooks.setState({ xcTestProcessId: runnerPid });
       const exitedRunner = { ...ownRunnerProcess(runnerPid), alive: false };
@@ -507,12 +507,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("start() waits for an own runner then terminates it if it never becomes healthy (#2834)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice, // simulator UUID
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       // A runner we spawned in an earlier setup() whose health endpoint is not up
       // yet (XCUITest still cold-starting on a loaded CI machine). Its PID is alive.
@@ -572,7 +572,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       failedPreHealthProcess.pid = 22222;
       manager.testHooks.trackRunner({
         pid: failedPreHealthProcess.pid,
-        process: failedPreHealthProcess as unknown as ChildProcess,
+        process: failedPreHealthProcess,
       });
       fakeExecutor.setCommandHandler("curl -s", () =>
         createExecResult(
@@ -593,12 +593,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("start() does NOT terminate the tracked PID if it was recycled during the wait (#2834)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 12345 });
 
       // PID 12345 stays alive throughout, and health never answers.
@@ -634,12 +634,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("start() reuses an own runner that becomes healthy during the wait (#2834)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 12345 });
       const runnerProcs = [ownRunnerProcess(12345)];
       installListeningProcessFakes(fakeExecutor, runnerProcs);
@@ -668,12 +668,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("start() honors a caller readiness budget beyond the configured health-poll default", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 12345 });
       installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
 
@@ -695,12 +695,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("joining readiness caller extends a default startup poll without spawning another runner", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 12345 });
       installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
 
@@ -739,12 +739,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("an aborted caller does not cancel an independent shared-start waiter", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 12345 });
       installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
 
@@ -774,12 +774,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("an aborted caller removes its readiness extension from a shared startup", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 12345 });
       installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
 
@@ -897,7 +897,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
           startOnDevice: async () => {
             manager.testHooks.trackRunner({
               pid: runnerPid,
-              process: new FakeChildProcess(fakeTimer) as unknown as ChildProcess,
+              process: new FakeChildProcess(fakeTimer),
             });
             fakeExecutor.setNextSpawnProcess(iproxy);
             tunnel(manager).setStateForTesting({ processId: iproxy.pid! });
@@ -934,12 +934,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("a retry starts fresh after the prior sole caller aborts", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       manager.testHooks.setState({ xcTestProcessId: 12345 });
       installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
 
@@ -1229,12 +1229,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         { pid: fakeProcess.pid!, port: 0, command: "iproxy", alive: true },
       ]);
 
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        physicalDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: physicalDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       // Simulate: CtrlProxy process is alive but iproxy tunnel was stopped
       manager.testHooks.setState({ xcTestProcessId: 12345 });
@@ -1418,12 +1418,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       test("does not restart iproxy when process is alive even if health check fails", async function () {
         const fakeProcess = new FakeChildProcess();
         fakeExecutor.setNextSpawnProcess(fakeProcess);
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          physicalDevice,
-          fakeTimer,
-          undefined,
-          fakeExecutor,
-        );
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+          device: physicalDevice,
+          timer: fakeTimer,
+          builder: undefined,
+          processExecutor: fakeExecutor,
+        });
 
         await manager.startIproxyTunnel();
         expect(fakeExecutor.getSpawnedProcesses().length).toBe(1);
@@ -1446,12 +1446,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         const fakeProcess1 = new FakeChildProcess();
         const fakeProcess2 = new FakeChildProcess();
         fakeExecutor.setNextSpawnProcess(fakeProcess1);
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          physicalDevice,
-          fakeTimer,
-          undefined,
-          fakeExecutor,
-        );
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+          device: physicalDevice,
+          timer: fakeTimer,
+          builder: undefined,
+          processExecutor: fakeExecutor,
+        });
 
         await manager.startIproxyTunnel();
 
@@ -1480,12 +1480,12 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         const fakeProcess1 = new FakeChildProcess();
         const fakeProcess2 = new FakeChildProcess();
         fakeExecutor.setNextSpawnProcess(fakeProcess1);
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          physicalDevice,
-          fakeTimer,
-          undefined,
-          fakeExecutor,
-        );
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+          device: physicalDevice,
+          timer: fakeTimer,
+          builder: undefined,
+          processExecutor: fakeExecutor,
+        });
 
         await manager.startIproxyTunnel();
 
@@ -1508,14 +1508,14 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       test("keeps retrying when a scheduled iproxy restart attempt fails before the tunnel is supervised", async function () {
         const fakeProcess1 = new FakeChildProcess();
         const fakeProcess2 = new FakeChildProcess();
-        fakeProcess2.pid = undefined as unknown as number;
+        fakeProcess2.pid = undefined;
         fakeExecutor.setNextSpawnProcess(fakeProcess1);
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          physicalDevice,
-          fakeTimer,
-          undefined,
-          fakeExecutor,
-        );
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+          device: physicalDevice,
+          timer: fakeTimer,
+          builder: undefined,
+          processExecutor: fakeExecutor,
+        });
 
         await manager.startIproxyTunnel();
 

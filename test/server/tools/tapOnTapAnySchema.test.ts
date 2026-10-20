@@ -10,10 +10,11 @@ import {
 } from "../../../src/server/interactionTools";
 
 import { selectedElementSchema } from "../../../src/server/toolOutputSchemas";
-import { resolverSelectionStrategySchema } from "../../../src/server/elementSelectorSchemas";
-import { applyJsonSchemaOverride } from "../../../src/server/toolSchemaHelpers";
+import { resolverSelectionStrategySchema } from "../../../src/models/elementSelectorSchemas";
+import { applyJsonSchemaOverride } from "../../../src/utils/schemaHelpers";
 
 import type { TapOnElementOptions, TapAnyElementOptions } from "../../../src/models";
+import { toolIsError, toolJson } from "../../helpers/toolResponse";
 
 const interactionDeps: InteractionToolDependencies = {};
 // P4 (issue #4181, rank 10): the removed-field rejections used bare
@@ -517,7 +518,12 @@ test("tapAny accepts and forwards display exactly like tapOn", async () => {
   interactionDeps.tapAnyElementFactory = () => ({
     execute: async (options) => {
       requests.push(options);
-      return { success: false, error: "injected failure", element: {} };
+      return {
+        success: false,
+        action: "tap",
+        error: "injected failure",
+        element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+      };
     },
   });
   try {
@@ -542,7 +548,12 @@ for (const error of [
 ]) {
   test(`tapAny failure message has one prefix: ${error}`, async () => {
     interactionDeps.tapAnyElementFactory = () => ({
-      execute: async () => ({ success: false, error, element: {} }),
+      execute: async () => ({
+        success: false,
+        action: "tap",
+        error,
+        element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+      }),
     });
     try {
       const response = await tapAnyHandler(
@@ -552,12 +563,12 @@ for (const error of [
         undefined,
         interactionDeps,
       );
-      const payload = JSON.parse(response.content[0].text!);
+      const payload = toolJson(response);
       expect(payload.message).toBe(
         `Failed to tap clickable element: ${error ? "No clickable element found" : "unknown error"}`,
       );
       expect(payload.error).toBe(error);
-      expect(response.isError).toBe(true);
+      expect(toolIsError(response)).toBe(true);
     } finally {
       delete interactionDeps.tapAnyElementFactory;
     }

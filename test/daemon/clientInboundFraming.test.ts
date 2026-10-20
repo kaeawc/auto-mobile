@@ -4,26 +4,38 @@ import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import type { DaemonNotification, DaemonResponse } from "../../src/daemon/types";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
+import { connectionListenerOf } from "../helpers/netConnectionListener";
+
+class RecordingDaemonClient extends DaemonClient {
+  readonly received: DaemonResponse[] = [];
+
+  protected override handleResponse(response: DaemonResponse): void {
+    this.received.push(response);
+    super.handleResponse(response);
+  }
+}
 
 function setup(limit = 256) {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new DaemonClient(
+  const client = new RecordingDaemonClient(
     "/fake/socket",
     1000,
     timer,
     ISOLATED_DAEMON_RECOVERY,
     null,
-    new FakeIdGenerator(["p"]),
-    "darwin",
-    limit,
+    {
+      idGenerator: new FakeIdGenerator(["p"]),
+      platformOverride: "darwin",
+      maxInboundFrameBytes: limit,
+    },
   );
   client.testHooks.attachSocket(socket);
   const feed = (frame: unknown) =>
@@ -55,7 +67,7 @@ for (const newline of [false, true]) {
       expect(await second).toMatchObject({ name: "DaemonUnavailableError", cause: error.cause });
       expect(timer.getPendingTimeoutCount()).toBe(0);
       expect(remove).toHaveBeenCalled();
-      expect((client as unknown as { connected: boolean }).connected).toBe(false);
+      expect(client.testHooks.connection().connected).toBe(false);
       expect(closes).toBe(1);
       client.testHooks.simulateIncomingData(Buffer.from("null\n" + "x".repeat(65)));
       expect(warn).toHaveBeenCalledTimes(1);
@@ -109,17 +121,13 @@ for (const [index, shape] of wrongShapes.entries()) {
     const { client, timer, request, feed } = setup();
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const errors = spyOn(logger, "error").mockImplementation(() => {});
-    const receiver = spyOn(
-      client as unknown as { handleResponse(response: DaemonResponse): void },
-      "handleResponse",
-    );
     const result = request();
     try {
       feed(shape);
       expect(client.testHooks.hasPendingRequest("p")).toBe(true);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(errors).not.toHaveBeenCalled();
-      expect(receiver).not.toHaveBeenCalled();
+      expect(client.received).toHaveLength(0);
       warn.mockClear();
       feed({
         ...(shape && typeof shape === "object" && !Array.isArray(shape) ? shape : {}),
@@ -128,7 +136,7 @@ for (const [index, shape] of wrongShapes.entries()) {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(JSON.stringify(warn.mock.calls)).not.toContain("PRIVATE_TOOL_OUTPUT");
       expect(client.testHooks.hasPendingRequest("p")).toBe(true);
-      expect(receiver).not.toHaveBeenCalled();
+      expect(client.received).toHaveLength(0);
       feed({ id: "p", type: "mcp_response", success: true, result: "ok" });
       expect(await result).toBe("ok");
       expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -137,17 +145,12 @@ for (const [index, shape] of wrongShapes.entries()) {
       await result;
       warn.mockRestore();
       errors.mockRestore();
-      receiver.mockRestore();
     }
   });
 }
 
 test("valid response preserves unknown and unchecked additive fields", async () => {
   const { client, request, feed } = setup(512);
-  const receiver = spyOn(
-    client as unknown as { handleResponse(response: DaemonResponse): void },
-    "handleResponse",
-  );
   const result = request();
   const frame = {
     id: "p",
@@ -163,9 +166,8 @@ test("valid response preserves unknown and unchecked additive fields", async () 
   try {
     feed(frame);
     expect(await result).toBe("ok");
-    expect(receiver.mock.calls[0]?.[0]).toEqual(frame);
+    expect(client.received[0]).toEqual<unknown>(frame);
   } finally {
-    receiver.mockRestore();
     await client.close();
     await result;
   }
@@ -188,7 +190,7 @@ test("notification preserves extras and split UTF-8, and a replacement connectio
   const { client, socket } = setup(128);
   const received: DaemonNotification[] = [];
   client.onNotification((frame) => received.push(frame));
-  const frame = { type: "daemon_notification", method: "notice", extra: "😀" };
+  const frame = { type: "daemon_notification" as const, method: "notice", extra: "😀" };
   const bytes = Buffer.from(JSON.stringify(frame) + "\n");
   const split = bytes.indexOf(Buffer.from("😀")) + 1;
   try {
@@ -218,22 +220,17 @@ async function withSocketConnection(
   const timer = new FakeTimer();
   const sockets: FakeSocket[] = [];
   const callbacks: Array<() => void> = [];
-  const create = spyOn(net, "createConnection").mockImplementation((_path, callback) => {
+  const create = spyOn(net, "createConnection").mockImplementation((...args: unknown[]) => {
     const socket = new FakeSocket();
     sockets.push(socket);
-    callbacks.push(callback!);
+    callbacks.push(connectionListenerOf(args)!);
     return socket;
   });
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    new FakeIdGenerator(["p", "q"]),
-    "win32",
-    128,
-  );
+  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    idGenerator: new FakeIdGenerator(["p", "q"]),
+    platformOverride: "win32",
+    maxInboundFrameBytes: 128,
+  });
   try {
     await scenario(client, sockets, callbacks, timer);
   } finally {

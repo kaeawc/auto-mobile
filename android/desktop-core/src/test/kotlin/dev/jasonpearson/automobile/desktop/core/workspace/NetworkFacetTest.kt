@@ -23,25 +23,29 @@ class NetworkFacetTest {
 
   private fun column() = DeviceColumn(deviceId = "d", name = "Pixel", platform = Platform.Android)
 
-  private fun row(
-    id: Long,
-    host: String,
-    path: String,
-    method: String = "GET",
-    status: Int = 200,
-    duration: Long = 12,
-  ) =
-    NetworkRequestRow(
-      id = id,
-      method = method,
-      host = host,
-      path = path,
-      statusCode = status,
-      durationMs = duration,
-      timestamp = 0,
-      contentType = "application/json",
-      error = null,
-    )
+  private data class RowSpec(
+    val id: Long,
+    val host: String,
+    val path: String,
+    val method: String = "GET",
+    val status: Int = 200,
+    val duration: Long = 12,
+  )
+
+  private fun row(spec: RowSpec) =
+    with(spec) {
+      NetworkRequestRow(
+        id = id,
+        method = method,
+        host = host,
+        path = path,
+        statusCode = status,
+        durationMs = duration,
+        timestamp = 0,
+        contentType = "application/json",
+        error = null,
+      )
+    }
 
   private fun detail(id: Long) =
     NetworkRequestDetail(
@@ -87,7 +91,7 @@ class NetworkFacetTest {
           column = column(),
           dataSource =
             FakeNetworkRequestsDataSource(
-              requests = Result.Success(listOf(row(1, "api.example.com", "/users/{id}"))),
+              requests = Result.Success(listOf(row(RowSpec(1, "api.example.com", "/users/{id}")))),
             ),
         )
       }
@@ -109,7 +113,7 @@ class NetworkFacetTest {
           column = column(),
           dataSource =
             FakeNetworkRequestsDataSource(
-              requests = Result.Success(listOf(row(1, "api.example.com", "/users"))),
+              requests = Result.Success(listOf(row(RowSpec(1, "api.example.com", "/users")))),
               details = mapOf(1L to Result.Success(detail(1))),
             ),
         )
@@ -161,7 +165,7 @@ class NetworkFacetTest {
           object : dev.jasonpearson.automobile.desktop.core.datasource.NetworkRequestsDataSource {
             override suspend fun getRequests(): Result<List<NetworkRequestRow>> =
               if (attempts.getAndIncrement() == 0) Result.Error(RuntimeException("daemon down"))
-              else Result.Success(listOf(row(1, "api.example.com", "/health")))
+              else Result.Success(listOf(row(RowSpec(1, "api.example.com", "/health"))))
 
             override suspend fun getRequestDetail(id: Long): Result<NetworkRequestDetail> =
               Result.Success(detail(id))
@@ -203,7 +207,7 @@ class NetworkFacetTest {
                 Result.Error(RuntimeException("daemon down"))
               } else {
                 gate.await()
-                Result.Success(listOf(row(1, "api.example.com", "/health")))
+                Result.Success(listOf(row(RowSpec(1, "api.example.com", "/health"))))
               }
 
             override suspend fun getRequestDetail(id: Long): Result<NetworkRequestDetail> =
@@ -248,7 +252,7 @@ class NetworkFacetTest {
           column = column(),
           dataSource =
             FakeNetworkRequestsDataSource(
-              requests = Result.Success(listOf(row(5, "api.example.com", "/slow"))),
+              requests = Result.Success(listOf(row(RowSpec(5, "api.example.com", "/slow")))),
               details = mapOf(5L to Result.Error(RuntimeException("detail unavailable"))),
             ),
         )

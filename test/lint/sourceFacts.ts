@@ -1,5 +1,5 @@
-import { Visitor, type Expression, type Program } from "oxc-parser";
-import { unwrapCallee } from "./astGuard";
+import { type Expression, type Program } from "oxc-parser";
+import { unwrapCallee, GuardVisitor as Visitor } from "./astGuard";
 
 /** Syntactic facts about one parsed module, for guards that must not read source text. */
 export interface SourceFacts {

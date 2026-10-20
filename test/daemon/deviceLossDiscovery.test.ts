@@ -9,7 +9,7 @@ import {
   probeListedAndroidStates,
   stopRecordingAfterDeviceDisconnect,
 } from "../../src/daemon/deviceLossDiscovery";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { AndroidOfflineProbeError } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
@@ -161,9 +161,7 @@ describe("device-loss discovery helpers (#11808)", () => {
   test("a plan-time tick lowers recorded misses to the plan cap", () => {
     const misses = new Map<string, number>();
     const result = {
-      missed: [
-        { deviceId: "emu-1", misses: PLAN_DEVICE_DISCONNECT_MISS_CAP + 5, budgetExhausted: false },
-      ],
+      missed: [{ deviceId: "emu-1", misses: PLAN_DEVICE_DISCONNECT_MISS_CAP + 5 }],
       transitional: [],
     };
     logDisconnectMisses(misses, result, true, new Set());
@@ -198,14 +196,13 @@ describe("device-loss discovery helpers (#11808)", () => {
       );
       const deps = { timer, stoppingRecordings };
       const first = stopRecordingAfterDeviceDisconnect(deps, "rec-1", "dev-1");
-      await drainMicrotasks();
+      await drainMicrotasks(5);
       expect(await stopRecordingAfterDeviceDisconnect(deps, "rec-1", "dev-1")).toBe(false);
       timer.advanceTime(DISCONNECT_RECORDING_STOP_WAIT_MS);
       expect(await first).toBe(true);
       expect(stoppingRecordings.has("rec-1")).toBe(true);
       finishStop?.();
       await drainUntil(() => !stoppingRecordings.has("rec-1"), {
-        timer,
         description: "recording stop to finish",
       });
     });

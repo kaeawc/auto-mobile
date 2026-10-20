@@ -5,6 +5,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { afterEach, describe, expect, test, beforeEach, spyOn } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -14,8 +15,7 @@ import { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
@@ -59,12 +59,12 @@ describe("DevicePool", () => {
 
   /** Bind `owner-session` to a pooled Android device. */
   const bindOwnerSession = async (device: BootedDevice, sourceImage: DeviceInfo): Promise<void> => {
-    await devicePool.bindOrReuseDeviceSession(
-      "owner-session",
-      device.deviceId,
-      "android",
+    await devicePool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: device.deviceId,
+      platform: "android",
       sourceImage,
-    );
+    });
   };
 
   const requireShutdownReservation = async (deviceId: string) => {
@@ -104,10 +104,10 @@ describe("DevicePool", () => {
     androidDevice: BootedDevice,
     fakeSimctl: ReturnType<typeof fakeDeviceManagerSimctl>,
   ): DevicePool => {
-    const fakeEmulator = {
+    const fakeEmulator = createFakeAndroidEmulator({
       getBootedDevices: async () => [androidDevice],
       getBootedDevicesChecked: async () => [androidDevice],
-    } as unknown as AndroidEmulatorClient;
+    });
     return makePool({
       deviceManager: new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator),
     });
@@ -144,7 +144,11 @@ describe("DevicePool", () => {
       await devicePool.initializeWithDevices([device]);
       deferredDeviceManager.bootedDevices = [device];
 
-      const binding = devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      const binding = devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
       await deferredDeviceManager.waitForDiscoveryStart();
       try {
         expect(connectedDeviceIds).toEqual([]);
@@ -438,7 +442,11 @@ describe("DevicePool", () => {
       const oldDevice = createBootedDevice("emulator-5554", "android", "Old Pixel");
       await devicePool.initializeWithDevices([oldDevice]);
       fakeDeviceManager.bootedDevices = [oldDevice];
-      await devicePool.bindOrReuseDeviceSession("session-1", oldDevice.deviceId, "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: oldDevice.deviceId,
+        platform: "android",
+      });
       fakeDeviceManager.bootedDevices = [
         createBootedDevice("emulator-5554", "android", "New Pixel"),
       ];
@@ -506,7 +514,7 @@ describe("DevicePool", () => {
       const sourceImage = pixel8Source();
       const branches = ["remove and add", "adopt existing"] as const;
 
-      beforeEach(async () => {
+      async function arrangeHarness(): Promise<void> {
         tracker = new ExecutionTracker(fakeTimer, new FakeIdGenerator(["ambient-execution"]));
         devicePool = makePool({
           ambientExecutionIdReader: { getExecutionId: () => "ambient-execution" },
@@ -522,7 +530,27 @@ describe("DevicePool", () => {
         });
         await initializeLiveDevices([device]);
         await bindOwnerSession(device, sourceImage);
-      });
+      }
+
+      // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+      function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+        test(
+          name,
+          async () => {
+            await arrangeHarness();
+            await fn();
+          },
+          timeout,
+        );
+      }
+
+      function arrangedEach<T>(table: readonly T[]) {
+        return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+          for (const row of table) {
+            arranged(name.replace("%s", String(row)), () => fn(row), timeout);
+          }
+        };
+      }
 
       async function replaceDevice(branch: (typeof branches)[number], excludeExecutionId?: string) {
         const reservation = await requireShutdownReservation(device.deviceId);
@@ -543,7 +571,7 @@ describe("DevicePool", () => {
         }
       }
 
-      test.each(branches)(
+      arrangedEach(branches)(
         "cancels old-device work and preserves the explicitly excluded recovery during %s",
         async (branch) => {
           const oldDeviceWork = tracker.startExecution("observe");
@@ -566,7 +594,7 @@ describe("DevicePool", () => {
         },
       );
 
-      test.each(branches)(
+      arrangedEach(branches)(
         "retains old-device work and warns when the recovery execution is unknown during %s",
         async (branch) => {
           const oldDeviceWork = tracker.startExecution("observe");
@@ -591,7 +619,7 @@ describe("DevicePool", () => {
         },
       );
 
-      test.each(branches)(
+      arrangedEach(branches)(
         "preserves session-only and other-device work during %s",
         async (branch) => {
           const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
@@ -605,27 +633,30 @@ describe("DevicePool", () => {
         },
       );
 
-      test("failure retirement cancels session work including recovery and retains sessionless device work", async () => {
-        const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
-        const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
-        const sessionlessWork = tracker.startExecution("observe");
-        const otherDeviceWork = tracker.startExecution("observe");
-        tracker.bindDeviceExecution(recovery.id, device.deviceId);
-        tracker.bindDeviceExecution(sessionlessWork.id, device.deviceId);
-        tracker.bindDeviceExecution(otherDeviceWork.id, "emulator-5558");
-        const captured = requirePooledDevice(devicePool, device.deviceId);
+      arranged(
+        "failure retirement cancels session work including recovery and retains sessionless device work",
+        async () => {
+          const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
+          const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
+          const sessionlessWork = tracker.startExecution("observe");
+          const otherDeviceWork = tracker.startExecution("observe");
+          tracker.bindDeviceExecution(recovery.id, device.deviceId);
+          tracker.bindDeviceExecution(sessionlessWork.id, device.deviceId);
+          tracker.bindDeviceExecution(otherDeviceWork.id, "emulator-5558");
+          const captured = requirePooledDevice(devicePool, device.deviceId);
 
-        const retired = await devicePool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured);
+          const retired = await devicePool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured);
 
-        expect(retired).toBe(true);
-        expect(sessionManager.getSession("owner-session")).toBeNull();
-        expect(devicePool.getDevice(device.deviceId)).toBeNull();
-        expect(sessionOnlyWork.abortController.signal.aborted).toBe(true);
-        expect(recovery.abortController.signal.aborted).toBe(true);
-        expect(sessionOnlyWork.cancelReason).toMatchObject({ deviceId: device.deviceId });
-        expect(sessionlessWork.abortController.signal.aborted).toBe(false);
-        expect(otherDeviceWork.abortController.signal.aborted).toBe(false);
-      });
+          expect(retired).toBe(true);
+          expect(sessionManager.getSession("owner-session")).toBeNull();
+          expect(devicePool.getDevice(device.deviceId)).toBeNull();
+          expect(sessionOnlyWork.abortController.signal.aborted).toBe(true);
+          expect(recovery.abortController.signal.aborted).toBe(true);
+          expect(sessionOnlyWork.cancelReason).toMatchObject({ deviceId: device.deviceId });
+          expect(sessionlessWork.abortController.signal.aborted).toBe(false);
+          expect(otherDeviceWork.abortController.signal.aborted).toBe(false);
+        },
+      );
     });
 
     test("keeps the existing session through a System UI recovery handoff", async () => {
@@ -795,12 +826,12 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [device, replacement];
       await devicePool.initializeWithDevices([device, replacement]);
       await bindOwnerSession(device, sourceImage);
-      await devicePool.bindOrReuseDeviceSession(
-        "competing-session",
-        replacement.deviceId,
-        "android",
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "competing-session",
+        deviceId: replacement.deviceId,
+        platform: "android",
         sourceImage,
-      );
+      });
       const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
@@ -838,17 +869,17 @@ describe("DevicePool", () => {
           sourceImage,
         );
 
-        await sessionManager.releaseSession("owner-session", "test replacement exit");
+        await sessionManager.releaseSession("owner-session", "explicit-release");
         await devicePool.releaseDevice(replacement.deviceId, "owner-session");
         await devicePool.removeDevice(replacement.deviceId, false, handoff.replacementDevice);
         fakeDeviceManager.bootedDevices = [replacement];
         await devicePool.addDevice(replacement, sourceImage);
-        await devicePool.bindOrReuseDeviceSession(
-          "successor-session",
-          replacement.deviceId,
-          "android",
+        await devicePool.bindOrReuseDeviceSession({
+          sessionId: "successor-session",
+          deviceId: replacement.deviceId,
+          platform: "android",
           sourceImage,
-        );
+        });
 
         await expect(handoff.validatePreservedSession()).rejects.toThrow(
           "was released while System UI recovery was becoming ready",
@@ -914,12 +945,12 @@ describe("DevicePool", () => {
       manager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
 
-      const binding = devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
+      const binding = devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
         sourceImage,
-      );
+      });
       await persistence.waitForUpsert();
       persistence.finishUpsert();
       await binding;
@@ -1016,12 +1047,12 @@ describe("DevicePool", () => {
         const sourceImage = pixel8Source();
         manager.bootedDevices = [device];
         await pool.initializeWithDevices([device]);
-        await pool.bindOrReuseDeviceSession(
-          "owner-session",
-          device.deviceId,
-          "android",
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner-session",
+          deviceId: device.deviceId,
+          platform: "android",
           sourceImage,
-        );
+        });
         const captured = pool.getDevice(device.deviceId);
         if (!captured) {
           throw new Error("expected recovery device to be pooled");
@@ -1077,7 +1108,11 @@ describe("DevicePool", () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const originalSession = sessionManager.getSession("owner-session");
       if (!originalSession) {
         throw new Error("expected original session");
@@ -1094,13 +1129,13 @@ describe("DevicePool", () => {
         return true;
       };
 
-      const replacementBinding = devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-      );
+      const replacementBinding = devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       await replacementPublished.promise;
-      const replacementSession = sessionManager.getSession("owner-session");
+      const replacementSession = sessionManager.getSession("owner-session")!;
       expect(replacementSession).not.toBeNull();
       expect(replacementSession).not.toBe(originalSession);
 
@@ -1135,7 +1170,11 @@ describe("DevicePool", () => {
       const replacementDevice = createBootedDevice("emulator-5556", "android", "Pixel 9");
       fakeDeviceManager.bootedDevices = [originalDevice, replacementDevice];
       await pool.initializeWithDevices([originalDevice, replacementDevice]);
-      await pool.bindOrReuseDeviceSession("shared", originalDevice.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "shared",
+        deviceId: originalDevice.deviceId,
+        platform: "android",
+      });
       const originalSession = sessionManager.getSession("shared");
       if (!originalSession) {
         throw new Error("expected original session");

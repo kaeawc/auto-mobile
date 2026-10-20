@@ -15,6 +15,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolIsError, toolJson, toolStructured } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -70,13 +71,9 @@ describe("storage tool output schemas (#11830)", () => {
         (candidate) => candidate.name === name,
       );
       const response = await tool!.deviceAwareHandler!(device, args);
-      const text = response.content[0];
-      if (text.type !== "text") {
-        throw new Error("Expected text result");
-      }
-      expect(response.isError).toBeUndefined();
-      expect(JSON.parse(text.text)).toEqual(JSON.parse(JSON.stringify(response.structuredContent)));
-      expect(schema.safeParse(response.structuredContent).success).toBe(true);
+      expect(toolIsError(response)).toBe(false);
+      expect(toolJson(response)).toEqual(JSON.parse(JSON.stringify(toolStructured(response))));
+      expect(schema.safeParse(toolStructured(response)).success).toBe(true);
     },
   );
 
@@ -85,7 +82,7 @@ describe("storage tool output schemas (#11830)", () => {
       (candidate) => candidate.name === "listDataStores",
     );
     const response = await tool!.deviceAwareHandler!(device, args);
-    expect(response.structuredContent).toEqual({
+    expect(toolStructured(response)).toEqual({
       success: true,
       appId: args.appId,
       adapterName: args.adapterName,

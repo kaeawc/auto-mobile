@@ -55,7 +55,7 @@ describe("device pool start on an incomplete booted-device scan", () => {
     manager.deviceImages = [startableAvd];
     pool = makePool(sessions, "incomplete-scan-test", { timer, deviceManager: manager });
     await pool.initializeWithDevices([android("d1")]);
-    await pool.bindOrReuseDeviceSession("base", "d1", "android");
+    await pool.bindOrReuseDeviceSession({ sessionId: "base", deviceId: "d1", platform: "android" });
   }
 
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.

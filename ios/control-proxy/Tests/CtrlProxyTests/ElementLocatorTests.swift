@@ -443,11 +443,11 @@ final class ElementLocatorTests: XCTestCase {
 
     func testDedup_identicalBoundsAndType_noUniqueProps() {
         let bounds = ElementBounds(left: 10, top: 20, right: 310, bottom: 64)
-        let a = UIElementInfo(className: "UIView", bounds: bounds)
-        let b = UIElementInfo(className: "UIView", bounds: bounds)
-        let c = UIElementInfo(className: "UIView", bounds: bounds)
+        let firstElement = UIElementInfo(className: "UIView", bounds: bounds)
+        let secondElement = UIElementInfo(className: "UIView", bounds: bounds)
+        let thirdElement = UIElementInfo(className: "UIView", bounds: bounds)
 
-        let result = ElementLocator.deduplicateSiblings([a, b, c])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement, thirdElement])
 
         XCTAssertEqual(result.count, 1)
         XCTAssertEqual(result[0].className, "UIView")
@@ -766,30 +766,36 @@ final class ElementLocatorTests: XCTestCase {
     }
 
     func testDedup_sameType_differentBounds_kept() {
-        let a = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
-        let b = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 50, right: 100, bottom: 100))
+        let firstElement = UIElementInfo(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50)
+        )
+        let secondElement = UIElementInfo(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 50, right: 100, bottom: 100)
+        )
 
-        let result = ElementLocator.deduplicateSiblings([a, b])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement])
 
         XCTAssertEqual(result.count, 2)
     }
 
     func testDedup_sameBounds_differentType_kept() {
         let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
-        let a = UIElementInfo(className: "UIView", bounds: bounds)
-        let b = UIElementInfo(className: "UIImageView", bounds: bounds)
+        let firstElement = UIElementInfo(className: "UIView", bounds: bounds)
+        let secondElement = UIElementInfo(className: "UIImageView", bounds: bounds)
 
-        let result = ElementLocator.deduplicateSiblings([a, b])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement])
 
         XCTAssertEqual(result.count, 2)
     }
 
     func testDedup_preservesElementsWithUniqueProperties() {
         let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
-        let a = UIElementInfo(text: "First", className: "UIView", bounds: bounds)
-        let b = UIElementInfo(text: "Second", className: "UIView", bounds: bounds)
+        let firstElement = UIElementInfo(text: "First", className: "UIView", bounds: bounds)
+        let secondElement = UIElementInfo(text: "Second", className: "UIView", bounds: bounds)
 
-        let result = ElementLocator.deduplicateSiblings([a, b])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement])
 
         // Both have unique text — both kept even with same bounds
         XCTAssertEqual(result.count, 2)
@@ -812,20 +818,20 @@ final class ElementLocatorTests: XCTestCase {
     }
 
     func testDedup_noBounds_sameClassName() {
-        let a = UIElementInfo(className: "UIView")
-        let b = UIElementInfo(className: "UIView")
+        let firstElement = UIElementInfo(className: "UIView")
+        let secondElement = UIElementInfo(className: "UIView")
 
-        let result = ElementLocator.deduplicateSiblings([a, b])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement])
 
         // Same className, no bounds → deduped via "UIView|nobounds" key
         XCTAssertEqual(result.count, 1)
     }
 
     func testDedup_noClassName_alwaysKept() {
-        let a = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
-        let b = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
+        let firstElement = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
+        let secondElement = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
 
-        let result = ElementLocator.deduplicateSiblings([a, b])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement])
 
         // No className — can't meaningfully dedup, both kept
         XCTAssertEqual(result.count, 2)
@@ -836,10 +842,10 @@ final class ElementLocatorTests: XCTestCase {
         let child1 = UIElementInfo(text: "Button A", className: "UIButton")
         let child2 = UIElementInfo(text: "Button B", className: "UIButton")
         // Two UIViews at same bounds, no unique props, but different children
-        let a = UIElementInfo(className: "UIView", bounds: bounds, node: [child1])
-        let b = UIElementInfo(className: "UIView", bounds: bounds, node: [child2])
+        let firstElement = UIElementInfo(className: "UIView", bounds: bounds, node: [child1])
+        let secondElement = UIElementInfo(className: "UIView", bounds: bounds, node: [child2])
 
-        let result = ElementLocator.deduplicateSiblings([a, b])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement])
 
         // Both kept — distinct subtrees must not be discarded
         XCTAssertEqual(result.count, 2)
@@ -972,23 +978,23 @@ final class ElementLocatorTests: XCTestCase {
 
     func testDedup_focusedElementPreservedNotDeduped() {
         let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
-        let a = UIElementInfo(className: "UIView", bounds: bounds, focused: "true")
-        let b = UIElementInfo(className: "UIView", bounds: bounds)
+        let firstElement = UIElementInfo(className: "UIView", bounds: bounds, focused: "true")
+        let secondElement = UIElementInfo(className: "UIView", bounds: bounds)
 
-        let result = ElementLocator.deduplicateSiblings([a, b])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement])
 
         // Focused element has state — always preserved, not deduped
-        // b has no state and no unique props — deduped against other stateless elements
+        // secondElement has no state and no unique props — deduped against other stateless elements
         XCTAssertEqual(result.count, 2)
         XCTAssertEqual(result[0].focused, "true")
     }
 
     func testDedup_passwordElementPreservedNotDeduped() {
         let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
-        let a = UIElementInfo(className: "UISecureTextField", bounds: bounds, password: "true")
-        let b = UIElementInfo(className: "UISecureTextField", bounds: bounds)
+        let firstElement = UIElementInfo(className: "UISecureTextField", bounds: bounds, password: "true")
+        let secondElement = UIElementInfo(className: "UISecureTextField", bounds: bounds)
 
-        let result = ElementLocator.deduplicateSiblings([a, b])
+        let result = ElementLocator.deduplicateSiblings([firstElement, secondElement])
 
         // Password element has state — preserved
         XCTAssertEqual(result.count, 2)
@@ -1005,12 +1011,17 @@ final class ElementLocatorTests: XCTestCase {
         let bounds1 = ElementBounds(left: 0, top: 0, right: 100, bottom: 50)
         let bounds2 = ElementBounds(left: 0, top: 50, right: 100, bottom: 100)
 
-        let a1 = UIElementInfo(className: "UIView", bounds: bounds1)
-        let a2 = UIElementInfo(className: "UIView", bounds: bounds1)
-        let b1 = UIElementInfo(className: "UIView", bounds: bounds2)
-        let b2 = UIElementInfo(className: "UIView", bounds: bounds2)
+        let firstGroupOriginal = UIElementInfo(className: "UIView", bounds: bounds1)
+        let firstGroupDuplicate = UIElementInfo(className: "UIView", bounds: bounds1)
+        let secondGroupOriginal = UIElementInfo(className: "UIView", bounds: bounds2)
+        let secondGroupDuplicate = UIElementInfo(className: "UIView", bounds: bounds2)
 
-        let result = ElementLocator.deduplicateSiblings([a1, a2, b1, b2])
+        let result = ElementLocator.deduplicateSiblings([
+            firstGroupOriginal,
+            firstGroupDuplicate,
+            secondGroupOriginal,
+            secondGroupDuplicate,
+        ])
 
         // Two distinct groups, each deduped to 1
         XCTAssertEqual(result.count, 2)
@@ -1028,14 +1039,14 @@ final class ElementLocatorTests: XCTestCase {
     func testCollapseAndDedup_secureTextFieldWithInternalSubviews() {
         let bounds = ElementBounds(left: 16, top: 200, right: 359, bottom: 244)
         let innerSecure = UIElementInfo(className: "UISecureTextField", bounds: bounds)
-        let bg = UIElementInfo(className: "UIView", bounds: bounds)
+        let background = UIElementInfo(className: "UIView", bounds: bounds)
 
         var result = ElementLocator.collapseSameTypeTextInputChildren(
             parentClassName: "UISecureTextField",
-            children: [innerSecure, bg]
+            children: [innerSecure, background]
         )
 
-        // innerSecure collapsed (empty), bg kept
+        // innerSecure collapsed (empty), background kept
         XCTAssertEqual(result.count, 1)
         XCTAssertEqual(result[0].className, "UIView")
 

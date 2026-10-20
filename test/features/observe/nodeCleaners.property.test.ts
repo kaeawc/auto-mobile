@@ -3,11 +3,13 @@ import fc from "fast-check";
 import type { Random } from "../../../src/utils/Random";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { sanitizeObserveResult } from "../../../src/features/observe/output/ObserveResultOutput";
-import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
+import { filterHierarchyNode } from "../../../src/features/observe/ios/IosHierarchyConverter";
 import { cleanupIosXCTestHierarchy } from "../../../src/features/observe/ios/cleanupIosHierarchy";
 import { SeededRandom } from "../../fakes/SeededRandom";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { RequestManager } from "../../../src/utils/RequestManager";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { makeViewHierarchyCtrlProxy } from "../../helpers/androidViewHierarchyClient";
+import { buildObserveResult } from "../../helpers/observeFixture";
 
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 80 } as const;
 
@@ -105,18 +107,12 @@ function generatedAttrs(random: Random): Record<string, unknown> {
   return attrs;
 }
 
-const viewCleaner = Object.create(ViewHierarchy.prototype) as ViewHierarchy;
-const ctrlTimer = new FakeTimer();
-const ctrlCleaner = new CtrlProxyHierarchy({
-  getWebSocket: () => null,
-  requestManager: new RequestManager(ctrlTimer),
-  timer: ctrlTimer,
-  ensureConnected: async () => false,
-  cancelScreenshotBackoff: () => {},
-  cacheFreshTtlMs: 0,
-  getCachedHierarchy: () => null,
-  setCachedHierarchy: () => {},
-});
+const viewCleaner = new ViewHierarchy(
+  { deviceId: "node-cleaners", name: "Node cleaners", platform: "android" },
+  new FakeAdbClientFactory(),
+  makeViewHierarchyCtrlProxy(),
+  new FakeTimer(),
+);
 
 function cleanAndroidNode(attrs: Record<string, unknown>): Record<string, unknown> {
   return viewCleaner.cleanNodeProperties({ $: { ...attrs } });
@@ -124,22 +120,27 @@ function cleanAndroidNode(attrs: Record<string, unknown>): Record<string, unknow
 
 function trimOutputNode(attrs: Record<string, unknown>): Record<string, unknown> {
   const result = sanitizeObserveResult(
-    { viewHierarchy: { hierarchy: { node: { ...attrs } } } } as never,
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 100, height: 100 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: { ...attrs } } },
+    }),
     { dropElements: false, project: "full" },
   );
   return result.viewHierarchy!.hierarchy!.node!;
 }
 
 function cleanCtrlProxyNode(attrs: Record<string, unknown>): Record<string, unknown> {
-  return ctrlCleaner.testHooks.filterHierarchyNode({ $: { ...attrs } })?.$ ?? {};
+  return filterHierarchyNode({ $: { ...attrs } }, true)?.$ ?? {};
 }
 
 function cleanIosNode(attrs: Record<string, unknown>): Record<string, unknown> {
   const result = cleanupIosXCTestHierarchy({ hierarchy: { ...attrs } });
-  return result.hierarchy as Record<string, unknown>;
+  return result.hierarchy;
 }
 
-function cleanerOutputs(attrs: Record<string, unknown>): Record<string, Record<string, unknown>> {
+function cleanerOutputs(attrs: Record<string, unknown>) {
   return {
     viewHierarchy: cleanAndroidNode(attrs),
     outputTrim: trimOutputNode(attrs),
@@ -213,9 +214,7 @@ describe("observe node cleaners (property-based)", () => {
       expect(outputs.ctrlProxyIos[key]).toEqual(attrs[key]);
       expect(outputs.cleanupIos[key]).toEqual(attrs[key]);
     }
-    for (const key of CORE_KEYS.filter(
-      (candidate) => candidate !== "className" && candidate !== "value",
-    )) {
+    for (const key of CORE_KEYS.filter((candidate) => candidate !== "value")) {
       expect(outputs.viewHierarchy[key]).toEqual(attrs[key]);
     }
     expect(outputs.ctrlProxyIos.value).toEqual(attrs.value);
@@ -235,7 +234,7 @@ describe("observe node cleaners (property-based)", () => {
       const actual = Object.values(cleanerOutputs(difference.attrs)).map(
         (cleaned) => difference.attrKey in cleaned,
       );
-      expect(actual, difference.policy).toEqual(difference.survives);
+      expect(actual, difference.policy).toEqual([...difference.survives]);
     }
   });
 });

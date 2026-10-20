@@ -1,5 +1,6 @@
+import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
-import { installFakeCtrlProxyManagers } from "../../helpers/hermeticDeviceTools";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   ViewHierarchy,
@@ -24,14 +25,6 @@ const setupReadFileMock = () => {
 const teardownReadFileMock = () => {
   /* no-op: patched dependency was removed */
 };
-
-let restoreDeviceToolProviders: () => void;
-beforeEach(() => {
-  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
-});
-afterEach(() => {
-  restoreDeviceToolProviders();
-});
 
 describe("ViewHierarchy", function () {
   describe("Unit Tests for Public Methods", function () {
@@ -414,11 +407,12 @@ describe("ViewHierarchy", function () {
         platform: "ios",
       };
       const fakeIosClient = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () => ({
           hierarchy: null,
           fresh: false,
           reconnectStatus: {
-            state: "cooldown",
+            state: "cooldown" as const,
             retryAfterMs: 1800,
             retryAfterSeconds: 2,
             connectionAttempts: 3,
@@ -440,7 +434,7 @@ describe("ViewHierarchy", function () {
 
         expect(result.hierarchy.error).toBe("CtrlProxy reconnecting, retry in 2s");
         expect(result.ctrlProxyReconnect).toEqual({
-          state: "cooldown",
+          state: "cooldown" as const,
           retryAfterMs: 1800,
           retryAfterSeconds: 2,
           connectionAttempts: 3,
@@ -461,6 +455,7 @@ describe("ViewHierarchy", function () {
         platform: "ios",
       };
       const getInstanceSpy = spyOnIosClientInstance({
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () => ({
           hierarchy: null,
           fresh: false,
@@ -496,6 +491,7 @@ describe("ViewHierarchy", function () {
       let reads = 0;
       let starts = 0;
       const fakeIosClient = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () =>
           ++reads === 1
             ? {
@@ -538,6 +534,7 @@ describe("ViewHierarchy", function () {
       let reads = 0;
       let waits = 0;
       const client = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () =>
           ++reads === 1
             ? {
@@ -578,12 +575,13 @@ describe("ViewHierarchy", function () {
       let reads = 0;
       let waits = 0;
       const client = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () =>
           ++reads === 1
             ? {
                 hierarchy: null,
                 reconnectStatus: {
-                  state: "cooldown",
+                  state: "cooldown" as const,
                   retryAfterMs: 1000,
                   retryAfterSeconds: 1,
                   connectionAttempts: 3,
@@ -622,6 +620,7 @@ describe("ViewHierarchy", function () {
       };
       let reads = 0;
       const client = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () => {
           reads++;
           return {
@@ -629,7 +628,7 @@ describe("ViewHierarchy", function () {
             unavailableReason: "connection_lost",
             unavailableDetail: "runner socket closed",
             reconnectStatus: {
-              state: "cooldown",
+              state: "cooldown" as const,
               retryAfterMs: 1000,
               retryAfterSeconds: 1,
               connectionAttempts: 3,
@@ -666,16 +665,17 @@ describe("ViewHierarchy", function () {
       const staleHierarchy = {
         updatedAt: 1750934585218,
         packageName: "com.example.cached",
-        hierarchy: { node: { $: { text: "Cached screen" } } },
+        hierarchy: { text: "Cached screen" },
       };
       const reconnectStatus = {
-        state: "cooldown",
+        state: "cooldown" as const,
         retryAfterMs: 1800,
         retryAfterSeconds: 2,
         connectionAttempts: 3,
         maxConnectionAttempts: 3,
       };
       const fakeIosClient = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () => ({
           hierarchy: staleHierarchy,
           fresh: false,
@@ -695,7 +695,7 @@ describe("ViewHierarchy", function () {
 
         const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
 
-        expect(result.hierarchy).toEqual(staleHierarchy.hierarchy);
+        expect(result.hierarchy).toEqual({ node: { $: { text: "Cached screen" } } });
         expect(result.updatedAt).toBe(1750934585218);
         expect(result.ctrlProxyReconnect).toEqual(reconnectStatus);
       } finally {
@@ -710,6 +710,7 @@ describe("ViewHierarchy", function () {
         platform: "ios",
       };
       const fakeIosClient = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () => ({
           hierarchy: {
             updatedAt: 1750934585218,
@@ -734,7 +735,10 @@ describe("ViewHierarchy", function () {
 
         const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
 
-        expect(result.hierarchy).toMatchObject({ role: "heading", text: "Overview" });
+        expect(result.hierarchy.node).toMatchObject({
+          role: "heading",
+          $: { text: "Overview" },
+        });
       } finally {
         getInstanceSpy.mockRestore();
       }
@@ -747,6 +751,7 @@ describe("ViewHierarchy", function () {
         platform: "ios",
       };
       const fakeIosClient = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: async () => ({
           hierarchy: {
             updatedAt: 1750934585218,
@@ -775,11 +780,61 @@ describe("ViewHierarchy", function () {
         );
 
         const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
-        const button = result.hierarchy.node;
+        const button = [result.hierarchy.node?.node ?? []].flat()[0];
 
         expect(button).toBeDefined();
         expect(button).not.toHaveProperty("viewId");
-        expect(button!["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
+        expect(nodeAttributes(button!)["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("converts the runner hierarchy before publishing the public observe hierarchy", async function () {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios",
+      };
+      const getInstanceSpy = spyOnIosClientInstance({
+        convertToViewHierarchyResult: convertIosHierarchy,
+        getLatestHierarchy: async () => ({
+          hierarchy: {
+            updatedAt: 7,
+            packageName: "com.example.app",
+            captureSequence: 9,
+            hierarchy: {
+              className: "XCUIApplication",
+              node: {
+                className: "UIButton",
+                text: "Go",
+                bounds: { left: 0, top: 0, right: 40, bottom: 20 },
+              },
+            },
+          },
+          fresh: true,
+          updatedAt: 7,
+        }),
+      });
+      try {
+        const subject = new ViewHierarchy(
+          iosDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          mockCtrlProxyClient,
+        );
+
+        const result = await subject.getiOSViewHierarchy();
+        const button = [result.hierarchy.node?.node ?? []].flat()[0];
+
+        // Unconverted runner trees carry the node fields at the top level and no `$` slot.
+        expect(button && nodeAttributes(button)).toMatchObject({
+          class: "UIButton",
+          text: "Go",
+          bounds: { left: 0, top: 0, right: 40, bottom: 20 },
+        });
+        expect(result.hierarchy).not.toHaveProperty("className");
+        expect(result.captureSequence).toBe(9);
+        expect(result.updatedAt).toBe(7);
       } finally {
         getInstanceSpy.mockRestore();
       }
@@ -793,6 +848,7 @@ describe("ViewHierarchy", function () {
       };
       let receivedSignal: AbortSignal | undefined;
       const fakeIosClient = {
+        convertToViewHierarchyResult: convertIosHierarchy,
         getLatestHierarchy: (
           _waitForFresh?: boolean,
           _timeout?: number,
@@ -1968,7 +2024,7 @@ describe("Offscreen Node Filtering", function () {
         getAccessibilityHierarchy: async (...args: unknown[]) => {
           reads++;
           if (reads === 2) {
-            expect(args[6]).toBe(MIN_RECOVERY_REFETCH_BUDGET_MS);
+            expect(args[1]).toMatchObject({ timeoutMs: MIN_RECOVERY_REFETCH_BUDGET_MS });
             return { hierarchy: { node: { $: { text: "Recovered" } } } };
           }
           return null;

@@ -128,6 +128,16 @@ function normalize(message: unknown): unknown {
   return parsed;
 }
 
+/** The `tools` array of the first `tools/list` result frame the server sent. */
+function listToolsFrameTools(sent: JSONRPCMessage[]): unknown[] {
+  for (const message of sent) {
+    if ("result" in message && Array.isArray(message.result.tools)) {
+      return message.result.tools;
+    }
+  }
+  throw new Error("no tools/list result frame was sent");
+}
+
 describe("tools/list through the proxy matches schemas/tool-definitions.json", () => {
   interface CommittedTool {
     name: string;
@@ -190,8 +200,7 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
       await client.connect(clientTransport);
       await client.listTools();
 
-      const frame = sent.find((message) => "result" in message && "tools" in message.result);
-      const tools = (frame as { result: { tools: unknown[] } }).result.tools;
+      const tools = listToolsFrameTools(sent);
       const served = tools as Array<{
         name: string;
         description?: string;
@@ -222,7 +231,10 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
 describe("desktop handshake against the real daemon streamable endpoint", () => {
   async function captureHandshake(): Promise<HandshakeFixture> {
     const port = await freePort();
-    const daemon = new Daemon({ port, host: "127.0.0.1" }, { timer: new FakeTimer() });
+    const daemon = new Daemon(
+      { port, host: "127.0.0.1" },
+      { timer: new FakeTimer(), httpToken: "test-http-token" },
+    );
     // The HTTP listener lifecycle is private; Daemon.start() would also boot devices and the DB.
     const call = async (method: string): Promise<void> => {
       await Reflect.get(daemon, method).call(daemon);
@@ -236,6 +248,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     try {
       for (const frame of DESKTOP_FRAMES) {
         const headers: Record<string, string> = {
+          authorization: "Bearer test-http-token",
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
         };

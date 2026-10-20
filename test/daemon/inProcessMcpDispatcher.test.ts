@@ -11,7 +11,7 @@ import {
 } from "../../src/daemon/socketServer/forwardSessionKey";
 import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttpEndpoint";
 import type { McpRequestSessionContext } from "../../src/daemon/statelessMcpServerFactory";
-import type { ExecutionCancellationReason } from "../../src/server/executionTracker";
+import type { ExecutionCancellationReason } from "../../src/daemon/executionTracker";
 import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
@@ -27,7 +27,9 @@ interface Built {
   closed: boolean;
 }
 
-function harness(options: { serverScope?: AsyncScope } = {}) {
+function harness(
+  options: { serverScope?: AsyncScope; refreshResources?: () => Promise<void> } = {},
+) {
   const built: Built[] = [];
   const cancelled: Array<{ scope: string; reason: ExecutionCancellationReason }> = [];
   const forgotten: string[] = [];
@@ -91,6 +93,21 @@ describe("InProcessMcpDispatcher (#11820)", () => {
     const client = await harness().dispatcher.connect({ sessionKey: "warm-up" });
     await client.callTool({ name: "echo", arguments: {} });
     await client.close();
+  });
+
+  test("cached resource freshness runs in the server root without opening a loopback client", async () => {
+    let observed: string | undefined;
+    const h = ambient.run("daemon-root", () =>
+      harness({
+        refreshResources: async () => {
+          observed = ambient.getStore();
+        },
+      }),
+    );
+    await ambient.run("socket-caller", () => h.dispatcher.refreshResources!());
+    expect(observed).toBe("daemon-root");
+    expect(h.built).toHaveLength(0);
+    expect(h.dispatcher.inFlightCount).toBe(0);
   });
 
   test("each forward gets its own server with the forward's context and session key", async () => {

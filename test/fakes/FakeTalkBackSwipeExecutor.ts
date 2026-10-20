@@ -1,7 +1,9 @@
+import type {
+  SwipeGestureRequest,
+  TalkBackSwipeRunner,
+} from "../../src/features/action/swipeon/types";
 import { Element, GestureOptions, SwipeDirection } from "../../src/models";
 import { SwipeResult } from "../../src/models/SwipeResult";
-import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
-import { TalkBackSwipeRunner, BoomerangConfig } from "../../src/features/action/swipeon/types";
 
 export class FakeTalkBackSwipeExecutor implements TalkBackSwipeRunner {
   private swipeCalls: Array<{
@@ -20,17 +22,15 @@ export class FakeTalkBackSwipeExecutor implements TalkBackSwipeRunner {
     this.nextResult = result;
   }
 
-  async executeSwipeGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    direction: SwipeDirection,
-    containerElement: Element | null,
-    gestureOptions?: GestureOptions,
-    _perf?: PerformanceTracker,
-    _boomerang?: BoomerangConfig,
-  ): Promise<SwipeResult> {
+  async executeSwipeGesture({
+    x1,
+    y1,
+    x2,
+    y2,
+    direction,
+    containerElement,
+    gestureOptions,
+  }: SwipeGestureRequest): Promise<SwipeResult> {
     const overrideResult = this.nextResult;
     this.nextResult = null;
     if (overrideResult) {

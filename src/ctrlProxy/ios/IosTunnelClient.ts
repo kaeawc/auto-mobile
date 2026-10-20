@@ -13,6 +13,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { LockOwnerGenerationProbe } from "../../utils/fileLock";
 import { defaultLockOwnerGenerationProbe } from "../../utils/lockOwnerGeneration";
+import { ENV } from "../../config/env";
 
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1000;
 export interface IosTunnelStart {
@@ -454,8 +455,8 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
 
   public getStartTimeoutMs(): number {
     return readEnvPositiveInteger(
-      "AUTOMOBILE_IPROXY_START_TIMEOUT_MS",
-      "AUTO_MOBILE_IPROXY_START_TIMEOUT_MS",
+      ENV.IPROXY_START_TIMEOUT_MS.name,
+      ENV.IPROXY_START_TIMEOUT_MS.legacyName,
       { fallback: DEFAULT_IPROXY_START_TIMEOUT_MS },
       this.options.env,
     );

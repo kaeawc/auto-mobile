@@ -1,3 +1,4 @@
+import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "fs";
 import * as path from "path";
@@ -40,7 +41,6 @@ const FORCE_STOP = `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`;
 const testDevice: BootedDevice = {
   deviceId: "test-device",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 
@@ -76,7 +76,10 @@ function createHarness(handler: Handler = () => undefined) {
     }
     return execResult("");
   };
-  const adb = new AdbClient(testDevice, exec, null, new DefaultRetryExecutor(timer), timer);
+  const adb = new AdbClient(testDevice, exec, {
+    retryExecutor: new DefaultRetryExecutor(timer),
+    timer,
+  });
   const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
   return { manager, executed, timer };
 }
@@ -86,6 +89,7 @@ const readdWrites = (executed: string[]) =>
   puts(executed).filter((command) => command.includes(component));
 
 describe("AndroidCtrlProxyManager rebind cancellation (#10199)", () => {
+  useFakeCtrlProxyManagerHost();
   beforeEach(() => {
     AndroidCtrlProxyManager.resetInstances();
   });

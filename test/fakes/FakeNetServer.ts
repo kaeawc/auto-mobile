@@ -1,5 +1,10 @@
-import { Socket, type SocketConnectOpts } from "node:net";
+import { Server as NetServer, Socket, type SocketConnectOpts } from "node:net";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+
+/** Any zod schema (v3 or v4): the frames are validated by `parse`, which throws on a mismatch. */
+export interface FrameSchema<T> {
+  parse(data: unknown): T;
+}
 
 type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
 
@@ -22,6 +27,8 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   get responses(): Response[] {
     return this._writtenData.map((frame) => JSON.parse(frame) as Response);
   }
+  /** Called with each written frame, e.g. to deliver it to the other end of an in-memory pair. */
+  public onWrite: ((frame: string) => void) | undefined;
   private _writtenData: string[] = [];
   private _peer: FakeSocket<unknown> | null = null;
 
@@ -44,12 +51,18 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   }
 
   /**
-   * Parse all written JSON messages (newline-delimited)
+   * Parse all written JSON messages (newline-delimited). With a `schema`, every frame is
+   * validated against it and returned with the schema's output type; without one the frames are
+   * `unknown`.
    */
-  getWrittenMessages<T = unknown>(): T[] {
-    const allData = this.getWrittenDataString();
-    const lines = allData.split("\n").filter((line) => line.trim());
-    return lines.map((line) => JSON.parse(line) as T);
+  getWrittenMessages(): unknown[];
+  getWrittenMessages<T>(schema: FrameSchema<T>): T[];
+  getWrittenMessages(schema?: FrameSchema<unknown>): unknown[] {
+    const lines = this.getWrittenDataString()
+      .split("\n")
+      .filter((line) => line.trim());
+    const frames: unknown[] = lines.map((line) => JSON.parse(line));
+    return schema === undefined ? frames : frames.map((frame) => schema.parse(frame));
   }
 
   /**
@@ -82,6 +95,7 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
     const str = typeof data === "string" ? data : Buffer.from(data).toString();
     this.written.push(typeof data === "string" ? data : Buffer.from(data));
     this._writtenData.push(str);
+    this.onWrite?.(str);
     callback?.();
     return this.writeReturnValue;
   }
@@ -195,4 +209,11 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
  */
 export class NonThrowingFakeSocket extends FakeSocket {
   public throwOnWriteAfterDestroy = false;
+}
+
+type FakeListeningNetServerContract = Pick<NetServer, "listening">;
+
+/** A net.Server that reports listening without binding a port, for socket-server subclasses under test. */
+export class FakeListeningNetServer extends NetServer implements FakeListeningNetServerContract {
+  override listening = true;
 }

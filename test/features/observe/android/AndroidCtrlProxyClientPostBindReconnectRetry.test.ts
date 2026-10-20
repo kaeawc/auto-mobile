@@ -1,3 +1,5 @@
+import { wireCapture } from "../../../helpers/wireCapture";
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
@@ -15,7 +17,6 @@ import { settleByFakeEvents } from "../../../helpers/fakeTimerStepping";
 const device: BootedDevice = {
   deviceId: "post-bind-retry",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 
@@ -36,7 +37,7 @@ function settle<T>(timer: FakeTimer, promise: Promise<T>, description: string): 
 
 function createHarness(timer: FakeTimer, gateMs: number, onGateStart?: () => void) {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
   let healthy = false;
   const manager: AndroidServiceRecoveryManager = {
@@ -73,21 +74,21 @@ test("post-bind reconnect retries until the fake WebSocket server is listening",
     expect(await settle(timer, subject.ensureConnected(), "foreground connect")).toBe(false);
   }
 
-  const freshHierarchy: ViewHierarchyResult = {
+  const freshHierarchy: ViewHierarchyResult = wireCapture({
     hierarchy: {
       packageName: "com.android.settings",
       hierarchy: { node: [{ text: "fresh" }] },
     },
     updatedAt: timer.now(),
-  };
-  const firstRead: ViewHierarchyResult = {
+  });
+  const firstRead: ViewHierarchyResult = wireCapture({
     hierarchy: {
       error: "connection lost",
       unavailableReason: "connection_lost",
       transportFailure: true,
     },
     updatedAt: timer.now(),
-  };
+  });
   let hierarchyReads = 0;
   const hierarchySpy = spyOn(subject, "getAccessibilityHierarchy").mockImplementation(async () => {
     hierarchyReads++;

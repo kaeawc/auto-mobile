@@ -49,16 +49,14 @@ async function harness() {
   );
   await Promise.resolve(); // FakeWebSocket opens on a microtask, without real timers.
   client.connectionTestHooks.socket = socket;
-  spyOn(client, "ensureConnected").mockResolvedValue(true);
+  client.ensureConnected = mock(async () => true);
   // Keep hierarchy delivery on the real cache/waiter path, with downstream consumers neutralized.
   const streamPushes: string[] = [];
   client["pushHierarchyToObservationStream"] = (data) => {
     streamPushes.push(data.hierarchy?.text ?? "");
   };
   client["startScreenshotBackoff"] = () => {};
-  spyOn(client["deviceConnectionLostNotifier"], "onDeviceConnectionLost").mockImplementation(
-    () => {},
-  );
+  client["deviceConnectionLostNotifier"].onDeviceConnectionLost = mock(() => {});
   const receive = (message: object) => client["handleWebSocketMessage"](JSON.stringify(message));
   const advertise = (commands: string[]) =>
     receive({ type: "connected", supportedCommands: commands });

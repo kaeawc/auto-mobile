@@ -1,4 +1,11 @@
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
+import {
+  drainFailureOutcome,
+  failedResult,
+  failureFor,
+  sameProcess,
+  unwrap,
+} from "./brokerSupport";
 import type { Timer } from "../../utils/SystemTimer";
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
@@ -7,11 +14,9 @@ import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
   resolveSessionDeviceProfile,
-  type RequirementResult,
   type SessionDeviceCatalog,
   type SessionRequirementDefaults,
 } from "../../devices/sessionRequirements";
-import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
 import {
@@ -75,43 +80,6 @@ export const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** Rows deleted per retention call, so one pass never holds the write lock for long. */
 export const RECEIPT_PRUNE_BATCH = 500;
 
-function unwrap<T>(result: RequirementResult<T>): T {
-  if (!result.ok) {
-    throw new SessionBrokerFailureError({
-      code: result.error.code,
-      message: result.error.message,
-      retryable: result.error.transient,
-    });
-  }
-  return result.value;
-}
-
-function failureFor(error: unknown): SessionBrokerFailure {
-  return error instanceof SessionBrokerFailureError
-    ? error.failure
-    : { code: "session_preparation_failed", message: errorMessage(error), retryable: false };
-}
-
-function failedResult(config: SessionConfig, failure: SessionBrokerFailure): SessionBrokerResult {
-  return {
-    contractVersion: 1,
-    requestId: config.requestId,
-    outcome: "failed",
-    sessionUuid: null,
-    profile: null,
-    cleanupPending: false,
-    failure,
-  };
-}
-
-function sameProcess(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {
-  return (
-    left.daemonId === right.daemonId &&
-    left.pid === right.pid &&
-    left.processGenerationToken === right.processGenerationToken
-  );
-}
-
 /**
  * Owns one acquisition-to-release lifecycle behind the consumer's fresh session UUID.
  * Requests are reserved before native work. Every unsuccessful acquisition becomes terminal and
@@ -131,6 +99,8 @@ export class SessionBroker {
 
   private readonly cleanup: RecoveryCleanup;
   private readonly destroys = new Map<string, Promise<void>>();
+  /** Releases background recovery queued or started: a stop leaves them durable for the successor. */
+  private readonly queuedRecoveryReleases = new Set<string>();
 
   constructor(private readonly options: SessionBrokerOptions) {
     this.cleanup = new RecoveryCleanup(
@@ -659,8 +629,20 @@ export class SessionBroker {
     // Retry after joining preparations in case the first snapshot or an inline mark failed;
     // the store makes each mark idempotent.
     await this.markRestartHandoff();
-    // Join work already started, not queued recovery releases. Their durable releasing/resetting
-    // rows remain unavailable and are retired by the successor; stop must start no new cleanup.
+    const requests = await this.options.store.listRecoverableRequests();
+    // Only a release the consumer already began is finished here; background recovery cleanup was
+    // stopped by the handoff mark above and starts no new work.
+    await Promise.allSettled(
+      requests
+        .filter(
+          (request) =>
+            sameProcess(request.owner, this.options.owner) &&
+            request.sessionId &&
+            request.state === "releasing" &&
+            !this.queuedRecoveryReleases.has(request.requestId),
+        )
+        .map((request) => this.release(request.sessionId!)),
+    );
     await this.joinReleases();
     await this.cleanup.join();
     await Promise.allSettled([...this.destroys.values()]);
@@ -743,6 +725,9 @@ export class SessionBroker {
       const request = resource.requestId ? requests.get(resource.requestId) : undefined;
       if (resource.state !== "destroying" && request?.state !== "releasing") {
         continue;
+      }
+      if (request?.state === "releasing") {
+        this.queuedRecoveryReleases.add(request.requestId);
       }
       items.push({
         resourceId: resource.resourceId,
@@ -933,27 +918,7 @@ export class SessionBroker {
       }
       return "idle";
     } catch (error) {
-      // Admission refusal leaves a healthy erased simulator shut down. Keep the durable reset
-      // pending and let recovery retry it; the consumer's release is already durable.
-      if (error instanceof BootCapacityExhaustedError) {
-        logger.warn(
-          `Session ${sessionUuid} clean release awaits boot capacity: ${errorMessage(error)}`,
-        );
-        return "pending";
-      }
-      // A failed or timed-out gate sample is not a capacity refusal and falls through to destruction.
-      // Native execution/journal fences still prevent destructive work before the drain joins.
-      logger.warn(
-        `Session ${sessionUuid} could not finish its clean release: ${errorMessage(error)}`,
-      );
-      const kind = classifyCleanReleaseError(error);
-      if (kind === "permanent" || (!resetClean && kind === "unknown")) {
-        return "destroy";
-      }
-      // A clean baseline survives unknown receipt-write failures; earlier failures need a
-      // known retryable kind. recover()/service redrive bounds each pass, not total retries:
-      // no per-request attempt/time cap exists, so persistent failures can stay pending forever.
-      return "pending";
+      return drainFailureOutcome(error, sessionUuid, resetClean);
     }
   }
 

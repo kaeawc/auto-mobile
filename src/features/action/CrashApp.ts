@@ -21,12 +21,14 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
-  PHYSICAL_IOS_CRASH_UNSUPPORTED_MESSAGE,
   resolveIosCrashBackend,
   type IosCrashBackend,
   type SimulatorCrashCommandRunner,
 } from "../../utils/ios-cmdline-tools/IosCrashBackend";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
+import { PhysicalIosAppCrasher } from "../../utils/ios-cmdline-tools/PhysicalIosAppCrasher";
+import { crashPhysicalIosApp, type PhysicalIosCrashControl } from "./crashPhysicalIosApp";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -93,6 +95,8 @@ export interface CrashAppDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: SimulatorCrashCommandRunner;
   crashBackend?: IosCrashBackend;
+  /** Physical iOS devicectl crash control (#14096); built on first use when omitted. */
+  physicalIosCrasher?: PhysicalIosCrashControl;
   uid?: () => number;
   timer?: Timer;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
@@ -107,6 +111,7 @@ export class CrashApp {
   private readonly uid: () => number;
   private readonly timer: Timer;
   private readonly cacheInvalidator: DeviceWindowCacheInvalidator;
+  private readonly physicalIosCrasher?: PhysicalIosCrashControl;
   private readonly crashReports: NativeCrashReportFinder;
   private readonly crashReportRecorder: () => CrashReportRecorder;
 
@@ -125,6 +130,7 @@ export class CrashApp {
     this.timer = dependencies.timer ?? defaultTimer;
     this.cacheInvalidator =
       dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
+    this.physicalIosCrasher = dependencies.physicalIosCrasher;
     this.crashReports =
       dependencies.crashReports ??
       createNativeCrashReportFinder(device, {
@@ -164,7 +170,7 @@ export class CrashApp {
             ? "android_am_crash"
             : this.crashBackend.kind === "simulator"
               ? "ios_simulator_sigabrt"
-              : "unsupported",
+              : "ios_device_sigabrt",
         timestamp,
         confirmed: false,
         error: message,
@@ -362,13 +368,16 @@ export class CrashApp {
     };
 
     if (this.crashBackend.kind === "physical") {
-      return {
-        ...base,
-        success: false,
-        supported: false,
-        mechanism: "unsupported",
-        error: PHYSICAL_IOS_CRASH_UNSUPPORTED_MESSAGE,
-      };
+      return crashPhysicalIosApp({
+        deviceId: this.device.deviceId,
+        appId,
+        crasher:
+          this.physicalIosCrasher ??
+          new PhysicalIosAppCrasher(this.device.deviceId, new DeviceAppManager()),
+        timer: this.timer,
+        signal,
+        onDispatched: () => this.cacheInvalidator.invalidate(this.device),
+      });
     }
 
     const initialProcesses = await this.listIosSimulatorProcesses(signal);

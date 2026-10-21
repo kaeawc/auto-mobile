@@ -7,7 +7,12 @@ import { ExecResult } from "../../src/models";
 export class FakeHostCommandExecutor implements HostCommandExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
   private defaultResponse: ExecResult = this.createExecResult("", "");
-  private executedCommands: Array<{ command: string; args: string[] }> = [];
+  private commandErrors: Map<string, Error> = new Map();
+  private executedCommands: Array<{
+    command: string;
+    args: string[];
+    options?: HostCommandOptions;
+  }> = [];
 
   private createExecResult(stdout: string, stderr: string): ExecResult {
     return {
@@ -21,6 +26,16 @@ export class FakeHostCommandExecutor implements HostCommandExecutor {
 
   setCommandResponse(commandPattern: string, response: ExecResult): void {
     this.commandResponses.set(commandPattern, this.ensureExecResultMethods(response));
+  }
+
+  /** Reject commands whose `command args...` string contains `commandPattern`. */
+  setCommandError(commandPattern: string, error: Error): void {
+    this.commandErrors.set(commandPattern, error);
+  }
+
+  /** Every call with its argv and options, in order. */
+  getExecutedCalls(): Array<{ command: string; args: string[]; options?: HostCommandOptions }> {
+    return [...this.executedCommands];
   }
 
   setDefaultResponse(response: ExecResult): void {
@@ -38,11 +53,16 @@ export class FakeHostCommandExecutor implements HostCommandExecutor {
   async executeCommand(
     command: string,
     args: string[] = [],
-    _options?: HostCommandOptions,
+    options?: HostCommandOptions,
   ): Promise<ExecResult> {
-    this.executedCommands.push({ command, args });
+    this.executedCommands.push({ command, args, options });
 
     const commandString = [command, ...args].join(" ");
+    for (const [pattern, error] of this.commandErrors.entries()) {
+      if (commandString.includes(pattern)) {
+        throw error;
+      }
+    }
     for (const [pattern, response] of this.commandResponses.entries()) {
       if (commandString.includes(pattern)) {
         return response;

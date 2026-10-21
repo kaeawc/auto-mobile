@@ -93,7 +93,7 @@ class NodeSelectorTest {
   @Test
   fun `unavailable advertised action is reported before performing it`() {
     assertEquals(
-      "Accessibility action is unavailable: long_click",
+      "Accessibility action is unavailable: long_click (available: click)",
       nodeActionFailure("long_click", listOf(AccessibilityNodeInfo.ACTION_CLICK)),
     )
     assertNull(

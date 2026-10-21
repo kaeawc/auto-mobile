@@ -77,6 +77,10 @@ const CLASSIFICATION: Classification = {
         { action: "tapImeKey" },
       ],
     },
+    killProfile: {
+      reads: [{ action: "list" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],
@@ -84,6 +88,7 @@ const CLASSIFICATION: Classification = {
     },
   },
   control: [
+    "accessibilityAction",
     "accessibilityFocus",
     // The performance and memory audits drive the app, and a baseline record writes state.
     "audit",
@@ -132,6 +137,7 @@ const CLASSIFICATION: Classification = {
     "setNotificationPolicy",
     "setPosture",
     "setPreference",
+    "setSensor",
     "setUIState",
     "shake",
     "stageSessionDownloads",

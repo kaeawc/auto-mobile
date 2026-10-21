@@ -19,6 +19,8 @@ import { ObserverSessionRegistry } from "../observerSessionRegistry";
 import { logger } from "../../utils/logger";
 import { defaultDisplayInventoryProvider } from "../../devices/DisplayInventoryProvider";
 import { stopLocationRouteForRemovedDevice } from "../../features/utility/LocationRoutePlayer";
+import { defaultKillProfileRestoreRegistry } from "../../features/utility/KillProfileRestore";
+import { defaultEmulatorSensorRestoreRegistry } from "../../features/utility/EmulatorSensorRestore";
 import { defaultMockLocationClearRegistry } from "../../features/utility/MockLocationClear";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import {
@@ -169,6 +171,8 @@ export class DaemonSessions {
         defaultMockLocationClearRegistry.retireDevice(deviceId);
         NetworkState.getInstance().retireDevice(deviceId);
         defaultAppLinksRestoreRegistry.retireDevice(deviceId);
+        defaultKillProfileRestoreRegistry.retireDevice(deviceId);
+        defaultEmulatorSensorRestoreRegistry.retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         this.host.services.deviceReadiness().clearExplicitDevicePin(deviceId);
         this.host.services.deviceSessionRegistry().onDeviceDisconnected(deviceId);

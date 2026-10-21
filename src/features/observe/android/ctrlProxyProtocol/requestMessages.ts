@@ -286,6 +286,10 @@ export interface RequestActionMessage {
     collectionRow?: number;
     collectionColumn?: number;
   };
+  /** For action `custom`: the label of the app-defined accessibility action (#14077). */
+  customAction?: string;
+  /** For action `set_progress`: the ACTION_ARGUMENT_PROGRESS_VALUE to set (#14077). */
+  progress?: number;
 }
 
 /** `@SerialName("request_click_focused_input")` → `RequestClickFocusedInput`. */

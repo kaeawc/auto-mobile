@@ -23,6 +23,7 @@ const batchSchema = z
     schemaVersion: z.literal(1),
     limits: z.object({ totalDeviceCap: cap, sessionCap: cap, idlePoolCap: cap }).strict(),
     reuseCleanDevices: z.boolean(),
+    reuseAndroidCleanDevices: z.boolean().optional(),
     defaults: z.object({ ios: z.unknown().optional(), android: z.unknown().optional() }).strict(),
     // Product host-config parser owns both shapes; the Android/iOS resolvers require them.
     androidProfileArchetypes: z.unknown().optional(),
@@ -69,7 +70,10 @@ export function renderClientRequest(client: BrokerBatchClient, requestId: string
 }
 
 export function renderHostConfig(
-  batch: Pick<z.infer<typeof batchSchema>, "limits" | "defaults" | "reuseCleanDevices"> &
+  batch: Pick<
+    z.infer<typeof batchSchema>,
+    "limits" | "defaults" | "reuseCleanDevices" | "reuseAndroidCleanDevices"
+  > &
     Partial<Pick<z.infer<typeof batchSchema>, "androidProfileArchetypes" | "iosClassifications">>,
 ): SessionBrokerHostConfig {
   return parseSessionBrokerHostConfig({
@@ -80,6 +84,7 @@ export function renderHostConfig(
     androidProfileArchetypes: batch.androidProfileArchetypes,
     iosClassifications: batch.iosClassifications,
     reuseCleanDevices: batch.reuseCleanDevices,
+    reuseAndroidCleanDevices: batch.reuseAndroidCleanDevices,
   });
 }
 
@@ -92,8 +97,15 @@ export function parseBrokerBatch(input: unknown, options: BrokerBatchOptions = {
   if (batch.limits.totalDeviceCap > maxDevices) {
     throw new Error(`totalDeviceCap exceeds --max-devices ${maxDevices} (hard ceiling 4).`);
   }
-  if (!options.allowReuse && (batch.limits.idlePoolCap !== 0 || batch.reuseCleanDevices)) {
-    throw new Error("idlePoolCap must be 0 and reuseCleanDevices false without --allow-reuse.");
+  if (
+    !options.allowReuse &&
+    (batch.limits.idlePoolCap !== 0 ||
+      batch.reuseCleanDevices ||
+      batch.reuseAndroidCleanDevices === true)
+  ) {
+    throw new Error(
+      "idlePoolCap must be 0, reuseCleanDevices false and reuseAndroidCleanDevices false without --allow-reuse.",
+    );
   }
   if (new Set(batch.clients.map((client) => client.name)).size !== batch.clients.length) {
     throw new Error("Broker batch client names must be unique.");

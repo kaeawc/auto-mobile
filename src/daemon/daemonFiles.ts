@@ -7,6 +7,8 @@ import {
 export { writeJsonFileAtomicSync, type AtomicPidFileWriteSyncDependencies } from "./atomicJsonFile";
 import path from "node:path";
 import {
+  constants as fsConstants,
+  copyFileSync,
   existsSync,
   linkSync,
   readFileSync,
@@ -37,7 +39,7 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDir
 import { sortedReaddirSync } from "../utils/io";
 import { ENV, readEnvRaw } from "../config/env";
 import type { IdGenerator } from "../utils/IdGenerator";
-import { removeOwnedFileSync } from "./ownedFileRemoval";
+import { OwnedRecordRestoreError, removeOwnedFileSync } from "./ownedFileRemoval";
 
 export {
   compareProcessGenerationTokens,
@@ -342,6 +344,7 @@ export interface DaemonCleanupFileSystem {
   unlinkSync: (path: string) => void;
   renameSync: (from: string, to: string) => void;
   linkSync: (from: string, to: string) => void;
+  copyFileExclusiveSync: (from: string, to: string) => void;
   readPid: typeof readPidFileDataSync;
   persistOwner: typeof persistDaemonLaunchLogOwnerTombstoneSync;
 }
@@ -353,6 +356,7 @@ const cleanupFileSystem: DaemonCleanupFileSystem = {
   unlinkSync: (path) => unlinkSync(path),
   renameSync,
   linkSync,
+  copyFileExclusiveSync: (from, to) => copyFileSync(from, to, fsConstants.COPYFILE_EXCL),
   readPid: readPidFileDataSync,
   persistOwner: persistDaemonLaunchLogOwnerTombstoneSync,
 };
@@ -480,11 +484,16 @@ function cleanupPidFile(
       {
         rename: (from, to) => files.renameSync(from, to),
         link: (from, to) => files.linkSync(from, to),
+        copyExclusive: (from, to) => files.copyFileExclusiveSync(from, to),
         remove: (path) => files.unlinkSync(path),
       },
       options.idGenerator,
     );
   } catch (error) {
+    if (error instanceof OwnedRecordRestoreError) {
+      logger.warn(`Could not restore successor daemon PID file ${pidFilePath}`, error);
+      return false;
+    }
     // Preserve the existing best-effort cleanup return contract on I/O failure.
     logger.warn(`Could not remove daemon PID file ${pidFilePath}`, error);
     return true;

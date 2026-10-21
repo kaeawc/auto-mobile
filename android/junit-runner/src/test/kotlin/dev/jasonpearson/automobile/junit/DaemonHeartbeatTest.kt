@@ -1,9 +1,10 @@
 package dev.jasonpearson.automobile.junit
 
-import com.sun.net.httpserver.HttpServer
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
-import java.net.InetAddress
-import java.net.InetSocketAddress
+import java.net.URL
+import java.net.URLConnection
+import java.net.URLStreamHandler
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
@@ -325,7 +326,7 @@ class DaemonHeartbeatTest {
 
   @Test
   fun `the http heartbeat maps a 404 to the daemon's release reason`() {
-    withHeartbeatServer(
+    withHeartbeatResponse(
       404,
       """{"error":"Session not found: s1","releaseReason":"heartbeat-timeout"}""",
     ) { url ->
@@ -341,7 +342,7 @@ class DaemonHeartbeatTest {
       assertEquals("heartbeat-timeout", error.releaseReason)
       assertEquals("Session not found: s1", error.message)
     }
-    withHeartbeatServer(404, """{"error":"Session not found: s2"}""") { url ->
+    withHeartbeatResponse(404, """{"error":"Session not found: s2"}""") { url ->
       val error =
         assertThrows(DaemonSessionReleasedException::class.java) {
           HeartbeatTransport.sendHeartbeat(
@@ -352,10 +353,10 @@ class DaemonHeartbeatTest {
         }
       assertNull(error.releaseReason)
     }
-    withHeartbeatServer(200, """{"status":"ok"}""") { url ->
+    withHeartbeatResponse(200, """{"status":"ok"}""") { url ->
       HeartbeatTransport.sendHeartbeat(url, "s3", tokenProvider = DaemonHttpTokenProvider { null })
     }
-    withHeartbeatServer(500, """{"error":"boom"}""") { url ->
+    withHeartbeatResponse(500, """{"error":"boom"}""") { url ->
       assertThrows(java.io.IOException::class.java) {
         HeartbeatTransport.sendHeartbeat(
           url,
@@ -369,8 +370,8 @@ class DaemonHeartbeatTest {
   @Test
   fun `the http heartbeat sends its process token and session id`() {
     val bodies = ConcurrentLinkedQueue<String>()
-    withHeartbeatServer(HttpURLConnection.HTTP_OK, """{"status":"ok"}""", { bodies.add(it) }) { url
-      ->
+    withHeartbeatResponse(HttpURLConnection.HTTP_OK, """{"status":"ok"}""", { bodies.add(it) }) {
+      url ->
       HeartbeatTransport.sendHeartbeat(
         url,
         "default-session",
@@ -391,25 +392,41 @@ class DaemonHeartbeatTest {
     assertEquals("injected-owner", injected["livenessOwnerToken"]!!.jsonPrimitive.content)
   }
 
-  private fun withHeartbeatServer(
+  private fun withHeartbeatResponse(
     status: Int,
     body: String,
     onRequest: (String) -> Unit = {},
     block: (java.net.URL) -> Unit,
   ) {
-    val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
-    server.createContext("/heartbeat") { exchange ->
-      onRequest(exchange.requestBody.use { String(it.readBytes()) })
-      val bytes = body.toByteArray()
-      exchange.sendResponseHeaders(status, bytes.size.toLong())
-      exchange.responseBody.use { it.write(bytes) }
-    }
-    server.start()
-    try {
-      block(java.net.URL("http://127.0.0.1:${server.address.port}/heartbeat"))
-    } finally {
-      server.stop(0)
-    }
+    val endpoint =
+      URL(
+        null,
+        "http://127.0.0.1/heartbeat",
+        object : URLStreamHandler() {
+          override fun openConnection(endpoint: URL): URLConnection =
+            object : HttpURLConnection(endpoint) {
+              private val outgoing = ByteArrayOutputStream()
+
+              override fun connect() = Unit
+
+              override fun disconnect() = Unit
+
+              override fun usingProxy() = false
+
+              override fun getOutputStream() = outgoing
+
+              override fun getResponseCode(): Int {
+                onRequest(outgoing.toString(Charsets.UTF_8))
+                return status
+              }
+
+              override fun getInputStream() = body.byteInputStream()
+
+              override fun getErrorStream() = body.byteInputStream()
+            }
+        },
+      )
+    block(endpoint)
   }
 
   @Test
@@ -668,6 +685,7 @@ class DaemonHeartbeatTest {
     var userNameCalls = 0
     val resolver =
       DaemonUserIdResolver(
+        envProvider = { null },
         osName = { "Linux" },
         userName = {
           userNameCalls++

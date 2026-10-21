@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { mock, beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
@@ -45,6 +45,18 @@ import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { timedHold } from "../../../helpers/timedReleaseHold";
 import { drainMicrotasks } from "../../../helpers/fakeTimerStepping";
+
+let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">>;
+let infoSpy: ReturnType<typeof spyOn<typeof logger, "info">>;
+let debugSpy: ReturnType<typeof spyOn<typeof logger, "debug">>;
+beforeEach(() => {
+  warnSpy = spyOn(logger, "warn");
+  infoSpy = spyOn(logger, "info");
+  debugSpy = spyOn(logger, "debug");
+});
+afterEach(() => {
+  mock.restore();
+});
 
 const OWNER = { daemonId: "new-daemon", pid: 200 };
 const cleanups: Array<() => Promise<void>> = [];
@@ -160,11 +172,11 @@ async function harness(
     },
   });
   const warnedAt: number[] = [];
-  const warn = spyOn(logger, "warn").mockImplementation(() => {
+  const warn = warnSpy.mockImplementation(() => {
     warnedAt.push(timer.now());
   });
-  const info = spyOn(logger, "info").mockImplementation(() => {});
-  const debug = spyOn(logger, "debug").mockImplementation(() => {});
+  const info = infoSpy.mockImplementation(() => {});
+  const debug = debugSpy.mockImplementation(() => {});
   cleanups.push(async () => {
     reowner.close();
     await reowner.whenIdle();

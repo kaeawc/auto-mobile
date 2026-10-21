@@ -12,7 +12,8 @@ import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeou
 import { FakeSimulatorCapacityGate } from "../../fakes/FakeSimulatorCapacityGate";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models/ActionableError";
-import type { BootedDevice, DeviceInfo } from "../../../src/models/DeviceInfo";
+import type { BootedDevice } from "../../../src/models/DeviceInfo";
+import type { AppleDevice } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 
 const UDID = "A1B2C3D4-E5F6-47A8-90AB-CDEF12345678";
 const DEVICE_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
@@ -36,20 +37,16 @@ const DEVICE: BootedDevice = {
 
 function image(
   state: "Booted" | "Shutdown" | "Booting" | "Shutting Down" = "Booted",
-  overrides: Partial<DeviceInfo> = {},
-): DeviceInfo {
+  overrides: Partial<AppleDevice> = {},
+): AppleDevice {
   return {
     name: DEVICE.name,
-    platform: "ios",
-    deviceId: UDID,
-    isRunning: state === "Booted",
+    udid: UDID,
     state,
     isAvailable: true,
-    deviceType: DEVICE_TYPE,
-    runtimeId: RUNTIME,
+    deviceTypeIdentifier: DEVICE_TYPE,
     runtime: RUNTIME,
-    osVersion: "27.0",
-    iosVersion: "27.0",
+    os_version: "27.0",
     ...overrides,
   };
 }
@@ -84,7 +81,8 @@ function capacityRefusal(): BootCapacityExhaustedError {
 interface HarnessOptions {
   instrumentation?: IosBootInstrumentation;
   timer?: FakeTimer;
-  inventories?: DeviceInfo[][];
+  inventories?: AppleDevice[][];
+  readError?: Error;
   assertOwned?: (call: number) => Promise<void>;
   stopDevice?: () => Promise<void>;
   eraseSimulator?: () => Promise<void>;
@@ -102,10 +100,14 @@ function harness(options: HarnessOptions = {}) {
     {
       iosBootInstrumentation: options.instrumentation ?? instrumentation,
       simctl: {
-        listSimulatorImages: async (...args) => {
+        readSimulatorTarget: async (...args) => {
           events.push(`list:${++listCall}`);
           listOptions.push(args);
-          return inventories[listCall - 1] ?? [];
+          if (options.readError) {
+            throw options.readError;
+          }
+          const matches = (inventories[listCall - 1] ?? []).filter((row) => row.udid === args[0]);
+          return matches.length === 1 ? matches[0] : undefined;
         },
         eraseSimulator: async (udid) => {
           events.push(`erase:${udid}`);
@@ -131,6 +133,31 @@ function harness(options: HarnessOptions = {}) {
 }
 
 describe("IosBaselineReset", () => {
+  test.each([undefined, "  ", " 27.0 "])(
+    "normalizes raw os_version %j with the runtime fallback",
+    async (os_version) => {
+      const h = harness({
+        inventories: [
+          [image("Booted", { os_version })],
+          [image("Shutdown", { os_version })],
+          [image("Booted", { os_version })],
+        ],
+      });
+      await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    },
+  );
+
+  test("fresh-read failures stop before mutation and retain their cause", async () => {
+    const failure = new Error("raw inventory unavailable");
+    const h = harness({ readError: failure });
+    const error = await h.resetter
+      .reset(DEVICE, PROFILE, h.assertOwned)
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toMatchObject({ cause: failure });
+    expect(h.events).toEqual(["list:1"]);
+  });
+
   test("runs the bounded clean-baseline sequence with fresh authoritative reads", async () => {
     const h = harness();
 
@@ -153,11 +180,7 @@ describe("IosBaselineReset", () => {
     expect(h.instrumentation.requests).toEqual([
       { udid: UDID, runtime: RUNTIME, timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS },
     ]);
-    expect(h.listOptions).toEqual([
-      [undefined, { bypassCache: true }],
-      [undefined, { bypassCache: true }],
-      [undefined, { bypassCache: true }],
-    ]);
+    expect(h.listOptions).toEqual([[UDID], [UDID], [UDID]]);
   });
 
   test("a capacity refusal stays typed and never calls bootSimulator", async () => {
@@ -253,7 +276,7 @@ describe("IosBaselineReset", () => {
       inventories: [
         [image()],
         [image("Shutdown")],
-        [image("Shutdown", { runtimeId: `${RUNTIME}-other` })],
+        [image("Shutdown", { runtime: `${RUNTIME}-other` })],
       ],
     });
     const refusal = capacityRefusal();
@@ -387,13 +410,15 @@ describe("IosBaselineReset", () => {
     ["missing target", []],
     ["duplicate target", [image(), image()]],
     ["unknown availability", [image("Booted", { isAvailable: undefined })]],
-    ["partial type", [image("Booted", { deviceType: undefined })]],
+    ["partial type", [image("Booted", { deviceTypeIdentifier: undefined })]],
     ["transitional state", [image("Booting")]],
     ["shutdown without a deferred boot", [image("Shutdown")]],
-    ["different runtime", [image("Booted", { runtimeId: `${RUNTIME}-other` })]],
-    ["different type", [image("Booted", { deviceType: `${DEVICE_TYPE}-other` })]],
-    ["different OS", [image("Booted", { osVersion: "28.0", iosVersion: "28.0" })]],
-  ] satisfies Array<[string, DeviceInfo[]]>)(
+    ["missing runtime", [image("Booted", { runtime: undefined })]],
+    ["different runtime", [image("Booted", { runtime: `${RUNTIME}-other` })]],
+    ["different type", [image("Booted", { deviceTypeIdentifier: `${DEVICE_TYPE}-other` })]],
+    ["different OS", [image("Booted", { os_version: "28.0" })]],
+    ["unavailable target", [image("Booted", { isAvailable: false })]],
+  ] satisfies Array<[string, AppleDevice[]]>)(
     "rejects %s before the first native mutation",
     async (_description, inventory) => {
       const h = harness({ inventories: [inventory] });
@@ -407,9 +432,11 @@ describe("IosBaselineReset", () => {
 
   test.each([
     ["non-Booted state", image("Shutdown")],
-    ["changed runtime", image("Booted", { runtimeId: `${RUNTIME}-other` })],
-    ["changed type", image("Booted", { deviceType: `${DEVICE_TYPE}-other` })],
-  ] satisfies Array<[string, DeviceInfo]>)(
+    ["changed runtime", image("Booted", { runtime: `${RUNTIME}-other` })],
+    ["changed type", image("Booted", { deviceTypeIdentifier: `${DEVICE_TYPE}-other` })],
+    ["changed OS", image("Booted", { os_version: "28" })],
+    ["unavailable target", image("Booted", { isAvailable: false })],
+  ] satisfies Array<[string, AppleDevice]>)(
     "does not return clean when final inventory has %s",
     async (_description, finalImage) => {
       const h = harness({ inventories: [[image()], [image("Shutdown")], [finalImage]] });

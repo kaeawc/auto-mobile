@@ -11,6 +11,7 @@ import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyP
 import { logger } from "../../src/utils/logger";
 import type { RemoteCtrlProxyIOSRunner } from "../../src/ctrlProxy/ios/IosCtrlProxyContracts";
 import { IosCtrlProxyHealthClient } from "../../src/ctrlProxy/ios/IosCtrlProxyHealthClient";
+import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import {
   FakeListeningProcess,
   captureLifecycleSteps,
@@ -817,17 +818,16 @@ describe("IOSCtrlProxyManager restart prevention", function () {
           return firstHealthPoll;
         }
         return createExecResult(
-          curlCalls >= 6 ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          fakeTimer.now() >= 1_000
+            ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })
+            : "",
           "",
         );
       });
 
       await withHealthBudget("1", async () => {
-        fakeTimer.enableAutoAdvance();
         const defaultStart = manager.start();
-        for (let i = 0; i < 5 && curlCalls < 3; i++) {
-          await new Promise((resolve) => setImmediate(resolve));
-        }
+        await drainUntil(() => curlCalls === 3, { description: "first shared health poll" });
         expect(curlCalls).toBe(3);
 
         const controller = new AbortController();
@@ -839,11 +839,15 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         await expect(extendedStart).rejects.toThrow("caller cancelled");
 
         releaseFirstHealthPoll!(createExecResult("", ""));
-        await expect(defaultStart).rejects.toThrow("CtrlProxy failed to start within timeout");
+        await expect(
+          settleByFakeEvents(fakeTimer, defaultStart, {
+            description: "default health deadline after caller cancellation",
+          }),
+        ).rejects.toThrow("CtrlProxy failed to start within timeout");
       });
 
       // Deferred runners retain the default budget after the caller extension is removed.
-      expect(curlCalls).toBe(4);
+      expect(fakeTimer.now()).toBe(500);
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
     });
 

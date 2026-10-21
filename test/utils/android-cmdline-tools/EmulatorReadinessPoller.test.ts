@@ -51,7 +51,8 @@ function setup(adb: FakeAdbExecutor, classify: (output: string) => ActionableErr
     getLaunchTargetDeviceId: () => undefined,
     captureLaunchTargetDeviceId: () => {},
     maybeRecoverFreshOffline: async () => {},
-    nextPollingDelayMs: (_tracker, _options, _id, _now, interval) => interval,
+    nextPollingDelayMs: (_tracker, _options, _id, _now, interval, remaining) =>
+      Math.min(interval, remaining),
     getBootedDevicesWithDiagnostics: async () => ({ devices: [emulator], diagnostics: [] }),
     findNamedEmulator: (_name, _child, running) => ({ emulator: running[0] }),
     resolvedReadyAvdName: async (avdName) => avdName,
@@ -59,16 +60,134 @@ function setup(adb: FakeAdbExecutor, classify: (output: string) => ActionableErr
     foundBootedDevice: (name, deviceId, model) => ({ name, deviceId, platform: "android", model }),
     classifyEmulatorExitOutput: classify,
   };
-  return { timer, adb, poller: new DefaultEmulatorReadinessPoller(host) };
+  return { timer, adb, host, poller: new DefaultEmulatorReadinessPoller(host) };
 }
 
 describe("DefaultEmulatorReadinessPoller", () => {
+  test("abort during both readiness sleeps rejects promptly without leaving timers", async () => {
+    const { poller, timer } = setup(
+      readyAdb({ "shell getprop sys.boot_completed": "0\n" }),
+      () => null,
+    );
+    const controller = new AbortController();
+    const reason = new Error("cancelled during readiness sleep");
+    timer.setTimeout(() => controller.abort(reason), 120);
+
+    await expect(
+      poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, controller.signal),
+    ).rejects.toBe(reason);
+
+    expect(timer.now()).toBe(120);
+    expect(timer.getPendingSleepCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+  });
+
+  test("a classified process exit wakes both readiness sleeps immediately", async () => {
+    const classified = new ActionableError("Emulator failed to start: corrupt image");
+    const { poller, timer } = setup(
+      readyAdb({ "shell getprop sys.boot_completed": "0\n" }),
+      () => classified,
+    );
+    const child = new FakeChildProcess(timer);
+    timer.setTimeout(() => {
+      child.emit("exit", 1);
+      child.emit("exit", 1);
+    }, 120);
+
+    await expect(poller.waitForEmulatorReady("Pixel_9", 5_000, child)).rejects.toBe(classified);
+
+    console.log(`process exit at 120ms: caller released at ${timer.now()}ms`);
+    expect(timer.now()).toBe(120);
+    expect(timer.getPendingSleepCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+    expect(child.listenerCount("exit")).toBe(0);
+  });
+
+  test("a launch failure recorded by the poller wakes the caller immediately", async () => {
+    const failure = new ActionableError("Emulator failed to start: launch failure");
+    const { poller, timer, host } = setup(
+      readyAdb({ "shell getprop sys.boot_completed": "0\n" }),
+      () => null,
+    );
+    host.nextPollingDelayMs = () => 120;
+    host.getLaunchError = () => (timer.now() >= 120 ? failure : undefined);
+
+    await expect(poller.waitForEmulatorReady("Pixel_9", 5_000)).rejects.toBe(failure);
+
+    expect(timer.now()).toBe(120);
+    expect(timer.getPendingSleepCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+  });
+
+  test("process exit keeps precedence when the in-flight readiness probes also succeed", async () => {
+    const failure = new ActionableError("Emulator failed to start: corrupt image");
+    const { poller, timer, host } = setup(readyAdb(), () => failure);
+    const child = new FakeChildProcess(timer);
+    const scan = host.getBootedDevicesWithDiagnostics;
+    host.getBootedDevicesWithDiagnostics = async () => {
+      timer.advanceTime(120);
+      child.emit("exit", 1);
+      return scan();
+    };
+
+    await expect(poller.waitForEmulatorReady("Pixel_9", 5_000, child)).rejects.toBe(failure);
+
+    expect(timer.now()).toBe(120);
+    expect(timer.getPendingSleepCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+  });
+
+  test("a terminal poller failure wakes the caller with the original thrown value", async () => {
+    for (const failure of [new Error("polling delay calculation failed"), undefined]) {
+      const { poller, timer, host } = setup(
+        readyAdb({ "shell getprop sys.boot_completed": "0\n" }),
+        () => null,
+      );
+      host.nextPollingDelayMs = () => {
+        timer.advanceTime(120);
+        throw failure;
+      };
+      const child = new FakeChildProcess(timer);
+
+      await expect(poller.waitForEmulatorReady("Pixel_9", 5_000, child)).rejects.toBe(failure);
+
+      expect(timer.now()).toBe(120);
+      expect(timer.getPendingSleepCount()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.getPendingIntervalCount()).toBe(0);
+      expect(child.listenerCount("exit")).toBe(0);
+    }
+  });
+
+  test("nothing ready times out at a deadline between fallback ticks without leaving timers", async () => {
+    const { poller, timer } = setup(
+      readyAdb({ "shell getprop sys.boot_completed": "0\n" }),
+      () => null,
+    );
+
+    await expect(poller.waitForEmulatorReady("Pixel_9", 750)).rejects.toThrow(
+      /failed to become ready within 750ms[\s\S]*phase=system-boot-complete/,
+    );
+
+    expect(timer.now()).toBe(750);
+    expect(timer.getPendingSleepCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+  });
+
   test("returns the booted device once every readiness signal passes", async () => {
-    const { poller } = setup(readyAdb(), () => null);
+    const { poller, timer } = setup(readyAdb(), () => null);
 
     const device = await poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, undefined, {
       skipWakeAndUnlock: true,
     });
+
+    // The caller is released when the poller finishes, not on the 500 ms fallback tick.
+    expect(timer.now()).toBeLessThan(500);
 
     expect(device).toEqual({
       name: "Pixel_9",

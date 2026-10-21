@@ -248,6 +248,10 @@ export class FakeCtrlProxyManager implements AndroidCtrlProxyManagerHandle {
     this.clearAvailabilityCache();
   }
 
+  reopenSetupGate(): ReturnType<AndroidCtrlProxyManagerHandle["reopenSetupGate"]> {
+    this.executedOperations.push("reopenSetupGate");
+  }
+
   async downloadApk(): Promise<string> {
     this.executedOperations.push("downloadApk");
 

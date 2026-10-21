@@ -5,6 +5,7 @@
 # Unpublished owners and abandoned recovery claims expire after 60 seconds.
 host_slot_paths=()
 host_slots_acquired=0
+host_slots_capacity=0
 host_slots_owner="$$"
 
 # stat flags differ between GNU and BSD; neither requires a new dependency.
@@ -75,6 +76,9 @@ host_slots_acquire() {
     host_slots_acquired="$demand"
     return 0
   fi
+  # The base pool size, for callers that must know whether they hold all of it (#14450).
+  # shellcheck disable=SC2034 # read by scripts/lib/host-heavy-run.sh
+  host_slots_capacity="$capacity"
   host_slots_acquired=0
   for ((index = 0; index < capacity && host_slots_acquired < demand; index += 1)); do
     host_slot_take "$coordination/test-slots/$index" || true

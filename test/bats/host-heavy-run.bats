@@ -59,6 +59,22 @@ hold() {
   [[ "$output" == *"gomaxprocs=unset"* ]]
 }
 
+@test "a lone run holding only part of a larger pool is capped to its reservation (#14450)" {
+  cd "$REPO_ROOT"
+  # A later run could take the other four slots while this one runs, so it cannot run uncapped.
+  AUTOMOBILE_HOST_TEST_SLOTS=8 run heavy bash -c 'echo "gomaxprocs=${GOMAXPROCS:-unset} threads=[$1]"' _
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gomaxprocs=4 threads=[4]"* ]]
+  [[ "$output" == *"holding 4 of 4 slots"* ]]
+}
+
+@test "a lone run that oversubscribes the whole small pool keeps the tool's default parallelism" {
+  cd "$REPO_ROOT"
+  AUTOMOBILE_HOST_TEST_SLOTS=2 run heavy bash -c 'echo "gomaxprocs=${GOMAXPROCS:-unset}"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gomaxprocs=unset"* ]]
+}
+
 @test "a contended pool caps the checker's threads to the slots acquired" {
   cd "$REPO_ROOT"
   hold 3

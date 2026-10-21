@@ -7,11 +7,12 @@
 #   host_heavy_run <command> [args...]
 #
 # The run asks for AUTOMOBILE_HEAVY_CHECK_SLOTS slots (default 4) from the same pool unit-test
-# workers use. When it holds slots alongside another run, or got fewer than it asked for, the
-# checker is capped to the slots it holds: GOMAXPROCS for the Go checkers, plus
-# the thread cap as the command's last argument (empty when uncapped) for tools with their own
-# thread flag (`tsgo --checkers`, `oxlint --threads`). A run with the pool to itself keeps the
-# tool's default parallelism. With no slot free the run waits up to
+# workers use. Unless it holds the entire base pool with no other run holding slots, the checker is
+# capped to the slots it holds: GOMAXPROCS for the Go checkers, plus the thread cap as the command's
+# last argument (empty when uncapped) for tools with their own thread flag (`tsgo --checkers`,
+# `oxlint --threads`). A run holding only part of a larger pool is capped even when alone, because a
+# later run can take the rest while it is still going (#14450). A run with the whole pool to itself
+# keeps the tool's default parallelism. With no slot free the run waits up to
 # AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS (default 60) and then proceeds with one thread, so a full
 # pool can never deadlock a gate. AUTOMOBILE_HOST_TEST_SLOTS=off disables the cap.
 
@@ -76,7 +77,9 @@ host_heavy_run() {
     done
     threads=""
     if [[ "${AUTOMOBILE_HOST_TEST_SLOTS:-}" != off ]] &&
-      { [[ "$host_slots_acquired" -lt "$demand" ]] || host_heavy_pool_shared; }; then
+      { [[ "$host_slots_acquired" -lt "$demand" ]] ||
+        [[ "$host_slots_acquired" -lt "${host_slots_capacity:-0}" ]] ||
+        host_heavy_pool_shared; }; then
       threads="$host_slots_acquired"
       if [[ "$threads" -lt 1 ]]; then threads=1; fi
       printf 'host-heavy-run: holding %s of %s slots (waited %ss); capping checker threads to %s\n' \

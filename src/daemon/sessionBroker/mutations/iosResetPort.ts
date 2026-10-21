@@ -1,4 +1,4 @@
-import { isAbsolute, normalize, sep } from "node:path";
+import { posix } from "node:path";
 import { z } from "zod/v4";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";
@@ -534,6 +534,8 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       if (state.removedPaths.has(path)) {
         continue;
       }
+      // simctl runs only on macOS, so container paths are POSIX whatever host runs the daemon.
+      const { isAbsolute, normalize, sep } = posix;
       const parent = `${sep}${context.scope.deviceId}${sep}data${sep}Containers${sep}Shared${sep}AppGroup${sep}`;
       if (
         !isAbsolute(path) ||

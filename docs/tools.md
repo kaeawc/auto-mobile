@@ -2044,6 +2044,23 @@ immediate OS diagnostic evidence. <code>success: true</code> and
 <code>confirmed: true</code> require fresh, target-specific crash evidence, not
 merely command dispatch or process disappearance.
 
+After dispatch, <code>crashApp</code> also looks for the OS crash report for the
+crashed process and returns it as <code>crashReport</code>. On iOS Simulator
+that is the host's <code>~/Library/Logs/DiagnosticReports/*.ips</code>; on
+Android it is the <code>dumpsys dropbox</code> <code>data_app_crash</code> or
+<code>data_app_native_crash</code> entry. A report is attributed only when it
+names the same Simulator UDID (iOS), app, and process ID, and was captured after
+the crash was induced. A found report is bounded: exception type and codes,
+termination reason, app version, report path, and the crashing thread's top
+frames. It is also recorded as a <code>crash</code> entry in
+<code>automobile:failures</code>, and its <code>failureOccurrenceId</code> is
+returned. A matching report confirms a crash that the log heuristic missed (its
+<code>evidence.source</code> is <code>ios_crash_report</code> or
+<code>android_dropbox</code>). Otherwise <code>crashReport</code> is
+<code>{"status": "notFound"}</code>. Physical iOS reports
+<code>{"status": "unsupported", "reason": …}</code> until device retrieval is
+verified.
+
 </details>
 
 <details class="example" markdown="1">
@@ -2308,6 +2325,12 @@ Camera posters use `setDeviceState` with `cameraPoster: { mode: "image", path: "
 Location route playback uses `setDeviceState` with `location: { mode: "route", waypoints: [{ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 1 }], durationMs: 10000 }`. Provide exactly one of positive, finite `durationMs` or `speedMetersPerSecond`. A route needs at least two ordered waypoints; latitude is −90..90, longitude is −180..180, and optional altitude is finite. `loop` defaults to false; `updateIntervalMs` defaults to 1000 and accepts integers from 200 to 60000. Starting a route returns immediately with its waypoint count, total distance, expected duration, loop, interval, and method. iOS Simulator interpolates on the host and sends repeated `simctl location set` commands. Three consecutive fix failures stop playback and are logged; the next location write reports the failed route in `previousRoute` with `endedReason: "failed"` and `lastError`.
 
 One route runs per device. A static fix, new route, `location: { mode: "stop" }`, session release, unbind, or device removal cancels it. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged. A sessionless fix written while a session marker remains on that device is cleared by that session's release; markers are per device and session, not per write. Stop reports `stopped: false` when idle and `previousRoute` when a route ended, including its `endedReason` (`completed`, `failed`, `replaced`, or `stopped`) and any `lastError`.
+
+Lock-screen credentials use `setDeviceState` with `screenLock: { type: "pin", credential: "1357" }`, `screenLock: { type: "password", credential: "s3cret" }`, `screenLock: { type: "pattern", credential: "14789" }` (cells of the 3x3 grid as digits 1-9, row by row, each used once), or `screenLock: { type: "none", currentCredential: "1357" }` to clear one. It runs `adb shell locksettings set-pin|set-password|set-pattern|clear` for user 0 on an Android emulator or physical device, so `KeyguardManager.isDeviceSecure()` becomes true and Keystore keys that need user authentication can be generated; iOS returns unsupported. A PIN is 4-16 digits; a password or `currentCredential` is 4-16 printable ASCII characters, not starting with `-` and without a single quote. `getDeviceState` with `include: ["screenLock"]` reads the credential type (`none`, `pin`, `password`, `pattern`, or `unknown`) from `dumpsys lock_settings`, falling back to the keyguard's `secure` flag.
+
+The result reports only the type and outcome, such as `screenLock: { type: "pin", set: true, outcome: "set", verified: true, restoreOnRelease: true }`; the credential is never returned. Within a session, AutoMobile keeps the credential in daemon memory (never on disk) so that session can replace it (`--old`) and its release or rebind clears it. A leaked lock blocks every later session on the device, so the outcome of that clear is returned in the session-release result as `screenLockRestore` (`cleared`, `failed` with the leftover and how to remove it, `skipped` for a replaced device, or `pending` if still running at the teardown cap); a refused credential is not retried, because each refusal counts toward the device's failed-attempt lockout. A daemon restart loses the in-memory credential, leaving the lock until it is cleared by hand. A sessionless set is never cleared automatically and carries a `warning`. An existing credential this session did not set is never overwritten: the call fails with `errorCode: "lock_credential_preexisting"` and no write; a wrong `currentCredential` fails with `lock_credential_mismatch`. Any change also drops the PIN `wakeAndUnlock` remembered for the device.
+
+The credential is replaced by `<redacted>` in request and plan logs, telemetry, the memory-audit store and `recordToolCalls` plans (the recorder warns that a replay needs it set by hand). AutoMobile's adb logs and command errors show `shell locksettings <credential redacted>`, and `locksettings` output, which echoes credentials, is scrubbed before it can reach an error. The credential is still an argument of the `locksettings` process on the device while it runs, so it is visible to anything that can list device processes for that moment. Work-profile users are not supported yet.
 
 During canonical-shape phase 1, every device surface returns the complete shared description:
 static facts are top-level, changing state is under `runtime`, and the previous nested and flat
@@ -3285,7 +3308,7 @@ errors.
 
 `getDeviceState` and `setDeviceState` report `success`, `deviceId`, and `platform`,
 with optional `error` and requested field results: `doNotDisturb`, `connectivity`,
-`biometrics`, `networkCondition`, `clock`, and (writes only) `location`. Reads may
+`biometrics`, `networkCondition`, `clock`, `screenLock`, and (writes only) `location`. Reads may
 also include `displays` and `unsupported` field names. Field results report
 `supported` and optional verification, capability, method, values, warning, or
 error metadata. Clock writes can report `outcome` as `changed`, `unchanged`, or

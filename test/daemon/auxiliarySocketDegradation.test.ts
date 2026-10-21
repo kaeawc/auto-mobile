@@ -42,7 +42,7 @@ import * as database from "../../src/db";
 function identityHarness(
   persist: (record: PidFileData) => Promise<void> = async () => {},
   platform: NodeJS.Platform = process.platform,
-  stat = () => ({ dev: 1, ino: 2 }),
+  stat = () => ({ dev: 1n, ino: 2n }),
   reportStartupFailure: (message: string) => void = () => {},
 ) {
   const host: DaemonIdentityHost = {
@@ -334,7 +334,7 @@ describe("auxiliary stream degradation", () => {
 
   test("control recovery records the replacement inode so cleanup removes socket before PID", async () => {
     const timer = new FakeTimer();
-    let inode = { dev: 1, ino: 2 };
+    let inode = { dev: 1n, ino: 2n };
     const identity = identityHarness(undefined, "linux", () => inode);
     identity.recordControlSocketIdentity();
     const ownerGuard = new IncumbentOwnerGuard({
@@ -407,7 +407,7 @@ describe("auxiliary stream degradation", () => {
     };
     // A successful fake bind replaces the inode; no real listener or path is touched.
     const start = spyOn(UnixSocketServer.prototype, "start").mockImplementation(async () => {
-      inode = { dev: 1, ino: 3 };
+      inode = { dev: 1n, ino: 3n };
     });
     const errors: string[] = [];
     const logError = spyOn(logger, "error").mockImplementation((message) => {
@@ -480,7 +480,7 @@ describe("auxiliary stream degradation", () => {
     identity.recordControlSocketIdentity();
     const options = identity.getDaemonFileCleanupOptions();
     expect(options.socketPaths).toContain(SOCKET_PATH);
-    expect(options.socketFileIdentities.get(SOCKET_PATH)).toEqual({ dev: 1, ino: 2 });
+    expect(options.socketFileIdentities.get(SOCKET_PATH)).toEqual({ dev: 1n, ino: 2n });
   });
 });
 

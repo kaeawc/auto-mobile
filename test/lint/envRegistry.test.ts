@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 
 import path from "node:path";
-import { type Expression } from "oxc-parser";
+import { type AssignmentTargetMaybeDefault, type Expression } from "oxc-parser";
 import {
   AMBIENT_ENV_REGISTRY,
   ENV_REGISTRY,
@@ -15,6 +15,7 @@ import {
   typeScriptFiles,
   readGuardFile,
   guardTextMayMatch,
+  unwrapCallee,
   GuardVisitor as Visitor,
 } from "./astGuard";
 
@@ -198,6 +199,76 @@ function registeredNames(): Set<string> {
   );
 }
 
+/** Identifier keys hide constant names from the registered-name scan above. */
+function computedProcessEnvReads(file: string, source: string): string[] {
+  const hits: string[] = [];
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, "process") && guardTextMayMatch(source, "env"),
+  );
+  if (!program) {
+    return hits;
+  }
+  const writes = new Set<unknown>();
+  const markWrite = (target: AssignmentTargetMaybeDefault | Expression): void => {
+    if (target.type === "ObjectPattern") {
+      for (const property of target.properties) {
+        markWrite(property.type === "RestElement" ? property.argument : property.value);
+      }
+    } else if (target.type === "ArrayPattern") {
+      for (const element of target.elements) {
+        if (element) {
+          markWrite(element.type === "RestElement" ? element.argument : element);
+        }
+      }
+    } else if (target.type === "AssignmentPattern") {
+      markWrite(target.left);
+    } else {
+      const node = unwrapCallee(target);
+      if (node.type === "ChainExpression") {
+        markWrite(node.expression);
+      } else {
+        writes.add(node);
+      }
+    }
+  };
+  new Visitor({
+    AssignmentExpression(node) {
+      markWrite(node.left);
+    },
+    UpdateExpression(node) {
+      markWrite(node.argument);
+    },
+    UnaryExpression(node) {
+      if (node.operator === "delete") {
+        markWrite(node.argument);
+      }
+    },
+    ForInStatement(node) {
+      if (node.left.type !== "VariableDeclaration") {
+        markWrite(node.left);
+      }
+    },
+    ForOfStatement(node) {
+      if (node.left.type !== "VariableDeclaration") {
+        markWrite(node.left);
+      }
+    },
+    MemberExpression(node) {
+      if (
+        !writes.has(node) &&
+        isProcessEnv(node.object) &&
+        node.computed &&
+        node.property.type === "Identifier"
+      ) {
+        hits.push(`${file}\tprocess.env[${node.property.name}]`);
+      }
+    },
+  }).visit(program);
+  return hits;
+}
+
 function unregisteredReads(files: Map<string, string>): string[] {
   const registered = registeredNames();
   return [...files]
@@ -213,6 +284,7 @@ function unregisteredReads(files: Map<string, string>): string[] {
 describe("environment variable registry", () => {
   let found: string[];
   let rawReads: string[];
+  let computedReads: string[];
   let allowlistedReads: string[];
   // The AST scan of src/ runs in the hook so the per-test 100 ms budget is not spent on it.
   beforeAll(() => {
@@ -224,6 +296,10 @@ describe("environment variable registry", () => {
     rawReads = [...files]
       .filter(([relative]) => relative !== REGISTRY_FILE)
       .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, registered))
+      .sort();
+    computedReads = [...files]
+      .filter(([relative]) => !relative.startsWith("src/config/"))
+      .flatMap(([relative, source]) => computedProcessEnvReads(relative, source))
       .sort();
     const allowlisted = new Set(Object.keys(NON_ENV_LITERALS));
     allowlistedReads = [...files]
@@ -254,6 +330,38 @@ describe("environment variable registry", () => {
         registered,
       ),
     ).toEqual(["x.ts\tHOME", "x.ts\tHOME"]);
+  });
+
+  test("computed identifier reads use the environment registry outside src/config/", () => {
+    expect(
+      computedReads,
+      "Use readEnvRaw/readEnvTrimmed with an ENV spec instead of process.env[identifier].",
+    ).toEqual([]);
+  });
+
+  test("computed process.env detector flags identifier reads", () => {
+    expect(
+      computedProcessEnvReads(
+        "x.ts",
+        `const KEY = "HOME"; process.env[KEY]; process.env?.[KEY];
+         process.env["HOME"]; env[KEY]; process.env[\`DYNAMIC_\${platform}\`];`,
+      ),
+    ).toEqual(["x.ts\tprocess.env[KEY]", "x.ts\tprocess.env[KEY]"]);
+  });
+
+  test("computed process.env detector allows writes and deletes but checks their values", () => {
+    expect(
+      computedProcessEnvReads(
+        "x.ts",
+        `process.env[KEY] = "value"; process.env[KEY] ??= "value";
+         process.env[KEY] += "value"; process.env[KEY]++; delete process.env[KEY];
+         delete process.env?.[KEY]; (process.env[KEY] as string) = "value";
+         ({ value: process.env[KEY] = process.env[DEFAULT] } = values);
+         [process.env[KEY], ...process.env[REST]] = values;
+         for (process.env[KEY] of values) {} for (process.env[KEY] in values) {}
+         process.env[KEY] = process.env[OTHER]; process.env[KEY].field = "value";`,
+      ),
+    ).toEqual(["x.ts\tprocess.env[DEFAULT]", "x.ts\tprocess.env[OTHER]", "x.ts\tprocess.env[KEY]"]);
   });
 
   test("raw process.env detector flags destructured reads", () => {

@@ -22,11 +22,11 @@ import {
   type ForeignCtrlProxyForwardEvidence,
 } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import { type SqliteBindingRegistry } from "./sessionBroker/registry/sqliteBindingRegistry";
-import { SESSION_BROKER_HOST_CONFIG_ENV } from "./sessionBroker/hostConfig";
+import { ENV, readEnvRaw } from "../config/env";
 import { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
 import { type DaemonBrokerDeviceAcquisitionHandle } from "./sessionBroker/provisioning/daemonDeviceAcquisition";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
-import { DEFAULT_DAEMON_PORT, ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "./constants";
+import { DEFAULT_DAEMON_PORT } from "./constants";
 import { DaemonOptions } from "./types";
 import { DeviceForwardLeaseIdleReleaser } from "./deviceForwardLeaseIdleReleaser";
 import {
@@ -281,8 +281,8 @@ export class Daemon {
 
   private bindingRegistry: Promise<SqliteBindingRegistry> | undefined;
 
-  private sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
-    ? resolve(process.env[SESSION_BROKER_HOST_CONFIG_ENV]!)
+  private sessionBrokerConfigPath = readEnvRaw(ENV.SESSION_BROKER_CONFIG)
+    ? resolve(readEnvRaw(ENV.SESSION_BROKER_CONFIG)!)
     : undefined;
 
   protected brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
@@ -332,7 +332,7 @@ export class Daemon {
 
   private options: DaemonOptions;
 
-  private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+  private readonly acceptanceDiscoveryCapability = readEnvRaw(ENV.ACCEPTANCE_DISCOVERY_CAPABILITY);
 
   private shutdownInProgress: boolean = false;
 

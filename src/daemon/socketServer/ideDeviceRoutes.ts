@@ -1,4 +1,4 @@
-import { DAEMON_LAUNCH_NONCE_ENV } from "../constants";
+import { ENV, readEnvRaw } from "../../config/env";
 import {
   availableDaemonSockets,
   getUnavailableAuxiliarySockets,
@@ -201,7 +201,7 @@ export class IdeDeviceRoutes {
       // daemon will fetch (#2746).
       version: this.ports.daemonIdentity().version,
       pid: process.pid,
-      launchNonce: process.env[DAEMON_LAUNCH_NONCE_ENV],
+      launchNonce: readEnvRaw(ENV.DAEMON_LAUNCH_NONCE),
       buildId: this.ports.daemonIdentity().build.buildId,
       entryScript: this.ports.daemonIdentity().build.entryScript,
       acceptanceCapabilityFingerprint: acceptanceDiscoveryCapability

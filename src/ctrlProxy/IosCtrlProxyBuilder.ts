@@ -1,7 +1,6 @@
 import {
   IosRunnerArtifactVerifier,
   type IOSCtrlProxyBundleMetadata,
-  IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV,
 } from "./IosRunnerArtifactVerifier";
 import { errorMessage } from "../utils/describeUnknownError";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
@@ -524,7 +523,7 @@ export class IosCtrlProxyBuilder {
    * Check if a download/extract is needed
    */
   public async needsRebuild(platform?: IOSCtrlProxyPlatform): Promise<boolean> {
-    if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
+    if (isTruthyEnvValue(readEnvRaw(ENV.SKIP_CTRL_PROXY_DOWNLOAD))) {
       logger.info(`[IOSCtrlProxyBuilder] Download skipped via ${SKIP_CTRL_PROXY_DOWNLOAD_ENV}`);
       return false;
     }
@@ -587,7 +586,7 @@ export class IosCtrlProxyBuilder {
   ): Promise<CtrlProxyIosBuildResult> {
     // Throw the actionable missing-build error before the download result's
     // catch boundary; SKIP retains its existing short-circuit/result semantics.
-    if (this.isLocalBuildMode() && !isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
+    if (this.isLocalBuildMode() && !isTruthyEnvValue(readEnvRaw(ENV.SKIP_CTRL_PROXY_DOWNLOAD))) {
       await this.artifactVerifier.requireLocalBuildProducts(platform);
     }
     // Keep the shared artifact flight alive until every waiter has resolved
@@ -683,7 +682,7 @@ export class IosCtrlProxyBuilder {
   ): Promise<CtrlProxyIosBuildResult> {
     perf.serial("xcTestServiceDownload");
 
-    if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
+    if (isTruthyEnvValue(readEnvRaw(ENV.SKIP_CTRL_PROXY_DOWNLOAD))) {
       perf.end();
       return {
         success: false,
@@ -1042,7 +1041,7 @@ export class IosCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
-    return isTruthyEnvValue(process.env[IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV]);
+    return isTruthyEnvValue(readEnvRaw(ENV.CTRL_PROXY_IOS_USE_LOCAL_BUILD));
   }
 
   private isLocalBuildMode(): boolean {

@@ -6,6 +6,7 @@ import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
+import { registerCompareScreenshotTools } from "./compareScreenshotTools";
 import { registerStatusBarTools } from "./statusBarTools";
 import { registerAppLinkTools } from "./appLinkTools";
 import { registerNavigationTools } from "./navigationTools";
@@ -73,6 +74,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerUtilityTools();
   registerDeviceTools();
   registerDeepLinkTools();
+  registerCompareScreenshotTools();
   registerStatusBarTools();
   registerAppLinkTools();
   registerNavigationTools();

@@ -84,6 +84,7 @@ const readArgs: Record<string, Record<string, unknown>> = {
 const EXPECTED = [
   "accessibility",
   "clipboard",
+  "compareScreenshot",
   "displayConfig",
   "getAppPermissions",
   "getDataStore",
@@ -440,6 +441,7 @@ const READS_THAT_READY_UNHELD = {
   android: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
@@ -461,6 +463,7 @@ const READS_THAT_READY_UNHELD = {
   ios: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",

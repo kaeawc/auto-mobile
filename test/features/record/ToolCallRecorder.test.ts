@@ -263,3 +263,61 @@ describe("planRelevant trait gate", () => {
     expect(recorder.stepCount).toBe(0);
   });
 });
+
+describe("credentials", () => {
+  test("a recorded keystore password is replaced and the author is told to restore it", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recordPlanCall(recorder, "installApp", {
+      artifactPath: "/apps/app.aab",
+      bundle: {
+        keystore: { path: "/k.jks", alias: "a", storePassword: "hunter2", keyPassword: "hunter3" },
+      },
+    });
+
+    const { steps, warnings } = recorder.stopWithWarnings();
+    expect(steps).toEqual([
+      {
+        tool: "installApp",
+        params: {
+          artifactPath: "/apps/app.aab",
+          bundle: {
+            keystore: {
+              path: "/k.jks",
+              alias: "a",
+              storePassword: "<redacted>",
+              keyPassword: "<redacted>",
+            },
+          },
+        },
+      },
+    ]);
+    expect(JSON.stringify(steps)).not.toContain("hunter");
+    expect(warnings).toEqual([
+      "installApp was recorded with its credentials replaced by <redacted>: set them in the plan by hand before a replay",
+    ]);
+  });
+});
+
+describe("screen lock credentials", () => {
+  test("a recorded setDeviceState screenLock credential is replaced and the author is told", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recordPlanCall(recorder, "setDeviceState", { screenLock: { type: "pin", credential: "7391" } });
+    recordPlanCall(recorder, "setDeviceState", {
+      screenLock: { type: "none", currentCredential: "7391" },
+    });
+
+    const { steps, warnings } = recorder.stopWithWarnings();
+    expect(steps).toEqual([
+      { tool: "setDeviceState", params: { screenLock: { type: "pin", credential: "<redacted>" } } },
+      {
+        tool: "setDeviceState",
+        params: { screenLock: { type: "none", currentCredential: "<redacted>" } },
+      },
+    ]);
+    expect(JSON.stringify(steps)).not.toContain("7391");
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain("setDeviceState was recorded with its credentials replaced");
+  });
+});

@@ -176,7 +176,11 @@ export class IosRunnerArtifactVerifier {
   constructor(
     private readonly host: IosRunnerArtifactVerifierHost,
     private readonly hashRunnerBundle = (appPath: string): Promise<string> =>
-      hashAppBundle(appPath, undefined, { includeSigningMetadata: true, lengthPrefixed: true }),
+      hashAppBundle(appPath, undefined, {
+        includeSigningMetadata: true,
+        lengthPrefixed: true,
+        sealLinks: true,
+      }),
   ) {}
 
   /** A replacement extraction invalidates every platform's local integrity pin. */

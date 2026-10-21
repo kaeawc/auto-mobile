@@ -137,6 +137,48 @@ describe("notification tools", () => {
     expect(schema.required).not.toContain("appId");
   });
 
+  test("forwards iOS category and raw payload to the executor (#14097)", async () => {
+    const received: unknown[] = [];
+    const postNotificationHandler = createPostNotificationHandler({
+      postNotificationFactory: () => ({
+        execute: async (options) => {
+          received.push(options);
+          return { success: true, supported: true, method: "simctlPush" as const };
+        },
+      }),
+    });
+    const args = postNotificationSchema.parse({
+      platform: "ios",
+      appId: "com.example.App",
+      title: "T",
+      body: "B",
+      category: "reply",
+      payload: { orderId: "A-1", aps: { "thread-id": "orders" } },
+    });
+
+    await postNotificationHandler(
+      { name: "Fake", deviceId: "11111111-2222-3333-4444-555555555555", platform: "ios" },
+      args,
+    );
+    expect(received).toEqual([
+      expect.objectContaining({
+        category: "reply",
+        payload: { orderId: "A-1", aps: { "thread-id": "orders" } },
+      }),
+    ]);
+  });
+
+  test("rejects an empty category at parse time", () => {
+    const result = postNotificationSchema.safeParse({
+      platform: "ios",
+      appId: "com.example.App",
+      title: "T",
+      body: "B",
+      category: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
   test("surfaces a postNotification warning in the message and payload (#10014)", async () => {
     const postNotificationHandler = createPostNotificationHandler({
       postNotificationFactory: () => ({

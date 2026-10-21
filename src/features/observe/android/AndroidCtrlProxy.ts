@@ -15,7 +15,10 @@ import type {
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { SetTextOptions } from "../DeviceService";
 import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
-import type { AndroidActivateAccessibilityLinkRequest } from "./AndroidActionDispatcher";
+import type {
+  AndroidAccessibilityActionRequest,
+  AndroidActivateAccessibilityLinkRequest,
+} from "./AndroidActionDispatcher";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import type { ImeCommitActionResult } from "./CtrlProxyText";
 import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
@@ -249,6 +252,9 @@ export interface AndroidCtrlProxy
   requestActivateAccessibilityLink(
     request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult>;
+
+  /** Perform a semantic or custom accessibility action on a node (#14077). */
+  requestAccessibilityAction(request: AndroidAccessibilityActionRequest): Promise<A11yActionResult>;
 
   supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean>;
 

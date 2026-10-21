@@ -1,4 +1,8 @@
 import {
+  defaultDeviceTraits,
+  type DeviceTraits,
+} from "../../utils/android-cmdline-tools/deviceTraits";
+import {
   LocationOperations,
   type DeviceLocationState,
   type SetDeviceLocationInput,
@@ -18,6 +22,7 @@ import type { DoNotDisturbState } from "./device-state/DoNotDisturbState";
 import { BiometricOperations } from "./device-state/BiometricOperations";
 import type { BiometricEnrollment, BiometricEnrollmentState } from "./device-state/BiometricState";
 import { ClockOperations } from "./device-state/ClockOperations";
+import { createScreenLockOperations } from "./screenLock/ScreenLockOperations";
 import {
   DEFAULT_DEVICE_STATE_FIELDS,
   EMPTY_STATE_SELECTION_ERROR,
@@ -117,6 +122,7 @@ export class DeviceState {
   private timer: Timer;
   private consoleFactory: EmulatorConsoleClientFactory;
   private routeRegistry: LocationRouteRegistry;
+  private deviceTraits: DeviceTraits;
   private readonly canWriteLocation: () => boolean;
   private readonly onLocationApplied?: () => void;
   private readonly cameraPosterQrWriter?: QrPosterWriter;
@@ -138,6 +144,7 @@ export class DeviceState {
     simctl: () => this.simctl,
     routeRegistry: () => this.routeRegistry,
     consoleFactory: () => this.consoleFactory,
+    deviceTraits: () => this.deviceTraits,
     canWriteLocation: () => this.canWriteLocation(),
     onLocationApplied: () => this.onLocationApplied,
   });
@@ -159,8 +166,15 @@ export class DeviceState {
     simctl: () => this.simctl,
   });
 
+  private readonly screenLock: ReturnType<typeof createScreenLockOperations>;
+
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
+    this.screenLock = createScreenLockOperations(
+      () => this.device,
+      () => this.adbFactory,
+      dependencies.screenLock,
+    );
     this.clock = new ClockOperations(
       {
         device: () => this.device,
@@ -179,6 +193,7 @@ export class DeviceState {
     this.simctl = dependencies.simctl ?? null;
     this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
     this.routeRegistry = dependencies.routeRegistry ?? defaultLocationRouteRegistry;
+    this.deviceTraits = dependencies.deviceTraits ?? defaultDeviceTraits;
     this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
     this.onLocationApplied = dependencies.onLocationApplied;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
@@ -243,6 +258,7 @@ export class DeviceState {
       ...(include.includes("networkCondition")
         ? { networkCondition: await this.readNetworkCondition() }
         : {}),
+      ...(include.includes("screenLock") ? { screenLock: await this.screenLock.read() } : {}),
     };
   }
 
@@ -332,6 +348,7 @@ export class DeviceState {
             }),
           }
         : {}),
+      ...(input.screenLock ? { screenLock: await this.screenLock.write(input.screenLock) } : {}),
     };
   }
 

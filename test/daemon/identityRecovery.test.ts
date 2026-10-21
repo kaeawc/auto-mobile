@@ -1051,6 +1051,27 @@ describe("republish admin RPC admission", () => {
 });
 
 describe("incumbent-owned atomic publisher", () => {
+  test("rewrites a complete record when the observation stream becomes available", async () => {
+    const { "observation-stream": omittedStream, ...degradedSockets } = sockets;
+    let record: PidFileData = { ...complete, sockets: degradedSockets };
+    let writes = 0;
+    const io = {
+      readRecord: () => record,
+      isProcessRunning: () => true,
+      writeRecord: async () => {
+        writes++;
+        record = { ...complete, sockets };
+      },
+    };
+
+    expect(record.sockets).not.toHaveProperty("observation-stream");
+    expect(await republishOwnedIdentity(true, complete, io, sockets)).toBe(true);
+    expect(writes).toBe(1);
+    expect(record.sockets?.["observation-stream"]).toBe(omittedStream);
+    expect(await republishOwnedIdentity(true, complete, io, sockets)).toBe(true);
+    expect(writes).toBe(1);
+  });
+
   test("success waits for complete atomic publication and later cross-process callers do not rewrite", async () => {
     let record: PidFileData | null = null;
     let writes = 0;

@@ -190,76 +190,12 @@ class WebSocketServer(
 
     /**
      * `requestId` read directly off a typed [response], avoiding the encode→parse round-trip the
-     * raw-string [extractRequestId] path pays. Exhaustive over the sealed hierarchy so a newly
-     * added correlated response type fails to compile until it is wired in here (mirrors what
-     * `sendErrorResponse` reads off `ErrorResponse` directly). See #5462.
+     * raw-string [extractRequestId] path pays. Every response that echoes a request id implements
+     * [CorrelatedResponse]; `CorrelatedResponseTest` in `:protocol` fails when a response type
+     * declares `requestId` without it. See #5462, #11877.
      */
     internal fun correlationRequestId(response: WebSocketResponse): String? =
-      when (response) {
-        is ErrorResponse,
-        is ScreenshotResult,
-        is ScreenshotErrorResult,
-        is SwipeResult,
-        is TapCoordinatesResult,
-        is DragResult,
-        is PinchResult,
-        is SetTextResult,
-        is CommitTextResult,
-        is InsertTextResult,
-        is InsertTextStateResult,
-        is CancelImeCommitResult -> ResponseCorrelation.interactionRequestId(response)
-        is SetKeyboardProfileResult,
-        is SetNetworkMockRulesResult,
-        is KeyboardProfileCatalogResult,
-        is ImeActionResult,
-        is SelectAllResult,
-        is ActionResult,
-        is ClipboardResult,
-        is SettingsGetResult,
-        is SettingsPutResult,
-        is SettingsListResult,
-        is CaCertResult,
-        is DeviceOwnerStatusResult -> ResponseCorrelation.deviceControlRequestId(response)
-        is PermissionResult,
-        is GlobalActionResult,
-        is FrameContextValidationResult,
-        is DeviceInfoResult,
-        is CurrentFocusResult,
-        is TraversalOrderResult,
-        is HighlightResponse,
-        is PrototypeResult,
-        is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult,
-        is dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult,
-        is PreferenceFilesResult,
-        is PreferencesResult -> ResponseCorrelation.inspectionRequestId(response)
-        is SubscribeStorageResult,
-        is UnsubscribeStorageResult,
-        is GetPreferenceResult,
-        is SetPreferenceResult,
-        is RemovePreferenceResult,
-        is ClearPreferencesResult,
-        is InstalledPackagesResult,
-        is PackageInfoResult,
-        is LaunchIntentResult,
-        is HierarchyUpdateEvent -> ResponseCorrelation.storageAndPackageRequestId(response)
-        // Other event/status frames never echo a requestId.
-        is ConnectedResponse,
-        is DisplayTransitionEvent,
-        is PrototypeEvent,
-        is InteractionEvent,
-        is PackageEvent,
-        is NavigationEventResponse,
-        is HandledExceptionEvent,
-        is NetworkEventResponse,
-        is WebSocketFrameResponse,
-        is LogEventResponse,
-        is BroadcastEventResponse,
-        is LifecycleEventResponse,
-        is FrameMetricsEventResponse,
-        is StorageChangedEvent,
-        is CrashEvent,
-        is AnrEvent -> null
-      }
+      (response as? CorrelatedResponse)?.requestId
 
     /** The sealed wire serializer is the single source of registered top-level request names. */
     private val registeredRequestTypes: List<String> = run {

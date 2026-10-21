@@ -1,4 +1,5 @@
 import { promises as fsPromises } from "node:fs";
+import * as appBundleHasher from "../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { ActionableError } from "../../src/models/ActionableError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -41,6 +42,44 @@ describe("IosCtrlProxyBuilder", function () {
   let originalRunnerSha256Target: string | undefined;
   let tempDir: string;
   const scratch = useScratchRoot("ctrl-proxy-ios-builder-test-");
+
+  test("codesign cache rechecks a file replaced by a symlink to identical bytes", async () => {
+    let linked = false;
+    const deps = {
+      readDir: async () => ["a", "b"],
+      stat: async () => ({ isDirectory: () => false, isFile: () => true }),
+      lstat: async (file: string) => ({
+        isDirectory: () => file.endsWith(".app"),
+        isFile: () => !file.endsWith(".app") && !(linked && path.basename(file) === "a"),
+        isSymbolicLink: () => linked && path.basename(file) === "a",
+      }),
+      readLink: async () => "b",
+      readFile: async () => Buffer.from("same"),
+    };
+    const hashAppBundle = appBundleHasher.hashAppBundle;
+    const hashing = spyOn(appBundleHasher, "hashAppBundle").mockImplementation(
+      (appPath, _deps, options) => hashAppBundle(appPath, deps, options),
+    );
+    const codesign = new FakeCtrlProxyCodesignVerifier();
+    IosCtrlProxyBuilder.configure({ codesignVerifier: codesign });
+    const verifier = IosCtrlProxyBuilder.getInstance()["artifactVerifier"];
+    const appPath = path.join(tempDir, "Runner.app");
+    try {
+      await verifier["inspectRunnerCodesign"](appPath);
+      await verifier["inspectRunnerCodesign"](appPath);
+      expect(codesign.verifiedPaths).toHaveLength(1);
+      linked = true;
+      await verifier["inspectRunnerCodesign"](appPath);
+      expect(codesign.verifiedPaths).toHaveLength(2);
+      expect(hashing).toHaveBeenLastCalledWith(appPath, undefined, {
+        includeSigningMetadata: true,
+        lengthPrefixed: true,
+        sealLinks: true,
+      });
+    } finally {
+      hashing.mockRestore();
+    }
+  });
 
   test("finds legacy fixture bundles and prefers the renamed product", async () => {
     const builder = IosCtrlProxyBuilder.getInstance();

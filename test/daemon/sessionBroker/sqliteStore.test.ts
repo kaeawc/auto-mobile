@@ -540,6 +540,33 @@ describe("session broker durable admission", () => {
     expect(await store.confirmDestroyed(tickets[0])).toBe(false);
   });
 
+  test("destruction finalizes only the current request reset and fences stale timing writes", async () => {
+    const first = await prepare("first");
+    await returnClean("first", first.resource);
+    const pendingReset = {
+      mode: "erase" as const,
+      outcome: "pending" as const,
+      startedAtMs: 10,
+      totalMs: 5,
+      reuseCount: 0,
+      phases: {},
+    };
+    await store.recordTiming("first", { reset: pendingReset });
+
+    const second = await prepare("second");
+    await store.recordTiming("second", { reset: pendingReset });
+    await store.beginRelease("session-second", OWNER);
+    await registry.releaseExecution(key(second.resource), "session-second");
+    const tickets = await store.completeCleanRelease("second", OWNER, { idlePoolCap: 0 });
+    await clearPhysicalBinding(second.resource);
+    expect(await store.confirmDestroyed(tickets[0])).toBe(true);
+
+    expect((await store.getRequest("first"))?.timing?.reset?.outcome).toBe("pending");
+    expect((await store.getRequest("second"))?.timing?.reset?.outcome).toBe("destroyed");
+    await store.recordTiming("second", { reset: pendingReset });
+    expect((await store.getRequest("second"))?.timing?.reset?.outcome).toBe("destroyed");
+  });
+
   test("recovery retains uncertain live owners, then fences dead owners without freeing capacity", async () => {
     await store.admit(input("crashed", { limits: { totalDeviceCap: 1 } }));
     expect(await store.recoverRequest("crashed", SUCCESSOR)).toBeUndefined();

@@ -1152,4 +1152,38 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       recordToolCallEvent.mockRestore();
     }
   });
+
+  test("telemetry never carries a setDeviceState lock-screen credential (#14107)", async () => {
+    const telemetryEvents: Array<{ args?: unknown }> = [];
+    const recordToolCallEvent = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordToolCallEvent",
+    ).mockImplementation((event) => {
+      telemetryEvents.push(event);
+    });
+    const timer = new FakeTimer();
+    timer.setCurrentTime(25);
+
+    try {
+      await new DefaultAfterToolCallHandler().handle({
+        outputSchema: undefined,
+        name: "setDeviceState",
+        args: { screenLock: { type: "pin", credential: "7391" } },
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse({ message: "Applied device state", success: true }),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 20,
+      });
+
+      expect(telemetryEvents).toHaveLength(1);
+      expect(telemetryEvents[0].args).toEqual({
+        screenLock: { type: "pin", credential: "<redacted>" },
+      });
+    } finally {
+      recordToolCallEvent.mockRestore();
+    }
+  });
 });

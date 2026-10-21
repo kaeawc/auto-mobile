@@ -37,7 +37,7 @@ import {
   type PlistValue,
 } from "../utils/ios-cmdline-tools/XctestrunPlist";
 import { toActionableError } from "../models/ActionableError";
-import { SKIP_CTRL_PROXY_DOWNLOAD_ENV, isTruthyEnvValue } from "../utils/ctrlProxyDownloadControl";
+import { SKIP_CTRL_PROXY_DOWNLOAD_ENV } from "../utils/ctrlProxyDownloadControl";
 import {
   type IosPrerequisiteDetector,
   DefaultIosPrerequisiteDetector,
@@ -47,7 +47,7 @@ import {
   DefaultCtrlProxyCodesignVerifier,
 } from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 import { sortedReaddir } from "../utils/io";
-import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
+import { ENV, readEnvBool, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 export {
   IOS_HELPER_REQUIRE_CODESIGN_ENV,
@@ -523,7 +523,7 @@ export class IosCtrlProxyBuilder {
    * Check if a download/extract is needed
    */
   public async needsRebuild(platform?: IOSCtrlProxyPlatform): Promise<boolean> {
-    if (isTruthyEnvValue(readEnvRaw(ENV.SKIP_CTRL_PROXY_DOWNLOAD))) {
+    if (readEnvBool(ENV.SKIP_CTRL_PROXY_DOWNLOAD)) {
       logger.info(`[IOSCtrlProxyBuilder] Download skipped via ${SKIP_CTRL_PROXY_DOWNLOAD_ENV}`);
       return false;
     }
@@ -586,7 +586,7 @@ export class IosCtrlProxyBuilder {
   ): Promise<CtrlProxyIosBuildResult> {
     // Throw the actionable missing-build error before the download result's
     // catch boundary; SKIP retains its existing short-circuit/result semantics.
-    if (this.isLocalBuildMode() && !isTruthyEnvValue(readEnvRaw(ENV.SKIP_CTRL_PROXY_DOWNLOAD))) {
+    if (this.isLocalBuildMode() && !readEnvBool(ENV.SKIP_CTRL_PROXY_DOWNLOAD)) {
       await this.artifactVerifier.requireLocalBuildProducts(platform);
     }
     // Keep the shared artifact flight alive until every waiter has resolved
@@ -682,7 +682,7 @@ export class IosCtrlProxyBuilder {
   ): Promise<CtrlProxyIosBuildResult> {
     perf.serial("xcTestServiceDownload");
 
-    if (isTruthyEnvValue(readEnvRaw(ENV.SKIP_CTRL_PROXY_DOWNLOAD))) {
+    if (readEnvBool(ENV.SKIP_CTRL_PROXY_DOWNLOAD)) {
       perf.end();
       return {
         success: false,
@@ -1041,7 +1041,7 @@ export class IosCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
-    return isTruthyEnvValue(readEnvRaw(ENV.CTRL_PROXY_IOS_USE_LOCAL_BUILD));
+    return readEnvBool(ENV.CTRL_PROXY_IOS_USE_LOCAL_BUILD);
   }
 
   private isLocalBuildMode(): boolean {

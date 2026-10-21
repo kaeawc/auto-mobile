@@ -264,10 +264,19 @@ export function readEnvTrimmed(
   return value ? value : undefined;
 }
 
-/** Lowercase `1` / `true` / `yes` (trimmed) are true; anything else, including unset, is false. */
+const TRUTHY_ENV_TEXT: ReadonlySet<string> = new Set(["1", "true", "yes", "on"]);
+
+/**
+ * The one truthiness rule for boolean environment flags: `1`, `true`, `yes` or `on`, trimmed
+ * and case-insensitive. Anything else, including unset, is false.
+ */
+export function isTruthyEnvText(value: string | undefined): boolean {
+  return value !== undefined && TRUTHY_ENV_TEXT.has(value.trim().toLowerCase());
+}
+
+/** A `kind: "bool"` variable, read with {@link isTruthyEnvText}. */
 export function readEnvBool(spec: EnvVarSpec, env: NodeJS.ProcessEnv = process.env): boolean {
-  const value = readEnvRaw(spec, env)?.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes";
+  return isTruthyEnvText(readEnvRaw(spec, env));
 }
 
 /**

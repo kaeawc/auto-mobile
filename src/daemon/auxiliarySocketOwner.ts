@@ -1,4 +1,12 @@
-import { linkSync, lstatSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import {
+  constants,
+  copyFileSync,
+  linkSync,
+  lstatSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+} from "node:fs";
 import { z } from "zod";
 import { DAEMON_VERSION } from "./constants";
 import { writePrivateJsonFileAtomicSync } from "./atomicJsonFile";
@@ -15,6 +23,7 @@ import { AuxiliarySocketHeldError } from "./AuxiliarySocketHeldError";
 import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { removeOwnedFileSync } from "./ownedFileRemoval";
+import { sameFileIdentity, statFileIdentity, type SocketFileIdentity } from "./socketFileIdentity";
 
 const ownerSchema = z.object({
   pid: z.number().int().positive(),
@@ -25,12 +34,33 @@ const ownerSchema = z.object({
     .refine((version) => !/[^0-9A-Za-z.+_-]/.test(version)),
   socketName: z.string(),
   socketPath: z.string(),
+  // Rounded above 2^53; kept so released versions can still read the record.
   dev: z.number(),
   ino: z.number(),
+  // The exact identity as decimal strings; records written before these fields lack them.
+  exactDev: z.string().regex(/^\d+$/).optional(),
+  exactIno: z.string().regex(/^\d+$/).optional(),
   processGenerationToken: z.string().optional(),
   processGenerationTokenUtc: z.string().optional(),
 });
 type OwnerRecord = z.infer<typeof ownerSchema>;
+
+function recordedFileIdentity(identity: SocketFileIdentity) {
+  return {
+    dev: Number(identity.dev),
+    ino: Number(identity.ino),
+    exactDev: identity.dev.toString(),
+    exactIno: identity.ino.toString(),
+  };
+}
+
+/** A record without the exact fields compares the way the version that wrote it did. */
+function recordMatchesFile(record: OwnerRecord, current: SocketFileIdentity): boolean {
+  if (record.exactDev === undefined || record.exactIno === undefined) {
+    return Number(current.dev) === record.dev && Number(current.ino) === record.ino;
+  }
+  return sameFileIdentity(current, { dev: BigInt(record.exactDev), ino: BigInt(record.exactIno) });
+}
 export interface AuxiliarySocketOwnerFiles {
   read(path: string): string;
   lstat(path: string): { isFile(): boolean; size: number };
@@ -38,7 +68,8 @@ export interface AuxiliarySocketOwnerFiles {
   remove(path: string): void;
   rename(from: string, to: string): void;
   link(from: string, to: string): void;
-  stat(path: string): { dev: number; ino: number };
+  copyExclusive(from: string, to: string): void;
+  stat(path: string): SocketFileIdentity;
 }
 const defaultFiles: AuxiliarySocketOwnerFiles = {
   read: (path) => readFileSync(path, "utf8"),
@@ -47,7 +78,8 @@ const defaultFiles: AuxiliarySocketOwnerFiles = {
   remove: unlinkSync,
   rename: renameSync,
   link: linkSync,
-  stat: statSync,
+  copyExclusive: (from, to) => copyFileSync(from, to, constants.COPYFILE_EXCL),
+  stat: statFileIdentity,
 };
 
 /** Path-scoped metadata; no namespace PID file and no process-signaling capability. */
@@ -64,8 +96,13 @@ export class AuxiliarySocketOwner {
     private readonly ids: IdGenerator = defaultIdGenerator,
   ) {}
 
-  publish(socketPath: string, socketName: string, identity: { dev: number; ino: number }): void {
-    const record = ownerSchema.parse({ ...this.identity(), socketPath, socketName, ...identity });
+  publish(socketPath: string, socketName: string, identity: SocketFileIdentity): void {
+    const record = ownerSchema.parse({
+      ...this.identity(),
+      socketPath,
+      socketName,
+      ...recordedFileIdentity(identity),
+    });
     this.files.write(`${socketPath}.owner.json`, record);
     this.published = record;
   }
@@ -78,8 +115,7 @@ export class AuxiliarySocketOwner {
       return;
     }
     try {
-      const current = this.files.stat(socketPath);
-      if (current.dev === published.dev && current.ino === published.ino) {
+      if (recordMatchesFile(published, this.files.stat(socketPath))) {
         removeOwnedFileSync(
           `${socketPath}.owner.json`,
           (claimedPath) =>
@@ -116,8 +152,7 @@ export class AuxiliarySocketOwner {
     ) {
       return new AuxiliarySocketHeldError(socketPath, socketName, { holderVerified: false });
     }
-    const inode = this.files.stat(socketPath);
-    if (inode.dev !== record.dev || inode.ino !== record.ino) {
+    if (!recordMatchesFile(record, this.files.stat(socketPath))) {
       return new AuxiliarySocketHeldError(socketPath, socketName, { holderVerified: false });
     }
     const recorded = recordedProcessGenerationToken(record);

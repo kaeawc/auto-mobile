@@ -2199,26 +2199,7 @@ describe("SetUIState iOS Forms nodes", () => {
 
   test("reads the control's checked state and taps to set it false", async () => {
     const tap = new FakeTapOnElement();
-    let tappedBounds: Element["bounds"] | undefined;
     let tapPoint: { x: number; y: number } | undefined;
-    const tapOnElement = {
-      execute: async (...args: Parameters<FakeTapOnElement["execute"]>) => {
-        const [options] = args;
-        const selected = new ResolverElementSelector().selectByText(
-          iosFormsSwitch("true"),
-          options.text!,
-          { intentAction: "tap" },
-        );
-        tappedBounds = selected.element?.bounds;
-        if (tappedBounds) {
-          tapPoint = {
-            x: (tappedBounds.left + tappedBounds.right) / 2,
-            y: (tappedBounds.top + tappedBounds.bottom) / 2,
-          };
-        }
-        return tap.execute(...args);
-      },
-    };
     const observe = new FakeObserveScreenForSetUIState();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -2227,11 +2208,20 @@ describe("SetUIState iOS Forms nodes", () => {
         updatedAt: timer.now(),
         screenSize: { width: 402, height: 874 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        viewHierarchy: iosFormsSwitch(tap.getCallCount() === 0 ? "true" : "false"),
+        viewHierarchy: iosFormsSwitch(tapPoint ? "false" : "true"),
       }),
     );
     const action = new SetUIState(device, null, {
-      tapOnElement,
+      tapOnElement: tap,
+      tapAt: {
+        execute: async (options) => {
+          if (options.x === undefined || options.y === undefined) {
+            throw new Error("Expected absolute switch coordinates");
+          }
+          tapPoint = { x: options.x, y: options.y };
+          return { success: true, ...tapPoint };
+        },
+      },
       inputText: new FakeInputText(),
       clearText: new FakeClearText(),
       swipeOn: new FakeSwipeOn(),
@@ -2244,14 +2234,8 @@ describe("SetUIState iOS Forms nodes", () => {
     });
 
     expect(result.fields[0]).toMatchObject({ success: true, verified: true, fieldType: "toggle" });
-    expect(tap.getCalls().map((call) => call.options)).toEqual([
-      { text: "Enable Notifications", action: "tap" },
-    ]);
-    expect(tappedBounds).toEqual({ left: 301, top: 296, right: 364, bottom: 324 });
-    expect(tapPoint?.x).toBeGreaterThanOrEqual(301);
-    expect(tapPoint?.x).toBeLessThan(364);
-    expect(tapPoint?.y).toBeGreaterThanOrEqual(296);
-    expect(tapPoint?.y).toBeLessThan(324);
+    expect(tap.getCallCount()).toBe(0);
+    expect(tapPoint).toEqual({ x: 332, y: 310 });
   });
 });
 

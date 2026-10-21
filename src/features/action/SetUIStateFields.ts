@@ -13,9 +13,11 @@ import { ActionableError } from "../../models/ActionableError";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
-import { DefaultElementParser } from "../utility/ElementParser";
-import { toSearchable } from "../utility/SearchableNode";
-import type { ViewHierarchyNode } from "../../models/ViewHierarchyResult";
+import { SearchableHierarchy } from "../utility/SearchableNode";
+import { readDropdownDescendantValue } from "./dropdownValue";
+import { DefaultElementGeometry } from "../utility/ElementGeometry";
+import { findIosToggleControl } from "./iosToggleControl";
+import type { TapAtCoordinate } from "./TapAtCoordinate";
 import {
   CONTAINS_IGNORE_CASE,
   FOCUS_INPUT_INSPECT_INTENT,
@@ -114,6 +116,7 @@ interface SwipeOnLike {
 export interface SetUIStateDependencies {
   keyboard?: Pick<Keyboard, "execute">;
   tapOnElement?: TapOnElementLike;
+  tapAt?: Pick<TapAtCoordinate, "execute">;
   inputText?: InputTextLike;
   clearText?: ClearTextLike;
   swipeOn?: SwipeOnLike;
@@ -162,6 +165,7 @@ type FieldValueVerification = {
 const DEFAULT_MAX_RETRIES = 3;
 
 export class SetUIStateFields {
+  private readonly hierarchy = new SearchableHierarchy();
   private readonly selector: ResolverElementSelector;
   private readonly fieldTypeDetector: FieldTypeDetection;
 
@@ -174,7 +178,7 @@ export class SetUIStateFields {
       observeScreen: () => ObserveScreen;
     },
   ) {
-    this.selector = new ResolverElementSelector(undefined, undefined, {
+    this.selector = new ResolverElementSelector(undefined, this.hierarchy, {
       platform: options.device.platform,
       iosMultiPanel:
         options.device.platform === "ios" && (options.device.displays?.panels.length ?? 0) > 1,
@@ -329,7 +333,11 @@ export class SetUIStateFields {
         `Verification failed for ${this.describeSelector(fieldSpec.selector)}: ` +
         `expected ${JSON.stringify(fieldType === "toggle" || fieldType === "checkbox" ? fieldSpec.selected : fieldSpec.value)}, ` +
         `observed ${JSON.stringify(verifyResult.observedValue)}`,
-      stopRetrying: fieldType === "text" && attempts >= 2,
+      // A settled no-change result gets at most one retry (#14659). Refreshing
+      // before that retry still skips a toggle whose state arrived late.
+      stopRetrying:
+        attempts >= 2 &&
+        (fieldType === "text" || fieldType === "toggle" || fieldType === "checkbox"),
     };
   }
 
@@ -461,8 +469,11 @@ export class SetUIStateFields {
     if (!element) {
       return null;
     }
-    const fieldType = this.fieldTypeDetector.detect(element);
-    return fieldType === "toggle" || fieldType === "checkbox" ? element : null;
+    const control = android
+      ? element
+      : findIosToggleControl(this.hierarchy, element, text, viewHierarchy, screenSizeOptions);
+    const fieldType = this.fieldTypeDetector.detect(control);
+    return fieldType === "toggle" || fieldType === "checkbox" ? control : null;
   }
 
   /**
@@ -588,24 +599,7 @@ export class SetUIStateFields {
     if (ownValue) {
       return ownValue;
     }
-    const source = getHierarchyNodeSource(element);
-    if (!source) {
-      return undefined;
-    }
-
-    // Resolved elements are flat; framework Spinners keep the selection in a child TextView.
-    const parser = new DefaultElementParser();
-    let textValue: string | undefined;
-    let descriptionValue: string | undefined;
-    parser.traverseNode(source, (node: ViewHierarchyNode, depth) => {
-      if (depth === 0) {
-        return;
-      }
-      const searchable = toSearchable(parser.extractNodeProperties(node));
-      textValue ??= searchable.textSources.text;
-      descriptionValue ??= searchable.textSources["content-desc"];
-    });
-    return textValue ?? descriptionValue;
+    return readDropdownDescendantValue(element);
   }
 
   /**
@@ -853,10 +847,20 @@ export class SetUIStateFields {
 
     // Only tap if state needs to change
     if (isChecked !== fieldSpec.selected) {
-      const tapResult = await tapOnElement.execute(
-        this.buildTapOptions(fieldSpec.selector, "tap"),
-        { progress, signal },
-      );
+      const targetId = element["resource-id"] || element["view-id"];
+      const useResolvedControl = this.device.platform === "ios" && !!fieldSpec.selector.text;
+      const tapResult =
+        useResolvedControl && !targetId
+          ? await this.getTapAt().execute(
+              { ...new DefaultElementGeometry().getElementCenter(element), action: "tap" },
+              { progress, signal },
+            )
+          : await tapOnElement.execute(
+              useResolvedControl
+                ? { elementId: targetId, action: "tap" }
+                : this.buildTapOptions(fieldSpec.selector, "tap"),
+              { progress, signal },
+            );
       if (!tapResult.success) {
         return { success: false, error: `Failed to tap checkbox/toggle: ${tapResult.error}` };
       }
@@ -1027,6 +1031,14 @@ export class SetUIStateFields {
   }
 
   // Dependency getters with lazy initialization
+
+  private getTapAt(): Pick<TapAtCoordinate, "execute"> {
+    if (this.options.dependencies.tapAt) {
+      return this.options.dependencies.tapAt;
+    }
+    const { TapAtCoordinate } = require("./TapAtCoordinate");
+    return new TapAtCoordinate(this.device, this.adb, { timer: this.timer });
+  }
 
   private getKeyboard(): Pick<Keyboard, "execute"> {
     if (this.options.dependencies.keyboard) {

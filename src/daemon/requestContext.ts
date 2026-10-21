@@ -33,8 +33,9 @@ export function createRequestContext(
   request: DaemonRequest,
   socketSessionId: string,
   receivedAtMs: number,
+  env: NodeJS.ProcessEnv = process.env,
 ): RequestContext {
-  const totalTimeoutMs = resolveMcpRequestTimeoutMsOnce(request);
+  const totalTimeoutMs = resolveMcpRequestTimeoutMsOnce(request, env);
   const cancellation = new AbortController();
   return {
     id: request.id,

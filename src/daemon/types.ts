@@ -56,11 +56,13 @@ export interface DaemonRequest {
   tasks?: TaskRelayFrame;
   /**
    * Set by a client that understands {@link REQUEST_BUDGET_NOTIFICATION_METHOD} (#13797). The
-   * daemon then reports the budget it resolved for this request when that is larger than the
+   * daemon then reports the budget it resolved for this request when that differs from the
    * `timeoutMs` the client sent, so the client's own backstop waits as long as the daemon does.
    * Absent: the request never gets that notification (older and Kotlin/Swift clients).
    */
   acceptsRequestBudget?: boolean;
+  /** Client's explicit per-tool budget; the daemon's own explicit override wins (#13797). */
+  requestedTimeoutMs?: number;
 }
 
 /**
@@ -404,11 +406,9 @@ export function sanitizeBoundSessionLoss(value: unknown): BoundSessionLoss | und
 export const PROGRESS_NOTIFICATION_METHOD = "notifications/progress";
 
 /**
- * Wire method for the daemon's resolved request budget (#13797). The client and the daemon resolve
- * a `tools/call` budget from their own environments (per-tool floors such as
- * `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS`), so the daemon can wait longer than the client sent; it
- * tells the requesting socket, which lengthens its backstop instead of cancelling a call the daemon
- * is still prepared to wait for. Carries `requestId` and `timeoutMs`.
+ * Wire method for the daemon's effective request budget (#13797). An opted-in client adopts this
+ * budget whether larger or smaller than it sent, retaining response grace so the daemon's own
+ * deadline error arrives first. Carries `requestId` and `timeoutMs`.
  */
 export const REQUEST_BUDGET_NOTIFICATION_METHOD = "notifications/automobile/requestBudget";
 

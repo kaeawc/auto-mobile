@@ -11,6 +11,8 @@ import {
   PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY,
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
+  PROTOTYPE_LOADING_STATES_CAPABILITY,
+  PROTOTYPE_MOTION_V2_CAPABILITY,
   PROTOTYPE_CHART_CAPABILITY,
   PROTOTYPE_CHAT_SCROLL_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
@@ -71,6 +73,11 @@ import {
   prototypeSearchBarFields,
   prototypeSearchBarUnsupportedMessage,
 } from "./prototypeSearchBar";
+import {
+  prototypeLoadingStatesFields,
+  prototypeLoadingStatesUnsupportedMessage,
+} from "./prototypeLoadingStates";
+import { prototypeMotionV2Fields, prototypeMotionV2UnsupportedMessage } from "./prototypeMotionV2";
 import { prototypeChartFields, prototypeChartUnsupportedMessage } from "./prototypeChart";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
 import { prototypeLinkifyFields, prototypeLinkifyUnsupportedMessage } from "./prototypeLinkify";
@@ -155,6 +162,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_SEARCH_BAR_CAPABILITY,
     fields: prototypeSearchBarFields,
     unsupportedMessage: prototypeSearchBarUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_LOADING_STATES_CAPABILITY,
+    fields: prototypeLoadingStatesFields,
+    unsupportedMessage: prototypeLoadingStatesUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_MOTION_V2_CAPABILITY,
+    fields: prototypeMotionV2Fields,
+    unsupportedMessage: prototypeMotionV2UnsupportedMessage,
   },
   {
     capability: PROTOTYPE_CHART_CAPABILITY,

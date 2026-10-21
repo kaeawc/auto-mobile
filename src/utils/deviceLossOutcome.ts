@@ -2,12 +2,10 @@ import {
   DEVICE_LOSS_REASON_PREFIX,
   isDeviceLossCancellationReason,
 } from "./deviceLossCancellationReason";
-import { isDeviceLostError, deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
-export {
-  isDeviceLostError,
-  deviceLostErrorFromAbortSignal,
-  rememberDeviceLossAbort,
-} from "../models/DeviceLostError";
+import { isDeviceLostError } from "../models/DeviceLostError";
+import { deviceLostErrorFromAbortSignal } from "./deviceLossAbortRegistry";
+export { isDeviceLostError } from "../models/DeviceLostError";
+export { deviceLostErrorFromAbortSignal, rememberDeviceLossAbort } from "./deviceLossAbortRegistry";
 import {
   DeviceLostError,
   DEVICE_LOSS_OUTCOME_CODE,

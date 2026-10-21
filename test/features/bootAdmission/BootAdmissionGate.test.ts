@@ -52,6 +52,18 @@ describe("isBootCapacityGateEnabled (#11181)", () => {
 });
 
 describe("BootAdmissionLedger", () => {
+  test("reason counts exclude ended admissions retained by a sample window", () => {
+    const ledger = new BootAdmissionLedger(new FakeTimer());
+    const window = ledger.beginSample();
+    const reset = ledger.admit("SIM-A", false, "reset");
+    const create = ledger.admit("SIM-B", false, "create");
+    ledger.admit("SIM-C", false, "restart");
+    reset.release();
+    create.release();
+    window.close();
+    expect(ledger.inFlightCount(new Set(), undefined, window)).toBe(3);
+    expect(ledger.admissionsByReason()).toEqual({ reset: 0, create: 0, restart: 1 });
+  });
   test("counts admissions not yet visible and forgets released ones", () => {
     const ledger = new BootAdmissionLedger(new FakeTimer());
     const first = ledger.admit();

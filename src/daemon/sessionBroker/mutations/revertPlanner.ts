@@ -1,4 +1,4 @@
-import { genericBaselineRevert, type BaselineDiff } from "./baseline";
+import { genericBaselineRevert, type BaselineChange, type BaselineDiff } from "./baseline";
 import { DEVICE_MUTATION_KINDS, type DeviceMutationEntry, type DeviceMutationInput } from "./types";
 
 export interface DeviceRevertStep {
@@ -12,6 +12,7 @@ export type DeviceRevertPlan =
 
 export interface DeviceMutationRevertSupport {
   canRevert(mutation: DeviceMutationInput): boolean;
+  baselineRevert?(change: BaselineChange): DeviceMutationInput | null;
 }
 
 export function planDeviceMutationRevert(
@@ -25,7 +26,7 @@ export function planDeviceMutationRevert(
     .sort((left, right) => right.sequence - left.sequence)
     .map((mutation) => ({ source: "journal", mutation }));
   for (const change of diff.changes.filter((entry) => !entry.journaled)) {
-    const mutation = genericBaselineRevert(change);
+    const mutation = genericBaselineRevert(change) ?? support.baselineRevert?.(change);
     if (mutation) {
       steps.push({ source: "baseline", mutation });
     } else {

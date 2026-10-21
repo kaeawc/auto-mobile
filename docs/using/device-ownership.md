@@ -716,7 +716,7 @@ For a sessionless call naming an unheld running device whose service is not read
 the **Yes/No** classifications refer to registry readiness: `ensureDeviceReady`
 with `intent: "read"`. **Yes** means the platform manager performs CtrlProxy/runner
 setup through that path. These are the exact sets pinned
-by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 18 of 22 tools on each platform.
+by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 21 of 25 tools on each platform.
 The handlers are stubbed in that test; platform-specific feature support is separate
 from target resolution and readiness.
 
@@ -751,11 +751,13 @@ entry point. Direct (non-daemon) mode is protected by the CtrlProxy manager guar
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |
 | `accessibility`         | Yes                                         | Yes                                         |
 | `clipboard`             | Yes                                         | Yes                                         |
+| `compareScreenshot`     | Yes                                         | Yes                                         |
 | `displayConfig`         | Yes                                         | Yes                                         |
 | `getAppPermissions`     | Yes                                         | Yes                                         |
 | `getDataStore`          | Yes                                         | Yes                                         |
 | `getDeepLinks`          | Yes                                         | Yes                                         |
 | `getDeviceState`        | Yes                                         | Yes                                         |
+| `getLogs`               | Yes                                         | Yes                                         |
 | `getNavigationGraph`    | Yes                                         | Yes                                         |
 | `getNetworkGraph`       | Yes                                         | Yes                                         |
 | `getNotificationPolicy` | Yes                                         | Yes                                         |
@@ -771,6 +773,7 @@ entry point. Direct (non-daemon) mode is protected by the CtrlProxy manager guar
 | `prototype`             | Yes                                         | Yes                                         |
 | `snapshotOf`            | Yes                                         | Yes                                         |
 | `sqlQuery`              | Yes                                         | Yes                                         |
+| `statusBar`             | Yes                                         | Yes                                         |
 
 `listApps`, `inspectPackageSigning` and `mediaSession` declare `deviceReadiness: "booted"` and
 verify the device without CtrlProxy/runner setup. `observe {deviceId}` bypasses
@@ -778,7 +781,7 @@ verify the device without CtrlProxy/runner setup. `observe {deviceId}` bypasses
 unheld, idle, pooled device through `ObservationReadServiceStart`, as described in
 [Reading a device you do not own](../tools.md#reading-a-device-you-do-not-own-deviceid).
 
-On Android, registry readiness for the 18 **Yes** tools uses
+On Android, registry readiness for the 19 **Yes** tools uses
 `DeviceReadiness.ensureAndroidCtrlProxyReady`: `CtrlProxyManager.setup` may
 install or upgrade the CtrlProxy APK, and `enable` writes
 `enabled_accessibility_services` (preserving other services) and

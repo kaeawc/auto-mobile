@@ -3,15 +3,15 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { IosBootInstrumentation } from "../../models/IosBootInstrumentation";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
-import type { BootedDevice, DeviceInfo } from "../../models/DeviceInfo";
-import type { AppleDevice, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { normalizeIosVersion } from "../../utils/ios-cmdline-tools/SimCtlSupport";
-import { compareIosVersions } from "../../utils/ios-cmdline-tools/iosVersion";
+import type { BootedDevice } from "../../models/DeviceInfo";
+import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
 import { errorMessage } from "../../utils/describeUnknownError";
+import type { BootSlotReservation } from "../../devices/bootAdmission/BootSlotReservation";
+import { assertIosResetInput, readExpectedIosResetTarget } from "./iosResetTarget";
 
 type IosProfile = Extract<BrokerNativeProfile, { platform: "ios" }>;
 type ResetSimctl = Pick<SimCtl, "readSimulatorTarget" | "eraseSimulator" | "bootSimulator">;
@@ -33,8 +33,9 @@ export class IosBaselineReset {
     device: BootedDevice,
     profile: IosProfile,
     assertOwned: () => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<"clean"> {
-    await this.runReset(device, profile, assertOwned, {});
+    await this.runReset(device, profile, assertOwned, {}, signal);
     return "clean";
   }
 
@@ -42,10 +43,11 @@ export class IosBaselineReset {
     device: BootedDevice,
     profile: IosProfile,
     assertOwned: () => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<ResetOutcome> {
     const phases: Record<string, number> = {};
     try {
-      return await this.runReset(device, profile, assertOwned, phases);
+      return await this.runReset(device, profile, assertOwned, phases, signal);
     } catch (error) {
       throw new ResetFailureError(
         errorMessage(error),
@@ -65,8 +67,14 @@ export class IosBaselineReset {
     profile: IosProfile,
     assertOwned: () => Promise<void>,
     phases: Record<string, number>,
+    signal?: AbortSignal,
   ): Promise<ResetOutcome> {
-    this.assertInput(device, profile);
+    const owned = async () => {
+      signal?.throwIfAborted();
+      await assertOwned();
+      signal?.throwIfAborted();
+    };
+    assertIosResetInput(device, profile);
     // Only a capacity refusal from this resetter permits a shut-down retry. Re-erase below:
     // ownership and inventory are checked again, so a retry never trusts an old clean result.
     const deferredBoot = this.deferredBoots.delete(device.deviceId);
@@ -77,7 +85,40 @@ export class IosBaselineReset {
       "start reset",
     );
 
-    await assertOwned();
+    await owned();
+    let reservation: BootSlotReservation | undefined;
+    try {
+      reservation = await this.dependencies.iosBootInstrumentation.reserveBoot?.({
+        replacingDeviceId: device.deviceId,
+        timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+        reason: "reset",
+        signal,
+      });
+    } catch (error) {
+      if (deferredBoot && error instanceof BootCapacityExhaustedError) {
+        this.deferredBoots.add(device.deviceId);
+      }
+      throw toActionableError(error, "Cannot reserve iOS reset boot slot");
+    }
+    const operation = () => this.eraseAndBoot(device, profile, owned, phases, deferredBoot, signal);
+    try {
+      return await (reservation ? reservation.run(operation) : operation());
+    } finally {
+      reservation?.release();
+    }
+  }
+
+  private async eraseAndBoot(
+    device: BootedDevice,
+    profile: IosProfile,
+    assertOwned: () => Promise<void>,
+    phases: Record<string, number>,
+    deferredBoot: boolean,
+    signal?: AbortSignal,
+  ): Promise<ResetOutcome> {
+    if (this.dependencies.iosBootInstrumentation.reserveBoot) {
+      await assertOwned();
+    }
     if (!deferredBoot) {
       await this.measureStep(device.deviceId, "stop", phases, () =>
         this.dependencies.stopDevice(device),
@@ -91,7 +132,7 @@ export class IosBaselineReset {
     );
 
     const booted = await this.measureStep(device.deviceId, "boot", phases, () =>
-      this.bootAdmitted(device.deviceId, profile, assertOwned),
+      this.bootAdmitted(device.deviceId, profile, assertOwned, signal),
     );
     if (booted.platform !== "ios" || booted.deviceId !== device.deviceId) {
       throw new ActionableError(
@@ -108,11 +149,18 @@ export class IosBaselineReset {
     udid: string,
     profile: IosProfile,
     assertOwned: () => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<BootedDevice> {
     try {
       return await this.dependencies.iosBootInstrumentation.run(
         // The callback ignores remainingMs; bootSimulator uses its own timeout.
-        { udid, runtime: profile.runtimeId, timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS },
+        {
+          udid,
+          runtime: profile.runtimeId,
+          timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+          reason: "reset",
+          signal,
+        },
         async () => {
           // Admission samples asynchronously; fence ownership immediately before the mutation.
           await assertOwned();
@@ -149,88 +197,18 @@ export class IosBaselineReset {
     }
   }
 
-  private assertInput(device: BootedDevice, profile: IosProfile): void {
-    if (device.platform !== "ios" || !device.deviceId.trim()) {
-      throw new ActionableError("iOS baseline reset requires an exact iOS simulator UDID");
-    }
-    if (
-      profile.platform !== "ios" ||
-      !profile.simulatorDeviceTypeIdentifier.trim() ||
-      !profile.runtimeId.trim() ||
-      !profile.osVersion.trim()
-    ) {
-      throw new ActionableError("iOS baseline reset requires a complete exact iOS profile");
-    }
-    if (profile.archetype === "duo" || profile.modelType.family === "duo") {
-      throw new ActionableError("iOS baseline reset does not support Duo devices");
-    }
-  }
-
   private async readExpectedTarget(
     udid: string,
     profile: IosProfile,
     expectedState: ExpectedState,
     action: string,
   ): Promise<void> {
-    let target: AppleDevice | undefined;
-    try {
-      target = await this.dependencies.simctl.readSimulatorTarget(udid);
-    } catch (error) {
-      throw toActionableError(error, `Cannot ${action}: fresh iOS simulator inventory failed`);
-    }
-
-    if (!target || target.udid !== udid) {
-      throw new ActionableError(
-        `Cannot ${action}: fresh iOS simulator inventory did not prove one exact target '${udid}'`,
-      );
-    }
-    const iosVersion = normalizeIosVersion(target.runtime, target.os_version);
-    this.assertTarget(
-      {
-        name: target.name,
-        deviceId: target.udid,
-        platform: "ios",
-        isRunning: target.state === "Booted",
-        state: target.state,
-        isAvailable: target.isAvailable,
-        deviceType: target.deviceTypeIdentifier,
-        runtimeId: target.runtime,
-        runtime: target.runtime,
-        osVersion: iosVersion,
-        iosVersion,
-      },
+    await readExpectedIosResetTarget(
+      this.dependencies.simctl,
+      udid,
       profile,
       expectedState,
       action,
     );
-  }
-
-  private assertTarget(
-    target: DeviceInfo,
-    profile: IosProfile,
-    expectedState: ExpectedState,
-    action: string,
-  ): void {
-    const expectedRunning = expectedState === "Booted";
-    const targetMatches = [
-      target.platform === "ios",
-      target.isAvailable === true,
-      target.deviceType === profile.simulatorDeviceTypeIdentifier,
-      target.runtimeId === profile.runtimeId,
-      target.runtime === undefined || target.runtime === profile.runtimeId,
-      compareIosVersions(target.osVersion, profile.osVersion) === 0,
-      target.iosVersion === undefined ||
-        compareIosVersions(target.iosVersion, profile.osVersion) === 0,
-      target.state === expectedState,
-      target.isRunning === expectedRunning,
-      target.isRunningStateKnown !== false,
-    ].every(Boolean);
-
-    if (!targetMatches) {
-      throw new ActionableError(
-        `Cannot ${action}: simulator '${target.deviceId}' lacks authoritative ${expectedState} ` +
-          "identity, runtime, type, OS, or availability evidence",
-      );
-    }
   }
 }

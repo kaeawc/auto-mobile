@@ -11,7 +11,6 @@ import dev.jasonpearson.automobile.protocol.InstalledPackageRecord
 import dev.jasonpearson.automobile.protocol.InstalledPackagesResult
 import dev.jasonpearson.automobile.protocol.LaunchIntentResult
 import dev.jasonpearson.automobile.protocol.PackageInfoResult
-import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.coroutines.CancellationException
 
 /** Installed-package enumeration, package metadata and launcher-activity resolution. */
@@ -19,16 +18,8 @@ internal class PackageController(
   private val packageManager: () -> PackageManager,
   private val currentUserId: () -> Int,
   private val timeProvider: TimeProvider,
-  private val resultBroadcaster: ResultBroadcaster,
-  private val responseSender: ResponseSender,
+  private val resultSender: ResultSender,
 ) {
-  /** Keeps the service's late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    fun isRunning(): Boolean
-
-    suspend fun broadcast(response: WebSocketResponse)
-  }
-
   companion object {
     private const val TAG = "CtrlProxy"
   }
@@ -310,62 +301,53 @@ internal class PackageController(
   }
 
   private suspend fun broadcastInstalledPackagesResult(outcome: InstalledPackagesOutcome) {
-    if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(outcome.requestId, "installed_packages_result") {
-      responseSender.broadcast(
-        InstalledPackagesResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = outcome.requestId,
-          success = outcome.success,
-          userId = outcome.userId,
-          packages = outcome.packages,
-          totalTimeMs = outcome.totalTimeMs,
-          error = outcome.error,
-        ),
+    resultSender.send(outcome.requestId, "installed_packages_result", attachPerf = false) { _ ->
+      InstalledPackagesResult(
+        timestamp = timeProvider.currentTimeMillis(),
+        requestId = outcome.requestId,
+        success = outcome.success,
+        userId = outcome.userId,
+        packages = outcome.packages,
+        totalTimeMs = outcome.totalTimeMs,
+        error = outcome.error,
       )
     }
   }
 
   private suspend fun broadcastPackageInfoResult(outcome: PackageInfoOutcome) {
-    if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(outcome.requestId, "package_info_result") {
-      responseSender.broadcast(
-        PackageInfoResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = outcome.requestId,
-          success = outcome.success,
-          packageName = outcome.packageName,
-          isSystem = outcome.isSystem,
-          applicationLabel = outcome.applicationLabel,
-          versionName = outcome.versionName,
-          versionCode = outcome.versionCode,
-          installerPackage = outcome.installerPackage,
-          firstInstallTime = outcome.firstInstallTime,
-          lastUpdateTime = outcome.lastUpdateTime,
-          allowBackup = outcome.allowBackup,
-          requestedPermissions = outcome.requestedPermissions,
-          grantedPermissions = outcome.grantedPermissions,
-          mainActivity = outcome.mainActivity,
-          totalTimeMs = outcome.totalTimeMs,
-          error = outcome.error,
-        ),
+    resultSender.send(outcome.requestId, "package_info_result", attachPerf = false) { _ ->
+      PackageInfoResult(
+        timestamp = timeProvider.currentTimeMillis(),
+        requestId = outcome.requestId,
+        success = outcome.success,
+        packageName = outcome.packageName,
+        isSystem = outcome.isSystem,
+        applicationLabel = outcome.applicationLabel,
+        versionName = outcome.versionName,
+        versionCode = outcome.versionCode,
+        installerPackage = outcome.installerPackage,
+        firstInstallTime = outcome.firstInstallTime,
+        lastUpdateTime = outcome.lastUpdateTime,
+        allowBackup = outcome.allowBackup,
+        requestedPermissions = outcome.requestedPermissions,
+        grantedPermissions = outcome.grantedPermissions,
+        mainActivity = outcome.mainActivity,
+        totalTimeMs = outcome.totalTimeMs,
+        error = outcome.error,
       )
     }
   }
 
   private suspend fun broadcastLaunchIntentResult(outcome: LaunchIntentOutcome) {
-    if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(outcome.requestId, "launch_intent_result") {
-      responseSender.broadcast(
-        LaunchIntentResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = outcome.requestId,
-          success = outcome.success,
-          packageName = outcome.packageName,
-          componentName = outcome.componentName,
-          totalTimeMs = outcome.totalTimeMs,
-          error = outcome.error,
-        ),
+    resultSender.send(outcome.requestId, "launch_intent_result", attachPerf = false) { _ ->
+      LaunchIntentResult(
+        timestamp = timeProvider.currentTimeMillis(),
+        requestId = outcome.requestId,
+        success = outcome.success,
+        packageName = outcome.packageName,
+        componentName = outcome.componentName,
+        totalTimeMs = outcome.totalTimeMs,
+        error = outcome.error,
       )
     }
   }

@@ -22,6 +22,9 @@ export interface PerfettoRecorderDependencies {
   /** Polls of `kill -0` after SIGTERM before giving up on a clean flush. */
   stopPollAttempts?: number;
   stopPollIntervalMs?: number;
+  /** Polls of the device trace size before giving up on perfetto writing the file. */
+  flushPollAttempts?: number;
+  flushPollIntervalMs?: number;
 }
 
 /** Perfetto may only write traces here on user builds (Android 12+ SELinux policy). */
@@ -92,6 +95,7 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
       warnings,
       stop: async (signal) => {
         await this.stopRecorder(adb, pid, warnings, signal);
+        await this.awaitFlushedTrace(adb, remotePath, signal);
         await adb.execute(["pull", remotePath, artifactPath], {
           timeoutMs: PULL_TIMEOUT_MS,
           noRetry: true,
@@ -142,6 +146,38 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
       await this.deps.timer.sleep(this.deps.stopPollIntervalMs ?? 250);
     }
     warnings.push(`perfetto (pid ${pid}) did not exit after SIGTERM; the trace may be incomplete.`);
+  }
+
+  /**
+   * perfetto can exit (or vanish from `kill -0`) a second or two before the trace
+   * file holds data (#14737), so wait for a non-zero size that holds across two polls.
+   */
+  private async awaitFlushedTrace(
+    adb: PerfettoAdb,
+    remotePath: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const options = { timeoutMs: ADB_TIMEOUT_MS, noRetry: true, signal };
+    const attempts = this.deps.flushPollAttempts ?? 40;
+    let previous = 0;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const probe = await adb.execute(
+        ["shell", `wc -c < ${remotePath} 2>/dev/null || echo 0`],
+        options,
+      );
+      const size = Number.parseInt(probe.stdout.trim(), 10) || 0;
+      if (size > 0 && size === previous) {
+        return;
+      }
+      previous = size;
+      await this.deps.timer.sleep(this.deps.flushPollIntervalMs ?? 250);
+    }
+    await this.removeRemote(adb, remotePath);
+    throw new ActionableError(
+      previous === 0
+        ? `perfetto wrote no data to ${remotePath} after it stopped; the trace is empty.`
+        : `perfetto was still growing ${remotePath} (${previous} bytes) after waiting for it to flush.`,
+    );
   }
 
   private async removeRemote(adb: PerfettoAdb, remotePath: string): Promise<void> {

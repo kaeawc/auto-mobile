@@ -14,7 +14,7 @@ export async function loadServerModules(onLoggerLoaded: (logger: LoadedLogger) =
   const { createDaemonMcpProxy, createProxyMcpServer } = await import("../server/proxyServer");
   const { logger, LogLevel } = await import("../utils/logger");
   onLoggerLoaded(logger);
-  const { runCliCommand } = await import("../cli");
+  const { runCliCommand, cliCommandSkipsServerBootstrap } = await import("../cli");
   const { runDaemonCommand } = await import("../daemon/manager");
   const { startDaemon } = await import("../daemon/daemon");
   const { guardDatabaseStartup } = await import("../daemon/daemonStartupGuard");
@@ -46,6 +46,7 @@ export async function loadServerModules(onLoggerLoaded: (logger: LoadedLogger) =
     logger,
     LogLevel,
     runCliCommand,
+    cliCommandSkipsServerBootstrap,
     runDaemonCommand,
     startDaemon,
     guardDatabaseStartup,

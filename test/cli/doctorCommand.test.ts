@@ -72,6 +72,29 @@ describe("runDoctorCommand", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
+  test.each(["--__proto__", "--constructor", "--prototype"])(
+    "rejects the %s flag before diagnosis",
+    async (flag) => {
+      const runDoctor = mock(async () => report());
+      const { params } = parseCliArgs(["doctor", flag]);
+
+      expect(Object.keys(params)).toEqual([flag.slice(2)]);
+      await expect(runDoctorCommand(params, { runDoctor })).rejects.toThrow(
+        `Unknown doctor flags: ${flag}.`,
+      );
+      expect(runDoctor).not.toHaveBeenCalled();
+    },
+  );
+
+  test("records a --__proto__ value as a flag instead of replacing the prototype", () => {
+    const { params } = parseCliArgs(["doctor", "--__proto__", '{"help":true}']);
+
+    expect(Object.getPrototypeOf(params)).toBe(Object.prototype);
+    expect(Object.hasOwn(params, "__proto__")).toBe(true);
+    expect(Object.hasOwn(params, "help")).toBe(false);
+    expect("help" in params).toBe(false);
+  });
+
   test.each([
     { args: ["doctor"], expected: { android: undefined, ios: undefined } },
     { args: ["doctor", "--android"], expected: { android: true, ios: undefined } },

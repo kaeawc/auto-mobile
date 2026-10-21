@@ -4,7 +4,7 @@ import type {
   OwnerConflictLeash,
 } from "../proxyLivenessRecovery";
 import type { NotFoundAnswerOutcome } from "./notFoundDecision";
-import type { SessionReleaseSnapshot } from "../sessionManager";
+import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 
 /** A `daemon_stalled` / `proxy_stalled` handover recorded for one session (#10053). */
 export interface StallHandoverRecord {

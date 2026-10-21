@@ -51,9 +51,6 @@ import {
   notifyBootedDeviceResourcesUpdated,
   resetBootedDevicesResourceCache,
 } from "./deviceResourceInvalidation";
-import { DatabaseInitializer } from "../db/DatabaseInitializer";
-import { DatabaseHealthProbe } from "../db/DatabaseHealthProbe";
-import { StartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { NavigationGraphStreamBridge } from "./daemonStreamRouting";
@@ -69,17 +66,16 @@ import { DaemonShutdownState } from "./daemonShutdownState";
 import { DaemonRuntimeState } from "./daemonRuntimeState";
 import { errorMessage } from "../utils/describeUnknownError";
 import { type ObservationStreamHealth } from "./ObservationStreamHealth";
-import { type ToolSelectionProfileProvenanceLoader } from "./toolSelectionProfileRegistry";
 import {
   resolveDaemonDependencies,
   type DaemonDependencies,
   type DaemonDeviceSessionStore,
-  type DatabaseHealthFailureRecovery,
   type ManagedAdbServerShutdown,
   type DaemonProcessBirthTimeProvider,
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
 import { DaemonHttpTokenLifecycle } from "./daemonCore/DaemonHttpTokenLifecycle";
+import type { DaemonDatabaseServices, DaemonProcessIdentity } from "./daemonCore/daemonFieldGroups";
 import type { DaemonStateWrites } from "./daemonContext";
 import { DaemonBroker } from "./daemonCore/DaemonBroker";
 import { DaemonSessions } from "./daemonCore/DaemonSessions";
@@ -255,27 +251,13 @@ export class Daemon {
 
   private managedExecutionReowner: ManagedExecutionReowner | undefined;
 
-  private readonly generationStartedAt: number;
-
-  private readonly processStartedAt: number;
-
-  private readonly processGenerationToken: string | undefined;
-
-  private readonly liveAcceptanceStartupSecret: string | undefined;
+  private readonly processIdentity: DaemonProcessIdentity;
 
   private readonly passiveWorkPolicy: PassiveWorkPolicy;
 
   private idGenerator: IdGenerator;
 
-  private databaseInitializer: DatabaseInitializer;
-
-  private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
-
-  private databaseHealthProbe: DatabaseHealthProbe;
-
-  private startupFailureTracker: StartupFailureTracker;
-
-  private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
+  private readonly database: DaemonDatabaseServices;
 
   private readonly stopManagedAdbServer: ManagedAdbServerShutdown;
 
@@ -377,11 +359,13 @@ export class Daemon {
       invalidate: resetBootedDevicesResourceCache,
       notify: notifyBootedDeviceResourcesUpdated,
     });
-    this.generationStartedAt = this.timer.now();
-    this.processStartedAt = processBirthTime();
-    this.processGenerationToken = processGenerationToken();
+    this.processIdentity = {
+      generationStartedAt: this.timer.now(),
+      processStartedAt: processBirthTime(),
+      processGenerationToken: processGenerationToken(),
+      liveAcceptanceStartupSecret: daemonLiveAcceptanceStartupSecret(),
+    };
     this.incumbentOwnerGuard = incumbentOwnerGuard;
-    this.liveAcceptanceStartupSecret = daemonLiveAcceptanceStartupSecret();
     // Even a malformed acceptance secret must not cause unsolicited simulator
     // launches. Capability validation remains strict in liveAcceptanceCapability.
     this.passiveWorkPolicy = new PassiveWorkPolicy(
@@ -389,18 +373,20 @@ export class Daemon {
       (deviceId) =>
         this.sessionManager.getAllSessions().some((session) => session.assignedDevice === deviceId),
     );
-    this.databaseInitializer = databaseInitializer;
-    this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
-    this.databaseHealthProbe = databaseHealthProbe;
-    this.startupFailureTracker = startupFailureTracker;
+    this.database = {
+      databaseInitializer,
+      toolSelectionProfileProvenanceLoader,
+      databaseHealthProbe,
+      startupFailureTracker,
+      recoverFromDatabaseHealthFailure:
+        recoverFromDatabaseHealthFailure ??
+        createDatabaseHealthFailureRecovery({
+          timer: () => this.timer,
+          selfExitRecorder: () => this.selfExitRecorder,
+          getDaemonFileCleanupOptions: () => this.identity.getDaemonFileCleanupOptions(),
+        }),
+    };
     this.stopManagedAdbServer = managedAdbServerShutdown;
-    this.recoverFromDatabaseHealthFailure =
-      recoverFromDatabaseHealthFailure ??
-      createDatabaseHealthFailureRecovery({
-        timer: () => this.timer,
-        selfExitRecorder: () => this.selfExitRecorder,
-        getDaemonFileCleanupOptions: () => this.identity.getDaemonFileCleanupOptions(),
-      });
     this.observationStreamHealth = createObservationStreamHealth({
       timer: () => this.timer,
       startAuxiliarySocket: (...args) => this.identity.startAuxiliarySocket(...args),
@@ -752,10 +738,11 @@ export class Daemon {
       exitRecordFileSystem: () => daemon.exitRecordFileSystem,
       strictPort: () => daemon.strictPort,
       host: () => daemon.host,
-      startupFailureTracker: () => daemon.startupFailureTracker,
+      startupFailureTracker: () => daemon.database.startupFailureTracker,
       avdManagerFactory: () => daemon.avdManagerFactory,
-      databaseInitializer: () => daemon.databaseInitializer,
-      toolSelectionProfileProvenanceLoader: () => daemon.toolSelectionProfileProvenanceLoader,
+      databaseInitializer: () => daemon.database.databaseInitializer,
+      toolSelectionProfileProvenanceLoader: () =>
+        daemon.database.toolSelectionProfileProvenanceLoader,
       liveDaemonSessionIdProvider: () => daemon.liveDaemonSessionIdProvider,
       startOn: (...args) => this.startOn(...args),
       startThroughSocketBind: (...args) => this.startThroughSocketBind(...args),
@@ -840,7 +827,7 @@ export class Daemon {
       setObservationStreamHealth: (health) => (this.observationStreamHealth = health),
       lastDatabaseHealthFailure: () => this.runtime.lastDatabaseHealthFailure,
       setLastDatabaseHealthFailure: (value) => (this.runtime.lastDatabaseHealthFailure = value),
-      recoverFromDatabaseHealthFailure: () => this.recoverFromDatabaseHealthFailure,
+      recoverFromDatabaseHealthFailure: () => this.database.recoverFromDatabaseHealthFailure,
       attemptRecovery: (...args) => this.attemptRecovery(...args),
       sessionExecutionProbe: (...args) => this.sessions.sessionExecutionProbe(...args),
       cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),
@@ -932,7 +919,7 @@ export class Daemon {
       timer: () => daemon.timer,
       passiveWorkPolicy: () => daemon.passiveWorkPolicy,
       idGenerator: () => daemon.idGenerator,
-      databaseHealthProbe: () => daemon.databaseHealthProbe,
+      databaseHealthProbe: () => daemon.database.databaseHealthProbe,
       options: () => daemon.options,
       daemonState: () => daemon.daemonState,
     };
@@ -948,10 +935,10 @@ export class Daemon {
       setSocketBindCommitted: (value) => (daemon.runtime.socketBindCommitted = value),
       incumbentOwnerGuard: () => daemon.incumbentOwnerGuard,
       daemonSessionId: () => daemon.daemonSessionId,
-      generationStartedAt: () => daemon.generationStartedAt,
-      processStartedAt: () => daemon.processStartedAt,
-      processGenerationToken: () => daemon.processGenerationToken,
-      liveAcceptanceStartupSecret: () => daemon.liveAcceptanceStartupSecret,
+      generationStartedAt: () => daemon.processIdentity.generationStartedAt,
+      processStartedAt: () => daemon.processIdentity.processStartedAt,
+      processGenerationToken: () => daemon.processIdentity.processGenerationToken,
+      liveAcceptanceStartupSecret: () => daemon.processIdentity.liveAcceptanceStartupSecret,
       acceptanceDiscoveryCapability: () => daemon.acceptanceDiscoveryCapability,
     };
   }

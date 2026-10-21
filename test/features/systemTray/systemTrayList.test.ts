@@ -1931,6 +1931,50 @@ describe("systemTray clearAll dumpsys ownership", () => {
     }
   });
 
+  test("a stalled clearAll whose terminal read also hangs still returns partial counts (#14531)", async () => {
+    const { adb, timer, observer, swipes } = setupDelayedClear(0);
+    const unchangedDump = execResult(
+      dumpsys(record(1, "Alpha", "Body of Alpha"), record(2, "Beta", "Body of Beta")),
+    );
+    adb.setCommandResponseSequence("dumpsys notification", [unchangedDump, unchangedDump]);
+    const execute = observer.execute.bind(observer);
+    const pendingReads: AbortSignal[] = [];
+    const executeSpy = spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      if (options?.signal) {
+        pendingReads.push(options.signal);
+      }
+      return new Promise<ObserveResult>(() => {});
+    });
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      const response = await handler()(device, {
+        action: "clearAll",
+        notification: { appId: SHELL },
+        awaitTimeout: 625,
+      });
+      expect(toolJson(response)).toMatchObject({
+        success: false,
+        stalled: true,
+        swipeCount: 1,
+        dismissedCount: 0,
+        expectedCount: 2,
+        remainingCount: 2,
+      });
+      // The drain's last shade read stands in for the terminal observation that never came.
+      expect(toolJson(response).observation).toBeDefined();
+      // The drain's deadline, then one more awaitTimeout for the bounded terminal read.
+      expect(timer.now()).toBe(1250);
+      expect(pendingReads.at(-1)?.aborted).toBe(true);
+      expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
+    } finally {
+      installedAppsSpy.mockRestore();
+      executeSpy.mockRestore();
+    }
+  });
+
   for (const readTimesOut of [false, true]) {
     test(`an unreadable post-dismissal shade reports partial counts (read timeout: ${readTimesOut})`, async () => {
       const { adb, timer, observer, swipes } = setupDelayedClear(0);

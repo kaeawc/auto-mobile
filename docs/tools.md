@@ -15,8 +15,10 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 
 `accessibility`, `accessibilityAction`, `accessibilityAudit`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
+`changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`,
+`compareScreenshot`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
-`executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
+`executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`, `getLogs`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
@@ -28,7 +30,8 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `setActiveDevice`, `setAppLinks`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`,
 `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setSensor`, `setUIState`, `shake`, `snapshotOf`,
-`sqlQuery`,
+`sqlQuery`, `statusBar`,
+`resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendBroadcast`, `sendKeys`, `sendSms`,
 `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`, `windowMode`.
 
@@ -800,17 +803,46 @@ observation screenshot resource (remote clients) for the completed capture.
 Cancellation before or during delivery stops the response. The opt-in can substantially increase MCP
 response size, so use it only when the client needs image bytes in the tool result.
 
-| Tool                                 | What it does                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------- |
-| 📸 <code>snapshotOf</code>           | Saves a PNG crop of an element or screen rectangle (opt-in).              |
-| 👀 <code>observe</code>              | Gets screen hierarchy and screenshot, with optional PNG crop.             |
-| 🎯 <code>hitTest</code>              | Estimates hierarchy nodes beneath a coordinate without dispatching input. |
-| 🔍 <code>explore</code>              | Explores an app to build a navigation graph.                              |
-| 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
-| 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
-| 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, reports, saves, lists or deletes.        |
-| 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
+| Tool                                 | What it does                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------- |
+| 📸 <code>snapshotOf</code>           | Saves a PNG crop of an element or screen rectangle (opt-in).                 |
+| 🧪 <code>compareScreenshot</code>    | Records or compares a named screenshot baseline per device profile (opt-in). |
+| 👀 <code>observe</code>              | Gets screen hierarchy and screenshot, with optional PNG crop.                |
+| 🎯 <code>hitTest</code>              | Estimates hierarchy nodes beneath a coordinate without dispatching input.    |
+| 🔍 <code>explore</code>              | Explores an app to build a navigation graph.                                 |
+| 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                                |
+| 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                                |
+| 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                                |
+| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, reports, saves, lists or deletes.           |
+| 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                                |
+
+### compareScreenshot
+
+`compareScreenshot` is a visual-regression assertion (#14083). It catches theme, colour,
+clipping and missing-icon regressions that leave the view hierarchy unchanged. It
+captures the same fresh hierarchy and screenshot as `snapshotOf`, then:
+
+- `baseline` names a host-side baseline under `~/.auto-mobile/visual-baselines/<baseline>/`
+  (or the `AUTOMOBILE_DATA_DIR` equivalent).
+- `mode` is `record` (write or overwrite the baseline), `compare`, or `recordIfMissing`
+  (compare when this device profile has a baseline, record otherwise).
+- `target` limits the comparison to one element (`elementId`) or a platform-native
+  rectangle (`rect`: Android pixels, iOS points). It defaults to the full screen.
+- `mask` lists regions (`elementId` or `rect`) to leave out, such as a clock, an
+  avatar or an ad.
+- `ignoreSystemBars` (default `true`) also leaves out the visible status and
+  navigation bars reported by the hierarchy's insets.
+- `threshold.perPixelDelta` (0-1, default 0.1) is the per-pixel colour distance that
+  still counts as equal. `threshold.pixelRatio` (0-1, default 0) is the largest share
+  of compared pixels that may differ while still matching.
+
+Baselines are stored per device profile: platform, screenshot size, density, font
+scale and theme. A `compare` whose baseline exists only for another profile is
+refused with `errorCode: "baseline_profile_mismatch"`, naming the differing fields,
+instead of being compared. A missing baseline returns `errorCode: "baseline_missing"`,
+and a target whose size changed returns `errorCode: "size_mismatch"`. A mismatch
+returns `match: false`, `diffRatio`, and `diffImagePath`, a PNG that marks the
+differing pixels.
 
 ### prototype
 
@@ -1886,6 +1918,8 @@ subtree, or the whole active-window tree when owner-less.
 | 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ✅ <code>setAppLinks</code>                                                                      | Android 12+: approves, resets, or re-verifies an app's App Links domains, or changes a user's domain selection, so https links open the app without a chooser. Returns what changed and a restore receipt; a daemon session restores the original state on release.                                                                                                                                                                                                                                                                                                                                      |
 | ⏱️ <code>measureStartup</code>                                                                   | Android: launches an app N times cold, warm or hot and reports time-to-initial-display (TTID) and, when the app calls `reportFullyDrawn`, time-to-full-display (TTFD) percentiles. Stored in `automobile:performance-results`.                                                                                                                                                                                                                                                                                                                                                                           |
+| 📜 <code>getLogs</code>                                                                          | Reads filtered device logs: Android logcat for every process of an app (crashes survive process death), with tag, priority, regex and buffer filters, since the last action or session start; iOS Simulator unified log by app subsystem.                                                                                                                                                                                                                                                                                                                                                                |
+| 📡 <code>sendBroadcast</code>                                                                    | Android: sends an explicit broadcast with a typed intent to the app under test and reports the ordered-broadcast result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 <details class="note" markdown="1">
 <summary>Measuring startup with measureStartup</summary>
@@ -1943,6 +1977,62 @@ returns <code>supported: false</code> for both actions because no state-preservi
 termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 
 </details>
+
+### getLogs
+
+`getLogs` returns bounded, filtered log lines as structured data (#14082). Use it
+when a step fails and you want to know why. It reads the same sources as the
+`automobile:device-session/{sessionUuid}/apps/{appId}/logs` resource, without
+needing an MCP resource read.
+
+- `appId` scopes Android logcat to the app's **uid** (`logcat --uid`, Android 11+),
+  so lines from a process that crashed or restarted are still returned. Before
+  Android 11 it falls back to the app's currently running pids, with a warning
+  (`attribution: "pid"`). Without `appId`, every process is read.
+- `since` is `"lastAction"` (the start of the most recent control call on the
+  device), `"sessionStart"` (the caller's session creation), or `{ seconds }`. The
+  default is 300 seconds and the window is capped at 3600. An anchor that is not
+  known falls back to the default with a warning. The window is measured on the
+  device's own clock.
+- `tags` are logcat filterspecs, `"Tag"` or `"Tag:P"`. All other tags are silenced.
+  `minPriority` is one of `V`, `D`, `I`, `W`, `E`, `F` (default `V`).
+- `grep` is a regular expression matched host-side against `Tag: message`.
+- `buffers` picks logcat buffers from `main`, `system`, `crash` and `events`. The
+  default is `["main", "crash"]`, so a crash's stack trace is included.
+- `includeSystem` adds `ActivityManager`, `ActivityTaskManager` and `AndroidRuntime`
+  lines that name `appId` (launches, process deaths, ANRs).
+- `maxLines` (default 1000, at most 5000) and a 256 KiB byte bound keep the newest
+  lines; `truncated` reports that older lines were dropped.
+
+Each line has `timestamp`, `pid`, `tid`, `priority`, `tag` and `message`, and the
+result lists the `pids` seen. On the iOS Simulator, `getLogs` needs `appId`. It
+reads the unified log for the app's subsystem (`minPriority` `V`/`D` maps to
+debug, `I` to info), applies `grep`, and warns that the Android-only filters are
+ignored. iOS lines carry only `timestamp` and `message`.
+
+### sendBroadcast
+
+`sendBroadcast` reaches an app's broadcast receivers, such as the debug receivers
+that toggle feature flags, seed data, reset state or fire a push-like event (#14081).
+It is Android-only; iOS returns `status: "unsupported"`.
+
+- `appId` is required. The broadcast is always explicit: `-p <appId>`, or
+  `-n <appId>/<receiver>` when `intent.component` names a receiver (`.DebugReceiver`,
+  `com.app.DebugReceiver`, or `com.app/.DebugReceiver`). A component in another
+  package is refused. Implicit system-wide broadcasts are out of scope.
+- `intent` takes `action` (required), plus optional `data`, `mimeType`, `categories`
+  and typed `extras`: `{ key, type, value }` with `type` one of `string`, `int`,
+  `long`, `float`, `boolean`, `stringArray` and `uri`. Every value is shell-quoted,
+  so shell metacharacters arrive literally. A comma inside a `stringArray` element
+  is escaped for `--esa`.
+- `userId` delivers to another Android user (`--user`).
+- `waitForResult` (default `true`) reports the ordered-broadcast `resultCode` and
+  `resultData` that `am broadcast` prints (`Broadcast completed: result=…`). With
+  `false` they are left out; `am` still waits for delivery.
+- A protected system broadcast (for example `BOOT_COMPLETED`), which the shell may
+  not send, fails with `errorCode: "protected_broadcast"`. Other refusals report
+  `permission_denied`, and output with no completion line reports
+  `broadcast_failed`.
 
 ### App launch, installation, links, and storage options
 
@@ -2466,6 +2556,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 📸 <code>deviceSnapshot</code>                                                 | Captures or restores a device snapshot. Android VM restores in daemon mode return the new deviceSessionUuid and supersede the previous device-session epoch.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🔄 <code>rotate</code>                                                         | Changes device orientation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 📖 <code>setPosture</code>                                                     | Sets a supported posture or a BEST EFFORT hingeAngle (0-180 degrees, emulator/simulator only). Exactly one selector is required; angle requests cannot use displayPreset. Unsupported angles return status: "unsupported" with a reason and no state change.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 📶 <code>statusBar</code>                                                      | Overrides, clears, or reads the status bar (time, battery, signal, data network, carrier) for deterministic screenshots and video: iOS Simulator `simctl status_bar`, Android SystemUI demo mode. Physical iOS returns status: "unsupported". A session's override is cleared when it releases the device.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🪟 <code>windowMode</code>                                                     | Android: puts an app's task into fullscreen, picture-in-picture, freeform (with bounds) or split screen with a second app and reads the mode and bounds back; returns a restore receipt. Omitted from discovery by default: select it with `setToolEnabled` or `--enable-tool windowMode`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🌐 <code>openLink</code>                                                       | Opens web URLs or routes app and universal deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 🧰 <code>homeScreen</code> / <code>recentApps</code> / <code>systemTray</code> | Controls core system surfaces and notifications.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -2484,6 +2575,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 🪫 <code>killProfile</code>                                                    | Android: applies or resets an OEM background-kill profile (standby bucket, appops, Doze, force-stop) on a stock device; opt-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 🎭 <code>persona</code>                                                        | Android: applies, resets or describes an OEM persona (keyboard profile, kill profile and display profile, with per-facet evidence status) on a stock device; opt-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 Clock control uses `setDeviceState` with `clock: { mode: "set", instant: "2026-10-01T00:00:00Z" }`, `clock: { mode: "advance", byMs: 60000 }`, or `clock: { mode: "reset" }`. Set requires ISO-8601 with Z or an explicit offset within **2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z, inclusive** (`MIN_DEVICE_CLOCK_INSTANT_MS` / `MAX_DEVICE_CLOCK_INSTANT_MS`). Advance requires an integer `byMs >= 1000`, at most `MAX_DEVICE_CLOCK_ADVANCE_MS` (315360000000, ten 365-day years). An early device read rejects cumulative targets outside that window before any clock or other field mutation. Immediately before the clock write, after other requested fields, root acquisition and disabling automatic time, advance reads the device again and range-checks the fresh target. A target that leaves the window during those operations returns a typed clock-field failure; other fields retain their results. Read-only root-capability probes and `date +%s` may run during validation. All inputs are validated before applying any field. Only rootable Android emulators support writes; Play Store images, physical Android devices, and all iOS targets return unsupported. Changing the clock affects TLS/certificate validation, token expiry, and the daemon's own freshness checks for that device.
 
@@ -2706,6 +2798,50 @@ displayProfile({ action: "reset" });
   changed before the next session can acquire the device. Font scale, density and night mode
   are also recorded for the next-owner settings reset, as with `displayConfig`. Sessionless
   changes persist until `reset`. The record is in memory only. The shared `platform` and
+  `keepScreenAwake` device options apply as for other tools.
+
+### OEM personas (`persona`)
+
+`persona` (Android, opt-in with `setToolEnabled`) bundles the keyboard profile, `killProfile`
+and `displayProfile` into one named OEM persona and applies it with those executors (#14055).
+It simulates what an app observes on that OEM's devices, not the firmware. See
+[OEM personas](using/oem-personas.md) for the catalog and its evidence.
+
+```ts
+persona({ action: "list" }); // catalog version, personas and evidence statuses
+persona({ action: "describe", persona: "samsung-oneui" }); // facets, evidence, nonEmulatable
+persona({ action: "apply", persona: "samsung-oneui", appId: "com.example.app" });
+persona({
+  action: "apply",
+  persona: "samsung-oneui",
+  appId: "com.example.app",
+  requires: ["samsung-dex"], // returns route_to_real_device and changes nothing
+});
+persona({ action: "reset" });
+```
+
+- `list` and `describe` change nothing on the device. `describe` reports every facet with its
+  category (`functionalityBreak` or `oemFeature`), its value and its evidence: `status`
+  (`focused_trace`, `vendor_documented`, `cdd_derived`, `inferred` or `experimental`), `note`
+  and `source`.
+- `apply` runs the keyboard, kill and display facets in that order. `appId` is required for
+  a persona with a kill profile. Each facet reports `applied`, `partial`, `unsupported` or
+  `failed`; a failed facet does not stop the others, and a persona that changes nothing is an
+  error. The result names the persona's `version` and the catalog's `catalogVersion`.
+- Personas replace one another: applying a persona other than the one recorded on the device
+  first resets the recorded one, and the result names it as `replaced`. Re-applying the same
+  persona (for example for another `appId`) does not reset it.
+- `requires` lists OEM capabilities the task needs. When the persona lists one of them as
+  `nonEmulatable`, `apply` returns `success: false` and `status: "route_to_real_device"` with
+  the capabilities and changes nothing.
+- `reset` restores every recorded display facet, the kill facet of every package a persona
+  applied to that still has a change recorded (plus `appId`), then the keyboard profile active
+  before the first persona. The display and kill records are shared with `displayProfile` and
+  `killProfile`, so reset also restores direct `displayProfile` changes and the device-wide
+  battery and Doze state. A facet the device refuses stays recorded and the reset is an error.
+- In a daemon session (`sessionUuid`), release or rebind restores the kill and display facets,
+  as with `killProfile` and `displayProfile`. The keyboard profile is restored only by `reset`,
+  as with `keyboard` `setProfile`, so it stays active for the device's next session until then. The record is in memory only. The shared `platform` and
   `keepScreenAwake` device options apply as for other tools.
 
 ### Localization, display, and event options
@@ -2943,6 +3079,38 @@ stream index. The current level and range are read first; a level outside the
 range is refused without a change. The level is read back after the write
 (`volume.verified`; a mismatch is `success: false`), and
 `restore.volume` holds the previous level to pass back to restore it.
+
+### Status bar overrides
+
+`statusBar` makes screenshots, `snapshotOf` crops and video recordings repeatable by
+pinning what the status bar shows (#14105). `action` is required:
+
+- `override` sets the given fields and leaves the others as they are. At least one
+  field is required. A later override from the same session merges with the
+  earlier one.
+- `clear` restores the live status bar (`simctl status_bar clear`, or the demo-mode
+  `exit` command on Android).
+- `get` reads the recorded override and the platform's own readback (`raw`):
+  `simctl status_bar list` on iOS, `sysui_demo_allowed` on Android. `get` is a
+  read; `override` and `clear` are control.
+  Fields:
+  | Field | iOS Simulator | Android demo mode | | ------------------- | --------------------------------------- | ---------------------------------------------------- |
+  | `time` | Any text, e.g. `"9:41"` | `H:MM` or `HH:MM` (24-hour), sent as `hhmm` |
+  | `batteryLevel` | 0-100 | 0-100 |
+  | `batteryState` | `charging`, `charged`, `discharging` | `charging` sets `plugged true`, the others false |
+  | `cellularBars` | 0-4 (sets `cellularMode active`) | 0-4 mobile `level` |
+  | `wifiBars` | 0-3 (sets `wifiMode active`) | 0-3 Wi-Fi `level` |
+  | `dataNetwork` | `wifi`, `5g`, `lte`, `4g`, `3g`, `hide` | `wifi` shows Wi-Fi; others set the mobile `datatype` |
+  | `operatorName` | Carrier text | Unsupported: no demo-mode carrier command |
+  | `hideNotifications` | Unsupported | Hides notification icons |
+  A requested field the platform cannot set is skipped, listed in `unsupported`, and
+  the result `status` is `"partial"` instead of `"applied"`. Physical iOS devices have
+  no status-bar override and return `status: "unsupported"`. Physical Android devices
+  use the same demo mode as emulators; OEM SystemUI builds may ignore some commands.
+  An override set under a `sessionUuid` is owned by that session and cleared when the
+  session releases the device or moves off it, before the next session can acquire
+  it. An override from a call without a session is not cleared automatically; use
+  `clear`.
 
 ### Window mode options
 

@@ -240,6 +240,13 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
   mapKeyList(action, "requireValid", path, visit);
 }
 
+function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
+  mapField(action, "path", path, "dataPath", visit);
+  if (action.type !== "removeData" && action.value !== undefined) {
+    action.value = mapBinding(action.value, `${path}.value`, visit);
+  }
+}
+
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   switch (action.type) {
     case "setState":
@@ -256,13 +263,8 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "setData":
     case "appendData":
-      mapField(action, "path", path, "dataPath", visit);
-      if (action.value !== undefined) {
-        action.value = mapBinding(action.value, `${path}.value`, visit);
-      }
-      break;
     case "removeData":
-      mapField(action, "path", path, "dataPath", visit);
+      mapDataAction(action, path, visit);
       break;
     case "request":
       mapRequestAction(action, path, visit);

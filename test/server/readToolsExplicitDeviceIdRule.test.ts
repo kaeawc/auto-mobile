@@ -77,6 +77,7 @@ const readArgs: Record<string, Record<string, unknown>> = {
   clipboard: { action: "get" },
   sqlQuery: { query: "SELECT 1" },
   prototype: { action: "inspect" },
+  statusBar: { action: "get" },
 };
 // All handler bodies are stubbed, so even platform-specific reads can exercise resolution.
 const EXPECTED = [
@@ -101,6 +102,7 @@ const EXPECTED = [
   "prototype",
   "snapshotOf",
   "sqlQuery",
+  "statusBar",
 ];
 const deviceFor = (platform: Platform): BootedDevice => ({
   platform,
@@ -452,6 +454,7 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
   ios: [
     "accessibility",
@@ -472,6 +475,7 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
 };
 const READS_WITHOUT_UNHELD_READINESS = {
@@ -511,7 +515,7 @@ test("documented unheld registry readiness matches literal classifications", () 
   }
 });
 
-test("unheld readiness literal lists partition all 21 production reads", () => {
+test("unheld readiness literal lists partition all 22 production reads", () => {
   for (const platform of ["android", "ios"] as const) {
     const classified = [
       ...READS_THAT_READY_UNHELD[platform],

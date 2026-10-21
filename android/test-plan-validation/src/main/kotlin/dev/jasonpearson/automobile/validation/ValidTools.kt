@@ -68,6 +68,7 @@ object ValidTools {
         "selectAllText",
         "sendKeys",
         "setActiveDevice",
+        "setAppLinks",
         "setAppPermissions",
         "setDeviceState",
         "setKeyValue",

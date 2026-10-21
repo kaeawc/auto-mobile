@@ -36,6 +36,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "putAppFile",
       "resetKeychain",
       "rotate",
+      "setAppLinks",
       "setSensor",
       "windowMode",
       "setAppPermissions",

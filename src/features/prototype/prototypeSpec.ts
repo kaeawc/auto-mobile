@@ -14,6 +14,7 @@ import {
   prototypeJsonSchema,
   type PrototypeJson,
 } from "./prototypeJson";
+import { prototypeChartShape } from "./prototypeChartSchema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   anchorSchema,
@@ -533,6 +534,7 @@ const progressBaseSchema = z
     max: z.number().finite().optional(),
   })
   .strict();
+const chartBaseSchema = z.object({ ...commonNodeShape, ...prototypeChartShape }).strict();
 const dialogBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -707,6 +709,7 @@ export type PrototypeNode =
   | z.infer<typeof dividerBaseSchema>
   | z.infer<typeof badgeBaseSchema>
   | z.infer<typeof progressBaseSchema>
+  | z.infer<typeof chartBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof menuBaseSchema>
   | z.infer<typeof snackbarBaseSchema>
@@ -783,6 +786,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       dividerBaseSchema,
       badgeBaseSchema,
       progressBaseSchema,
+      chartBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       menuBaseSchema,
       snackbarBaseSchema,
@@ -937,6 +941,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "divider",
   "badge",
   "progress",
+  "chart",
   "dialog",
   "menu",
   "snackbar",

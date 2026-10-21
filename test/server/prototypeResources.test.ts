@@ -174,7 +174,7 @@ test("the Data guide describes bindings, ownership, reporting, capability and er
     expect(section).toContain(text);
   }
   expect(guide).toContain("Repeat placeholder in a data condition operand is not supported");
-  expect(guide).toContain("Requires key or data");
+  expect(guide).toContain("Requires key or data or platform");
 });
 
 test("the authoring guide documents menu/select capability, in-window rendering and row tags", () => {

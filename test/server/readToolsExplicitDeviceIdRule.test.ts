@@ -75,6 +75,7 @@ isolateToolRegistry();
 const readArgs: Record<string, Record<string, unknown>> = {
   keyboard: { action: "detect" },
   clipboard: { action: "get" },
+  mediaSession: { action: "get" },
   sqlQuery: { query: "SELECT 1" },
   prototype: { action: "inspect" },
   statusBar: { action: "get" },
@@ -98,6 +99,7 @@ const EXPECTED = [
   "keyboard",
   "listApps",
   "listDataStores",
+  "mediaSession",
   "observe",
   "prototype",
   "snapshotOf",
@@ -482,11 +484,13 @@ const READS_WITHOUT_UNHELD_READINESS = {
   android: [
     "inspectPackageSigning", // Declares booted readiness; no CtrlProxy setup.
     "listApps", // Declares booted readiness; no CtrlProxy setup.
+    "mediaSession", // Declares booted readiness; plain adb only.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
   ios: [
     "inspectPackageSigning", // Declares booted readiness; no runner setup.
     "listApps", // Declares booted readiness; no runner setup.
+    "mediaSession", // Declares booted readiness; no runner setup.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
 };

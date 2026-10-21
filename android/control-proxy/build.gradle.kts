@@ -27,7 +27,6 @@ android {
   defaultConfig {
     applicationId = "dev.jasonpearson.automobile.ctrlproxy"
     versionCode = 1
-    versionName = "0.0.87-SNAPSHOT"
   }
 
   buildTypes {

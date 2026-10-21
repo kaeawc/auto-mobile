@@ -1,0 +1,22 @@
+Executable=/private/var/folders/xy/abc123/T/automobile-device-app-Q1w2E3/Playground.app/Playground
+Identifier=dev.jasonpearson.automobile.Playground
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20500 size=1920 flags=0x10000(runtime) hashes=49+7 location=embedded
+Hash type=sha256 size=32
+CandidateCDHash sha256=A1B2C3D4E5F60718293A4B5C6D7E8F9012345678
+CandidateCDHashFull sha256=a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0
+Hash choices=sha256
+CMSDigest=a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0
+CMSDigestType=2
+Launch Constraints:
+	None
+CDHash=A1B2C3D4E5F60718293A4B5C6D7E8F9012345678
+Signature size=4797
+Authority=Apple Development: Jane Appleseed (Q7RST8UVW9)
+Authority=Apple Worldwide Developer Relations Certification Authority
+Authority=Apple Root CA
+Signed Time=Oct 21, 2026 at 09:12:44
+Info.plist entries=32
+TeamIdentifier=ABCDE12345
+Sealed Resources version=2 rules=10 files=59
+Internal requirements count=1 size=200

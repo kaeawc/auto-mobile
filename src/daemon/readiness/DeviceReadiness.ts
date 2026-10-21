@@ -248,10 +248,12 @@ export class DeviceReadiness implements DeviceReadinessContract {
     device: { runtimeId?: string },
     udid: string,
     signal: AbortSignal,
+    reason: "create" | "restart" = "restart",
   ): Promise<BootedDevice> {
     return await this.iosBootInstrumentation.run(
       {
         udid,
+        reason,
         runtime: device.runtimeId,
         timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
         signal,
@@ -310,6 +312,17 @@ export class DeviceReadiness implements DeviceReadinessContract {
     options?: ConnectedPlatformScanOptions,
   ): Promise<ConnectedPlatformScan> {
     return this.readinessSelection.detectConnectedPlatformsWithStatus(signal, options);
+  }
+
+  public listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]> {
+    return this.readinessSelection.listBootedAndroidDevicesForSelection({
+      bypassAndroidDeviceListCache: true,
+      signal: options?.signal,
+    });
+  }
+
+  public verifyAndroidCtrlProxyServiceReady(device: BootedDevice): Promise<boolean> {
+    return this.provider.getAndroidCtrlProxyClient(device).verifyServiceReady(2, 200, 2000);
   }
 
   private readonly checkedAndroidOwnership = new AsyncLocalStorage<Set<string>>();
@@ -803,6 +816,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
               provisioned,
               provisioned.deviceId!,
               signal,
+              "create",
             );
             perf.endOperation("bootSimulator");
             if (createdDevice.deviceId === provisioned.deviceId) {

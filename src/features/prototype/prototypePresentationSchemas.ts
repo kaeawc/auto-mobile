@@ -30,7 +30,7 @@ export const boundsSchema = z
   .strict();
 
 // Reuse the existing interaction contract's type; anchors reject ambiguous selection.
-export let containerObject: z.ZodType<ElementContainerSelector> | undefined;
+let containerObject: z.ZodType<ElementContainerSelector> | undefined;
 
 export const containerSchema: z.ZodType<ElementContainerSelector> = z.lazy(
   () =>
@@ -74,6 +74,11 @@ export type PrototypeCondition =
   | { data: string; notEquals: string | number | boolean }
   | { data: string; gt: number }
   | { data: string; lt: number }
+  | { data: string; empty: boolean }
+  | { platform: string; equals: string | number | boolean }
+  | { platform: string; notEquals: string | number | boolean }
+  | { platform: string; gt: number }
+  | { platform: string; lt: number }
   | { key: string; equals: string | number | boolean }
   | { key: string; notEquals: string | number | boolean }
   | { key: string; gt: number }
@@ -82,7 +87,7 @@ export type PrototypeCondition =
   | { any: PrototypeCondition[] }
   | { not: PrototypeCondition };
 
-export let conditionUnion: z.ZodType<PrototypeCondition> | undefined;
+let conditionUnion: z.ZodType<PrototypeCondition> | undefined;
 
 export const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
   () =>
@@ -94,6 +99,12 @@ export const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
       z.object({ data: pointerSchema, notEquals: scalarSchema }).strict(),
       z.object({ data: pointerSchema, gt: z.number().finite() }).strict(),
       z.object({ data: pointerSchema, lt: z.number().finite() }).strict(),
+      // A missing value, [], {} or "" is empty (#14207).
+      z.object({ data: pointerSchema, empty: z.boolean() }).strict(),
+      z.object({ platform: pointerSchema, equals: scalarSchema }).strict(),
+      z.object({ platform: pointerSchema, notEquals: scalarSchema }).strict(),
+      z.object({ platform: pointerSchema, gt: z.number().finite() }).strict(),
+      z.object({ platform: pointerSchema, lt: z.number().finite() }).strict(),
       z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
@@ -292,6 +303,10 @@ export const styleSchema = z
     offset: offsetSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     pressScale: z.number().finite().min(0.5).max(1).optional(),
+    // An animated highlight sweep over the background of a loading placeholder (#14207).
+    shimmer: z.boolean().optional(),
+    scale: z.number().finite().min(0).max(4).optional(),
+    rotation: z.number().finite().min(-360).max(360).optional(),
     alignment: z
       .enum([
         "topStart",

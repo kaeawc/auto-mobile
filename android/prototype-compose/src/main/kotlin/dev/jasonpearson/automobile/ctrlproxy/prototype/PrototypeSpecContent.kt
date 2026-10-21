@@ -172,6 +172,7 @@ fun PrototypeRuntimeContent(
         }
       CompositionLocalProvider(
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
+        LocalPrototypeScrollRequests provides snapshot.scrollRequests,
         LocalPrototypeImageCache provides images,
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
@@ -463,8 +464,8 @@ private fun RenderPrototypeNode(
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter = prototypeEnterTransition(node.source.transition),
-      exit = prototypeExitTransition(node.source.transition),
+      enter = prototypeEnterTransition(node.source.transition, prototypeRtl()),
+      exit = prototypeExitTransition(node.source.transition, prototypeRtl()),
     ) {
       ProvideAnchorFade(none = node.source.transition == "none") {
         RenderPrototypeNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
@@ -514,8 +515,8 @@ private fun RenderPrototypeVisibility(
       AnimatedVisibility(
         visible = node.visible,
         modifier = parentModifier,
-        enter = prototypeEnterTransition(node.source?.transition),
-        exit = prototypeExitTransition(node.source?.transition),
+        enter = prototypeEnterTransition(node.source?.transition, prototypeRtl()),
+        exit = prototypeExitTransition(node.source?.transition, prototypeRtl()),
       ) {
         ProvideAnchorFade(none = node.source?.transition == "none") {
           content(node, Modifier, weightAxis, windowRoot)
@@ -568,6 +569,7 @@ private fun RenderPrototypeNodeContent(
       }
   val modifier =
     (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
+      .prototypeScrollAnchor(node.identity)
       .then(boundsModifier)
       .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
       .then(focusModifier)
@@ -653,7 +655,11 @@ private fun RenderPrototypeNodeContent(
       // A styled text node with no colour of its own reads as on-surface text, not black.
       val textColor =
         if (source.color == null && role != null) MaterialTheme.colorScheme.onSurface
-        else prototypeThemedColor(node.style.color, source.color) ?: node.style.color
+        else
+          prototypeAnimatedColor(
+            node,
+            prototypeThemedColor(node.style.color, source.color) ?: node.style.color,
+          )
       if (node.spans == null) {
         Text(
           node.text,
@@ -724,8 +730,11 @@ private fun RenderPrototypeNodeContent(
           contentDescription = null,
           modifier = modifier,
           tint =
-            (prototypeThemedColor(node.style.color, node.style.source.color) ?: node.style.color)
-              .takeOrElse { LocalContentColor.current },
+            prototypeAnimatedColor(
+              node,
+              (prototypeThemedColor(node.style.color, node.style.source.color) ?: node.style.color)
+                .takeOrElse { LocalContentColor.current },
+            ),
         )
       else
         Box(
@@ -742,14 +751,28 @@ private fun RenderPrototypeNodeContent(
       val scroll = key(LocalPrototypeShowEpoch.current) { rememberScrollState() }
       val source = node.source as? PrototypeScrollNode
       val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
+      // A vertical scroll may be a chat list (#14232); reverse anchors it at its end.
+      val chat = source?.takeIf { it.axis != "horizontal" }
+      val reverse = chat?.reverse == true
+      val anchors = remember { PrototypeScrollAnchors() }
+      val viewport = Modifier.onGloballyPositioned { anchors.viewport = it }
       val scrolling =
         if (source?.axis == "horizontal")
           modifier.boundedScrollViewport(vertical = false).horizontalScroll(scroll)
         else if (refresh != null)
-          Modifier.boundedScrollViewport(vertical = true).verticalScroll(scroll)
-        else modifier.boundedScrollViewport(vertical = true).verticalScroll(scroll)
+          viewport
+            .boundedScrollViewport(vertical = true)
+            .verticalScroll(scroll, reverseScrolling = reverse)
+        else
+          modifier
+            .then(viewport)
+            .boundedScrollViewport(vertical = true)
+            .verticalScroll(scroll, reverseScrolling = reverse)
+      if (chat != null) PrototypeChatScrollEffects(chat, scroll, anchors, interact)
       val content: @Composable BoxScope.() -> Unit = {
-        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+        CompositionLocalProvider(LocalPrototypeScrollAnchors provides chat?.let { anchors }) {
+          node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+        }
       }
       if (refresh != null) {
         PrototypeRefreshBox(refresh, node.checked, modifier, interact) {
@@ -776,6 +799,7 @@ private fun RenderPrototypeNodeContent(
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
+    "chart" -> RenderPrototypeChart(node, modifier)
     "timePicker" ->
       PrototypeCheckedControl(node, parentModifier) {
         RenderPrototypeTimePicker(node, modifier, controlInteract)
@@ -1289,9 +1313,8 @@ private fun prototypeNodeModifier(
   if (anchor != null) {
     modifier = modifier.prototypeAnchor(anchor, currentPrototypeWindowGeometry(), windowRoot)
   }
-  // A draw-time shift of the whole node (shadow, touch target and semantics included); siblings
-  // keep the layout slot it would have had.
-  style.offset?.let { modifier = modifier.offset(it.x.toFloat().dp, it.y.toFloat().dp) }
+  // Draw-time offset, scale and rotation, animated with the node's `animate` (#14208).
+  modifier = modifier.prototypeStyleTransform(node)
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
   val pressScale = style.pressScale
   if (tappable && pressScale != null) {
@@ -1303,7 +1326,7 @@ private fun prototypeNodeModifier(
   // A cover anchor sizes the node to the anchor bounds: authored sizes would only wrap or clamp it.
   if (anchor == null || !prototypeAnchorCovers(anchor))
     modifier = authoredSizeModifier(modifier, style, weightAxis)
-  modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
+  modifier = modifier.alpha(prototypeAnimatedAlpha(node))
   val shape =
     prototypeCornerShape(MaterialTheme.shapes, style.cornerRadius ?: PrototypeCornerRadius.Dp(0.0))
   // Before clip/background/border so the shadow is drawn outside the clipped content.
@@ -1315,11 +1338,13 @@ private fun prototypeNodeModifier(
   }
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
   prototypeThemedColor(node.style.background, style.background)?.let {
-    modifier = modifier.background(it, shape)
+    modifier = modifier.background(prototypeAnimatedColor(node, it), shape)
   }
   style.gradient?.let {
     modifier = modifier.background(prototypeGradientBrush(it, prototypePalette()), shape)
   }
+  // A loading placeholder's highlight sweep, over the background and inside the clip (#14207).
+  modifier = modifier.prototypeShimmer(style.shimmer == true)
   style.border?.let {
     val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)

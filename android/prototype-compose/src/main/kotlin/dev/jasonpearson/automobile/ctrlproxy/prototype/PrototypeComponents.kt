@@ -185,7 +185,7 @@ internal fun RenderPrototypeButton(
  */
 @Composable
 internal fun prototypeAuthoredForeground(node: PrototypeRenderNode): Color? =
-  prototypeThemedColor(null, node.style.source.color)
+  prototypeThemedColor(null, node.style.source.color)?.let { prototypeAnimatedColor(node, it) }
 
 /** The authored `style.color` when set, else the enclosing Material component's content color. */
 @Composable

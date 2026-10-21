@@ -48,18 +48,9 @@ import type { VideoSourceAdb, VideoSourceAdbFactory } from "./videoSourceAdb";
 export { InMemoryActiveVideoSessionRegistry } from "./InMemoryActiveVideoSessionRegistry";
 export {
   type ActiveVideoSessionRegistry,
-  DEFAULT_LAUNCH_COMMAND_TIMEOUT_MS,
-  DEFAULT_LOCAL_SOCKET_RECONNECT_RETRY_MS,
-  DEFAULT_LOCAL_SOCKET_RECONNECT_WINDOW_MS,
-  DEFAULT_MAX_SERVER_RELAUNCH_ATTEMPTS,
-  DEFAULT_SERVER_RELAUNCH_BACKOFF,
-  DEFAULT_SERVER_RELAUNCH_HEALTHY_WINDOW_MS,
-  DEFAULT_TEARDOWN_COMMAND_TIMEOUT_MS,
-  defaultActiveVideoSessionRegistry,
   type PersistentEncoderH264SourceOptions,
   type SocketConnector,
   type StreamSocket,
-  VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME,
   VIDEO_SERVER_HANDSHAKE_VERSION,
   type VideoServerSession,
 } from "./persistentEncoderProtocol";

@@ -77,6 +77,17 @@ const CLASSIFICATION: Classification = {
         { action: "tapImeKey" },
       ],
     },
+    mediaSession: {
+      reads: [{ action: "get" }, { action: "get", waitFor: { mediaState: "playing" } }],
+      controls: [
+        { action: { dispatch: "pause" } },
+        { action: { volume: { stream: "music", level: 3 } } },
+      ],
+    },
+    killProfile: {
+      reads: [{ action: "list" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],
@@ -88,7 +99,10 @@ const CLASSIFICATION: Classification = {
     },
   },
   control: [
+    "accessibilityAction",
     "accessibilityFocus",
+    // Drives an XCUITest audit of the app under test, so it is held to the owner.
+    "accessibilityAudit",
     // The performance and memory audits drive the app, and a baseline record writes state.
     "audit",
     "appLifecycle",
@@ -100,6 +114,7 @@ const CLASSIFICATION: Classification = {
     "crashApp",
     "criticalSection",
     "deviceSnapshot",
+    "displayProfile",
     "dragAndDrop",
     "dragPath",
     "executePlan",
@@ -108,10 +123,13 @@ const CLASSIFICATION: Classification = {
     "homeScreen",
     "installApp",
     "launchApp",
+    "measureStartup",
     "mockNetwork",
     "navigateTo",
     "network",
     "openLink",
+    // Starts and stops an on-device tracer (perfetto) or a device-attached xctrace.
+    "performanceTrace",
     "phoneCall",
     "pinchOn",
     "multiTouch",
@@ -128,6 +146,7 @@ const CLASSIFICATION: Classification = {
     "selectAllText",
     "sendKeys",
     "sendSms",
+    "setAppLinks",
     "setAppPermissions",
     "setDeviceResources",
     "setDeviceState",
@@ -135,6 +154,7 @@ const CLASSIFICATION: Classification = {
     "setNotificationPolicy",
     "setPosture",
     "setPreference",
+    "setSensor",
     "setUIState",
     "shake",
     "stageSessionDownloads",

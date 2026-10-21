@@ -44,6 +44,10 @@ export function createGetDeepLinksHandler(
         hosts: result.deepLinks.hosts,
         intentFilters: result.deepLinks.intentFilters,
         supportedMimeTypes: result.deepLinks.supportedMimeTypes,
+        appLinks: result.appLinks,
+        appLinksUserId: result.appLinksUserId,
+        appLinkHandlingAllowed: result.appLinkHandlingAllowed,
+        appLinksUnavailable: result.appLinksUnavailable,
         note: result.note,
         error: result.error,
         rawOutput: result.rawOutput,
@@ -62,7 +66,7 @@ export function registerDeepLinkTools() {
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "getDeepLinks",
-    "Query app deep links",
+    "Query app deep links. On Android 12+ also reports appLinks: each web domain's App Links verification state, user selection, and whether the app may open it without a chooser.",
     getDeepLinksSchema,
     createGetDeepLinksHandler(),
     // Reads only; read-only access never requires a session (#10965).

@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "platform": {
+      "on": {
+        "test.bogus": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "platform.on[\"test.bogus\"]",
+  "expectedMessage": "Unknown platform event"
+}

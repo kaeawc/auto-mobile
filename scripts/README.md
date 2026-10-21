@@ -374,6 +374,10 @@ covers the script with a fake server, adb and clock.
   - `--once` - Build once and exit
   - `--device <udid>` - Target a specific booted simulator
   - Shared functions in `local-dev/lib/` (common.sh, deps.sh, xctestservice.sh)
+- `local-dev/probe-device-condition-capabilities.sh` - Probe an attached emulator for the commands the device-condition fixtures rely on (#14053)
+  - `matrix` (default) - Print a Markdown capability matrix; `OUT_FILE` also writes it to a file
+  - `persistence-prepare` / `persistence-verify` - Check whether `-writable-system` changes survive an `avd snapshot save` + cold reload
+  - See `docs/design-docs/plat/android/device-condition-capability-probe.md`
 
 ### Tool Definition Scripts
 

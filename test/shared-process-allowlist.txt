@@ -30,7 +30,7 @@ test/contracts/dbWriteBarrier.test.ts
 test/contracts/deviceClientRegistry.test.ts
 test/contracts/deviceHealthMarkers.test.ts
 test/contracts/deviceManager.test.ts
-test/contracts/deviceSessionManager.test.ts
+test/contracts/deviceReadiness.test.ts
 test/contracts/displayInventoryProvider.test.ts
 test/contracts/displayTransitionReader.test.ts
 test/contracts/elementParser.test.ts

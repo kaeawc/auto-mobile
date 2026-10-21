@@ -58,6 +58,7 @@ const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
 const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
   displayConfig: [
     "fontScale",
+    "contentSize",
     "density",
     "theme",
     "increaseContrast",

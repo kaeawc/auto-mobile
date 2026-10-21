@@ -22,7 +22,7 @@ import {
   startToolCallRecording,
 } from "../../src/daemon/toolCallRecordingManager";
 import { daemonNotificationFrameSchema } from "../helpers/wireMessageSchemas";
-import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 
 class RpcSocket extends FakeSocket {
   setTimeout(_ms: number): this {
@@ -34,20 +34,24 @@ class RpcSocket extends FakeSocket {
 function connectedSocketFixture(socketSessionId: string): {
   internals: UnixSocketServerHarness;
   socket: Socket;
+  readiness: FakeDeviceReadiness;
 } {
-  const server = createHarnessServer("/fake/socket", undefined, new FakeTimer());
+  const readiness = new FakeDeviceReadiness();
+  const server = createHarnessServer("/fake/socket", undefined, new FakeTimer(), undefined, {
+    clearConnectionDevicePin: (id) => readiness.clearConnectionDevicePin(id),
+  });
   const internals = server;
   const socket = new RpcSocket();
   internals.state.clientSockets.set(socketSessionId, socket);
-  return { internals, socket };
+  return { internals, socket, readiness };
 }
 
 describe("daemon socket transport lifecycle", () => {
   afterEach(() => resetToolCallRecordingState());
 
   test("socket disconnect clears only the released connection's device pin", () => {
-    const { internals, socket } = connectedSocketFixture("pin-socket");
-    const clearPin = spyOn(DeviceReadiness.getInstance(), "clearConnectionDevicePin");
+    const { internals, socket, readiness } = connectedSocketFixture("pin-socket");
+    const clearPin = spyOn(readiness, "clearConnectionDevicePin");
     try {
       internals.releaseSocket("pin-socket", new RpcSocket());
       expect(clearPin).not.toHaveBeenCalled();

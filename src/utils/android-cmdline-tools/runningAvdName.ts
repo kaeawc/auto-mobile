@@ -10,6 +10,11 @@ export interface RunningAvdNameResult {
   name: string;
   diagnostic?: ReadinessDiagnostic;
   consoleBusyDuringProbe?: boolean;
+  /**
+   * Point-in-time: the AVD-name probe exhausted its budget without an answer.
+   * Host load or a stalled daemon event loop supplies no AVD identity evidence (#14333).
+   */
+  nameProbeTimedOut?: boolean;
 }
 
 export interface RunningAvdNameDeps {
@@ -80,7 +85,7 @@ export async function resolveRunningAvdNameOnce(
     logger.debug(
       `AVD name resolution for ${deviceId} spent its ${infoTimeoutMs}ms budget on the console probe; skipping the property fallback`,
     );
-    return { name: "", diagnostic, consoleBusyDuringProbe };
+    return { name: "", diagnostic, consoleBusyDuringProbe, nameProbeTimedOut: true };
   }
 
   try {
@@ -93,7 +98,14 @@ export async function resolveRunningAvdNameOnce(
     logger.debug(
       `AVD name property fallback for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
     );
-    return avdName ? { name: avdName } : { name: "", diagnostic, consoleBusyDuringProbe };
+    return avdName
+      ? { name: avdName }
+      : {
+          name: "",
+          diagnostic,
+          consoleBusyDuringProbe,
+          ...(timer.now() >= deadlineMs && { nameProbeTimedOut: true }),
+        };
   } catch (error) {
     throwIfReadinessAborted(signal);
     logger.debug(`Failed to get AVD name property for ${deviceId}: ${error}`);
@@ -101,6 +113,7 @@ export async function resolveRunningAvdNameOnce(
       name: "",
       diagnostic: readinessDiagnostic("avd-name-resolution", error, deviceId),
       consoleBusyDuringProbe,
+      ...(timer.now() >= deadlineMs && { nameProbeTimedOut: true }),
     };
   }
 }

@@ -247,7 +247,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
       expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: false }]);
       expect(appearanceApplies).toEqual([]);
       expect(deviceWrites()).toEqual([]);
-      expect(devices.getCurrentDevice()).toBeUndefined();
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
     },
   );
 
@@ -255,7 +255,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
     await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
     expect(appearanceApplies).toEqual([]);
     expect(deviceWrites()).toEqual([]);
-    expect(devices.getCurrentDevice()).toBeUndefined();
+    expect(devices.getExplicitDevicePin()).toBeUndefined();
 
     await call("controlProbe", { platform: "android", deviceId: theirs.deviceId });
     expect(appearanceApplies).toEqual([{ deviceId: theirs.deviceId, mode: "dark" }]);
@@ -264,6 +264,6 @@ describe("a sessionless read never readies a device held outside this daemon's s
         (command) => command === "shell settings put secure stylus_handwriting_enabled 0",
       ),
     ).toHaveLength(1);
-    expect(devices.getCurrentDevice()).toEqual(theirs);
+    expect(devices.getExplicitDevicePin()).toBeUndefined();
   });
 });

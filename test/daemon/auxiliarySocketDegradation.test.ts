@@ -437,6 +437,15 @@ describe("auxiliary stream degradation", () => {
           }
           paths.add(to);
         },
+        copyFileExclusiveSync: (from, to) => {
+          if (paths.has(to)) {
+            throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+          }
+          if (!paths.has(from)) {
+            throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+          }
+          paths.add(to);
+        },
         readPid: () => ({
           pid: process.pid,
           socketPath: SOCKET_PATH,

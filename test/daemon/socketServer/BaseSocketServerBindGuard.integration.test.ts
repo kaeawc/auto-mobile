@@ -141,6 +141,9 @@ describe("BaseSocketServer bind guard", () => {
           link: () => {
             throw new Error("conflict must not link");
           },
+          copyExclusive: () => {
+            throw new Error("conflict must not copy");
+          },
         },
         processes,
       );
@@ -167,6 +170,9 @@ describe("BaseSocketServer bind guard", () => {
         remove: unlinkSync,
         rename: renameSync,
         link: linkSync,
+        copyExclusive: () => {
+          throw new Error("unpublished owner must not copy");
+        },
         write: () => {
           throw new Error("ENOSPC");
         },

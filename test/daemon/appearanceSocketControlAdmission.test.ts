@@ -133,7 +133,7 @@ describe("appearance socket set_appearance as a control call on the holder's ses
     };
     const deviceSource: AppearanceDeviceSource = {
       getPooledDevices: () => [DEVICE],
-      getCurrentDevice: () => undefined,
+      getSessionDevice: () => undefined,
       getSessionForDevice: (deviceId) => sessionManager.getSessionForDevice(deviceId),
       // As the default device source resolves it from the daemon state.
       getSessionManager: () => sessionManager,

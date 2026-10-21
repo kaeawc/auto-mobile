@@ -184,7 +184,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
       }
       expect(h.adb.getExecutedCommands()).toEqual([]);
       expect(h.waitForConnection).not.toHaveBeenCalled();
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
     },
   );
 
@@ -202,7 +202,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
     expect(h.adb.getExecutedCommands()).toEqual([]);
     expect(h.waitForConnection).not.toHaveBeenCalled();
     expect(h.appearance).not.toHaveBeenCalled();
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("F7 read propagates cancellation despite the client's stale conflict flag", async () => {
@@ -328,7 +328,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
           .getExecutedCommands()
           .filter((command) => /forward|settings|force-stop|uninstall|install/.test(command)),
       ).toEqual([]);
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
       expect(h.appearance).not.toHaveBeenCalled();
     });
   }
@@ -341,7 +341,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
     expect(h.guard).toHaveBeenCalled();
     expect(h.waitForConnection).not.toHaveBeenCalled();
     expect(h.ctrlProxyManager.getExecutedOperations()).toEqual([]);
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
     expect(h.appearance).not.toHaveBeenCalled();
   });
 
@@ -350,7 +350,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
     await expect(
       h.manager.ensureDeviceReady("android", h.device.deviceId, { readiness: "booted" }),
     ).rejects.toBe(h.refusal);
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
     expect(h.appearance).not.toHaveBeenCalled();
     expect(
       h.adb.getExecutedCommands().filter((command) => /settings|force-stop/.test(command)),
@@ -380,7 +380,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
           .getExecutedCommands()
           .filter((command) => /forward|settings|force-stop|uninstall|install/.test(command)),
       ).toEqual([]);
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
     });
   }
 
@@ -408,7 +408,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
       ).toEqual([]);
       expect(isInstalled).not.toHaveBeenCalled();
       expect(isEnabled).not.toHaveBeenCalled();
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
     });
   }
 
@@ -441,7 +441,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
           /forward --remove|forward tcp:|settings put|force-stop|uninstall|install/.test(command),
         ),
     ).toEqual([]);
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("#12220 unknown adb forward evidence permits a read without mutation", async () => {
@@ -459,7 +459,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
         ),
     ).toEqual([]);
     expect(h.waitForConnection).not.toHaveBeenCalled();
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("#12220 booted control refuses real foreign adb forward before appearance", async () => {
@@ -470,7 +470,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
     ).rejects.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
     expect(h.adb.getExecutedCommands()).toContain("forward --list");
     expect(h.appearance).not.toHaveBeenCalled();
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   for (const mode of ["none", "owned"] as const) {
@@ -503,7 +503,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
       expect(h.adb.getExecutedCommands()).toContain(
         "shell settings put secure stylus_handwriting_enabled 0",
       );
-      expect(h.manager.getCurrentDevice()).toEqual(h.device);
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
     });
   }
 
@@ -515,7 +515,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
     expect(h.ctrlProxyManager.wasMethodCalled("resetSetupState")).toBe(false);
     expect(h.ctrlProxyManager.wasMethodCalled("setup")).toBe(false);
     expect(h.ctrlProxyManager.wasMethodCalled("enable")).toBe(false);
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("#12220 read skips a lease conflict discovered after the ownership precheck", async () => {
@@ -527,7 +527,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
     expect(h.waitForConnection).toHaveBeenCalled();
     expect(h.ctrlProxyManager.wasMethodCalled("resetSetupState")).toBe(false);
     expect(h.ctrlProxyManager.wasMethodCalled("setup")).toBe(false);
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("#12220 setup failure preserves the typed foreign owner cause", async () => {
@@ -538,7 +538,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
       cause: h.refusal,
     });
     await expect(h.manager.ensureDeviceReady("android", h.device.deviceId)).rejects.toBe(h.refusal);
-    expect(h.manager.getCurrentDevice()).toBeUndefined();
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("#12220 no foreign forward allows booted control selection and appearance", async () => {
@@ -549,7 +549,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
       h.manager.ensureDeviceReady("android", h.device.deviceId, { readiness: "booted" }),
     ).resolves.toEqual(h.device);
     expect(read).toHaveBeenCalled();
-    expect(h.manager.getCurrentDevice()).toEqual(h.device);
+    expect(h.manager.getExplicitDevicePin()).toBeUndefined();
     expect(h.appearance).toHaveBeenCalled();
     expect(h.adb.getExecutedCommands()).toContain(
       "shell settings put secure stylus_handwriting_enabled 0",

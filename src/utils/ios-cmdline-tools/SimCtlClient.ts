@@ -42,6 +42,8 @@ import {
   type SimCtlClientDependencies,
 } from "./SimCtlClientDependencies";
 import { parseSimctlDeviceList } from "./simctlDeviceList";
+import { parseSimctlListApps } from "./simctlListApps";
+import type { IosInstalledAppRecord } from "./iosInstalledApp";
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
 import type {
@@ -745,7 +747,7 @@ export class SimCtlClient implements SimCtl {
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with array of app objects containing bundle identifiers and other metadata
    */
-  async listApps(deviceId?: string): Promise<any[]> {
+  async listApps(deviceId?: string): Promise<IosInstalledAppRecord[]> {
     try {
       return await this.listAppsOrThrow(deviceId);
     } catch (error) {
@@ -766,27 +768,9 @@ export class SimCtlClient implements SimCtl {
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with array of app objects containing bundle identifiers and other metadata
    */
-  async listAppsOrThrow(deviceId?: string): Promise<any[]> {
+  async listAppsOrThrow(deviceId?: string): Promise<IosInstalledAppRecord[]> {
     const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Listing installed apps on iOS simulator ${targetDevice}`);
-
-    const parseApps = (payload: string): any[] => {
-      const appsData = JSON.parse(payload);
-
-      if (Array.isArray(appsData)) {
-        return appsData;
-      }
-
-      if (!appsData || typeof appsData !== "object") {
-        return [];
-      }
-
-      // Convert the apps object to an array, preserving bundle IDs from keys.
-      return Object.entries(appsData).map(([bundleId, appInfo]) => {
-        const record = appInfo && typeof appInfo === "object" ? appInfo : {};
-        return { ...record, bundleId };
-      });
-    };
 
     // simctl listapps may return an old-style plist instead of JSON (Xcode
     // 26+). The plist owner receives the exact bytes over stdin, avoiding a
@@ -803,12 +787,12 @@ export class SimCtlClient implements SimCtl {
     };
 
     try {
-      return parseApps(await listAppsJson([targetDevice, "--all"]));
+      return parseSimctlListApps(await listAppsJson([targetDevice, "--all"]));
     } catch (error) {
       logger.warn(`Failed to list iOS apps with --all: ${error}`);
     }
 
-    return parseApps(await listAppsJson([targetDevice]));
+    return parseSimctlListApps(await listAppsJson([targetDevice]));
   }
 
   /**

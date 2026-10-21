@@ -4,15 +4,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-const val PROTOTYPE_ESCAPE_HOLD_MILLIS = 1_000L
-const val PROTOTYPE_ESCAPE_PILL_MILLIS = 5_000L
+internal const val PROTOTYPE_ESCAPE_HOLD_MILLIS = 1_000L
+@InternalAutoMobilePrototypeApi const val PROTOTYPE_ESCAPE_PILL_MILLIS = 5_000L
 private const val ESCAPE_POINTER_COUNT = 2
 
 /** Runs on the view's thread and returns a cancellation handle. */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeEscapeScheduler {
   fun schedule(delayMillis: Long, block: () -> Unit): () -> Unit
 }
 
+@InternalAutoMobilePrototypeApi
 data class PrototypeEscapePointer(val id: Int, val x: Float, val y: Float)
 
 enum class PrototypeEscapeAction {
@@ -25,6 +27,7 @@ enum class PrototypeEscapeAction {
 }
 
 /** Host-owned state, retained per window and cleared on replacement. */
+@InternalAutoMobilePrototypeApi
 class PrototypeEscapeState {
   var revealed by mutableStateOf(false)
     private set
@@ -47,6 +50,7 @@ class PrototypeEscapeState {
  * scheduled callback recognizes stationary fingers without needing any MOVE event. Movement
  * rejection lasts until the pair changes; returning inside slop cannot restart the same hold.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeEscapeTracker(
   touchSlop: Int,
   private val scheduler: PrototypeEscapeScheduler,

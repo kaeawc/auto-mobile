@@ -16,6 +16,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecTheme
  * controller, not each window's Compose configuration, is the one reader, so every window of a show
  * (the service context's and any display or app-layer window context's) follows the same value.
  */
+@InternalAutoMobilePrototypeApi
 interface PrototypeDeviceAppearance {
   /** Whether the device is in night mode. */
   val dark: Boolean
@@ -29,6 +30,7 @@ interface PrototypeDeviceAppearance {
 }
 
 /** A light device with no dynamic colour: the controller's default outside the service. */
+@InternalAutoMobilePrototypeApi
 object NoPrototypeDeviceAppearance : PrototypeDeviceAppearance {
   override val dark = false
   override val paletteKey = 0
@@ -38,6 +40,7 @@ object NoPrototypeDeviceAppearance : PrototypeDeviceAppearance {
  * Reads the service context, whose configuration the platform updates before
  * `onConfigurationChanged`. The palette key hashes one tone of each Material You palette (API 31+).
  */
+@InternalAutoMobilePrototypeApi
 class AndroidPrototypeDeviceAppearance(
   private val context: Context,
   private val sdkInt: Int = Build.VERSION.SDK_INT,
@@ -74,6 +77,7 @@ class AndroidPrototypeDeviceAppearance(
 }
 
 /** The small resolved theme value shared by the controller, host chrome and content. */
+@InternalAutoMobilePrototypeApi
 data class PrototypeShownTheme
 internal constructor(
   internal val themeSpec: PrototypeThemeSpec,

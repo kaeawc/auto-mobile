@@ -242,7 +242,7 @@ export class ReadinessSelection {
     const result = await this.getReadinessScan(platform, options);
     const scan = this.normalizeReadinessScan(result);
     const connectedPlatforms = scan.devices;
-    this.reconcileReadinessPin(scan);
+    this.reconcileReadinessPin(scan, options);
     logger.info(`Found ${connectedPlatforms.length} connectedPlatform devices`);
     const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
     logger.info(`Found ${androidDevices.length} android devices`);
@@ -272,6 +272,7 @@ export class ReadinessSelection {
       androidDevices,
       iosDevices,
       providedDeviceId,
+      options,
     );
 
     let selectedDevice: BootedDevice | undefined;
@@ -291,7 +292,7 @@ export class ReadinessSelection {
     }
 
     // Explicit selection takes precedence over ambient resolution by another call.
-    const selectedPin = this.findPinnedReadinessDevice(platformDevices);
+    const selectedPin = this.findPinnedReadinessDevice(platformDevices, options);
     if (this.shouldResolveReadinessPin(selectedDevice, providedDeviceId, selectedPin)) {
       selectedDevice = await this.resolveAndroidReadinessIdentity(selectedPin, options?.signal);
       deviceSource = "provided";
@@ -665,10 +666,12 @@ export class ReadinessSelection {
     return await this.dependencies.bootIosReadinessImage(image, options);
   }
 
-  private findPinnedReadinessDevice(platformDevices: BootedDevice[]): BootedDevice | undefined {
-    return platformDevices.find(
-      (device) => device.deviceId === this.dependencies.selection.explicitDevicePin?.deviceId,
-    );
+  private findPinnedReadinessDevice(
+    platformDevices: BootedDevice[],
+    options?: DeviceReadyOptions,
+  ): BootedDevice | undefined {
+    const pin = this.dependencies.selection.getPin(options?.connectionId);
+    return platformDevices.find((device) => device.deviceId === pin?.deviceId);
   }
 
   /** Ownership has been rechecked; now observe boot state while holding the image lease. */
@@ -770,8 +773,8 @@ export class ReadinessSelection {
       : this.dependencies.detectConnectedPlatformsWithStatus(options?.signal, { platform });
   }
 
-  private reconcileReadinessPin(scan: ConnectedPlatformScan): void {
-    const pinnedDevice = this.dependencies.selection.explicitDevicePin;
+  private reconcileReadinessPin(scan: ConnectedPlatformScan, options?: DeviceReadyOptions): void {
+    const pinnedDevice = this.dependencies.selection.getPin(options?.connectionId);
     if (
       pinnedDevice &&
       isScanAuthoritativeFor(scan, pinnedDevice) &&
@@ -780,6 +783,7 @@ export class ReadinessSelection {
           device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,
       )
     ) {
+      // Proven device absence invalidates that device's pins on every connection.
       this.dependencies.clearExplicitDevicePin(pinnedDevice.deviceId);
     }
   }
@@ -789,6 +793,7 @@ export class ReadinessSelection {
     androidDevices: BootedDevice[],
     iosDevices: BootedDevice[],
     providedDeviceId?: string,
+    options?: DeviceReadyOptions,
   ): { platformDevices: BootedDevice[]; resolvedPlatform: Platform } {
     // Get devices for the requested platform
     let platformDevices: BootedDevice[] = [];
@@ -805,7 +810,12 @@ export class ReadinessSelection {
       default:
         // Only check for mixed platforms when auto-detecting (not explicitly specified)
         if (androidDevices.length > 0 && iosDevices.length > 0) {
-          return this.resolveMixedReadinessPlatform(androidDevices, iosDevices, providedDeviceId);
+          return this.resolveMixedReadinessPlatform(
+            androidDevices,
+            iosDevices,
+            providedDeviceId,
+            options,
+          );
         }
 
         if (androidDevices.length > 0) {
@@ -827,6 +837,7 @@ export class ReadinessSelection {
     androidDevices: BootedDevice[],
     iosDevices: BootedDevice[],
     providedDeviceId?: string,
+    options?: DeviceReadyOptions,
   ): { platformDevices: BootedDevice[]; resolvedPlatform: Platform } {
     // An explicit deviceId names the target unambiguously, so it resolves
     // the platform ahead of the ambient one — otherwise switching to a
@@ -843,13 +854,9 @@ export class ReadinessSelection {
       }
     }
     // With no matching deviceId, fall back to the platform setActiveDevice selected.
-    const selectedPlatform =
-      this.dependencies.selection.explicitDevicePin?.platform ??
-      this.dependencies.selection.currentPlatform;
-    if (
-      selectedPlatform &&
-      (this.dependencies.selection.explicitDevicePin || this.dependencies.selection.currentDevice)
-    ) {
+    const pin = this.dependencies.selection.getPin(options?.connectionId);
+    const selectedPlatform = pin?.platform ?? this.dependencies.selection.currentPlatform;
+    if (selectedPlatform && (pin || this.dependencies.selection.currentDevice)) {
       return {
         platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,
         resolvedPlatform: selectedPlatform,

@@ -564,7 +564,7 @@ arranged("direct mode display refuses before device selection; omitted is unchan
         deviceId: device.deviceId,
       },
     });
-    expect(pin).toHaveBeenCalledWith(device);
+    expect(pin).toHaveBeenCalledWith(device, undefined);
   } finally {
     ready.mockRestore();
     pin.mockRestore();

@@ -299,6 +299,12 @@ else
   cp "$report_path" "$report_dir/report.xml"
 fi
 
+# A unit lane may recreate its junit directory and drop the marker. The derived
+# directory is scratch this run populated, so re-mark it for the next run.
+if [[ "$report_dir" == "${report_path%.xml}.d" && -d "$report_dir" && ! -L "$report_dir" ]]; then
+  : > "$report_dir/$scratch_marker"
+fi
+
 set -- "$report_dir"/*.xml
 if [[ ! -f "$1" ]]; then
   if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" && "$affects_unit_tests" == "true" && -z "${BUN_TEST_TIMING_REPORT_DIR:-}" ]]; then

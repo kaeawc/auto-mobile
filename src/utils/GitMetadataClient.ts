@@ -3,6 +3,7 @@ import { spawnSync } from "child_process";
 import { execFile } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 import { logger } from "./logger";
 
 export interface GitDirtyState {
@@ -58,6 +59,13 @@ const defaultReader: GitMetadataReader = {
     }
   },
 };
+
+interface GitLocation {
+  toplevel: string | null;
+  /** A `.git` directory or gitfile; null defers HEAD resolution to git itself. */
+  dotgit: string | null;
+  commonDirOverride?: string;
+}
 
 export interface GitMetadataClient {
   readDirtyState(cwd: string): Promise<GitDirtyState | null>;
@@ -116,6 +124,8 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
     private readonly run: GitCommandRunner = defaultRunner,
     private readonly fs: GitMetadataReader = defaultReader,
     private readonly runAsync: GitAsyncCommandRunner = defaultAsyncRunner,
+    /** Inherited by the git probes, so HEAD discovery honours the same GIT_* (#14506). */
+    private readonly env: NodeJS.ProcessEnv = process.env,
   ) {}
 
   readVersion(
@@ -127,12 +137,12 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
       return null;
     }
 
-    const toplevel = this.findRoot(cwd);
-    if (!toplevel || readPackageName(toplevel) !== PACKAGE_NAME) {
+    const location = this.locate(cwd);
+    if (!location?.toplevel || readPackageName(location.toplevel) !== PACKAGE_NAME) {
       return null;
     }
 
-    const sha = this.readHead(toplevel) ?? this.execute(cwd, ["rev-parse", "HEAD"]);
+    const sha = this.readHead(location) ?? this.execute(cwd, ["rev-parse", "HEAD"]);
     if (!sha) {
       return null;
     }
@@ -164,6 +174,42 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
     return { dirty, dirtyHash };
   }
 
+  /**
+   * Mirrors git's repository selection: GIT_DIR replaces discovery, and
+   * GIT_WORK_TREE / GIT_COMMON_DIR override the work tree and common dir. Like
+   * git, relative values resolve against the probe cwd (the same cwd the async
+   * status/diff probes run in).
+   */
+  private locate(cwd: string): GitLocation | null {
+    // Raw values: git neither trims nor ignores blank repository overrides.
+    const gitDir = readEnvRaw(AMBIENT_ENV.GIT_DIR, this.env);
+    const workTree = readEnvRaw(AMBIENT_ENV.GIT_WORK_TREE, this.env);
+    const commonDir = readEnvRaw(AMBIENT_ENV.GIT_COMMON_DIR, this.env);
+    if (gitDir === "" || workTree === "" || commonDir === "") {
+      // Git rejects or specially treats empty values; let it decide.
+      return { toplevel: this.execute(cwd, ["rev-parse", "--show-toplevel"]), dotgit: null };
+    }
+    const commonDirOverride = commonDir === undefined ? undefined : resolve(cwd, commonDir);
+    if (gitDir !== undefined) {
+      // Without GIT_WORK_TREE, the work tree depends on core.worktree/core.bare
+      // config, which only git resolves faithfully.
+      const toplevel =
+        workTree === undefined
+          ? this.execute(cwd, ["rev-parse", "--show-toplevel"])
+          : resolve(cwd, workTree);
+      return { toplevel, dotgit: resolve(cwd, gitDir), commonDirOverride };
+    }
+    const root = this.findRoot(cwd);
+    if (!root) {
+      return null;
+    }
+    return {
+      toplevel: workTree === undefined ? root : resolve(cwd, workTree),
+      dotgit: join(root, ".git"),
+      commonDirOverride,
+    };
+  }
+
   private findRoot(cwd: string): string | null {
     try {
       let directory = resolve(cwd);
@@ -184,8 +230,8 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
     }
   }
 
-  private resolveGitdir(root: string): string | null {
-    const dotgit = join(root, ".git");
+  /** Resolves a `.git` directory or gitfile (as git accepts for GIT_DIR too). */
+  private resolveGitdir(dotgit: string): string | null {
     if (this.fs.kind(dotgit) === "directory") {
       return dotgit;
     }
@@ -194,7 +240,7 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
       return null;
     }
     const target = gitfile.slice("gitdir: ".length);
-    return target ? resolve(root, target) : null;
+    return target ? resolve(dirname(dotgit), target) : null;
   }
 
   private resolveCommondir(gitdir: string): string | null {
@@ -247,13 +293,13 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
       : null;
   }
 
-  private readHead(root: string): string | null {
+  private readHead({ dotgit, commonDirOverride }: GitLocation): string | null {
     try {
-      const gitdir = this.resolveGitdir(root);
+      const gitdir = dotgit && this.resolveGitdir(dotgit);
       if (!gitdir) {
         return null;
       }
-      const commondir = this.resolveCommondir(gitdir);
+      const commondir = commonDirOverride ?? this.resolveCommondir(gitdir);
       // Reftable is deliberately left to git, including transitional mixed layouts.
       if (!commondir || this.fs.kind(join(commondir, "reftable"))) {
         return null;

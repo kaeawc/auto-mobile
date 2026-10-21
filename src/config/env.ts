@@ -227,6 +227,24 @@ export const AMBIENT_ENV = {
     default: "5037",
     doc: "adb server port; ambient, identifies the ADB server scope.",
   },
+  GIT_DIR: {
+    name: "GIT_DIR",
+    kind: "path",
+    default: "unset",
+    doc: "Git repository directory; ambient, honoured when stamping a source build's commit.",
+  },
+  GIT_WORK_TREE: {
+    name: "GIT_WORK_TREE",
+    kind: "path",
+    default: "unset",
+    doc: "Git work tree; ambient, locates the source checkout when stamping its commit.",
+  },
+  GIT_COMMON_DIR: {
+    name: "GIT_COMMON_DIR",
+    kind: "path",
+    default: "unset",
+    doc: "Git common directory; ambient, resolves shared refs when stamping a commit.",
+  },
   CTRL_PROXY_IOS_BUNDLE_ID: {
     name: "CTRL_PROXY_IOS_BUNDLE_ID",
     kind: "string",

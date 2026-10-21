@@ -25,6 +25,7 @@ describe("isGitVersionProbe", () => {
           probes.push([command, ...args]);
           return fallback ? "tracked edit" : "";
         },
+        {},
       );
 
       client.readVersion("/src/auto-mobile", () => "@kaeawc/auto-mobile");

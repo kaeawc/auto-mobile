@@ -129,6 +129,54 @@ describe("Daemon database health check", () => {
     expect(h.exits).toEqual([{ code: 1, detail: "Database health probe timed out after 1000ms" }]);
   });
 
+  test("degraded observation retries keep healthy servers running and probe the DB every tick", async () => {
+    const timer = new FakeTimer();
+    const probe = new FakeDatabaseHealthProbe();
+    const exits: number[] = [];
+    const daemon = buildDaemon(timer, probe, (code) => {
+      exits.push(code);
+    });
+    const internals = daemon.testHooks;
+    cleanup = { internals, timer };
+    internals.httpIngress.setHttpServer(new FakeHttpServer(true));
+    let controlCloses = 0;
+    internals.setSocketServer({
+      isListening: () => true,
+      close: async () => {
+        controlCloses++;
+      },
+    });
+    let retries = 0;
+    const conflict = new AuxiliarySocketBindConflict("/fake/stream.sock", "Stream");
+    degradeAuxiliarySocket("observation-stream", conflict);
+    internals.setObservationStreamHealth({
+      isHealthy: () => false,
+      recover: async () => {
+        retries++;
+        throw conflict;
+      },
+    });
+    let fullRecoveries = 0;
+    internals.overrideAttemptRecovery(async () => {
+      fullRecoveries++;
+    });
+    const stop = spyOn(daemon, "stop").mockResolvedValue();
+    try {
+      internals.startHealthCheckTimer();
+      for (let i = 0; i < 5; i++) {
+        await advanceOneInterval(timer);
+      }
+      expect(probe.checkCalls).toBe(5);
+      expect(retries).toBe(5);
+      expect(fullRecoveries).toBe(0);
+      expect(controlCloses).toBe(0);
+      expect(exits).toEqual([]);
+      expect(stop).not.toHaveBeenCalled();
+    } finally {
+      stop.mockRestore();
+    }
+  });
+
   test("recovery reports an observation stream that remains degraded accurately", async () => {
     const h = timeoutHarness();
     h.internals.setObservationStreamHealth({ isHealthy: () => false, recover: async () => {} });

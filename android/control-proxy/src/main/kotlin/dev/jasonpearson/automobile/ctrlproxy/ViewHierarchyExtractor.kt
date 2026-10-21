@@ -1601,22 +1601,7 @@ internal constructor(
     return links.ifEmpty { null }
   }
 
-  /**
-   * Generate a deterministic UUID from a hierarchy path string. Uses SHA-256 to hash the path and
-   * formats the first 16 bytes as a UUID string.
-   *
-   * NOTE (#3228): this id is *positional* — a list scroll shifts child indices, so a moved row gets
-   * a different UUID and the row now occupying its old slot inherits the departed row's. The
-   * daemon's TS ingest (`StableNodeIdentity.assignStableViewIds`) therefore rewrites every
-   * UUID-shaped viewId into a content-derived stable id before the hierarchy reaches consumers.
-   * Keep the UUID shape here (8-4-4-4-12 lowercase hex): it is the marker the ingest matches;
-   * emitting a different shape would make ids pass through unrewritten.
-   */
-  private fun generateDeterministicUuid(path: String): String {
-    val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(path.toByteArray())
-    val hex = bytes.take(16).joinToString("") { formatHexByte(it) }
-    return "${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}"
-  }
+  private fun generateDeterministicUuid(path: String): String = GeneratedViewId.fromPath(path)
 
   /**
    * Find the accessibility-focused element in the hierarchy. Recursively searches for the element
@@ -1686,14 +1671,16 @@ internal constructor(
     val keys = extras.keySet()
     if (keys.isNullOrEmpty()) return null
 
-    val map = mutableMapOf<String, String>()
+    var map: MutableMap<String, String>? = null
     for (key in keys) {
+      if (VolatileExtras.isNeverShipped(key)) continue
       val value = extras.get(key)
       if (value != null) {
+        if (map == null) map = linkedMapOf()
         map[key] = value.toString()
       }
     }
-    return if (map.isEmpty()) null else map
+    return map
   }
 
   private fun extractTestTag(extras: Map<String, String>?): String? = testTagFromExtras(extras)
@@ -1952,7 +1939,7 @@ internal constructor(
     windowCount: Int,
   ): Boolean = !disableAllFiltering && occlusionEnabled && windowCount > 1
 
-  private val occlusionCalculator = OcclusionCalculator(stats, ::generateDeterministicUuid)
+  private val occlusionCalculator = OcclusionCalculator(stats, GeneratedViewId::fromPath)
 
   // Keep the existing extraction/test entry points while the calculator owns the algorithm.
   private fun buildOcclusionInfo(

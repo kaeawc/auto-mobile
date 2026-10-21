@@ -82,6 +82,7 @@ const readArgs: Record<string, Record<string, unknown>> = {
 const EXPECTED = [
   "accessibility",
   "clipboard",
+  "compareScreenshot",
   "displayConfig",
   "getAppPermissions",
   "getDataStore",
@@ -436,6 +437,7 @@ const READS_THAT_READY_UNHELD = {
   android: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
@@ -456,6 +458,7 @@ const READS_THAT_READY_UNHELD = {
   ios: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
@@ -511,7 +514,7 @@ test("documented unheld registry readiness matches literal classifications", () 
   }
 });
 
-test("unheld readiness literal lists partition all 21 production reads", () => {
+test("unheld readiness literal lists partition all 22 production reads", () => {
   for (const platform of ["android", "ios"] as const) {
     const classified = [
       ...READS_THAT_READY_UNHELD[platform],

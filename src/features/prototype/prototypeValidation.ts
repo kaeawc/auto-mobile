@@ -714,7 +714,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
-    prototypeChatScrollError(context.nodes, context.actions, object(data.state) ?? {}) ??
+    prototypeChatScrollError(context.nodes, context.actions) ??
     pagerErrors(context) ??
     stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats)

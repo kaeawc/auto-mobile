@@ -114,7 +114,7 @@ internal object PrototypeSpecInput {
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: dataActionErrors(context, value)
         ?: requestActionErrors(context)
-        ?: chatScrollErrors(value, context)
+        ?: chatScrollErrors(context)
         ?: swipeActionsErrors(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)

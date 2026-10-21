@@ -26,40 +26,22 @@ export interface PrototypeChatScrollError {
 const firstOption = (node: Raw): string | undefined =>
   PROTOTYPE_CHAT_SCROLL_OPTIONS.find((option) => node[option] !== undefined);
 
-function scrollNodeError(
-  node: Raw,
-  path: string,
-  state: Raw,
-): PrototypeChatScrollError | undefined {
-  const option = firstOption(node);
-  if (option !== undefined && node.axis === "horizontal") {
-    return { path: `${path}.${option}`, message: "Chat scroll options need a vertical scroll" };
-  }
-  const key = node.atEndKey;
-  // A repeat-bound key is checked per row by the state-key bindings.
-  if (typeof key === "string" && !key.includes("{") && typeof state[key] !== "boolean") {
-    return {
-      path: `${path}.atEndKey`,
-      message: "atEndKey must name a declared boolean state key",
-    };
-  }
-  return undefined;
-}
-
-/** Static checks over the structurally valid nodes and actions of one spec. */
+/**
+ * Static checks over the structurally valid nodes and actions of one spec. `atEndKey` must name a
+ * declared boolean state key; the state bindings check that per repeat row and on every write.
+ */
 export function prototypeChatScrollError(
   nodes: readonly { value: Raw; path: string }[],
   actions: readonly { value: Raw; path: string }[],
-  state: Raw,
 ): PrototypeChatScrollError | undefined {
   const ids = new Map<string, number>();
   for (const { value, path } of nodes) {
     if (value.type !== "scroll") {
       continue;
     }
-    const error = scrollNodeError(value, path, state);
-    if (error) {
-      return error;
+    const option = firstOption(value);
+    if (option !== undefined && value.axis === "horizontal") {
+      return { path: `${path}.${option}`, message: "Chat scroll options need a vertical scroll" };
     }
     if (typeof value.id === "string") {
       ids.set(value.id, (ids.get(value.id) ?? 0) + 1);

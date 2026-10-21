@@ -33,7 +33,7 @@ wiring_requires_yq() {
   boot_options="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-1") | .run' "$ACTION")"
   retry_options="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-2") | .run' "$ACTION")"
   [[ "$prep_options" == *"inputs.windowed == 'true'"* ]]
-  [[ "$prep_options" == *"'-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none'"* ]]
+  [[ "$prep_options" == *"'-no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none'"* ]]
   [[ "$boot_options" == *"inputs.windowed == 'true'"* ]]
   [[ "$retry_options" == *"inputs.windowed == 'true'"* ]]
 }

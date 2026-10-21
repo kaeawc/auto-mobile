@@ -184,7 +184,7 @@ export function parseExtraEmulatorArguments(raw: string): string[] {
     parsed = JSON.parse(raw);
   } catch {
     throw new ActionableError(
-      'AUTOMOBILE_EMULATOR_ARGS must be a JSON array of emulator arguments, for example ["-gpu", "swiftshader_indirect"]',
+      'AUTOMOBILE_EMULATOR_ARGS must be a JSON array of emulator arguments, for example ["-gpu", "swiftshader"]',
     );
   }
 

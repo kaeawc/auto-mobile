@@ -75,7 +75,7 @@ echo "no" | "$AVDMANAGER" create avd -n "$AVD_NAME" -k "$PKG" --abi "$ABI" --for
 # 3. Boot headless.
 log "booting emulator on port $PORT"
 "$EMULATOR" -avd "$AVD_NAME" -port "$PORT" -no-window -no-audio -no-boot-anim \
-  -no-snapshot -gpu swiftshader_indirect -wipe-data >/dev/null 2>&1 &
+  -no-snapshot -gpu swiftshader -wipe-data >/dev/null 2>&1 &
 EMU_PID=$!
 
 log "waiting for device"

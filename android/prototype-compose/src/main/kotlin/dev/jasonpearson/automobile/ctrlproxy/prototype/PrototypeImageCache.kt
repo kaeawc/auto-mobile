@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 
 /** A decoded image the renderer can draw. Production wraps a Bitmap; tests use a plain fake. */
+@InternalAutoMobilePrototypeApi
 interface PrototypeDecodedImage {
   val width: Int
   val height: Int
@@ -17,15 +18,17 @@ interface PrototypeDecodedImage {
 }
 
 /** The size, in pixels, an image will be shown at; the decoder downsamples to at least this. */
-data class PrototypeImageTarget(val widthPx: Int, val heightPx: Int)
+@InternalAutoMobilePrototypeApi data class PrototypeImageTarget(val widthPx: Int, val heightPx: Int)
 
 /** Decodes encoded PNG/JPEG/WebP bytes, or returns null when they cannot be decoded. */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeImageDecoder {
   /** Blocking and heavy: always called off the main thread. */
   fun decode(bytes: ByteArray, target: PrototypeImageTarget): PrototypeDecodedImage?
 }
 
 /** What an `image` node (or nav item image) should draw right now. */
+@InternalAutoMobilePrototypeApi
 sealed interface PrototypeImageState {
   /** The decode is still running; draw a neutral box, not the missing-asset placeholder. */
   data object Loading : PrototypeImageState
@@ -53,6 +56,7 @@ sealed interface PrototypeImageState {
  * overlaps the window between a store change and its [invalidate] is covered by the epoch check.
  * Evicted bitmaps are not recycled: a composable may still be drawing one.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeImageCache(
   private val source: PrototypeAssetSource,
   private val decoder: PrototypeImageDecoder,

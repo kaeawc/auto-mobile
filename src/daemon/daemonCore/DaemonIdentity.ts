@@ -15,7 +15,12 @@ import { PidFileData, type AuxiliaryDaemonSocketName } from "../types";
 import { statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
-import { PID_FILE_PATH, DAEMON_VERSION } from "../constants";
+import {
+  PID_FILE_PATH,
+  DAEMON_VERSION,
+  resolveDaemonVersion,
+  syncSettledDaemonVersion,
+} from "../constants";
 import { getCurrentBuildIdentity } from "../buildIdentity";
 import {
   cleanupDaemonFiles,
@@ -99,6 +104,9 @@ export class DaemonIdentity {
    * ready early. {@link writePidFile} overwrites it with the complete record.
    */
   async writeEarlyOwnerRecord(): Promise<void> {
+    if (!syncSettledDaemonVersion()) {
+      await resolveDaemonVersion();
+    }
     // Snapshot any live incumbent BEFORE this overwrite clobbers its PID record,
     // so the lock-less bind guard can still see the live sibling and restore its
     // record on refusal instead of unlinking/orphaning it (issue #6232).
@@ -134,6 +142,9 @@ export class DaemonIdentity {
    * Write PID file with daemon metadata
    */
   async writePidFile(signal?: AbortSignal): Promise<void> {
+    if (!syncSettledDaemonVersion()) {
+      await resolveDaemonVersion();
+    }
     signal?.throwIfAborted();
     const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {

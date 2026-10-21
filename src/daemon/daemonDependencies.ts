@@ -46,6 +46,7 @@ export type DaemonDeviceSessionStore = DeviceSessionPersistence &
   Pick<DeviceSessionRepository, "markAutolockSession" | "markStaleActiveSessionsExpired">;
 
 export interface DaemonDependencies {
+  deviceReadiness?: DeviceReadiness;
   installedAppsRepository?: InstalledAppsStore;
   timer?: Timer;
   deviceSessionRepository?: DaemonDeviceSessionStore;
@@ -126,6 +127,7 @@ function resolveProcessIdentity(dependencies: DaemonDependencies) {
 }
 
 function resolveFactories(dependencies: DaemonDependencies) {
+  const deviceReadiness = dependencies.deviceReadiness ?? DeviceReadiness.createInstance();
   return {
     managedAdbServerShutdown: dependencies.managedAdbServerShutdown ?? stopManagedAdbServer,
     toolSelectionProfileProvenanceLoader:
@@ -134,7 +136,8 @@ function resolveFactories(dependencies: DaemonDependencies) {
     httpTokenStore: dependencies.httpTokenStore ?? new FileDaemonHttpTokenStore(),
     httpServerFactory: dependencies.httpServerFactory ?? (() => createHttpServer()),
     avdManagerFactory: dependencies.avdManagerFactory ?? (() => new AvdManagerService()),
-    iosDeviceVerifier: dependencies.iosDeviceVerifier ?? (() => DeviceReadiness.getInstance()),
+    deviceReadiness,
+    iosDeviceVerifier: dependencies.iosDeviceVerifier ?? (() => deviceReadiness),
     bindingExclusionFactory: dependencies.bindingExclusionFactory ?? createDefaultBindingExclusion,
     daemonState: dependencies.daemonState ?? defaultDaemonStateWrites,
   };

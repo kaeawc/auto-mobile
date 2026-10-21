@@ -19,7 +19,9 @@ import { errorMessage } from "../describeUnknownError";
 export function guardPrefix(path: string, sample: LockSample): string {
   const hash = createHash("sha256").update(sample.raw).digest("hex").slice(0, 32);
   // Numeric/hash suffixes never end in .lock/.pid/.sock/.json/.forward; directory scans ignore them.
-  return `${path}.reclaim.${sample.ino}.${sample.mtimeMs}.${hash}`;
+  // The inode keeps its rounded number spelling so every version names the same guard;
+  // the mtime and content hash still tell distinct samples apart.
+  return `${path}.reclaim.${Number(sample.ino)}.${sample.mtimeMs}.${hash}`;
 }
 
 interface ReclaimGuard {

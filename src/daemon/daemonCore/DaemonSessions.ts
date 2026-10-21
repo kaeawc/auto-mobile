@@ -48,7 +48,6 @@ import { NetworkState } from "../../utils/NetworkState";
 import { resolveToolSelectionBaseSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { EmulatorLossIncidentRepository } from "../../db/emulatorLossIncidentRepository";
-import { DeviceReadiness } from "../readiness/DeviceReadiness";
 import { type AppearanceSyncTarget } from "../AppearanceSyncScheduler";
 import { Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -59,6 +58,7 @@ const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
 export interface DaemonSessionsHost {
   services: Pick<
     DaemonCoreServices,
+    | "deviceReadiness"
     | "sessionManager"
     | "devicePool"
     | "deviceSessionRegistry"
@@ -168,7 +168,7 @@ export class DaemonSessions {
         defaultMockLocationClearRegistry.retireDevice(deviceId);
         NetworkState.getInstance().retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
-        DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
+        this.host.services.deviceReadiness().clearExplicitDevicePin(deviceId);
         this.host.services.deviceSessionRegistry().onDeviceDisconnected(deviceId);
         // Full removal: prune AFTER epoch retirement, which also invalidates frames.
         this.host.lifecycle.deviceDataStreamServer()?.removeDeviceFrames(deviceId);
@@ -241,6 +241,7 @@ export class DaemonSessions {
       deviceDataStreamServer: () => this.host.lifecycle.deviceDataStreamServer(),
       socketServer: () => this.host.lifecycle.socketServer(),
       managedExecutionReowner: () => this.host.lifecycle.managedExecutionReowner(),
+      deviceReadiness: () => this.host.services.deviceReadiness(),
       devicePool: () => this.host.services.devicePool(),
       passiveWorkPolicy: () => this.host.services.passiveWorkPolicy(),
       navigationGraphListenerManagers: this.host.lifecycle.navigationGraphBridge().listenerManagers,

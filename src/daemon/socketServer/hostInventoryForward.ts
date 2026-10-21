@@ -113,7 +113,7 @@ export class HostInventoryForward {
       return current;
     }
     // A running transport's timeout is fixed. Start fresh rather than shorten a later waiter's
-    // budget or let a read after its socket's barrier reuse a pre-barrier snapshot.
+    // budget or let a read after any socket's barrier reuse a pre-barrier snapshot.
     const now = this.timer.now();
     const timeoutMs = Math.max(
       DEFAULT_MCP_REQUEST_TIMEOUT_MS,

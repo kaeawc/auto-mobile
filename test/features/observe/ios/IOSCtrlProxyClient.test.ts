@@ -162,7 +162,7 @@ describe("IOSCtrlProxyClient", function () {
       ],
       postures: ["closed", "opened"],
     };
-    ctrlProxyClient["cachedHierarchy"] = {
+    ctrlProxyClient.testHooks.cachedHierarchy = {
       hierarchy: {
         updatedAt: 1,
         packageName: "com.example.app",
@@ -585,7 +585,7 @@ describe("IOSCtrlProxyClient", function () {
           timer,
           { serviceManagerFactory: () => manager, bootedDeviceLister: async () => [testDevice] },
         );
-        client["autoReconnectEnabled"] = false;
+        client.connectionTestHooks.autoReconnectEnabled = false;
         try {
           expect(await client.ensureConnected()).toBe(false);
           expect(
@@ -625,7 +625,7 @@ describe("IOSCtrlProxyClient", function () {
           timer,
           { serviceManagerFactory: () => manager, bootedDeviceLister: async () => [testDevice] },
         );
-        client["autoReconnectEnabled"] = false;
+        client.connectionTestHooks.autoReconnectEnabled = false;
         try {
           expect(await client.ensureConnected()).toBe(false);
           expect(
@@ -658,7 +658,7 @@ describe("IOSCtrlProxyClient", function () {
           bootedDeviceLister: async () => (booted ? [testDevice] : []),
         },
       );
-      client["autoReconnectEnabled"] = false;
+      client.connectionTestHooks.autoReconnectEnabled = false;
       try {
         expect(await client.ensureConnected()).toBe(false);
         const failure = client["createHierarchyDelegateContext"]().getLastConnectFailure?.();
@@ -675,7 +675,7 @@ describe("IOSCtrlProxyClient", function () {
       const scheduler = new FakeScreenshotBackoffScheduler();
 
       ctrlProxyClient["screenshotBackoffScheduler"] = scheduler;
-      ctrlProxyClient["onConnectionClosed"]();
+      ctrlProxyClient.testHooks.onConnectionClosed();
 
       expect(scheduler.cancelPendingCapturesCalls).toBe(1);
     });
@@ -774,7 +774,7 @@ describe("IOSCtrlProxyClient", function () {
         },
       );
 
-      testClient["onConnectionClosed"]();
+      testClient.testHooks.onConnectionClosed();
 
       expect(lostDeviceIds).toEqual(["A1B2C3D4-E5F6-7890-ABCD-EF1234567890"]);
     });
@@ -1668,7 +1668,7 @@ describe("IOSCtrlProxyClient", function () {
           unavailableDetail: message.error,
         });
         expect(timer.now()).toBe(before);
-        expect(client["cachedHierarchy"]).toBeNull();
+        expect(client.testHooks.cachedHierarchy).toBeNull();
         expect(timer.getPendingTimeouts()).not.toContain(1000);
       } finally {
         await client.close();
@@ -1692,7 +1692,7 @@ describe("IOSCtrlProxyClient", function () {
           receivedAt: 0,
           fresh: true,
         };
-        client["cachedHierarchy"] = cached;
+        client.testHooks.cachedHierarchy = cached;
         const push = spyOn(
           client.testHooks.messageEffects,
           "pushToObservationStream",
@@ -1730,7 +1730,7 @@ describe("IOSCtrlProxyClient", function () {
             const request = await waitForMessageType(socket, "request_hierarchy_if_stale");
             expect(typeof request.requestId).toBe("string");
             requestId = String(request.requestId);
-            expect(client["getRequestManager"]().isPending(requestId)).toBe(true);
+            expect(client.connectionTestHooks.requestManager.isPending(requestId)).toBe(true);
             expect(timer.getPendingTimeouts()).toContain(1000);
           }
           // Built from WebSocketResponse.error in
@@ -1751,10 +1751,10 @@ describe("IOSCtrlProxyClient", function () {
               `[RequestManager] No pending request found for id: ${requestId} (may have timed out)`,
             );
           }
-          expect(client["getRequestManager"]().isPending(requestId)).toBe(false);
+          expect(client.connectionTestHooks.requestManager.isPending(requestId)).toBe(false);
           expect(timer.getPendingTimeouts()).not.toContain(1000);
           expect(timer.now()).toBe(before);
-          expect(client["cachedHierarchy"]).toBe(cached);
+          expect(client.testHooks.cachedHierarchy).toBe(cached);
           expect(push).not.toHaveBeenCalled();
           expect(navigation).not.toHaveBeenCalled();
           expect(ingestor.layoutEvents).toEqual([]);
@@ -1916,7 +1916,7 @@ describe("IOSCtrlProxyClient", function () {
         createInstantFailureWebSocketFactory(testTimer),
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         await testClient.ensureConnected();
@@ -1944,7 +1944,7 @@ describe("IOSCtrlProxyClient", function () {
         createConnectionTimeoutWebSocketFactory(testTimer),
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       const failAfterConnectionTimeout = async (): Promise<void> => {
         const resultPromise = testClient.ensureConnected();
@@ -1979,7 +1979,7 @@ describe("IOSCtrlProxyClient", function () {
         createInstantFailureWebSocketFactory(testTimer),
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         await testClient.ensureConnected();
@@ -2012,7 +2012,7 @@ describe("IOSCtrlProxyClient", function () {
         createInstantFailureWebSocketFactory(testTimer),
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         await testClient.ensureConnected();
@@ -2050,14 +2050,14 @@ describe("IOSCtrlProxyClient", function () {
         createInstantFailureWebSocketFactory(testTimer),
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
-      testClient["cachedHierarchy"] = {
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
+      testClient.testHooks.cachedHierarchy = {
         hierarchy: cachedHierarchy,
         receivedAt: 0,
         fresh: false,
       };
-      testClient["connectionAttempts"] = 3;
-      testClient["lastConnectionAttempt"] = 1000;
+      testClient.connectionTestHooks.connectionAttempts = 3;
+      testClient.connectionTestHooks.lastConnectionAttempt = 1000;
       testTimer.advanceTime(1000);
 
       try {
@@ -3219,9 +3219,7 @@ describe("IOSCtrlProxyClient", function () {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const requestManager = testClient["requestManager"] as {
-          getPendingCount(): number;
-        };
+        const requestManager = testClient.connectionTestHooks.requestManager;
         expect(requestManager.getPendingCount()).toBe(1);
 
         controller.abort(cancellation);
@@ -3508,15 +3506,15 @@ describe("IOSCtrlProxyClient", function () {
         handshake(socket);
       };
       const state = () => ({
-        inFlight: client["inFlightConnectPromise"],
-        reconnect: client["reconnectTimeoutId"],
-        autoReconnect: client["autoReconnectEnabled"],
-        attempts: client["connectionAttempts"],
-        lastAttempt: client["lastConnectionAttempt"],
+        inFlight: client.connectionTestHooks.inFlightConnectPromise,
+        reconnect: client.connectionTestHooks.reconnectTimeoutId,
+        autoReconnect: client.connectionTestHooks.autoReconnectEnabled,
+        attempts: client.connectionTestHooks.connectionAttempts,
+        lastAttempt: client.connectionTestHooks.lastConnectionAttempt,
         lastFailure: client.getLastConnectionFailureMessage(),
         restartToken: client.getRunnerRecoveryTestHooks().diagnostics().pendingRestartToken,
         restartTimer: client.getRunnerRecoveryTestHooks().diagnostics().restartRearmTimeout,
-        commands: client["supportedCommands"],
+        commands: client.connectionTestHooks.supportedCommands,
         features: client["supportedFeatures"],
         lostConnections,
         budget: manager.getForcedRestartBudget().snapshot(),
@@ -3558,8 +3556,8 @@ describe("IOSCtrlProxyClient", function () {
           expect(h.sockets).toHaveLength(2);
           h.open(h.sockets[0]!);
           expect(await diagnostic).toEqual(["request_hierarchy"]);
-          expect(h.client["inFlightConnectPromise"]).not.toBeNull();
-          expect(h.client["autoReconnectEnabled"]).toBe(ownerState.autoReconnect);
+          expect(h.client.connectionTestHooks.inFlightConnectPromise).not.toBeNull();
+          expect(h.client.connectionTestHooks.autoReconnectEnabled).toBe(ownerState.autoReconnect);
           h.open(h.sockets[1]!);
           expect(await live).toBe(true);
           await flushPromises();
@@ -3671,7 +3669,7 @@ describe("IOSCtrlProxyClient", function () {
     test("diagnostic read preserves a pending owner auto-reconnect timer which fires normally", async () => {
       const h = diagnosticResident();
       try {
-        h.client["scheduleReconnect"]();
+        h.client.testHooks.scheduleReconnect();
         const before = h.state();
         expect(before.reconnect).not.toBeNull();
         expect(await h.client.getSupportedCommandsForDiagnostics()).toEqual(["request_hierarchy"]);
@@ -3695,7 +3693,7 @@ describe("IOSCtrlProxyClient", function () {
         expect(await h.client.getSupportedFeaturesForDiagnostics()).toEqual(["feature"]);
         expect(h.state()).toEqual(before);
         // Even a previous live-session cache cannot make a closed runner pass.
-        h.client["supportedCommands"] = new Set(["old_command"]);
+        h.client.connectionTestHooks.supportedCommands = new Set(["old_command"]);
         h.client["supportedFeatures"] = new Set(["old_feature"]);
         const cachedState = h.state();
         h.modes.push("instant", "instant");
@@ -3743,7 +3741,7 @@ describe("IOSCtrlProxyClient", function () {
         socket.readyState = WebSocketState.CLOSED;
         socket.emit("close");
         expect(h.state().lostConnections).toBe(1);
-        expect(h.client["reconnectTimeoutId"]).not.toBeNull();
+        expect(h.client.connectionTestHooks.reconnectTimeoutId).not.toBeNull();
         close.mockRestore();
       } finally {
         await h.client.close();
@@ -3831,7 +3829,7 @@ describe("IOSCtrlProxyClient", function () {
     test("doctor never changes resident autoReconnectEnabled on failure, thrown read or abort", async () => {
       for (const enabled of [true, false]) {
         const h = diagnosticResident();
-        h.client["autoReconnectEnabled"] = enabled;
+        h.client.connectionTestHooks.autoReconnectEnabled = enabled;
         try {
           h.modes.push("instant");
           const before = h.state();
@@ -3903,7 +3901,7 @@ describe("IOSCtrlProxyClient", function () {
           },
         },
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         expect(await testClient.connectWithoutSetup()).toBe(false);
@@ -3923,7 +3921,7 @@ describe("IOSCtrlProxyClient", function () {
         createConnectionTimeoutWebSocketFactory(testTimer),
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         const connection = testClient.connectWithoutSetup(controller.signal);
@@ -3931,7 +3929,7 @@ describe("IOSCtrlProxyClient", function () {
         controller.abort(cancellation);
 
         await expect(connection).rejects.toBe(cancellation);
-        expect(testClient["isConnecting"]).toBe(false);
+        expect(testClient.connectionTestHooks.isConnecting).toBe(false);
       } finally {
         await testClient.close();
       }
@@ -3949,7 +3947,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         const connectionA = testClient.connectWithoutSetup(callerA.signal);
@@ -3969,7 +3967,7 @@ describe("IOSCtrlProxyClient", function () {
         socket!.emit("open");
         testTimer.advanceTime(100);
         await expect(connectionB).resolves.toBe(true);
-        expect(testClient["pendingConnectJoiners"]).toBe(0);
+        expect(testClient.connectionTestHooks.pendingConnectJoiners).toBe(0);
       } finally {
         await testClient.close();
       }
@@ -3987,7 +3985,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         const connectionA = testClient.connectWithoutSetup(callerA.signal);
@@ -4007,7 +4005,7 @@ describe("IOSCtrlProxyClient", function () {
         socket!.emit("open");
         testTimer.advanceTime(100);
         await expect(connectionB).resolves.toBe(true);
-        expect(testClient["pendingConnectJoiners"]).toBe(0);
+        expect(testClient.connectionTestHooks.pendingConnectJoiners).toBe(0);
       } finally {
         await testClient.close();
       }
@@ -4055,8 +4053,8 @@ describe("IOSCtrlProxyClient", function () {
         testTimer.advanceTime(100);
         await flushPromises();
         expect(testClient.isConnected()).toBe(true);
-        expect(testClient["isConnecting"]).toBe(false);
-        expect(testClient["pendingConnectJoiners"]).toBe(0);
+        expect(testClient.connectionTestHooks.isConnecting).toBe(false);
+        expect(testClient.connectionTestHooks.pendingConnectJoiners).toBe(0);
       } finally {
         await testClient.close();
       }
@@ -4074,7 +4072,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         const connectionA = testClient.connectWithoutSetup(callerA.signal);
@@ -4090,7 +4088,7 @@ describe("IOSCtrlProxyClient", function () {
         callerB.abort(new Error("caller B cancelled"));
         await expect(connectionB).rejects.toThrow("caller B cancelled");
         expect(socket?.readyState).toBe(WebSocketState.CLOSING);
-        expect(testClient["isConnecting"]).toBe(false);
+        expect(testClient.connectionTestHooks.isConnecting).toBe(false);
 
         const reconnect = testClient.connectWithoutSetup();
         await flushPromises();
@@ -4121,8 +4119,8 @@ describe("IOSCtrlProxyClient", function () {
       try {
         await expect(testClient.connectWithoutSetup(controller.signal)).rejects.toBe(cancellation);
         expect(getCreatedSocketCount()).toBe(0);
-        expect(testClient["isConnecting"]).toBe(false);
-        expect(testClient["pendingConnectJoiners"]).toBe(0);
+        expect(testClient.connectionTestHooks.isConnecting).toBe(false);
+        expect(testClient.connectionTestHooks.pendingConnectJoiners).toBe(0);
       } finally {
         await testClient.close();
       }
@@ -4137,7 +4135,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      testClient["autoReconnectEnabled"] = false;
+      testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
         const resolved = createTrackedAbortSignal();
@@ -4159,7 +4157,7 @@ describe("IOSCtrlProxyClient", function () {
           createInstantFailureWebSocketFactory(testTimer),
           testTimer,
         );
-        failedClient["autoReconnectEnabled"] = false;
+        failedClient.connectionTestHooks.autoReconnectEnabled = false;
         const failedConnection = failedClient.connectWithoutSetup(failed.signal);
         expect(failed.getListenerCount()).toBe(1);
         await expect(failedConnection).resolves.toBe(false);
@@ -4173,7 +4171,7 @@ describe("IOSCtrlProxyClient", function () {
           createConnectionTimeoutWebSocketFactory(testTimer),
           testTimer,
         );
-        abortedClient["autoReconnectEnabled"] = false;
+        abortedClient.connectionTestHooks.autoReconnectEnabled = false;
         const abortedConnection = abortedClient.connectWithoutSetup(aborted.signal);
         await flushPromises();
         expect(aborted.getListenerCount()).toBe(1);
@@ -4264,7 +4262,7 @@ describe("IOSCtrlProxyClient", function () {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
-        const requestManager = testClient["getRequestManager"]();
+        const requestManager = testClient.connectionTestHooks.requestManager;
         // Ensure the request is registered before the port change. Microtasks only:
         // a real turn would let auto-advance expire the handshake wait first.
         await drainUntil(() => requestManager.getPendingCount() > 0, {
@@ -4276,7 +4274,7 @@ describe("IOSCtrlProxyClient", function () {
 
         // Changing the service port on a live socket must FAIL the in-flight request
         // (cancelAll rejects it), not silently strand it in the pending map.
-        testClient["updatePort"](serverPort + 1);
+        testClient.testHooks.updatePort(serverPort + 1);
         expect(cancel).toHaveBeenCalledWith(expect.any(CtrlProxyServicePortChangedError));
         cancel.mockRestore();
 
@@ -4316,7 +4314,7 @@ describe("IOSCtrlProxyClient", function () {
       test("keeps an error listener on the retired socket so a late error cannot crash the process", async function () {
         const { client, socket } = await connectLive();
         try {
-          client["updatePort"](serverPort + 1);
+          client.testHooks.updatePort(serverPort + 1);
 
           // removeAllListeners() with nothing re-attached would make this emit throw.
           expect(socket.listenerCount("error")).toBe(1);
@@ -4329,9 +4327,9 @@ describe("IOSCtrlProxyClient", function () {
       test("detaches the retired socket's lifecycle listeners and drops it from the client", async function () {
         const { client, socket } = await connectLive();
         try {
-          client["updatePort"](serverPort + 1);
+          client.testHooks.updatePort(serverPort + 1);
 
-          expect(client["ws"]).toBeNull();
+          expect(client.connectionTestHooks.socket).toBeNull();
           expect(client["lifecycleSocket"]).toBeNull();
           expect(socket.listenerCount("close")).toBe(0);
           expect(socket.listenerCount("message")).toBe(0);
@@ -4348,8 +4346,8 @@ describe("IOSCtrlProxyClient", function () {
           },
         });
         try {
-          client["supportedCommands"] = new Set(["request_hierarchy"]);
-          client["cachedHierarchy"] = {
+          client.connectionTestHooks.supportedCommands = new Set(["request_hierarchy"]);
+          client.testHooks.cachedHierarchy = {
             hierarchy: {
               updatedAt: 1,
               packageName: "com.test.app",
@@ -4359,11 +4357,11 @@ describe("IOSCtrlProxyClient", function () {
             fresh: true,
           };
 
-          client["updatePort"](serverPort + 1);
+          client.testHooks.updatePort(serverPort + 1);
 
           expect(lostDeviceIds).toEqual([testDevice.deviceId]);
-          expect(client["supportedCommands"]).toBeNull();
-          expect(client["cachedHierarchy"]).toBeNull();
+          expect(client.connectionTestHooks.supportedCommands).toBeNull();
+          expect(client.testHooks.cachedHierarchy).toBeNull();
         } finally {
           await client.close();
         }
@@ -4372,11 +4370,11 @@ describe("IOSCtrlProxyClient", function () {
       test("does not schedule a reconnect or count a failed attempt for the old endpoint", async function () {
         const { client } = await connectLive();
         try {
-          client["updatePort"](serverPort + 1);
+          client.testHooks.updatePort(serverPort + 1);
 
-          expect(client["reconnectTimeoutId"]).toBeNull();
+          expect(client.connectionTestHooks.reconnectTimeoutId).toBeNull();
           expect(client["consecutiveConnectionFailures"]).toBe(0);
-          expect(client["autoReconnectEnabled"]).toBe(true);
+          expect(client.connectionTestHooks.autoReconnectEnabled).toBe(true);
         } finally {
           await client.close();
         }
@@ -4390,9 +4388,9 @@ describe("IOSCtrlProxyClient", function () {
           },
         });
         try {
-          client["updatePort"](serverPort);
+          client.testHooks.updatePort(serverPort);
 
-          expect(client["ws"]).toBe(socket);
+          expect(client.connectionTestHooks.socket).toBe(socket);
           expect(lostDeviceIds).toEqual([]);
         } finally {
           await client.close();
@@ -4411,7 +4409,7 @@ describe("IOSCtrlProxyClient", function () {
       ctrlProxyClient
         .getInboundMessageTestHooks()
         .processMessage({ type: "hierarchy_update", data: current });
-      const cached = ctrlProxyClient["cachedHierarchy"];
+      const cached = ctrlProxyClient.testHooks.cachedHierarchy;
       const captureReceivedAt = cached?.captureReceivedAt;
       fakeTimer.advanceTime(100);
       const debug = spyOn(logger, "debug").mockImplementation(() => {});
@@ -4421,9 +4419,11 @@ describe("IOSCtrlProxyClient", function () {
           data: { ...current, updatedAt: 1_000, hierarchy: { text: "old" } },
         });
 
-        expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
-        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(6_000);
-        expect(ctrlProxyClient["cachedHierarchy"]?.captureReceivedAt).toBe(captureReceivedAt);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy).toBe(cached);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy.updatedAt).toBe(6_000);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy?.captureReceivedAt).toBe(
+          captureReceivedAt,
+        );
         expect(debug).toHaveBeenCalledWith(expect.stringContaining("pushed=1000 cached=6000"));
       } finally {
         debug.mockRestore();
@@ -4471,12 +4471,12 @@ describe("IOSCtrlProxyClient", function () {
             }),
           );
           await pending;
-          const cached = client["cachedHierarchy"];
+          const cached = client.testHooks.cachedHierarchy;
           expect(cached?.hierarchy.updatedAt).toBe(refreshed.updatedAt);
           client
             .getInboundMessageTestHooks()
             .processMessage({ type: "hierarchy_update", data: stale });
-          expect(client["cachedHierarchy"]).toBe(cached);
+          expect(client.testHooks.cachedHierarchy).toBe(cached);
         }
         expect(warn).not.toHaveBeenCalled();
       } finally {
@@ -4503,7 +4503,7 @@ describe("IOSCtrlProxyClient", function () {
       try {
         const stepped = { ...current, updatedAt: 400_000 };
         push(stepped);
-        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(stepped);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy).toBe(stepped);
         expect(stream).toHaveBeenCalledTimes(1);
         expect(backoff).toHaveBeenCalledTimes(1);
         expect(listeners).toHaveBeenCalledWith(stepped);
@@ -4512,13 +4512,13 @@ describe("IOSCtrlProxyClient", function () {
 
         const newer = { ...stepped, updatedAt: 401_000 };
         push(newer);
-        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(newer);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy).toBe(newer);
         const equal = { ...newer, hierarchy: { text: "equal" } };
         push(equal);
-        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(equal);
-        const cached = ctrlProxyClient["cachedHierarchy"];
+        expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy).toBe(equal);
+        const cached = ctrlProxyClient.testHooks.cachedHierarchy;
         push({ ...equal, updatedAt: 400_000 });
-        expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy).toBe(cached);
         expect(warn).toHaveBeenCalledTimes(1);
       } finally {
         warn.mockRestore();
@@ -4546,7 +4546,7 @@ describe("IOSCtrlProxyClient", function () {
         for (const updatedAt of [20_000, 21_000]) {
           for (let i = 0; i < 4; i++) {
             push({ ...current, updatedAt: 15_000 + i });
-            expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(baseline);
+            expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy.updatedAt).toBe(baseline);
           }
           push({ ...current, updatedAt });
           baseline = updatedAt;
@@ -4554,17 +4554,17 @@ describe("IOSCtrlProxyClient", function () {
         const older = { ...current, updatedAt: 16_004 };
         for (let i = 0; i < 4; i++) {
           push({ ...older, updatedAt: 16_000 + i });
-          expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(21_000);
+          expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy.updatedAt).toBe(21_000);
         }
         expect(warn).not.toHaveBeenCalled();
         push(older);
-        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(older);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy).toBe(older);
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining("pushed=16004 cached=21000"));
-        const cached = ctrlProxyClient["cachedHierarchy"];
+        const cached = ctrlProxyClient.testHooks.cachedHierarchy;
         for (let i = 0; i < 4; i++) {
           push({ ...older, updatedAt: 15_000 + i });
-          expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+          expect(ctrlProxyClient.testHooks.cachedHierarchy).toBe(cached);
         }
         expect(warn).toHaveBeenCalledTimes(1);
       } finally {
@@ -4586,21 +4586,23 @@ describe("IOSCtrlProxyClient", function () {
             data: { ...current, updatedAt },
           });
         push(current.updatedAt);
-        const cached = ctrlProxyClient["cachedHierarchy"];
+        const cached = ctrlProxyClient.testHooks.cachedHierarchy;
         const warn = spyOn(logger, "warn").mockImplementation(() => {});
         try {
           for (const updatedAt of [10_000, 11_000, 12_000, interruption]) {
             push(updatedAt);
-            expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+            expect(ctrlProxyClient.testHooks.cachedHierarchy).toBe(cached);
           }
           // The interruption is value one of the new run; four advances are needed.
           for (let i = 1; i < 4; i++) {
             push(interruption + i);
-            expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+            expect(ctrlProxyClient.testHooks.cachedHierarchy).toBe(cached);
           }
           expect(warn).not.toHaveBeenCalled();
           push(interruption + 4);
-          expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(interruption + 4);
+          expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy.updatedAt).toBe(
+            interruption + 4,
+          );
           expect(warn).toHaveBeenCalledTimes(1);
           expect(warn).toHaveBeenCalledWith(
             expect.stringContaining(`pushed=${interruption + 4} cached=20000`),
@@ -4650,14 +4652,14 @@ describe("IOSCtrlProxyClient", function () {
           }),
         );
         await pending;
-        const cached = client["cachedHierarchy"];
+        const cached = client.testHooks.cachedHierarchy;
         for (const updatedAt of [14_000, 15_000, 16_000, 17_000]) {
           push(updatedAt);
-          expect(client["cachedHierarchy"]).toBe(cached);
+          expect(client.testHooks.cachedHierarchy).toBe(cached);
         }
         expect(warn).not.toHaveBeenCalled();
         push(18_000);
-        expect(client["cachedHierarchy"]?.hierarchy.updatedAt).toBe(18_000);
+        expect(client.testHooks.cachedHierarchy?.hierarchy.updatedAt).toBe(18_000);
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining("pushed=18000 cached=20000"));
       } finally {
@@ -4675,19 +4677,19 @@ describe("IOSCtrlProxyClient", function () {
       ctrlProxyClient
         .getInboundMessageTestHooks()
         .processMessage({ type: "hierarchy_update", data: current });
-      const cached = ctrlProxyClient["cachedHierarchy"];
+      const cached = ctrlProxyClient.testHooks.cachedHierarchy;
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         ctrlProxyClient.getInboundMessageTestHooks().processMessage({
           type: "hierarchy_update",
           data: { ...current, updatedAt: 70_000 },
         });
-        expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy).toBe(cached);
         ctrlProxyClient.getInboundMessageTestHooks().processMessage({
           type: "hierarchy_update",
           data: { ...current, updatedAt: 69_999 },
         });
-        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(69_999);
+        expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy.updatedAt).toBe(69_999);
         expect(warn).toHaveBeenCalledTimes(1);
       } finally {
         warn.mockRestore();
@@ -4709,9 +4711,9 @@ describe("IOSCtrlProxyClient", function () {
         .getInboundMessageTestHooks()
         .processMessage({ type: "hierarchy_update", data: newer });
 
-      expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(newer);
-      expect(ctrlProxyClient["cachedHierarchy"]?.receivedAt).toBe(fakeTimer.now());
-      expect(ctrlProxyClient["cachedHierarchy"]?.captureReceivedAt).toBe(fakeTimer.now());
+      expect(ctrlProxyClient.testHooks.cachedHierarchy?.hierarchy).toBe(newer);
+      expect(ctrlProxyClient.testHooks.cachedHierarchy?.receivedAt).toBe(fakeTimer.now());
+      expect(ctrlProxyClient.testHooks.cachedHierarchy?.captureReceivedAt).toBe(fakeTimer.now());
     });
 
     test("hasCachedHierarchy should return true after receiving hierarchy", async function () {
@@ -4774,16 +4776,16 @@ describe("IOSCtrlProxyClient", function () {
 
         socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: hierarchy }));
         await flushPromises();
-        const firstReceivedAt = testClient["cachedHierarchy"]!.receivedAt;
-        expect(testClient["cachedHierarchy"]!.captureReceivedAt).toBe(firstReceivedAt);
+        const firstReceivedAt = testClient.testHooks.cachedHierarchy!.receivedAt;
+        expect(testClient.testHooks.cachedHierarchy!.captureReceivedAt).toBe(firstReceivedAt);
 
         testTimer.advanceTime(10_000);
         const repeatedPushAt = testTimer.now();
         socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: hierarchy }));
         await flushPromises();
 
-        expect(testClient["cachedHierarchy"]!.receivedAt).toBe(repeatedPushAt);
-        expect(testClient["cachedHierarchy"]!.captureReceivedAt).toBe(firstReceivedAt);
+        expect(testClient.testHooks.cachedHierarchy!.receivedAt).toBe(repeatedPushAt);
+        expect(testClient.testHooks.cachedHierarchy!.captureReceivedAt).toBe(firstReceivedAt);
       } finally {
         await testClient.close();
       }
@@ -6795,7 +6797,7 @@ describe("IOSCtrlProxyClient", function () {
         42,
       );
 
-      expect(ctrlProxyClient["screenGeometry"].bind()).toEqual({
+      expect(ctrlProxyClient.testHooks.screenGeometry.bind()).toEqual({
         captureSequence: 42,
         width: 1170,
         height: 2532,
@@ -6804,7 +6806,7 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test("drops stale provenance when an initial hierarchy has no assigned identity", function () {
-      const geometry = ctrlProxyClient["screenGeometry"];
+      const geometry = ctrlProxyClient.testHooks.screenGeometry;
       geometry.update(1170, 2532);
       geometry.markForwarded(41);
 

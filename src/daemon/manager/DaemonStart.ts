@@ -18,6 +18,8 @@ import {
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_VERSION,
+  resolveDaemonVersion,
+  syncSettledDaemonVersion,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
 } from "../constants";
 import { DaemonStatus, DaemonOptions } from "../types";
@@ -202,6 +204,9 @@ export class DaemonStart {
     // prevent. Bounding the rejoin by the time REMAINING under this deadline keeps
     // the error deliverable.
     const startDeadline = this.host.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+    if (!syncSettledDaemonVersion()) {
+      await resolveDaemonVersion();
+    }
     const admission = await this.admitStart(
       options,
       recoverySignal,

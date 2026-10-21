@@ -6,6 +6,12 @@ import {
   findAndroidCrashEvidence,
   findIosSimulatorCrashEvidence,
 } from "../../../src/features/action/CrashApp";
+import type {
+  NativeCrashReport,
+  NativeCrashReportLookup,
+  NativeCrashReportQuery,
+} from "../../../src/features/crashReports/NativeCrashReport";
+import type { RecordCrashInput } from "../../../src/features/failures/FailureRecorder";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { PhysicalIosCrashControl } from "../../../src/features/action/crashPhysicalIosApp";
@@ -77,6 +83,12 @@ class FakeSimulatorCommands {
 const dependencies = (overrides: Partial<CrashAppDependencies> = {}): CrashAppDependencies => ({
   cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
   uid: () => 501,
+  crashReports: { find: async () => ({ status: "notFound" }) },
+  crashReportRecorder: {
+    recordCrash: async () => {
+      throw new Error("no crash report should be recorded");
+    },
+  },
   ...overrides,
 });
 
@@ -864,5 +876,176 @@ describe("CrashApp (physical iOS, #14096)", () => {
     expect(result).toMatchObject({ success: false, wasRunning: true, processId: 4321 });
     expect(result.error).toContain("device is locked");
     expect(invalidations).toHaveLength(1);
+  });
+});
+
+describe("CrashApp native crash reports (#14103)", () => {
+  const report = (processId: number, platform: "android" | "ios"): NativeCrashReport => ({
+    id: `report-${processId}`,
+    platform,
+    source: platform === "ios" ? "ios_ips" : "android_dropbox",
+    appId: "com.example.app",
+    appVersion: "1.4.0",
+    processId,
+    exceptionType: platform === "ios" ? "EXC_CRASH (SIGABRT)" : "CrashedByAdbException",
+    exceptionMessage: platform === "ios" ? "abort() called" : "shell-induced crash",
+    terminationReason: "SIGNAL 6: Abort trap: 6",
+    frames: [
+      {
+        className: "libsystem_c.dylib",
+        methodName: "abort",
+        fileName: null,
+        lineNumber: null,
+        isAppCode: false,
+      },
+    ],
+    reportPath: "/reports/Playground.ips",
+  });
+
+  function finder(lookup: NativeCrashReportLookup) {
+    const queries: NativeCrashReportQuery[] = [];
+    return {
+      queries,
+      find: async (query: NativeCrashReportQuery) => (queries.push(query), lookup),
+    };
+  }
+
+  function recorder(result: string | Error = "occ-7") {
+    const recorded: RecordCrashInput[] = [];
+    return {
+      recorded,
+      recordCrash: async (input: RecordCrashInput) => {
+        recorded.push(input);
+        if (result instanceof Error) {
+          throw result;
+        }
+        return result;
+      },
+    };
+  }
+
+  function androidWithoutLogcatEvidence() {
+    const adb = new FakeAdbClient();
+    adb.setCommandResultSequence("shell dumpsys activity processes", [
+      "*APP* UID u0a123 ProcessRecord{abc 3220:com.example.app/u0a123}",
+      "*APP* UID u0a123 ProcessRecord{abc 3220:com.example.app/u0a123}",
+      "",
+    ]);
+    adb.setCommandResult("shell logcat -b crash -d -v epoch -t 200", "");
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    return { adb, timer };
+  }
+
+  test("confirms an Android crash from the dropbox report when logcat has no marker", async () => {
+    const { adb, timer } = androidWithoutLogcatEvidence();
+    const crashReports = finder({ status: "found", report: report(3220, "android") });
+    const failures = recorder();
+
+    const result = await new CrashApp(
+      androidDevice,
+      dependencies({ adb, timer, crashReports, crashReportRecorder: failures }),
+    ).execute("com.example.app");
+
+    expect(result).toMatchObject({
+      success: true,
+      confirmed: true,
+      processId: 3220,
+      evidence: {
+        source: "android_dropbox",
+        summary: "CrashedByAdbException: shell-induced crash",
+      },
+      crashReport: {
+        status: "found",
+        source: "android_dropbox",
+        exceptionType: "CrashedByAdbException",
+        terminationReason: "SIGNAL 6: Abort trap: 6",
+        frames: ["abort (libsystem_c.dylib)"],
+        failureOccurrenceId: "occ-7",
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(crashReports.queries).toEqual([
+      expect.objectContaining({ appId: "com.example.app", processId: 3220 }),
+    ]);
+    expect(failures.recorded).toEqual([
+      expect.objectContaining({
+        exceptionType: "CrashedByAdbException",
+        deviceId: androidDevice.deviceId,
+        appVersion: "1.4.0",
+      }),
+    ]);
+  });
+
+  test("keeps the unconfirmed result and reports notFound when no report exists", async () => {
+    const { adb, timer } = androidWithoutLogcatEvidence();
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb, timer })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      confirmed: false,
+      crashReport: { status: "notFound" },
+    });
+    expect(result.error).toContain("no fresh OS crash evidence");
+  });
+
+  test("attaches the .ips report to a log-confirmed iOS Simulator crash and records it", async () => {
+    const processList = "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]";
+    const commands = new FakeSimulatorCommands(
+      [processList, processList, "PID\tStatus\tLabel\n"],
+      "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
+    );
+    const timer = new FakeTimer();
+    timer.advanceTime(1_700_000_000_000);
+    const crashReports = finder({ status: "found", report: report(27955, "ios") });
+    const failures = recorder();
+
+    const result = await new CrashApp(
+      iosSimulator,
+      dependencies({ simctl: commands, timer, crashReports, crashReportRecorder: failures }),
+    ).execute("com.example.app");
+
+    expect(result).toMatchObject({
+      success: true,
+      confirmed: true,
+      evidence: { source: "ios_unified_log" },
+      crashReport: {
+        status: "found",
+        source: "ios_ips",
+        reportPath: "/reports/Playground.ips",
+        exceptionType: "EXC_CRASH (SIGABRT)",
+        failureOccurrenceId: "occ-7",
+      },
+    });
+    expect(crashReports.queries).toEqual([
+      {
+        appId: "com.example.app",
+        processId: 27955,
+        notBeforeTimestampMs: 1_700_000_000_000,
+        signal: undefined,
+      },
+    ]);
+    expect(failures.recorded).toHaveLength(1);
+  });
+
+  test("a failure to record the report never fails a confirmed crash", async () => {
+    const { adb, timer } = androidWithoutLogcatEvidence();
+
+    const result = await new CrashApp(
+      androidDevice,
+      dependencies({
+        adb,
+        timer,
+        crashReports: finder({ status: "found", report: report(3220, "android") }),
+        crashReportRecorder: recorder(new Error("database is locked")),
+      }),
+    ).execute("com.example.app");
+
+    expect(result).toMatchObject({ success: true, confirmed: true });
+    expect(result.crashReport).toMatchObject({ status: "found" });
+    expect(result.crashReport).not.toHaveProperty("failureOccurrenceId");
   });
 });

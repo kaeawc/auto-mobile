@@ -579,7 +579,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         { bypassDeviceListCache: true },
         signal,
       );
-      return devices.some((device) => device.deviceId === serial);
+      if (devices.some((device) => device.deviceId === serial)) {
+        return true;
+      }
+      // Any listed transport confirms startup, even before adb reports it as online.
+      return (await this.getListedNonDeviceStatesAmong([serial], { signal })).has(serial);
     } catch (error) {
       // adb may be unavailable during startup; the stdout grace and fallback still validate it.
       logger.debug(`Could not probe emulator startup serial '${serial}': ${errorMessage(error)}`);

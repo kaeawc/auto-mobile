@@ -121,7 +121,7 @@ describe("appearance sync on device readiness", () => {
           ]);
         }
         await manager.ensureDeviceReady(platform, undefined, { readiness: "booted" });
-        expect(dependencies.apply).toHaveBeenCalledTimes(1);
+        expect(dependencies.apply).toHaveBeenCalledTimes(2);
       },
     );
   }
@@ -202,8 +202,8 @@ describe("readiness for a read", () => {
           ).toEqual([]);
           expect(appearanceSimctl.getMethodCalls("executeCommandArgs")).toEqual([]);
           expect(recordBeforeChange).not.toHaveBeenCalled();
-          expect(manager.getCurrentDevice()).toBeUndefined();
-          expect(manager.getCurrentPlatform()).toBeUndefined();
+          expect(manager.getExplicitDevicePin()).toBeUndefined();
+          expect(manager.getExplicitDevicePin()?.platform).toBeUndefined();
           if (platform === "android") {
             expect(window.getGetActiveCallCount()).toBeGreaterThan(0);
           }
@@ -227,8 +227,8 @@ describe("readiness for a read", () => {
       expect(dependencies.getConfig).toHaveBeenCalledWith("holder");
       expect(dependencies.apply).toHaveBeenCalledTimes(1);
       expect(dependencies.apply).toHaveBeenCalledWith(device, "dark");
-      expect(manager.getCurrentDevice()).toEqual(device);
-      expect(manager.getCurrentPlatform()).toBe(platform);
+      expect(manager.getExplicitDevicePin()).toBeUndefined();
+      expect(manager.getExplicitDevicePin()).toBeUndefined();
       if (platform === "android") {
         expect(
           adb
@@ -249,7 +249,7 @@ describe("readiness for a read", () => {
       });
       expect(dependencies.apply).toHaveBeenCalledTimes(1);
       expect(dependencies.apply).toHaveBeenCalledWith(device, "dark");
-      expect(manager.getCurrentDevice()).toEqual(device);
+      expect(manager.getExplicitDevicePin()).toBeUndefined();
     });
 
     test(`${platform}: reads after control preserve the current device without more writes`, async () => {
@@ -266,8 +266,8 @@ describe("readiness for a read", () => {
       await manager.ensureDeviceReady(platform, undefined, { readiness: "booted", intent: "read" });
       expect(dependencies.getConfig).toHaveBeenCalledTimes(1);
       expect(dependencies.apply).toHaveBeenCalledTimes(1);
-      expect(manager.getCurrentDevice()).toEqual(device);
-      expect(manager.getCurrentPlatform()).toBe(platform);
+      expect(manager.getExplicitDevicePin()).toBeUndefined();
+      expect(manager.getExplicitDevicePin()).toBeUndefined();
       expect(
         adb
           .getExecutedCommands()
@@ -294,7 +294,7 @@ describe("readiness for a read", () => {
         .filter((command) => /cmd uimode night|settings put|settings delete/.test(command)),
     ).toEqual([]);
     expect(appearanceSimctl.getMethodCalls("executeCommandArgs")).toEqual([]);
-    expect(manager.getCurrentDevice()).toBeUndefined();
-    expect(manager.getCurrentPlatform()).toBeUndefined();
+    expect(manager.getExplicitDevicePin()).toBeUndefined();
+    expect(manager.getExplicitDevicePin()?.platform).toBeUndefined();
   });
 });

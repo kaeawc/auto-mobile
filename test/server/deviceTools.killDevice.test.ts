@@ -3812,7 +3812,7 @@ describe("killDevice handler", () => {
     }
   });
 
-  test("a tool call after iOS kill cannot revive a pending screenshot client", async () => {
+  test("a tool call after iOS kill refuses its stale session and cannot revive a pending screenshot client", async () => {
     const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "ios-killed" };
     const timer = new FakeTimer();
     const successfulManager = new SuccessfulKillDeviceManager();
@@ -3874,11 +3874,13 @@ describe("killDevice handler", () => {
         z.object({}),
         async () => ({ success: true }),
       );
-      await registry.getTool("postKillProbe")!.handler({
-        deviceId: device.deviceId,
-        platform: "ios",
-        sessionUuid: "session-1",
-      });
+      await expect(
+        registry.getTool("postKillProbe")!.handler({
+          deviceId: device.deviceId,
+          platform: "ios",
+          sessionUuid: "session-1",
+        }),
+      ).rejects.toMatchObject({ code: "direct_session_not_active" });
 
       expect(String(await screenshotResult)).toContain("WebSocket connection closed");
       const postKillClient = IOSCtrlProxyClient.getInstance(device);

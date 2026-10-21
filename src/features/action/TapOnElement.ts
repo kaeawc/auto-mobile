@@ -58,6 +58,7 @@ import { resolveTapAccessibilityDependencies } from "./tapAccessibilityDependenc
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { type RenderedObservationReader } from "./TargetDisplayAction";
 import { resolveTapOnCall, type TapOnCall } from "./ActionCall";
+import { tapPlatformTraits, type TapPlatformTraits } from "./strategies/tapPlatformTraits";
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
@@ -108,9 +109,9 @@ export { tapFocusFailure, tapResolvedLayer, type TapFocusFailure, type TapOnFocu
 
 export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
   private readonly semanticLinks = new TapSemanticLinks({
-    usesAndroidLinkActivation: () => this.device.platform === "android",
-    usesIosLinkActivation: () => this.device.platform === "ios",
-    usesCapturedOwnerIdentity: () => this.device.platform === "ios",
+    usesAndroidLinkActivation: () => this.platformTraits.androidLinkActivation,
+    usesIosLinkActivation: () => this.platformTraits.iosLinkActivation,
+    usesCapturedOwnerIdentity: () => this.platformTraits.capturedOwnerIdentity,
     accessibilityService: () => this.accessibilityService,
     activateSemanticLink: (...args) => this.activateSemanticLink(...args),
     device: () => this.device,
@@ -160,7 +161,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     withObservationScreenSize: (...args) => this.withObservationScreenSize(...args),
   });
   private readonly displayRouter = new TapDisplayRouter({
-    routesAndroidDisplay: () => this.device.platform === "android",
+    routesAndroidDisplay: () => this.platformTraits.routesAndroidDisplay,
     accessibilityService: () => this.accessibilityService,
     adb: () => this.adb,
     applyEnsureCheckedResult: (...args) => this.applyEnsureCheckedResult(...args),
@@ -203,21 +204,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   });
   private readonly execution = new TapExecution({
     runPlatformTap: async (dispatch) => {
-      switch (this.device.platform) {
-        case "android":
-          return dispatch.android();
-        case "ios":
-          return dispatch.ios();
-        default:
-          throw unsupportedPlatformError(this.device.platform, "tap on elements");
+      const ladder = this.platformTraits.tapDispatch;
+      if (ladder === undefined) {
+        throw unsupportedPlatformError(this.device.platform, "tap on elements");
       }
+      return dispatch[ladder]();
     },
-    detectsAccessibilityBeforeSearch: () => this.device.platform === "android",
-    refreshesAccessibilityHierarchyBeforeSearch: () => this.device.platform === "android",
-    revalidatesCachedTargets: () =>
-      this.device.platform === "android" || this.device.platform === "ios",
-    canReuseAccessibilityState: () => this.device.platform !== "ios",
-    requiresFreshExtractionForCachedTarget: () => this.device.platform === "ios",
+    detectsAccessibilityBeforeSearch: () => this.platformTraits.detectsAccessibilityBeforeSearch,
+    refreshesAccessibilityHierarchyBeforeSearch: () =>
+      this.platformTraits.refreshesAccessibilityHierarchyBeforeSearch,
+    revalidatesCachedTargets: () => this.platformTraits.revalidatesCachedTargets,
+    canReuseAccessibilityState: () => this.platformTraits.canReuseAccessibilityState,
+    requiresFreshExtractionForCachedTarget: () =>
+      this.platformTraits.requiresFreshExtractionForCachedTarget,
     activateAccessibilityLinkPhase: (...args) => this.activateAccessibilityLinkPhase(...args),
     activateSubtextPhase: (...args) => this.activateSubtextPhase(...args),
     applyEnsureCheckedResult: (...args) => this.applyEnsureCheckedResult(...args),
@@ -461,13 +460,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     this.longPressMetadataDetector = new LongPressMetadataDetector(this.elementParser);
   }
 
+  /** Platform facts for the bound device; read per call because `device` can be rebound. */
+  private get platformTraits(): TapPlatformTraits {
+    return tapPlatformTraits(this.device.platform);
+  }
+
   private createElementSelector(options: TapOnElementDependencies): ElementSelector {
     return (
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
         platform: this.device.platform,
         iosMultiPanel:
-          this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+          this.platformTraits.panelAwareSelection && (this.device.displays?.panels.length ?? 0) > 1,
       })
     );
   }

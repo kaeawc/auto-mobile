@@ -55,6 +55,31 @@ function managerWith(client: AdmissionClient): DaemonManager {
 }
 
 describe("safe-restart admission of an incumbent daemon (#13792)", () => {
+  test.each(["preparation", "admission"] as const)(
+    "identity-recovery %s refusal carries its reason on the deferred error",
+    async (phase) => {
+      let calls = 0;
+      const client = new AdmissionClient(async () => {
+        calls += 1;
+        return phase === "admission" && calls === 1
+          ? { accepted: true, maintenanceToken: "recovery-token" }
+          : { accepted: false, reason: "active_operations" };
+      });
+
+      const outcome = managerWith(client)["prepareIdentityRecoveryRestart"]({
+        ...expected,
+        dbPath: "/incumbent/auto-mobile.db",
+        options: {},
+      });
+
+      await expect(outcome).rejects.toBeInstanceOf(DaemonRestartDeferredError);
+      await expect(outcome).rejects.toMatchObject({
+        refusalReason: "active_operations",
+        message: new DaemonRestartDeferredError("active_operations").message,
+      });
+    },
+  );
+
   test("one bounded call carries the admission, with no separate default-timeout connect", async () => {
     const client = new AdmissionClient(async () => ({ accepted: true }));
 

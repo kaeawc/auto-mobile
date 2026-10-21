@@ -112,6 +112,7 @@ export class DaemonMaintenance {
         // The production recovery retries through startAuxiliarySocket, which keeps a live
         // holder as a warning and clears degradation/records ownership after a successful bind.
         retryDegradedObservationStream: () => this.host.observationStreamHealth().recover(),
+        onObservationStreamRestored: () => this.host.republishIdentity(),
         databaseHealthProbe: () => this.host.services.databaseHealthProbe(),
         onDatabaseFailureChanged: (message) => {
           this.host.setLastDatabaseHealthFailure(message);

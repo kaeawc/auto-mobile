@@ -1,6 +1,9 @@
+import { tmpdir } from "node:os";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { defaultTimer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import type { AppFileFileSystem } from "./appFileService";
 import { nodeAppFileFileSystem } from "./appFileSupport";
 import {
   DefaultSessionLogService,
@@ -8,7 +11,12 @@ import {
   type SessionLogServiceDependencies,
 } from "./DefaultSessionLogService";
 import { AndroidSessionLogProvider } from "./AndroidSessionLogProvider";
+import { IosSessionLogProvider } from "./IosSessionLogProvider";
 import { IosSimulatorSessionLogProvider } from "./IosSimulatorSessionLogProvider";
+import {
+  PHYSICAL_UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
+  PhysicalIosSessionLogProvider,
+} from "./PhysicalIosSessionLogProvider";
 export type {
   SessionLogSimctl,
   SessionLogCollectRequest,
@@ -32,14 +40,33 @@ export function createSessionLogService(
   deps: SessionLogServiceDependencies = {},
 ): SessionLogService {
   const timer = deps.timer ?? defaultTimer;
+  const fileSystem = deps.fileSystem ?? nodeAppFileFileSystem;
   const providers = deps.providers ?? [
     new AndroidSessionLogProvider(deps.adbFactory ?? defaultAdbClientFactory),
-    new IosSimulatorSessionLogProvider(
-      deps.simctlFactory ?? ((device) => new SimCtlClient(device)),
-      deps.fileSystem ?? nodeAppFileFileSystem,
-      timer,
-      deps.unifiedLogTimeoutMs ?? UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
+    new IosSessionLogProvider(
+      new IosSimulatorSessionLogProvider(
+        deps.simctlFactory ?? ((device) => new SimCtlClient(device)),
+        fileSystem,
+        timer,
+        deps.unifiedLogTimeoutMs ?? UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
+      ),
+      createPhysicalIosProvider(deps.physicalIos, fileSystem, timer),
     ),
   ];
   return new DefaultSessionLogService(providers);
+}
+
+function createPhysicalIosProvider(
+  physicalIos: SessionLogServiceDependencies["physicalIos"] = {},
+  fileSystem: AppFileFileSystem,
+  timer: Timer,
+): PhysicalIosSessionLogProvider {
+  return new PhysicalIosSessionLogProvider({
+    host: physicalIos.host ?? new DefaultHostCommandExecutor(),
+    fileSystem,
+    timer,
+    timeoutMs: physicalIos.timeoutMs ?? PHYSICAL_UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
+    hostPlatform: physicalIos.hostPlatform ?? process.platform,
+    tempRoot: physicalIos.tempRoot ?? tmpdir(),
+  });
 }

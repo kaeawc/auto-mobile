@@ -7,8 +7,11 @@ import {
   defaultGitMetadataClient,
   type GitMetadataClient,
   type GitVersionInfo,
+  type GitDirtyState,
 } from "./GitMetadataClient";
 import { AMBIENT_ENV, readEnvRaw } from "../config/env";
+import { defaultTimer, type Timer } from "./SystemTimer";
+import { logger } from "./logger";
 
 export type { GitVersionInfo } from "./GitMetadataClient";
 
@@ -29,7 +32,10 @@ export interface McpVersionDeps {
   readGitVersion: () => GitVersionInfo | null;
 }
 
-let cachedVersion: string | null = null;
+export interface McpVersionResolverDeps extends McpVersionDeps {
+  timer: Pick<Timer, "setTimeout">;
+  readDirtyState: () => Promise<GitDirtyState | null>;
+}
 
 const findPackageJson = (startDir: string): string | null => {
   let currentDir = startDir;
@@ -148,18 +154,59 @@ export const resolveMcpServerVersion = (deps: McpVersionDeps): string => {
   return formatMcpServerVersion(base, deps.readGitVersion());
 };
 
-export const getMcpServerVersion = (): string => {
-  if (cachedVersion) {
-    return cachedVersion;
-  }
+/** Cache the startup stamp and refine tracked edits once, off the startup path. */
+export const createMcpVersionResolver = (deps: McpVersionResolverDeps): { current(): string } => {
+  let cachedVersion: string | null = null;
+  return {
+    current() {
+      if (cachedVersion !== null) {
+        return cachedVersion;
+      }
+      const override = deps.env.MCP_SERVER_VERSION;
+      if (override) {
+        cachedVersion = override;
+        return cachedVersion;
+      }
+      const base = deps.readPackageVersion() || deps.env.npm_package_version || "unknown";
+      const git = base === "unknown" ? null : deps.readGitVersion();
+      cachedVersion = formatMcpServerVersion(base, git);
+      if (git) {
+        const refine = async (): Promise<void> => {
+          try {
+            const state = await deps.readDirtyState();
+            if (state?.dirty) {
+              cachedVersion = formatMcpServerVersion(base, { ...git, ...state });
+            }
+          } catch (error) {
+            logger.warn("Background git dirty-state resolution failed", error);
+          }
+        };
+        deps.timer.setTimeout(() => void refine(), 0);
+      }
+      return cachedVersion;
+    },
+  };
+};
 
-  cachedVersion = resolveMcpServerVersion({
+let resolver: ReturnType<typeof createMcpVersionResolver> | undefined;
+
+export const getMcpServerVersion = (): string => {
+  resolver ??= createMcpVersionResolver({
     env: {
       MCP_SERVER_VERSION: readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION),
       npm_package_version: readEnvRaw(AMBIENT_ENV.NPM_PACKAGE_VERSION),
     },
     readPackageVersion: readPackageVersionFromDisk,
     readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),
+    readDirtyState: () =>
+      (testOverrides.gitMetadataClient ?? defaultGitMetadataClient).readDirtyState(moduleDir()),
+    timer: {
+      setTimeout(callback, ms) {
+        const handle = defaultTimer.setTimeout(callback, ms);
+        handle.unref?.();
+        return handle;
+      },
+    },
   });
-  return cachedVersion;
+  return resolver.current();
 };

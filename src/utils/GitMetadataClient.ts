@@ -1,7 +1,14 @@
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
+import { execFile } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { logger } from "./logger";
+
+export interface GitDirtyState {
+  dirty: boolean;
+  dirtyHash: string | null;
+}
 
 export interface GitVersionInfo {
   shortSha: string;
@@ -20,6 +27,13 @@ export type GitCommandRunner = (
   args: readonly string[],
   options: GitCommandOptions,
 ) => string | null;
+
+/** Injectable asynchronous argv boundary for tracked working-tree probes. */
+export type GitAsyncCommandRunner = (
+  command: "git",
+  args: readonly string[],
+  options: GitCommandOptions,
+) => Promise<string | null>;
 
 /** Synchronous, read-only boundary; absent paths return null. */
 export interface GitMetadataReader {
@@ -46,6 +60,7 @@ const defaultReader: GitMetadataReader = {
 };
 
 export interface GitMetadataClient {
+  readDirtyState(cwd: string): Promise<GitDirtyState | null>;
   readVersion(
     cwd: string,
     readPackageName: (directory: string) => string | null,
@@ -74,8 +89,25 @@ const defaultRunner: GitCommandRunner = (_command, args, { cwd, timeoutMs }) => 
   return (typeof result.stdout === "string" ? result.stdout : result.stdout.toString()).trim();
 };
 
+const defaultAsyncRunner: GitAsyncCommandRunner = async (command, args, { cwd, timeoutMs }) => {
+  try {
+    return await new Promise<string | null>((resolve) => {
+      execFile(
+        command,
+        args,
+        { cwd, encoding: "utf8", timeout: timeoutMs, killSignal: "SIGTERM" },
+        (error, stdout) => resolve(error ? null : stdout.trim()),
+      );
+    });
+  } catch (error) {
+    logger.warn("Async git version probe failed", error);
+    return null;
+  }
+};
+
 /**
- * Owns synchronous git metadata probing. All commands use argv, a bounded
+ * Resolves HEAD synchronously and tracked working-tree state asynchronously.
+ * All commands use argv, a bounded
  * timeout, and SIGTERM cleanup; unavailable or non-repository environments
  * produce no metadata rather than making version discovery fail.
  */
@@ -83,6 +115,7 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
   constructor(
     private readonly run: GitCommandRunner = defaultRunner,
     private readonly fs: GitMetadataReader = defaultReader,
+    private readonly runAsync: GitAsyncCommandRunner = defaultAsyncRunner,
   ) {}
 
   readVersion(
@@ -107,16 +140,28 @@ export class DefaultGitMetadataClient implements GitMetadataClient {
     // Unlike --short=12, this does not lengthen an astronomically rare collision.
     const shortSha = sha.slice(0, 12);
 
-    const status = this.execute(cwd, ["status", "--porcelain", "--untracked-files=no"]);
-    const dirty = status !== null && status.length > 0;
+    return { shortSha, dirty: false, dirtyHash: null };
+  }
+
+  async readDirtyState(cwd: string): Promise<GitDirtyState | null> {
+    const options = { cwd, timeoutMs: GIT_TIMEOUT_MS };
+    const status = await this.runAsync(
+      "git",
+      ["status", "--porcelain", "--untracked-files=no"],
+      options,
+    );
+    if (status === null) {
+      return null;
+    }
+    const dirty = status.length > 0;
     let dirtyHash: string | null = null;
     if (dirty) {
-      const diff = this.execute(cwd, ["diff", "HEAD"]);
+      const diff = await this.runAsync("git", ["diff", "HEAD"], options);
       if (diff) {
         dirtyHash = createHash("sha256").update(diff).digest("hex").slice(0, 12);
       }
     }
-    return { shortSha, dirty, dirtyHash };
+    return { dirty, dirtyHash };
   }
 
   private findRoot(cwd: string): string | null {

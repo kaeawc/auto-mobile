@@ -35,7 +35,7 @@ const fixture = (fs = plainRepo(), responses: Record<string, string | null> = {}
         ? ""
         : null;
   };
-  const client = new DefaultGitMetadataClient(run, fs);
+  const client = new DefaultGitMetadataClient(run, fs, async (...args) => run(...args));
   return { client, calls, fs, read: (cwd = ROOT) => client.readVersion(cwd, () => OWN) };
 };
 
@@ -47,26 +47,19 @@ describe("DefaultGitMetadataClient", () => {
     expect(fs.inspections).toEqual([]);
   });
 
-  test("walks upward to a plain repo and preserves argv and timeout for status", () => {
+  test("walks upward to a plain repo without spawning", () => {
     const { read, calls } = fixture();
     expect(read(`${ROOT}/src/utils`)).toEqual(CLEAN);
-    expect(calls).toEqual([
-      { command: "git", args: STATUS, cwd: `${ROOT}/src/utils`, timeoutMs: 2_000 },
-    ]);
+    expect(calls).toEqual([]);
   });
 
-  test.each([false, true])("spawns before/after: clean 3 -> 1, dirty 4 -> 2 (%s)", (dirty) => {
+  test.each([false, true])("readVersion never spawns status/diff (dirty: %s)", (dirty) => {
     const { read, calls } = fixture(plainRepo(), {
       status: dirty ? " M src/index.ts" : "",
       diff: "tracked edit",
     });
-    expect(read()?.dirty).toBe(dirty);
-    const before = 2 + 1 + Number(dirty); // root + abbreviated SHA + status (+ diff)
-    const after = 1 + Number(dirty); // status (+ diff), zero rev-parse on the fast path
-    expect(before).toBe(dirty ? 4 : 3);
-    expect(calls).toHaveLength(after);
-    expect(calls.filter(({ args }) => args[0] === "rev-parse")).toHaveLength(0);
-    expect(calls.map(({ args }) => args)).toEqual(dirty ? [STATUS, ["diff", "HEAD"]] : [STATUS]);
+    expect(read()).toEqual(CLEAN);
+    expect(calls).toEqual([]);
   });
 
   test.each(["/repo/.git/worktrees/lane", "../../repo/.git/worktrees/lane"])(
@@ -82,7 +75,7 @@ describe("DefaultGitMetadataClient", () => {
       });
       const { read, calls } = fixture(fs);
       expect(read()).toEqual(CLEAN);
-      expect(calls).toHaveLength(1);
+      expect(calls).toHaveLength(0);
     },
   );
 
@@ -98,7 +91,7 @@ describe("DefaultGitMetadataClient", () => {
       }),
     );
     expect(read()).toEqual(CLEAN);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(0);
   });
 
   test("reads a submodule gitfile without commondir", () => {
@@ -110,7 +103,7 @@ describe("DefaultGitMetadataClient", () => {
       }),
     );
     expect(read()).toEqual(CLEAN);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(0);
   });
 
   test.each([false, true])("reads packed-only refs (linked worktree: %s)", (linked) => {
@@ -124,7 +117,7 @@ describe("DefaultGitMetadataClient", () => {
       `# pack-refs with: peeled fully-peeled sorted\n${OTHER_SHA} refs/tags/v1\n^${SHA}\n${SHA} refs/heads/main\n`;
     const { read, calls } = fixture(fs);
     expect(read()).toEqual(CLEAN);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(0);
   });
 
   test("prefers loose refs over packed refs", () => {
@@ -138,7 +131,7 @@ describe("DefaultGitMetadataClient", () => {
     fs.entries[`${ROOT}/.git/HEAD`] = `${sha}\n`;
     const { read, calls } = fixture(fs);
     expect(read()).toEqual({ ...CLEAN, shortSha: sha.slice(0, 12) });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(0);
   });
 
   test("follows symbolic ref chains, including a packed terminal ref", () => {
@@ -147,7 +140,7 @@ describe("DefaultGitMetadataClient", () => {
     fs.entries[`${ROOT}/.git/packed-refs`] = `${SHA} refs/heads/alias\n`;
     const { read, calls } = fixture(fs);
     expect(read()).toEqual(CLEAN);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(0);
   });
 
   test("resolves worktree-private refs in the worktree gitdir", () => {
@@ -188,7 +181,9 @@ describe("DefaultGitMetadataClient", () => {
     }
     const { read, calls } = fixture(fs, { sha: SHA });
     expect(read()).toEqual(CLEAN);
-    expect(calls.map(({ args }) => args)).toEqual([["rev-parse", "HEAD"], STATUS]);
+    expect(calls).toEqual([
+      { command: "git", args: ["rev-parse", "HEAD"], cwd: ROOT, timeoutMs: 2_000 },
+    ]);
   });
 
   test("filesystem read errors fall back before logger initialization", () => {
@@ -200,7 +195,7 @@ describe("DefaultGitMetadataClient", () => {
     const fs = new UnreadableGitMetadataReader(plainRepo().entries);
     const { read, calls } = fixture(fs, { sha: SHA });
     expect(read()).toEqual(CLEAN);
-    expect(calls.map(({ args }) => args)).toEqual([["rev-parse", "HEAD"], STATUS]);
+    expect(calls.map(({ args }) => args)).toEqual([["rev-parse", "HEAD"]]);
   });
 
   test("returns null when fallback git is missing, times out, or cannot resolve HEAD", () => {
@@ -238,38 +233,75 @@ describe("DefaultGitMetadataClient", () => {
     expect(fs.reads).toEqual([]);
   });
 
-  test("re-reads HEAD, status and tracked diff on every call", () => {
+  test("re-reads HEAD on every synchronous call without spawning", () => {
+    const { read, calls, fs } = fixture();
+    expect(read()).toEqual(CLEAN);
+    fs.entries[`${ROOT}/.git/refs/heads/main`] = OTHER_SHA;
+    expect(read()).toEqual({ ...CLEAN, shortSha: OTHER_SHA.slice(0, 12) });
+    expect(calls).toEqual([]);
+  });
+
+  test("re-reads status and tracked diff on every async call", async () => {
     const fs = plainRepo();
     let status = " M src/index.ts";
     let diff = "edit A";
     const recorded: string[][] = [];
-    const client = new DefaultGitMetadataClient((_command, args) => {
-      recorded.push([...args]);
-      return args[0] === "status" ? status : diff;
-    }, fs);
-    const read = () => client.readVersion(ROOT, () => OWN);
-    expect(read()).toEqual({
-      shortSha: SHA.slice(0, 12),
+    const client = new DefaultGitMetadataClient(
+      () => {
+        throw new Error("unexpected sync git");
+      },
+      fs,
+      async (_command, args) => {
+        recorded.push([...args]);
+        return args[0] === "status" ? status : diff;
+      },
+    );
+    const read = () => client.readDirtyState(ROOT);
+    expect(await read()).toEqual({
       dirty: true,
       dirtyHash: createHash("sha256").update("edit A").digest("hex").slice(0, 12),
     });
     diff = "edit B";
-    expect(read()?.dirtyHash).toBe(createHash("sha256").update(diff).digest("hex").slice(0, 12));
-    fs.entries[`${ROOT}/.git/refs/heads/main`] = OTHER_SHA;
+    expect((await read())?.dirtyHash).toBe(
+      createHash("sha256").update(diff).digest("hex").slice(0, 12),
+    );
     status = "";
-    expect(read()).toEqual({ ...CLEAN, shortSha: OTHER_SHA.slice(0, 12) });
+    expect(await read()).toEqual({ dirty: false, dirtyHash: null });
     expect(recorded).toEqual([STATUS, ["diff", "HEAD"], STATUS, ["diff", "HEAD"], STATUS]);
   });
 
-  test.each([null, ""])("retains a bare dirty marker when diff is unavailable: %s", (diff) => {
-    expect(fixture(plainRepo(), { status: " M x", diff }).read()).toEqual({
-      ...CLEAN,
+  test("async probes preserve argv, cwd and timeout", async () => {
+    const { client, calls } = fixture(plainRepo(), { status: " M x", diff: "edit" });
+    expect(await client.readDirtyState(`${ROOT}/src/utils`)).toEqual({
       dirty: true,
+      dirtyHash: createHash("sha256").update("edit").digest("hex").slice(0, 12),
     });
+    expect(calls).toEqual([
+      { command: "git", args: STATUS, cwd: `${ROOT}/src/utils`, timeoutMs: 2_000 },
+      { command: "git", args: ["diff", "HEAD"], cwd: `${ROOT}/src/utils`, timeoutMs: 2_000 },
+    ]);
   });
 
-  test("retains the existing clean fallback when status fails", () => {
-    const { read } = fixture(plainRepo(), { status: null });
-    expect(read()).toEqual(CLEAN);
-  });
+  test.each([null, ""])(
+    "retains a bare dirty marker when diff is unavailable: %s",
+    async (diff) => {
+      expect(
+        await fixture(plainRepo(), { status: " M x", diff }).client.readDirtyState(ROOT),
+      ).toEqual({
+        dirty: true,
+        dirtyHash: null,
+      });
+    },
+  );
+
+  test.each([null, ""])(
+    "status %s skips diff and returns failure or clean state",
+    async (status) => {
+      const { client, calls } = fixture(plainRepo(), { status });
+      expect(await client.readDirtyState(ROOT)).toEqual(
+        status === null ? null : { dirty: false, dirtyHash: null },
+      );
+      expect(calls.map(({ args }) => args)).toEqual([STATUS]);
+    },
+  );
 });

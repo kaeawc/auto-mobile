@@ -8,7 +8,7 @@ import type { ProxySessionState, StallHandoverRecord } from "./ProxySessionState
 import type { PendingHeldSessionLoss } from "./HeldSessionLosses";
 import type { ReleaseEpochLedger } from "./ReleaseEpochLedger";
 import type { Timer } from "../../utils/SystemTimer";
-import type { SessionReleaseSnapshot } from "../sessionManager";
+import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import { DAEMON_BOUND_SESSION_PARAM } from "../constants";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSelectionControl";
 import {

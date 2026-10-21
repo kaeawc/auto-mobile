@@ -1,3 +1,4 @@
+import { SdkCapabilityQueryError } from "../observe/ios/SdkCapabilityQueryError";
 import { SdkTooOldError } from "../../models/SdkTooOldError";
 import { AppNotRunningError } from "../../models/AppNotRunningError";
 /** Stable resource error fields for an absent AutoMobile SDK provider. */
@@ -15,7 +16,11 @@ export class ProviderUnavailableError extends Error {
 export function resourceErrorFields(error: unknown): {
   errorCode?: string;
   errorReason?: string;
+  retryable?: boolean;
 } {
+  if (error instanceof SdkCapabilityQueryError) {
+    return { errorCode: error.code, retryable: error.retryable };
+  }
   if (error instanceof AppNotRunningError || error instanceof SdkTooOldError) {
     return { errorCode: error.code };
   }

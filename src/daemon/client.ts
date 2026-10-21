@@ -1,5 +1,6 @@
 import { handleResponse } from "./clientInboundFrames";
 import type { PendingDaemonRequest } from "./clientInboundFrames";
+import { type DaemonSendPolicy, sendDaemonFrame } from "./clientSend";
 import { existsSync } from "node:fs";
 import type { Socket } from "node:net";
 import { platform } from "node:os";
@@ -9,7 +10,7 @@ import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
-import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
+import { type BuildIdentity, liveDaemonIdentity } from "./buildIdentity";
 import { serializeRequestFrame } from "./clientFrameSerialization";
 import { handleInboundLine } from "./clientInboundFrames";
 import { overflowingResponseId } from "./clientInboundOverflow";
@@ -31,7 +32,8 @@ import {
   CONNECTION_TIMEOUT_MS,
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-  DAEMON_VERSION,
+  resolveDaemonVersion,
+  syncSettledDaemonVersion,
   SOCKET_PATH,
 } from "./constants";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
@@ -101,10 +103,9 @@ export interface DaemonMethodCallOptions {
    */
   abortMode?: "connection" | "request";
   /**
-   * Whether the response backstop sends `daemon/cancelRequest` when no reply arrives in time
-   * (default true). A caller that shortened this RPC's wait only to recover the result later by
-   * request id (session preparation, #13800) sets false so the daemon's work keeps running.
-   * A caller-supplied `signal` abort still cancels.
+   * Send cancellation on response timeout (default true). Session preparation (#13800)
+   * sets false to recover the result by request id while daemon work continues.
+   * A caller-supplied `signal` abort still cancels, including after timeout.
    */
   cancelOnTimeout?: boolean;
 }
@@ -131,6 +132,7 @@ export class DaemonClient {
    * Insertion-ordered and capped so a daemon that never answers cannot grow it.
    */
   private readonly cancelledRequestIds = new Set<string>();
+  private readonly timedOutRequestAbortCleanups = new Map<string, () => void>();
   private framer: LineFramer;
   private inboundClosed = false;
   private readonly closedSockets = new WeakSet<Socket | Duplex>();
@@ -157,13 +159,8 @@ export class DaemonClient {
     connectionTimeout: number = CONNECTION_TIMEOUT_MS,
     timer: Timer = defaultTimer,
     recoveryOptions: DaemonClientRecoveryOptions = {},
-    // `null` opts out of the handshake so the daemon treats this client as legacy and never gates
-    // it — used by diagnostics (doctor) that must reach even a wrong-build daemon to report it,
-    // without triggering a restart. Defaults to this process's real version/build identity.
-    clientIdentity: { version: string; build: BuildIdentity } | null = {
-      version: DAEMON_VERSION,
-      build: getCurrentBuildIdentity(),
-    },
+    // `null` = no handshake, so doctor reaches a wrong-build daemon ungated; omitted = live identity.
+    clientIdentity?: { version: string; build: BuildIdentity } | null,
     {
       idGenerator = defaultIdGenerator,
       platformOverride = platform(),
@@ -180,7 +177,7 @@ export class DaemonClient {
     this.connectionTimeout = connectionTimeout;
     this.timer = timer;
     this.recoveryOptions = recoveryOptions;
-    this.clientIdentity = clientIdentity;
+    this.clientIdentity = clientIdentity === undefined ? liveDaemonIdentity() : clientIdentity;
     this.idGenerator = idGenerator;
     this.platform = platformOverride;
     this.maxInboundFrameBytes = maxInboundFrameBytes;
@@ -299,6 +296,10 @@ export class DaemonClient {
     const attempt = (async () => {
       const deadline = this.timer.now() + timeoutMs;
       try {
+        // Any client that declares an identity must declare the settled one (#14405).
+        if (this.clientIdentity !== null && !syncSettledDaemonVersion()) {
+          await resolveDaemonVersion();
+        }
         await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
       } catch (error) {
         throw this.annotateStaleSocketHint(error);
@@ -378,6 +379,9 @@ export class DaemonClient {
   }
 
   private rejectPendingRequests(error: Error, preserveRequestCause: boolean): void {
+    for (const cleanup of this.timedOutRequestAbortCleanups.values()) {
+      cleanup();
+    }
     for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
       .pendingRequests) {
       this.timer.clearTimeout(timeout);
@@ -423,6 +427,9 @@ export class DaemonClient {
 
   /** Handle a response from daemon; retained for subclass instrumentation. */
   protected handleResponse(response: DaemonResponse): void {
+    if (response.id !== null) {
+      this.timedOutRequestAbortCleanups.get(response.id)?.();
+    }
     handleResponse(
       {
         pendingRequests: this.pendingRequests,
@@ -463,6 +470,9 @@ export class DaemonClient {
   }
 
   private handleSocketClosed(socket: Socket | Duplex | null): void {
+    for (const cleanup of this.timedOutRequestAbortCleanups.values()) {
+      cleanup();
+    }
     if (socket) {
       this.closedSockets.add(socket);
     }
@@ -599,12 +609,7 @@ export class DaemonClient {
     );
   }
 
-  /**
-   * Tell the daemon this client abandoned `requestId` (issue #6384), so it skips
-   * or aborts the request instead of holding this socket's FIFO queue for work
-   * nobody awaits. Best-effort: a dead socket already cancels via disconnect,
-   * and an older daemon answers the unknown method with an ignored error.
-   */
+  /** Best-effort cancellation for abandoned work; late answers are dropped quietly (#6384). */
   private sendCancelFrame(requestId: string): void {
     const socket = this.socket;
     if (!socket || socket.destroyed) {
@@ -623,8 +628,7 @@ export class DaemonClient {
     try {
       socket.write(serializeRequestFrame(frame));
     } catch (error) {
-      // The caller is already being rejected; a failed write means the socket is
-      // going away, and the daemon aborts a closed socket's requests itself.
+      // A failed write means the socket is going away; the daemon aborts a closed socket's requests.
       logger.debug(`Daemon cancel frame for ${requestId} not sent: ${error}`);
     }
   }
@@ -634,6 +638,7 @@ export class DaemonClient {
     if (this.cancelledRequestIds.size > MAX_CANCELLED_REQUEST_IDS) {
       const oldest = this.cancelledRequestIds.values().next().value;
       if (oldest !== undefined) {
+        this.timedOutRequestAbortCleanups.get(oldest)?.();
         this.cancelledRequestIds.delete(oldest);
       }
     }
@@ -820,69 +825,29 @@ export class DaemonClient {
         ? new ProgressExtendableDeadline(this.timer.now(), requestTimeoutMs)
         : undefined;
 
-    let removeAbortListener = () => {};
-    return new Promise((resolve, reject) => {
-      const timeout = this.scheduleRequestTimeout(requestId, toolName, requestTimeoutMs, reject);
-
-      this.pendingRequests.set(requestId, {
-        resolve: (response) => {
-          resolve(response.result);
-        },
-        reject,
-        timeout,
+    return this.send(requestId, frame, {
+      entry: {
         toolName,
         progressToken,
         deadline,
         requestTimeoutMs,
         sentAtMs: this.timer.now(),
         disconnectCause,
-        removeAbortListener: () => removeAbortListener(),
-      });
-      onRequestId?.(requestId);
-
-      if (!this.socket || signal?.aborted) {
-        this.timer.clearTimeout(timeout);
-        this.pendingRequests.delete(requestId);
-        reject(
-          signal?.aborted
-            ? signal.reason
-            : new DaemonRequestNotDeliveredError("Socket connection lost"),
-        );
-        return;
-      }
-
-      try {
-        this.socket.write(frame);
-      } catch (error) {
+      },
+      signal,
+      armTimeout: (reject) =>
+        this.scheduleRequestTimeout(requestId, toolName, requestTimeoutMs, reject),
+      onRegistered: () => onRequestId?.(requestId),
+      socketLostError: () => new DaemonRequestNotDeliveredError("Socket connection lost"),
+      writeError: (error) =>
         // A synchronous write failure means the frame never left this process.
-        this.timer.clearTimeout(timeout);
-        this.pendingRequests.delete(requestId);
-        reject(
-          new DaemonRequestNotDeliveredError(`Daemon socket write failed: ${errorMessage(error)}`, {
-            cause: error,
-          }),
-        );
-        return;
-      }
-      if (signal) {
-        const onAbort = () => {
-          const pending = this.pendingRequests.get(requestId);
-          // A response or timeout may have won before this listener runs.
-          if (!pending) {
-            return;
-          }
-          this.timer.clearTimeout(pending.timeout);
-          this.pendingRequests.delete(requestId);
-          this.sendCancelFrame(requestId);
-          reject(signal.reason);
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-        removeAbortListener = () => signal.removeEventListener("abort", onAbort);
-        if (signal.aborted) {
-          onAbort();
-        }
-      }
-    }).finally(() => removeAbortListener());
+        new DaemonRequestNotDeliveredError(`Daemon socket write failed: ${errorMessage(error)}`, {
+          cause: error,
+        }),
+      abortError: () => signal?.reason,
+      // The connection may be shared with sibling requests; abandon only this one.
+      destroyOnAbort: false,
+    });
   }
 
   /**
@@ -938,83 +903,58 @@ export class DaemonClient {
       ...this.handshakeFields(),
     };
 
-    return new Promise((resolve, reject) => {
-      let removeAbortListener = () => {};
-      const timeout = this.scheduleResponseBackstop(
-        requestId,
-        () => {
-          removeAbortListener();
-          this.pendingRequests.delete(requestId);
-          if (options.cancelOnTimeout !== false) {
-            this.sendCancelFrame(requestId);
-          } else {
-            // The daemon keeps working (#13800); its late answer is expected, not an unknown id.
-            this.rememberCancelledRequestId(requestId);
-          }
-          reject(
-            new McpTimeoutError({
-              toolName: method,
-              timeoutMs,
-              origin: "DaemonClient.callDaemonMethod",
-              detail: `no response from the daemon within budget + grace (${remainingTimeoutMs}ms + ${DAEMON_RESPONSE_GRACE_MS}ms)`,
-            }),
-          );
-        },
-        remainingTimeoutMs + DAEMON_RESPONSE_GRACE_MS,
-      );
-
-      if (options.signal) {
-        const onAbort = () => {
-          this.timer.clearTimeout(this.pendingRequests.get(requestId)?.timeout ?? timeout);
-          this.pendingRequests.delete(requestId);
-          removeAbortListener();
-          // Destroying this dedicated lifecycle connection tells the daemon to
-          // abandon a still-queued local control RPC. Merely rejecting the
-          // caller would leave a delayed metadata repair free to publish after
-          // doctor has already reported its deadline. The cancel frame goes first
-          // so a daemon that reads it before the close skips the request too.
-          this.sendCancelFrame(requestId);
-          if (options.abortMode !== "request") {
-            this.socket?.destroy();
-          }
-          reject(
-            new DaemonUnavailableError(`Daemon request ${method} aborted`, {
-              cause: options.signal?.reason,
-            }),
-          );
-        };
-        options.signal.addEventListener("abort", onAbort, { once: true });
-        removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
-      }
-
-      this.pendingRequests.set(requestId, {
-        resolve: (response) => {
-          resolve(response.result);
-        },
-        reject,
-        timeout,
-        toolName: method,
-        removeAbortListener,
-        disconnectCause,
-      });
-
-      if (!this.socket) {
-        this.timer.clearTimeout(timeout);
-        removeAbortListener();
-        this.pendingRequests.delete(requestId);
-        reject(new DaemonUnavailableError("Socket connection lost"));
-        return;
-      }
-
-      try {
-        this.socket.write(serializeRequestFrame(request));
-      } catch (error) {
-        this.timer.clearTimeout(timeout);
-        removeAbortListener();
-        this.pendingRequests.delete(requestId);
-        reject(toDaemonTransportError(error instanceof Error ? error : new Error(String(error))));
-      }
+    return this.send(requestId, serializeRequestFrame(request), {
+      entry: { toolName: method, disconnectCause },
+      signal: options.signal,
+      armTimeout: (reject, forgetAbort) =>
+        this.scheduleResponseBackstop(
+          requestId,
+          () => {
+            this.pendingRequests.delete(requestId);
+            if (options.cancelOnTimeout !== false) {
+              forgetAbort();
+              this.sendCancelFrame(requestId);
+            } else {
+              // Caller aborts still cancel during status recovery; bounded by the cancelled-id set.
+              if (options.signal) {
+                this.timedOutRequestAbortCleanups.set(requestId, forgetAbort);
+              }
+              // The daemon keeps working (#13800); its late answer is expected, not an unknown id.
+              this.rememberCancelledRequestId(requestId);
+            }
+            reject(
+              new McpTimeoutError({
+                toolName: method,
+                timeoutMs,
+                origin: "DaemonClient.callDaemonMethod",
+                detail: `no response from the daemon within budget + grace (${remainingTimeoutMs}ms + ${DAEMON_RESPONSE_GRACE_MS}ms)`,
+              }),
+            );
+          },
+          remainingTimeoutMs + DAEMON_RESPONSE_GRACE_MS,
+        ),
+      socketLostError: () => new DaemonUnavailableError("Socket connection lost"),
+      writeError: (error) =>
+        toDaemonTransportError(error instanceof Error ? error : new Error(String(error))),
+      abortError: () =>
+        new DaemonUnavailableError(`Daemon request ${method} aborted`, {
+          cause: options.signal?.reason,
+        }),
+      // Cancel first; destroying a lifecycle connection then abandons a queued control RPC.
+      destroyOnAbort: options.abortMode !== "request",
     });
+  }
+
+  /** Register, deliver and settle one request frame (#11817); see {@link sendDaemonFrame}. */
+  private send(requestId: string, frame: string, policy: DaemonSendPolicy): Promise<any> {
+    const context = {
+      socket: () => this.socket,
+      pendingRequests: this.pendingRequests,
+      timedOutRequestAbortCleanups: this.timedOutRequestAbortCleanups,
+      timer: this.timer,
+      sendCancelFrame: (id: string) => this.sendCancelFrame(id),
+    };
+    return sendDaemonFrame(context, requestId, frame, policy);
   }
 
   /**
@@ -1023,16 +963,8 @@ export class DaemonClient {
   async close(): Promise<void> {
     this.connected = false;
 
-    // Reject before destroy emits "close", preserving each request's own
-    // request context instead of replacing all diagnostics with one generic
-    // transport message.
-    for (const [, { timeout, reject, removeAbortListener, disconnectCause }] of this
-      .pendingRequests) {
-      this.timer.clearTimeout(timeout);
-      removeAbortListener?.();
-      reject(new DaemonUnavailableError("Socket connection closed", { cause: disconnectCause }));
-    }
-    this.pendingRequests.clear();
+    // Reject before destroy emits "close", preserving each request's own context.
+    this.rejectPendingRequests(new DaemonUnavailableError("Socket connection closed"), true);
     const socket = this.socket;
     if (socket) {
       await new Promise<void>((resolve) => {

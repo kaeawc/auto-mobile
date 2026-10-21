@@ -292,6 +292,28 @@ describe("restartExpectedGeneration deferral bound (#13792)", () => {
     expect(host.startedWith).toEqual([]);
   }
 
+  test("recovering=true: thrown active-operations refusal waits ten minutes before guidance", async () => {
+    const host = deferredHost();
+    const original = new DaemonRestartDeferredError("active_operations", "active_operations");
+    host.preparationError = original;
+
+    await expect(attempt(host, true)).rejects.toBe(original);
+    await expect(attempt(host, true)).rejects.toBe(original);
+    await expect(attempt(host, true)).rejects.toBe(original);
+    host.timer.advanceTime(TAKEOVER_DEFERRAL_TIME_BOUND_MS);
+    await expect(attempt(host, true)).rejects.toBe(original);
+    host.timer.advanceTime(
+      TAKEOVER_ACTIVE_OPERATIONS_TIME_BOUND_MS - TAKEOVER_DEFERRAL_TIME_BOUND_MS - 1,
+    );
+    await expect(attempt(host, true)).rejects.toBe(original);
+    host.timer.advanceTime(1);
+
+    await expect(attempt(host, true)).rejects.toMatchObject({
+      message: guidance(host, 6, original),
+    });
+    expectNoLifecycleCalls(host);
+  });
+
   for (const recovering of [false, true]) {
     describe(`recovering=${recovering}`, () => {
       test("unavailable admission preserves the original error twice, then gives guidance", async () => {

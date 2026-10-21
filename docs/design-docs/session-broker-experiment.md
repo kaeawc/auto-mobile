@@ -6,6 +6,62 @@ it. Callers do not select slots, pool identities, runner scopes, or capacity.
 The requirement vocabulary and default resolution are documented in
 [session-requirements.md](session-requirements.md).
 
+## Timing receipts and statistics
+
+`contractVersion: 1` replies gain an optional `timing` object. Existing consumers
+may ignore it and any future fields. `session-request-status --json` preserves
+it without projection. `timing.acquisition` is stored on the request receipt;
+release replies include it plus `timing.reset`. A `cleanup_pending` reply's
+reset record is updated after cleanup; read request status to obtain the final
+record. If the release reply budget expires before timing is available, that
+`cleanup_pending` reply can omit timing. Legacy receipts and pre-admission
+refusals can also omit timing.
+
+Acquisition records expose `admission` (`reuse`, `create`, `evict-then-create`),
+`outcome` (`pending`, `ready`, `failed`), `reuseCount`, `startedAtMs`, optional
+`completedAtMs`, and millisecond phases `queueMs`, `admissionWaitMs`, `createMs`,
+`bootMs`, `automationReadyMs`, `totalMs`. This broker has no admission queue, so
+`queueMs` is zero. `admissionWaitMs` includes catalog/default resolution and the
+reservation transaction. Native creation and boot phases come from the existing
+provision timing tree (`provisionExactDevice` and `bootDevice`); the creation
+phase includes exact-device discovery/provisioning, not only the create command.
+Unmeasured native phases are omitted, never manufactured as zero. Reuse reports
+zero creation and boot phases. `reuseCount` starts at zero and increments once
+per reuse reservation, including a reservation whose preparation later fails.
+
+Reset records expose `mode` (`keep-booted`, `erase`, `snapshot`, `wipe-data`,
+`none`), `outcome` (`clean`, `fallback:<mode>`, `destroyed`, `pending`),
+`phases` (phase names mapped to milliseconds), optional `fallbackReason`,
+`reuseCount`, timestamps and `totalMs`. `drain` and `reset` measure broker
+operations; platform resetters add native phases. iOS erase returns `stop`,
+`erase`, `boot`, including partial phase evidence on failure. The extensible
+`ResetOutcome` port record carries `{ outcome, mode, phases, fallbackReason? }`;
+legacy `"clean"`/`"pending"` returns remain accepted (unknown mode is `none`).
+`fallback:<mode>` means a clean fallback completed and is eligible for reuse,
+not merely that fallback was attempted; `none` is not a fallback mode. Failed resets retain the reason and
+ultimately report `destroyed` after authoritative cleanup.
+
+`daemon/sessionBrokerStats { windowMs?, limit? }` is a read-only daemon method:
+default window 24 hours, maximum 30 days; default sample cap 5000, maximum 10000.
+It returns `sinceMs`, `untilMs`, `limit`, `truncated`, and `groups` per exact
+platform/profile, with acquisition/reset counts, `reuseHitRate`, `fallbackRate`,
+`retirements`, and per-phase `{ count, p50, p90 }` in milliseconds. Percentiles
+use the repository's linear-interpolation convention. Rates are fractions;
+empty denominators yield zero. Only completed records in the requested time
+window contribute; acquisition counts, percentiles and reuse hit rates include
+only successful (`ready`) acquisitions. Failed acquisitions remain in receipts
+but do not contribute to these statistics. Unknown phases are excluded rather than counted as zero.
+The indexed read considers the newest updated receipts, is bounded by the
+sample cap, and reports truncation explicitly. Statistics are sampled receipts,
+not lifetime resource counters. `retirements` counts destroyed reset records and
+idle-trim retirements marked `retired`, including destruction still pending,
+not admission evictions or failed-acquisition device destruction. Timing and the saved profile survive provider
+restart, including resource tombstone deletion, and are pruned with receipts
+under `RECEIPT_RETENTION_MS` (export pins retain their usual behavior).
+Structured acquisition/reset log lines contain the same records and profile,
+without owner tokens, scope keys or allocation indices. Pending reset attempts
+and their eventual terminal update may each emit a line.
+
 ## Pinned session exports
 
 Broker mode advertises `session-broker-export/v1`. A client may pass the strict
@@ -259,10 +315,10 @@ there is no temporary burst. Pool selection prefers the most recently returned
 compatible device, even after a total-cap reduction, and evicts the least recently
 returned idle device when no compatible idle device is available. A pending
 eviction or transient destroy failure returns `eviction_pending` with
-`retryable: true` and `retryAfterMs: 1000`. Its destroying resource keeps capacity
-reserved for recovery. The failed request ID remains terminal; after cleanup
-frees capacity, retry with a new request ID. Permanent destroy errors remain
-non-retryable `session_preparation_failed` failures.
+`retryable: true`, `retryAfterMs: 1000`, and `retryRequires: "new_request_id"`.
+Its destroying resource keeps capacity reserved for recovery. The failed request
+ID remains terminal; after cleanup frees capacity, retry with a new request ID.
+Permanent destroy errors remain non-retryable `session_preparation_failed` failures.
 Managed provisioning's `cleanup_pending` remains a separate failure: its retryability
 is suppressed while that request's resource cleanup is pending, with no retry delay injected.
 

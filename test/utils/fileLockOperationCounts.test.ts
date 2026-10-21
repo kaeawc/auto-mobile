@@ -8,7 +8,7 @@ import {
 } from "../../src/utils/fileLock";
 import { fixture, PATH, prefix } from "./fileLockRaceHarness";
 
-const WRITE_CLASS = new Set<LockStep["op"]>([
+const WRITE_CLASS = new Set<string>([
   "mkdir",
   "writeFile",
   "link",

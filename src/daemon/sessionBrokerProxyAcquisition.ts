@@ -393,21 +393,69 @@ function stoppingRetryDelay(error: unknown): number | undefined {
     : SESSION_BROKER_RETRY_AFTER_MS;
 }
 
+function waitForStoppingRetry(
+  timer: SessionBrokerProxyAcquisitionPorts["timer"],
+  delayMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
+    const onAbort = () => {
+      timer.clearTimeout(handle);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason);
+    };
+    const handle = timer.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+    }
+  });
+}
+
 async function prepareBudgetAfterRetry(
+  config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
   statusReserveMs: number,
   deadlineMs: number,
   signal: AbortSignal | undefined,
   retryAfterMs: number | undefined,
-): Promise<number> {
+): Promise<number | SessionBrokerResult> {
   let prepareCallBudgetMs = Math.floor(deadlineMs - ports.timer.now() - statusReserveMs);
   if (retryAfterMs !== undefined && prepareCallBudgetMs > 0) {
     const delayMs = Math.min(retryAfterMs, Math.max(0, deadlineMs - ports.timer.now()));
-    await raceWithDeadline(() => ports.timer.sleep(delayMs), {
-      timer: ports.timer,
-      signal,
-      label: "session broker stopping retry wait",
-    });
+    await waitForStoppingRetry(ports.timer, delayMs, signal);
+    prepareCallBudgetMs = Math.floor(deadlineMs - ports.timer.now() - statusReserveMs);
+    if (prepareCallBudgetMs <= 0) {
+      return exhaustedPrepareBudget(config, retryAfterMs);
+    }
+    const timeoutError = new Error("Session broker retry reconnect exceeded preparation budget");
+    try {
+      await raceWithDeadline(() => ports.ensureConnected(), {
+        timer: ports.timer,
+        timeoutMs: Math.max(1, prepareCallBudgetMs),
+        signal,
+        label: "session broker retry daemon connection",
+        timeoutError: () => timeoutError,
+      });
+    } catch (error) {
+      if (signal?.aborted) {
+        // Cancellation must preserve the proxy's existing unresolved shutdown result.
+        logger.debug("[SessionBroker] Retry reconnect cancelled during proxy shutdown.", error);
+        return unresolvedResult(config, "Session preparation was cancelled during proxy shutdown.");
+      }
+      if (error === timeoutError || ports.timer.now() >= deadlineMs - statusReserveMs) {
+        // Stopping admitted nothing, so exhausting the retry budget needs no status recovery.
+        logger.debug("[SessionBroker] Retry reconnect exhausted the preparation budget.", error);
+        return exhaustedPrepareBudget(config, retryAfterMs);
+      }
+      const message = `Session preparation could not reconnect to the daemon after a stopping refusal: ${errorMessage(error)}`;
+      logger.warn(message, error);
+      return failedResult(config, brokerFailure("daemon_unavailable", message, true));
+    }
     prepareCallBudgetMs = Math.floor(deadlineMs - ports.timer.now() - statusReserveMs);
   }
   return prepareCallBudgetMs;
@@ -446,12 +494,16 @@ async function prepareThenRecover(
     let reply: unknown;
     try {
       const prepareCallBudgetMs = await prepareBudgetAfterRetry(
+        config,
         ports,
         statusReserveMs,
         deadlineMs,
         signal,
         retryAfterMs,
       );
+      if (typeof prepareCallBudgetMs !== "number") {
+        return prepareCallBudgetMs;
+      }
       if (prepareCallBudgetMs <= 0) {
         return exhaustedPrepareBudget(config, retryAfterMs);
       }

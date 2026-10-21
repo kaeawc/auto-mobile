@@ -6,6 +6,7 @@ import {
 import type { BootedDevice, DeviceInfo } from "../../../../src/models/DeviceInfo";
 import { createExecResult } from "../../../../src/utils/execResult";
 import type { AdbExecuteOptions } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 
 export const ANDROID_RESET_PROFILE: AndroidResetProfile = {
   platform: "android",
@@ -45,6 +46,8 @@ export class FakeAndroidResetHost implements AndroidBaselineResetDependencies {
   packageManager = true;
   failCommand: string | undefined;
   strategy: AndroidResetStrategy | undefined;
+  timer: FakeTimer | undefined;
+  resetTimeoutMs: number | undefined;
   closed = 0;
   inventoryCalls = 0;
   lastInventorySignal: AbortSignal | undefined;

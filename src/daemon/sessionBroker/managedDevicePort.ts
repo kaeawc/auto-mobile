@@ -216,6 +216,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       });
       await runAsBindingReconciler(this.key(resource), () =>
         android.capture(resource.resourceId, device, profile, sessionId, {
+          fresh: entry.disposition === "created" || entry.disposition === "replaced",
           signal: options.signal,
           timeoutMs: Math.max(
             0,
@@ -223,6 +224,26 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
           ),
           timer: this.dependencies.timer ?? defaultTimer,
           incarnation: JSON.stringify([resource.resourceId, binding.stableId]),
+          assertOwned: async () => {
+            options.signal?.throwIfAborted();
+            const current = await this.dependencies.registry.getAssignment(this.key(resource));
+            if (
+              !current ||
+              !sameBinding(current, {
+                generation: entry.assignmentGeneration!,
+                stableDeviceId: binding.stableId,
+              }) ||
+              current.state !== "ready" ||
+              current.deviceName !== device.name ||
+              current.execOwner?.sessionUuid !== sessionId ||
+              current.settler !== null ||
+              (await this.hasOpenJournal(this.key(resource)))
+            ) {
+              throw new ActionableError(
+                "Android baseline capture lost exclusive binding ownership",
+              );
+            }
+          },
         }),
       );
     } catch (error) {

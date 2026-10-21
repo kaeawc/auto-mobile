@@ -3,6 +3,13 @@ import { assertSafeSnapshotName } from "../../src/utils/snapshotNameValidation";
 import { ActionableError } from "../../src/models";
 
 describe("assertSafeSnapshotName (#5705)", () => {
+  it.each([
+    "automobile-broker-baseline-v1",
+    "automobile-broker-baseline-v2",
+    "AUTOMOBILE-BROKER-BASELINE-v1",
+  ])("reserves broker baseline %s against capture and restore", (name) => {
+    expect(() => assertSafeSnapshotName(name)).toThrow("reserved");
+  });
   it("refuses a parent-directory traversal name '../x'", () => {
     expect(() => assertSafeSnapshotName("../traversal_x")).toThrow(ActionableError);
     expect(() => assertSafeSnapshotName("../x")).toThrow(/path separator/i);

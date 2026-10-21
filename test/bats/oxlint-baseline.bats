@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 #
 # Tests for scripts/oxlint-baseline.sh -- the oxlint ratchet gate that replaces
 # ESLint's eslint-suppressions.json (oxlint has no native bulk-suppressions).

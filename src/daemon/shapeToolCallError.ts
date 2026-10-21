@@ -25,6 +25,7 @@ import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDisc
 import { typedRefusalFields } from "../models/typedRefusalFields";
 import { PrototypeSuspendedError } from "../features/prototype/prototypeSuspended";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
+import { DaemonRestartOptionsUnknownError } from "./proxy/DaemonRestartOptionsUnknownError";
 import {
   recoveryIdentityLoss,
   recoveryIdentityLossPayload,
@@ -164,6 +165,7 @@ function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
   | SdkCapabilityQueryError
+  | DaemonRestartOptionsUnknownError
   | AdbDeviceTransportUnavailableError
   | AndroidAvdIdentityUnresolvedError
   | AndroidDeviceIdentityUnresolvedError
@@ -184,6 +186,7 @@ function hasSelfDescribedRefusalPayload(
   | BindingOwnershipUnconfirmedError {
   return [
     SdkCapabilityQueryError,
+    DaemonRestartOptionsUnknownError,
     AdbDeviceTransportUnavailableError,
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,

@@ -15,6 +15,7 @@ import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchErr
 import { DaemonBuildMismatchError } from "./DaemonBuildMismatchError";
 import { DaemonVersionMismatchError } from "./DaemonVersionMismatchError";
 import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
+import { DaemonRestartOptionsUnknownError } from "./DaemonRestartOptionsUnknownError";
 
 /**
  * Connection facts the classifier reads:
@@ -45,7 +46,8 @@ export class DaemonErrorClassifier {
     if (
       error instanceof DaemonVersionMismatchError ||
       error instanceof DaemonBuildMismatchError ||
-      error instanceof DaemonAssetVersionMismatchError
+      error instanceof DaemonAssetVersionMismatchError ||
+      error instanceof DaemonRestartOptionsUnknownError
     ) {
       return false;
     }

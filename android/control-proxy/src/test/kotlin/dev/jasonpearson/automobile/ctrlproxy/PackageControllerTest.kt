@@ -9,7 +9,6 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.InstalledPackagesResult
 import dev.jasonpearson.automobile.protocol.LaunchIntentResult
 import dev.jasonpearson.automobile.protocol.PackageInfoResult
-import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,15 +26,9 @@ class PackageControllerTest {
     override fun currentTimeMillis() = 9_000L
   }
 
-  private class FakeSender : PackageController.ResponseSender {
-    var running = true
-    val frames = mutableListOf<WebSocketResponse>()
-
-    override fun isRunning() = running
-
-    override suspend fun broadcast(response: WebSocketResponse) {
-      frames += response
-    }
+  private class FakeSender : FakeResultTransport() {
+    val frames
+      get() = sentResponses
   }
 
   private val application = RuntimeEnvironment.getApplication()
@@ -46,9 +39,11 @@ class PackageControllerTest {
       packageManager = { application.packageManager },
       currentUserId = { 0 },
       timeProvider = FakeTimer(),
-      resultBroadcaster =
-        ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
-      responseSender = sender,
+      resultSender =
+        guardedResultSender(
+          sender,
+          ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+        ),
     )
 
   private fun install(name: String, system: Boolean = false, launchable: Boolean = false) {

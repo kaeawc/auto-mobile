@@ -57,6 +57,28 @@ export class FakeDeviceMutationJournal implements DeviceMutationJournal {
     return structuredClone(this.baselines.get(this.deviceKey(scope)) ?? null);
   }
 
+  async deleteResource(resourceId: string): Promise<void> {
+    const matches = (incarnation: string) => {
+      if (incarnation === resourceId) {
+        return true;
+      }
+      const identity: unknown = JSON.parse(incarnation.startsWith("[") ? incarnation : "null");
+      return Array.isArray(identity) && identity[0] === resourceId;
+    };
+    for (const key of this.baselines.keys()) {
+      const [, incarnation]: string[] = JSON.parse(key);
+      if (matches(incarnation)) {
+        this.baselines.delete(key);
+      }
+    }
+    for (const key of this.entries.keys()) {
+      const [, , incarnation]: string[] = JSON.parse(key);
+      if (matches(incarnation)) {
+        this.entries.delete(key);
+      }
+    }
+  }
+
   private deviceKey(scope: DeviceIncarnationScope): string {
     assertDeviceMutationScope(scope);
     return JSON.stringify([scope.deviceId, scope.incarnation]);

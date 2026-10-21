@@ -768,7 +768,10 @@ export class SimCtlClient implements SimCtl {
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with array of app objects containing bundle identifiers and other metadata
    */
-  async listAppsOrThrow(deviceId?: string): Promise<IosInstalledAppRecord[]> {
+  async listAppsOrThrow(
+    deviceId?: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<IosInstalledAppRecord[]> {
     const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Listing installed apps on iOS simulator ${targetDevice}`);
 
@@ -776,13 +779,22 @@ export class SimCtlClient implements SimCtl {
     // 26+). The plist owner receives the exact bytes over stdin, avoiding a
     // shell pipe and a temporary host file.
     const listAppsJson = async (args: string[]): Promise<string> => {
-      const result = await this.executeCommandArgs(["listapps", ...args]);
+      options?.signal?.throwIfAborted();
+      const result = await this.executeCommandArgs(
+        ["listapps", ...args],
+        options?.timeoutMs,
+        options?.signal,
+      );
       try {
         JSON.parse(result.stdout);
         return result.stdout;
       } catch (error) {
         logger.debug(`[iOS] listapps returned plist; converting with plutil: ${error}`);
-        return JSON.stringify(await this.plist.readJsonBytes(Buffer.from(result.stdout, "utf8")));
+        return JSON.stringify(
+          await this.plist.readJsonBytes(Buffer.from(result.stdout, "utf8"), {
+            signal: options?.signal,
+          }),
+        );
       }
     };
 
@@ -790,6 +802,7 @@ export class SimCtlClient implements SimCtl {
       return parseSimctlListApps(await listAppsJson([targetDevice, "--all"]));
     } catch (error) {
       logger.warn(`Failed to list iOS apps with --all: ${error}`);
+      options?.signal?.throwIfAborted();
     }
 
     return parseSimctlListApps(await listAppsJson([targetDevice]));

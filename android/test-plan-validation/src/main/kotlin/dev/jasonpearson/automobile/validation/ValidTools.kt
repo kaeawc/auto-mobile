@@ -69,6 +69,7 @@ object ValidTools {
         "removeKeyValue",
         "rotate",
         "selectAllText",
+        "sendBroadcast",
         "sendKeys",
         "setActiveDevice",
         "setAppLinks",

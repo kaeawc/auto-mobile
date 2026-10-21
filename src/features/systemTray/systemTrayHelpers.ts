@@ -44,6 +44,7 @@ export {
   verifyNotificationDismissed,
   clearMatchingSystemTrayNotifications,
   clearIosSystemTrayNotifications,
+  readClearAllTerminalObservation,
 } from "./helpers/dismissal";
 export { listSystemTrayNotifications, readActiveNotificationKeysForApp } from "./helpers/listing";
 export { NotificationShadeNotOpenError } from "./systemTrayNotificationList";

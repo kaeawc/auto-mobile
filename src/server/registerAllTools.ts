@@ -6,6 +6,7 @@ import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
+import { registerSendBroadcastTools } from "./sendBroadcastTools";
 import { registerGetLogsTools } from "./getLogsTools";
 import { registerCompareScreenshotTools } from "./compareScreenshotTools";
 import { registerStatusBarTools } from "./statusBarTools";
@@ -47,6 +48,7 @@ import { registerSensorTools } from "./sensorTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
 import { registerPersonaTools } from "./personaTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
+import type { IosRunnerLocationResolver } from "../features/utility/device-state/IosRunnerLocation";
 
 export interface RegisterAllToolsOptions {
   /**
@@ -59,6 +61,8 @@ export interface RegisterAllToolsOptions {
   includeDoctor?: boolean;
   /** Register the session tool-selection tools. The CLI has no session to select for. Default true. */
   includeToolSelection?: boolean;
+  /** Physical iOS location runner (#14091), resolved by the composition root (#11806). */
+  iosRunnerLocation?: IosRunnerLocationResolver;
 }
 
 /**
@@ -72,9 +76,10 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSwipeAtTools();
   registerMultiTouchTools();
   registerAppTools();
-  registerUtilityTools();
+  registerUtilityTools({ iosRunnerLocation: options.iosRunnerLocation });
   registerDeviceTools();
   registerDeepLinkTools();
+  registerSendBroadcastTools();
   registerGetLogsTools();
   registerCompareScreenshotTools();
   registerStatusBarTools();

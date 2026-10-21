@@ -112,6 +112,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "dragPath",
   "homeScreen",
   "keyboard",
+  "killProfile",
   "launchApp",
   "multiTouch",
   "observe",

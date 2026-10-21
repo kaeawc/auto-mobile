@@ -28,6 +28,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "displayConfig",
       "installApp",
       "keyboard",
+      "killProfile",
       "network",
       "openLink",
       "postNotification",

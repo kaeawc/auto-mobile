@@ -77,6 +77,10 @@ const CLASSIFICATION: Classification = {
         { action: "tapImeKey" },
       ],
     },
+    killProfile: {
+      reads: [{ action: "list" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],

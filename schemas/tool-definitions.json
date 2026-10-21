@@ -3048,6 +3048,7 @@
               "installApp",
               "keyboard",
               "killDevice",
+              "killProfile",
               "launchApp",
               "listApps",
               "listDataStores",
@@ -3182,6 +3183,7 @@
               "installApp",
               "keyboard",
               "killDevice",
+              "killProfile",
               "launchApp",
               "listApps",
               "listDataStores",
@@ -5646,6 +5648,221 @@
       },
       "required": ["device"],
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "killProfile",
+    "description": "Android: simulate an OEM background-kill policy (Samsung sleeping apps, Xiaomi autostart off, OnePlus deep optimization, recents swipe, Motorola adaptive battery, user-restricted, exact alarms denied) on a stock device with standby buckets, appops, Doze and force-stop. Each profile reports its evidence status and each step applied | unsupported | failed. apply is idempotent and records the state before the first change; reset restores it, and in a daemon session release or rebind does too. list shows the catalog and the OEM behaviour that cannot be simulated. Simulates effects, not firmware.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "apply a profile, reset what profiles changed, or list the catalog (no device change)",
+          "type": "string",
+          "enum": ["apply", "reset", "list"]
+        },
+        "appId": {
+          "description": "Android package; required for apply and reset",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "profile": {
+          "description": "Profile id; required for apply",
+          "type": "string",
+          "enum": [
+            "samsung-sleeping",
+            "samsung-deep-sleeping",
+            "xiaomi-autostart-off",
+            "oneplus-deep-optimization",
+            "recents-swipe-kill",
+            "recents-swipe-force-stop",
+            "oneplus-sleep-standby",
+            "motorola-adaptive",
+            "user-restricted",
+            "exact-alarm-denied"
+          ]
+        },
+        "baseline": {
+          "description": "reset only: when nothing is recorded (e.g. after a daemon restart), write the AOSP defaults",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["apply", "reset", "list"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["applied", "partial", "unsupported"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["recorded", "baseline", "none"]
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "samsung-sleeping",
+                "samsung-deep-sleeping",
+                "xiaomi-autostart-off",
+                "oneplus-deep-optimization",
+                "recents-swipe-kill",
+                "recents-swipe-force-stop",
+                "oneplus-sleep-standby",
+                "motorola-adaptive",
+                "user-restricted",
+                "exact-alarm-denied"
+              ]
+            },
+            "version": {
+              "type": "number"
+            },
+            "evidenceStatus": {
+              "type": "string",
+              "enum": ["vendor_documented", "cdd_derived", "inferred"]
+            },
+            "evidenceNote": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "version", "evidenceStatus", "evidenceNote"],
+          "additionalProperties": {}
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["applied", "unsupported", "failed"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["step", "command", "status"],
+            "additionalProperties": {}
+          }
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "commands": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "onSessionRelease": {
+              "type": "boolean"
+            }
+          },
+          "required": ["commands", "onSessionRelease"],
+          "additionalProperties": {}
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "samsung-sleeping",
+                  "samsung-deep-sleeping",
+                  "xiaomi-autostart-off",
+                  "oneplus-deep-optimization",
+                  "recents-swipe-kill",
+                  "recents-swipe-force-stop",
+                  "oneplus-sleep-standby",
+                  "motorola-adaptive",
+                  "user-restricted",
+                  "exact-alarm-denied"
+                ]
+              }
+            },
+            "required": ["id"],
+            "additionalProperties": {}
+          }
+        },
+        "nonEmulatable": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "note"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["success", "message", "action", "deviceId"],
+      "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["list"]
+        }
+      ]
     }
   },
   {
@@ -21595,6 +21812,7 @@
               "installApp",
               "keyboard",
               "killDevice",
+              "killProfile",
               "launchApp",
               "listApps",
               "listDataStores",
@@ -28433,6 +28651,7 @@
             "installApp",
             "keyboard",
             "killDevice",
+            "killProfile",
             "launchApp",
             "listApps",
             "listDataStores",
@@ -28533,6 +28752,7 @@
               "installApp",
               "keyboard",
               "killDevice",
+              "killProfile",
               "launchApp",
               "listApps",
               "listDataStores",

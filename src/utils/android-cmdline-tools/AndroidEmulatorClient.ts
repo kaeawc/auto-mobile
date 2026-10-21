@@ -196,7 +196,7 @@ export interface AndroidEmulator {
   /** Resolve the AVD name from one runtime serial without scanning all devices. */
   resolveAvdNameForSerial(
     serial: string,
-    options: { signal?: AbortSignal; timeoutMs: number },
+    options: { signal?: AbortSignal; timeoutMs: number; consoleExclusiveOwner?: boolean },
   ): Promise<string | undefined>;
 
   /**
@@ -780,13 +780,20 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   async resolveAvdNameForSerial(
     serial: string,
-    options: { signal?: AbortSignal; timeoutMs: number },
+    options: { signal?: AbortSignal; timeoutMs: number; consoleExclusiveOwner?: boolean },
   ): Promise<string | undefined> {
-    return await this.resolveRunningAvdName(
+    const { name } = await resolveRunningAvdNameOnce(
+      {
+        consoleBusyRegistry: this.consoleBusyRegistry,
+        adbFactory: this.adbFactory,
+        timer: this.timer,
+      },
       { deviceId: serial, name: serial, platform: "android" },
       options.timeoutMs,
       options.signal,
+      options.consoleExclusiveOwner,
     );
+    return name || undefined;
   }
 
   private getRunningAVDName(

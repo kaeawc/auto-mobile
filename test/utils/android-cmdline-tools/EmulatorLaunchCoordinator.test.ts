@@ -95,6 +95,20 @@ function setup(options: { posterExists?: boolean } = {}) {
 }
 
 describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
+  test("releasing a launch detaches its cancellation lifetime without killing the emulator", async () => {
+    const { coordinator, launcher } = setup();
+    const controller = new AbortController();
+    const spawned = child();
+    launcher.onStart = async () => ({ process: spawned, outcome: "launched" });
+    const handle = await coordinator.launchEmulator({
+      avdName: "Pixel",
+      signal: controller.signal,
+    });
+    handle.release();
+    handle.release();
+    controller.abort(new Error("later reset failure"));
+    expect(spawned.killed).toBe(false);
+  });
   test("an already aborted request is cancelled before launching", async () => {
     const { coordinator, launcher } = setup();
     const controller = new AbortController();

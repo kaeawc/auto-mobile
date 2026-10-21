@@ -132,6 +132,7 @@ export interface DeviceReadinessContract {
     device: BootedDevice,
     options?: { signal?: AbortSignal; timeoutMs?: number; noRetry?: boolean },
   ): Promise<boolean>;
+  readAndroidCtrlProxySnapshotIdentity(device: BootedDevice, signal: AbortSignal): Promise<string>;
 
   /**
    * Verify an iOS device is connected and ready

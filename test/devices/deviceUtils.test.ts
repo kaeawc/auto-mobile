@@ -34,6 +34,7 @@ const launchedHandle = (avdName: string): AndroidEmulatorLaunchHandle => ({
   process: null,
   outcome: "launched",
   dispose: () => {},
+  release: () => {},
 });
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
@@ -832,6 +833,7 @@ describe("MultiPlatformDeviceManager", () => {
           process: null,
           outcome: "joined-in-process-launch",
           dispose: () => {},
+          release: () => {},
         }),
       }),
     );

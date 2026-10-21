@@ -142,10 +142,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     }
     args.push(...this.host.emulatorAudioArguments());
     const extraArgsRaw = readEnvRaw(ENV.EMULATOR_ARGS);
+    if (extraArgsRaw) {
+      args.push(...parseExtraEmulatorArguments(extraArgsRaw));
+    }
     if (requestedExtraArgs) {
       args.push(...requestedExtraArgs);
-    } else if (extraArgsRaw) {
-      args.push(...parseExtraEmulatorArguments(extraArgsRaw));
     }
     this.appendCameraPosterArguments(args, options.cameraPosterPath);
     this.host.throwIfLaunchCancelled(avdName, isCancelled);

@@ -6,6 +6,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 import { logger } from "../../src/utils/logger";
+import { SessionMutationRecorder } from "../../src/daemon/sessionBroker/mutations/recorder";
+import { FakeDeviceMutationJournal } from "../fakes/FakeDeviceMutationJournal";
 import {
   DeferredDeviceSessionPersistence,
   DeferredLivenessRebindPersistence,
@@ -121,6 +123,18 @@ describe("SessionManager", () => {
         }
       },
     );
+
+    test("rebind discards the old device's mutation recorder", async () => {
+      const manager = makeSessionManager({ timer: fakeTimer, fakeBarrier: true });
+      const session = await manager.createSession("s1", "device-1", "android");
+      session.mutationRecorder = new SessionMutationRecorder(
+        new FakeDeviceMutationJournal(fakeTimer),
+        { sessionUuid: "s1", deviceId: "device-1", incarnation: "old-native" },
+      );
+      const rebound = await manager.rebindSession("s1", "device-2", "android");
+      expect(rebound.assignedDevice).toBe("device-2");
+      expect(rebound.mutationRecorder).toBeUndefined();
+    });
 
     test("rebinds without advancing time when keep-awake restoration completes immediately", async () => {
       const restoredDevices: string[] = [];

@@ -82,7 +82,10 @@ describe("DefaultEmulatorLauncher pre-flight", () => {
   });
 });
 
-function startupHarness(probe: EmulatorLauncherHost["isEmulatorSerialListed"] = async () => false) {
+function startupHarness(
+  probe: EmulatorLauncherHost["isEmulatorSerialListed"] = async () => false,
+  onSpawn?: (args: readonly string[]) => void,
+) {
   resetEmulatorLaunchReservations();
   const timer = new FakeTimer();
   const child = new FakeChildProcess(timer);
@@ -105,7 +108,10 @@ function startupHarness(probe: EmulatorLauncherHost["isEmulatorSerialListed"] = 
     throwIfLaunchCancelled: () => {},
     releaseReservationIfLaunchCancelled: () => {},
     emulatorPath: () => "fake-emulator",
-    spawnFn: () => () => child,
+    spawnFn: () => (_command, args) => {
+      onSpawn?.(args ?? []);
+      return child;
+    },
     launchTargetDeviceIds: () => targets,
     captureLaunchTargetDeviceId: (_child: HostChildProcess, output: string) => {
       const serial = detectDeviceIdFromEmulatorOutput(output);
@@ -146,6 +152,52 @@ function expectNoStartupTimers(timer: FakeTimer) {
   expect(timer.getPendingTimeoutCount()).toBe(0);
   expect(timer.getPendingIntervalCount()).toBe(0);
 }
+
+test("wipe-data arguments append to operator GPU and memory arguments rather than replacing them", async () => {
+  const previous = process.env.AUTOMOBILE_EMULATOR_ARGS;
+  process.env.AUTOMOBILE_EMULATOR_ARGS = JSON.stringify([
+    "-gpu",
+    "swiftshader_indirect",
+    "-memory",
+    "4096",
+  ]);
+  const args: string[][] = [];
+  const harness = startupHarness(
+    async () => true,
+    (spawnArgs) => {
+      args.push([...spawnArgs]);
+    },
+  );
+  try {
+    const launch = harness.launcher.startEmulatorProcess("Pixel_9", {
+      expectedDeviceId: "emulator-5554",
+      requestedExtraArgs: ["-wipe-data", "-no-snapshot-load", "-no-snapshot-save"],
+    });
+    await drainUntil(() => harness.child.stdout.listenerCount("data") > 0, {
+      description: "argument composition startup",
+    });
+    harness.child.stdout.emit("data", Buffer.from("emulator-5554"));
+    await harness.timer.advanceTimeAsync(500);
+    await launch;
+    expect(args[0]).toEqual(
+      expect.arrayContaining([
+        "-gpu",
+        "swiftshader_indirect",
+        "-memory",
+        "4096",
+        "-wipe-data",
+        "-no-snapshot-load",
+        "-no-snapshot-save",
+      ]),
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTOMOBILE_EMULATOR_ARGS;
+    } else {
+      process.env.AUTOMOBILE_EMULATOR_ARGS = previous;
+    }
+  }
+});
 
 describe("DefaultEmulatorLauncher early validation", () => {
   test("lists the expected serial on the second poll and clears every timer", async () => {

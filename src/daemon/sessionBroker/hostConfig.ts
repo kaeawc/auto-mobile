@@ -1,5 +1,6 @@
 import { ENV as ENV_SPECS } from "../../config/env";
 import { readFile } from "node:fs/promises";
+import { MAX_SETTIMEOUT_DELAY_MS } from "../../utils/SystemTimer";
 import { z } from "zod";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BindingScopeIdentity } from "./registry/bindingRegistry";
@@ -121,8 +122,10 @@ const hostConfig = z
       .default([]),
     reuseCleanDevices: z.boolean().default(false),
     reuseAndroidCleanDevices: z.boolean().default(false),
-    androidResetMode: z.enum(["keep-booted"]).optional(),
+    androidResetMode: z.enum(["snapshot", "keep-booted"]).optional(),
+    androidResetTimeoutMs: z.number().int().positive().max(MAX_SETTIMEOUT_DELAY_MS).optional(),
     androidKeepBootedMaxUses: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+    androidKeepBootedFallback: z.enum(["snapshot", "destroy"]).optional(),
     reuse: z.object({ ios: iosReuse }).strict().optional(),
   })
   .strict()
@@ -131,13 +134,28 @@ const hostConfig = z
   })
   .refine(
     (config) =>
-      (config.androidResetMode === undefined && config.androidKeepBootedMaxUses === undefined) ||
-      (config.reuseAndroidCleanDevices &&
-        config.defaults.android !== undefined &&
-        config.androidResetMode === "keep-booted"),
+      config.androidResetMode === undefined ||
+      (config.reuseAndroidCleanDevices && config.defaults.android !== undefined),
     {
-      message:
-        "Android reset keys require Android defaults, reuseAndroidCleanDevices and keep-booted mode",
+      message: "Android reset mode requires Android defaults and reuseAndroidCleanDevices",
+    },
+  )
+  .refine(
+    (config) =>
+      (config.androidKeepBootedMaxUses === undefined &&
+        config.androidKeepBootedFallback === undefined) ||
+      config.androidResetMode === "keep-booted",
+    { message: "Android keep-booted keys require keep-booted mode" },
+  )
+  .refine(
+    (config) =>
+      config.androidResetTimeoutMs === undefined ||
+      config.androidResetMode === "snapshot" ||
+      (config.androidResetMode === "keep-booted" &&
+        config.androidKeepBootedFallback === "snapshot"),
+    {
+      path: ["androidResetTimeoutMs"],
+      message: "androidResetTimeoutMs requires snapshot mode or keep-booted snapshot fallback",
     },
   )
   .refine(

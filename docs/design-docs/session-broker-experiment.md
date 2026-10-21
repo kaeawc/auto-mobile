@@ -111,6 +111,9 @@ its host lock.
 
 ## Current qualification boundary
 
+For choosing a reuse mode, configuring resets and sizing caps, see
+[Session broker device reuse, reset, and capacity](session-broker-device-reuse.md).
+
 The first native milestone deliberately uses zero pooling. Every relinquished
 device is destroyed through the existing durable native journal, with
 authoritative absence required before its capacity is freed. Native iOS clean
@@ -121,9 +124,11 @@ type, runtime, availability, and expected state; durable ownership and native
 binding checks fence every mutation. Any failure falls back to journaled
 destruction. `reuseCleanDevices` continues to opt in only to iOS reuse. Android
 has its own `reuseAndroidCleanDevices` flag, defaulting to false. With Android
-defaults and `androidResetMode: "keep-booted"`, release runs best-effort cleaning
-and health checks before returning the resource to idle. This is operational
-cleanup, not proof of isolation or restoration of all device state.
+defaults, `androidResetMode` selects either `keep-booted` best-effort cleaning
+or `snapshot` baseline restoration before returning the resource to idle.
+Keep-booted cleaning is operational cleanup, not proof of isolation or
+restoration of all device state. It can opt into snapshot fallback; by default
+hard failures require destruction.
 Without a mutation-aware strategy, any observed package-list difference requires
 destruction, never uninstall-and-pool. Optional baseline capture failure
 logs a warning without failing acquisition; release then destroys the device.
@@ -147,8 +152,7 @@ The optional operator field `androidResetMode: "keep-booted"` selects the journa
 strategy only when `reuseAndroidCleanDevices` and Android defaults are also
 configured; ignored reset keys are rejected by configuration validation.
 Omitting the mode preserves destruction-only behavior. The
-`androidResetMode` enum currently contains only `keep-booted`; the parallel
-#14365 snapshot lane must add `snapshot` when integrating its strategy. Optional
+`androidResetMode` enum contains both `keep-booted` and `snapshot`. Optional
 `androidKeepBootedMaxUses` is a positive integer (default 20); reaching that count
 retires to a configured baseline strategy or destruction, not keep-booted idle.
 Counts are resource-local and disappear on destruction. Restart loses the
@@ -212,8 +216,23 @@ Hard cleaning failures or failed health checks use an injected snapshot-compatib
 fallback if configured, otherwise journaled destruction. Ownership loss never
 publishes idle or runs a fallback under a stale fence. `maxUses` still retires via
 fallback or destruction. Fallback health checks must also pass before idle; its
-report uses snapshot mode and a fallback reason. Production in this lane has no
-snapshot fallback configured.
+report uses the completed fallback's mode (`snapshot` or `wipe-data`) and retains
+both the cleaning/retirement reason and the snapshot strategy's fallback reason. Set
+`androidKeepBootedFallback: "snapshot"` to inject the snapshot strategy in
+production; omitted or `"destroy"` leaves the existing destruction fallback.
+This field and `androidKeepBootedMaxUses` are valid only in keep-booted mode.
+Snapshot support requires the daemon readiness and identity ports; missing
+ports reject startup rather than silently changing the requested policy.
+
+Snapshot fallback uses an exclusive binding fence, not the old kernel boot UUID,
+because restore can change that UUID. After successful restore (or the snapshot
+strategy's wipe-data replacement), exact target/boot checks rebind the incarnation,
+prune the previous mutation journals and recapture a keep-booted baseline under
+the new boot identity. The next session reuses that baseline without resetting
+it to potentially dirty state. Binding ownership remains fenced throughout;
+recapture or final health failure requires destruction, never idle. Native phase
+timings from the fallback carry a `snapshot:` prefix on both success and failure
+in the keep-booted receipt, alongside the keep-booted journal/clean/fallback phases.
 
 **Limits:** this policy does not remove accounts/account secrets, reset retained
 app databases or other app data, undo system package updates, rebuild overwritten
@@ -254,10 +273,56 @@ retirement. Preparation captures the partial native baseline regardless of
 certification coverage. Capture is capped at the cleaning budget (30 seconds by
 default) within the remaining preparation budget; file hashing commands have a
 30-second cap, still subject to the enclosing capture/reset deadline.
-The injected fallback has its own 30-second budget and receives `signal` and
-`timeoutMs` in the shared reset context. The sibling #14365 strategy must adopt
-these fields, abort/settle native restore on cancellation, and fence every command.
-This lane neither selects nor implements snapshots.
+The injected snapshot fallback uses `androidResetTimeoutMs` (600000 ms by default),
+limited to the time actually remaining when fallback starts, with 2001 ms reserved
+for its bounded command-settlement drain before the overall deadline. It receives
+`signal`, `timeoutMs` and `deadlineMs` in the shared reset context; the composed
+snapshot strategy uses cancellable, fenced native commands.
+
+### Android snapshot reset and fallback
+
+`androidResetMode: "snapshot"` selects the full-baseline strategy directly.
+It requires Android defaults and `reuseAndroidCleanDevices: true`, as does
+keep-booted mode. Omitting the mode preserves destruction-only behavior.
+
+```json
+{
+  "reuseAndroidCleanDevices": true,
+  "androidResetMode": "keep-booted",
+  "androidKeepBootedFallback": "snapshot",
+  "androidKeepBootedMaxUses": 20,
+  "androidResetTimeoutMs": 600000
+}
+```
+
+This fragment supplements a valid host configuration with Android defaults.
+`androidResetTimeoutMs` is an optional positive integer in milliseconds no
+greater than 2147483647. It is accepted only for snapshot mode or keep-booted
+with snapshot fallback; ignored timeout keys are rejected. Its default is
+600000 (ten minutes), covering the whole release reset including cleaning,
+fallback, incarnation rebinding and final health checks. Keep-booted cleaning
+retains its own 30-second cap; the fallback gets a fresh cancellable budget
+bounded by the remaining overall reset deadline minus the settlement reserve.
+Individual snapshot commands
+retain their 30-second cap; clock root and transport reconnection retain their
+own bounded timeouts within the remaining overall budget.
+
+Snapshot mode captures the reserved, hidden broker baseline only on a freshly
+created or replaced emulator. Keep-booted snapshot fallback captures that same
+baseline during initial preparation, not after dirty cleaning fails. AVD,
+image revision/hardware, emulator and CtrlProxy identity must match before load.
+Restore goes through incarnation preparation, host-state invalidation,
+exact-serial readiness and settlement before health is accepted. A failed or
+incompatible load attempts a capacity-reserved same-AVD, same-serial wipe-data
+replacement. Shutdown must prove the emulator process has exited, not merely
+disappeared from adb, and remove dirty `default_boot` state. Relaunch preserves
+`AUTOMOBILE_EMULATOR_ARGS`, appends wipe/no-snapshot flags and releases the launch
+cancellation handle before readiness. A failed snapshot and wipe-data fallback
+requires normal journaled destruction, never idle or out-of-band child signals.
+
+Snapshot clean-reuse isolation remains unqualified until native two-session
+contamination checks pass. Fake-backed tests qualify composition and fencing,
+not native isolation; keep-booted retains its intentional best-effort boundary.
 Native two-session contamination and matched p50 timing qualification are not run.
 
 Native zero-pooling qualification passed on October 12, 2026, using broker

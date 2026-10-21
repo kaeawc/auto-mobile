@@ -16,6 +16,7 @@ import {
   type DeviceMutationResetPort,
 } from "./mutations/reset";
 import type { ResetOutcome } from "./devicePort";
+import { ResetFailureError } from "./ResetFailureError";
 import { isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
 import {
   type DeviceBaseline,
@@ -116,6 +117,9 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     device: BootedDevice,
     context: AndroidResetCaptureContext,
   ): Promise<void> {
+    if (!context.sessionId) {
+      throw new ActionableError("Android keep-booted capture requires a session identity");
+    }
     const deadlineMs = this.dependencies.timer.now() + context.timeoutMs;
     const prior = this.sessions.get(context.resourceId);
     const incarnation = context.incarnation ?? context.resourceId;
@@ -230,6 +234,8 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     assertOwned: () => Promise<void>,
     context: AndroidResetSessionContext,
   ): Promise<ResetOutcome> {
+    const deadlineMs =
+      context.deadlineMs ?? this.dependencies.timer.now() + (context.timeoutMs ?? Infinity);
     const session = this.resetSession(device, context);
     const port = this.dependencies.port(device);
     const controller = new AbortController();
@@ -250,6 +256,8 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
       signal.throwIfAborted();
     };
     const phases: Record<string, number> = {};
+    let fallbackTiming: ResetOutcome | undefined;
+    let fallbackReason: string | undefined;
     const mutationContext: DeviceMutationResetContext = {
       scope: session.scope,
       signal,
@@ -263,6 +271,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
           : await this.cleanWithDeadline(port, mutationContext, context, phases);
       await fence();
       if (reason) {
+        fallbackReason = reason;
         const fallback = this.dependencies.fallback;
         if (!fallback) {
           throw new ActionableError(
@@ -270,16 +279,59 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
           );
         }
         logger.warn(`Android keep-booted escalating to baseline (${reason})`);
+        const fallbackTimeoutMs = Math.min(
+          this.fallbackBudgetMs,
+          deadlineMs - this.dependencies.timer.now() - 2001,
+        );
+        if (fallbackTimeoutMs <= 0) {
+          throw new ActionableError(
+            "Android keep-booted has no remaining fallback settlement budget",
+          );
+        }
+        fallbackTiming = { outcome: "pending", mode: "snapshot", phases: {} };
         let fallbackOperation: Promise<void> | undefined;
         try {
           await raceWithDeadline(
             () => {
               fallbackOperation = this.measure("fallback", phases, async () => {
-                await fallback.reset(device, baselinePackages, fence, {
+                const fallbackFence = fallback.fullBaseline ? context.assertBindingOwned : fence;
+                if (!fallbackFence || (fallback.fullBaseline && !context.rebindIncarnation)) {
+                  throw new ActionableError(
+                    "Android snapshot fallback requires incarnation rebinding",
+                  );
+                }
+                const outcome = await fallback.reset(device, baselinePackages, fallbackFence, {
                   ...context,
                   signal,
-                  timeoutMs: this.fallbackBudgetMs,
+                  timeoutMs: fallbackTimeoutMs,
+                  assertOwned: fallbackFence,
+                  deadlineMs: this.dependencies.timer.now() + fallbackTimeoutMs,
+                  resetTiming: fallbackTiming,
                 });
+                if (outcome) {
+                  fallbackTiming = outcome;
+                }
+                if (outcome?.outcome === "pending") {
+                  throw new ActionableError(
+                    "Android snapshot fallback did not prove a clean reset",
+                  );
+                }
+                for (const [phase, elapsed] of Object.entries(fallbackTiming!.phases)) {
+                  phases[`snapshot:${phase}`] = elapsed;
+                }
+                if (fallback.fullBaseline) {
+                  const incarnation = await context.rebindIncarnation!();
+                  await this.dependencies.journal.deleteResource(context.resourceId);
+                  session.scope = { ...session.scope, incarnation };
+                  mutationContext.scope = session.scope;
+                  await this.captureBaseline(port, session.scope, {
+                    ...context,
+                    incarnation,
+                    signal,
+                    timeoutMs: fallbackTimeoutMs,
+                    assertOwned: fence,
+                  });
+                }
                 await fence();
                 await this.measure(
                   "health",
@@ -293,7 +345,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
             {
               timer: this.dependencies.timer,
               signal,
-              timeoutMs: this.fallbackBudgetMs,
+              timeoutMs: fallbackTimeoutMs,
               label: "Android keep-booted fallback",
               onTimeout: () =>
                 controller.abort(
@@ -309,18 +361,47 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
         }
         await fence();
         session.uses = 0;
-        return { outcome: "fallback:snapshot", mode: "snapshot", phases, fallbackReason: reason };
+        const mode = fallbackTiming.mode;
+        return {
+          outcome: mode === "wipe-data" ? "fallback:wipe-data" : "fallback:snapshot",
+          mode,
+          phases,
+          fallbackReason: [reason, fallbackTiming.fallbackReason].filter(Boolean).join("; "),
+        };
       }
       await fence();
       return { outcome: "clean", mode: "keep-booted", phases };
     } catch (error) {
       controller.abort(error);
       logger.warn(`Android keep-booted reset failed: ${errorMessage(error)}`, error);
-      throw toActionableError(
-        error,
-        "Android keep-booted requires baseline fallback or destruction",
-      );
+      throw this.resetFailure(error, phases, fallbackTiming, fallbackReason);
     }
+  }
+
+  private resetFailure(
+    error: unknown,
+    phases: Record<string, number>,
+    fallbackTiming: ResetOutcome | undefined,
+    fallbackReason: string | undefined,
+  ): ResetFailureError {
+    if (error instanceof ResetFailureError) {
+      fallbackTiming = error.reset;
+    }
+    for (const [phase, elapsed] of Object.entries(fallbackTiming?.phases ?? {})) {
+      phases[`snapshot:${phase}`] = elapsed;
+    }
+    return new ResetFailureError(
+      toActionableError(error, "Android keep-booted requires baseline fallback or destruction")
+        .message,
+      {
+        outcome: "pending",
+        mode: fallbackTiming?.mode ?? "keep-booted",
+        phases,
+        fallbackReason:
+          [fallbackReason, fallbackTiming?.fallbackReason].filter(Boolean).join("; ") || undefined,
+      },
+      { cause: error instanceof ResetFailureError ? error.cause : error },
+    );
   }
 
   private async measure(

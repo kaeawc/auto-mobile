@@ -6,12 +6,74 @@ import {
 import { ExecutionTracker } from "../../../src/daemon/executionTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
 import {
   ANDROID_RESET_DEVICE,
   ANDROID_RESET_PROFILE,
   FakeAndroidResetHost,
 } from "./fixtures/androidReset";
 describe("AndroidBaselineReset", () => {
+  test("default reset budget accommodates a cold boot beyond the old two-minute cutoff", async () => {
+    const timer = new FakeTimer();
+    const host = new FakeAndroidResetHost();
+    host.timer = timer;
+    host.strategy = {
+      reset: async (_device, _packages, _owned, context) => {
+        expect(context.timeoutMs).toBe(600_000);
+        timer.advanceTime(150_000);
+        return { outcome: "clean", mode: "snapshot", phases: { load: 150_000 } };
+      },
+    };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer,
+    });
+    await expect(
+      baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+    ).resolves.toMatchObject({ outcome: "clean", mode: "snapshot", phases: { load: 150_000 } });
+  });
+
+  test("configured reset budget aborts in-flight strategy work and closes its baseline", async () => {
+    const timer = new FakeTimer();
+    const host = new FakeAndroidResetHost();
+    host.timer = timer;
+    host.resetTimeoutMs = 1000;
+    let signal: AbortSignal | undefined;
+    host.strategy = {
+      reset: async (_device, _packages, _owned, context) => {
+        signal = context.signal;
+        return new Promise<never>(() => {});
+      },
+    };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer,
+    });
+    const result = baseline.reset(
+      "resource-a",
+      ANDROID_RESET_DEVICE,
+      ANDROID_RESET_PROFILE,
+      async () => {},
+    );
+    await drainUntil(() => signal !== undefined, { description: "bounded reset strategy" });
+    timer.advanceTime(1000);
+    await expect(result).rejects.toThrow("timed out");
+    expect(signal?.aborted).toBe(true);
+    expect(host.closed).toBe(1);
+  });
+
+  test.each(["deviceSnapshot", "network", "setDeviceResources"])(
+    "admitted %s activity vetoes even a full snapshot baseline",
+    async (toolName) => {
+      const tracker = new ExecutionTracker(new FakeTimer(), new CountingIdGenerator("execution"));
+      const activity = watchAndroidResetSession(tracker, "session-a");
+      const mutation = tracker.startExecution(toolName, undefined, "session-a");
+      tracker.markSessionAdmitted(mutation.id);
+      tracker.endExecution(mutation.id);
+      expect(activity.canReset()).toBe(false);
+      activity.close();
+    },
+  );
   test("other strategies receive the remaining capture deadline without a journal cap", async () => {
     const host = new FakeAndroidResetHost();
     const timer = new FakeTimer();

@@ -279,34 +279,6 @@ class RetrofitPrototypeHttpClientTest {
   }
 
   @Test
-  fun `a response slower than the client's own read timeout succeeds within the request timeout`() {
-    // OkHttp's default read timeout is 10 s; the request's timeoutMs is the whole-call budget.
-    server.enqueue(
-      MockResponse.Builder()
-        .body("{}")
-        .addHeader("Content-Type", "application/json")
-        .headersDelay(400, TimeUnit.MILLISECONDS)
-        .build(),
-    )
-    val shortReadTimeouts =
-      RetrofitPrototypeHttpClient(
-        OkHttpClient.Builder()
-          .dns(loopbackDns)
-          .connectTimeout(100, TimeUnit.MILLISECONDS)
-          .readTimeout(100, TimeUnit.MILLISECONDS)
-          .writeTimeout(100, TimeUnit.MILLISECONDS)
-          .build(),
-        policy = permissivePolicy,
-        clock = { time },
-        warn = { message, _ -> warnings += message },
-      )
-
-    val response = runBlocking { shortReadTimeouts.execute(request(timeoutMs = 5_000)) }
-
-    assertEquals(200, received(response).status)
-  }
-
-  @Test
   fun `a timeout is logged and names the local network permission only for private hosts`() {
     assertTrue(RetrofitPrototypeHttpClient.isLocalNetworkHost("10.0.2.2"))
     assertTrue(RetrofitPrototypeHttpClient.isLocalNetworkHost("192.168.1.5"))

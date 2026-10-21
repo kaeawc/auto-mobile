@@ -73,6 +73,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "request_sdk_trigger",
   "get_voiceover_state",
   "set_voiceover_state",
+  "request_accessibility_audit",
 
   // Storage inspection
   "list_preference_files",

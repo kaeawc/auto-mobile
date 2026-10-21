@@ -1415,6 +1415,255 @@
     }
   },
   {
+    "name": "compareScreenshot",
+    "description": "Visual regression: record a named screenshot baseline (per device profile) or compare the current screen, an element, or a rectangle against it, ignoring masked regions and system bars. Returns match, diffRatio and a diff image path on mismatch.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "baseline": {
+          "description": "Baseline name; letters, digits, '.', '_' or '-' (host-side, per device profile)",
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "description": "compare against, (re)record, or record only when this profile has none",
+          "type": "string",
+          "enum": ["compare", "record", "recordIfMissing"]
+        },
+        "target": {
+          "description": "Region to compare; default the full screen",
+          "type": "object",
+          "properties": {
+            "elementId": {
+              "description": "Unique exposed element ID",
+              "type": "string",
+              "minLength": 1
+            },
+            "rect": {
+              "description": "Platform-native screen rectangle: Android pixels, iOS points",
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "number"
+                },
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                }
+              },
+              "required": ["left", "top", "right", "bottom"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "mask": {
+          "description": "Regions to ignore, e.g. a clock, avatar or ad",
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "elementId": {
+                "description": "Unique exposed element ID",
+                "type": "string",
+                "minLength": 1
+              },
+              "rect": {
+                "description": "Platform-native screen rectangle: Android pixels, iOS points",
+                "type": "object",
+                "properties": {
+                  "left": {
+                    "type": "number"
+                  },
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  }
+                },
+                "required": ["left", "top", "right", "bottom"],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "ignoreSystemBars": {
+          "description": "Ignore the status and navigation bars (default true)",
+          "type": "boolean"
+        },
+        "threshold": {
+          "type": "object",
+          "properties": {
+            "pixelRatio": {
+              "description": "Largest share of compared pixels that may differ (default 0)",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "perPixelDelta": {
+              "description": "Per-pixel colour distance treated as equal (default 0.1)",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["baseline", "mode"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "baseline": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["compare", "record", "recordIfMissing"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["recorded", "compared", "failed"]
+        },
+        "match": {
+          "type": "boolean"
+        },
+        "profile": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "baselinePath": {
+          "type": "string"
+        },
+        "diffRatio": {
+          "type": "number"
+        },
+        "diffPixels": {
+          "type": "number"
+        },
+        "comparedPixels": {
+          "type": "number"
+        },
+        "diffImagePath": {
+          "type": "string"
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": ["baseline_missing", "baseline_profile_mismatch", "size_mismatch"]
+        },
+        "error": {
+          "type": "string"
+        },
+        "otherProfiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "deviceId",
+        "baseline",
+        "mode",
+        "status",
+        "match",
+        "profile"
+      ],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "platform": {
+              "type": "string"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fontScale": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["platform", "width", "height", "density", "fontScale", "theme"],
+          "additionalProperties": {}
+        }
+      }
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
+    }
+  },
+  {
     "name": "crashApp",
     "description": "Intentionally crash a running app through the platform crash path",
     "inputSchema": {
@@ -3466,6 +3715,7 @@
               "clearKeyValueFile",
               "clearMockNetwork",
               "clipboard",
+              "compareScreenshot",
               "crashApp",
               "deleteDevice",
               "deviceSnapshot",
@@ -3609,6 +3859,7 @@
               "clearKeyValueFile",
               "clearMockNetwork",
               "clipboard",
+              "compareScreenshot",
               "crashApp",
               "deleteDevice",
               "deviceSnapshot",
@@ -23941,6 +24192,7 @@
               "clearKeyValueFile",
               "clearMockNetwork",
               "clipboard",
+              "compareScreenshot",
               "crashApp",
               "deleteDevice",
               "deviceSnapshot",
@@ -31055,6 +31307,7 @@
             "clearKeyValueFile",
             "clearMockNetwork",
             "clipboard",
+            "compareScreenshot",
             "crashApp",
             "deleteDevice",
             "deviceSnapshot",
@@ -31164,6 +31417,7 @@
               "clearKeyValueFile",
               "clearMockNetwork",
               "clipboard",
+              "compareScreenshot",
               "crashApp",
               "deleteDevice",
               "deviceSnapshot",

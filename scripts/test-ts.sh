@@ -208,7 +208,7 @@ host_load_exceeds_cores() {
   else
     load="$(sysctl -n vm.loadavg 2>/dev/null | awk '{gsub(/[{}]/, ""); print $1}')"
   fi
-  if [[ "$load" =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v load="$load" -v cores="$cores" 'BEGIN {exit !(load > cores)}'; then
+  if [[ "$load" =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v host_load="$load" -v core_count="$cores" 'BEGIN {exit !(host_load > core_count)}'; then
     printf 'test-ts: not retrying unit shard %d: host load %s > cores %s\n' "$1" "$load" "$cores" >&2
     return 0
   fi

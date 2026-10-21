@@ -19,15 +19,15 @@ import {
   discoveryRefreshOutcome,
   deviceListRefreshFailureMessage,
 } from "../../../daemon/devicePoolRefresh";
-import { type StartDeviceArgs } from "./contracts";
-import { describeStartDeviceRequest } from "./provisioning";
-import { runWithinShutdownDeadline, type StableDeviceTarget } from "./deadlines";
+import { type StartDeviceArgs } from "../core/contracts";
+import { describeStartDeviceRequest } from "../core/provisioning";
+import { runWithinShutdownDeadline, type StableDeviceTarget } from "../core/deadlines";
 import {
   isUnknownAndroidRuntimeName,
   isVirtualAndroidDevice,
   getBootedAndroidStableName,
   getValidatedPooledAndroidAvdName,
-} from "./androidIdentity";
+} from "../core/androidIdentity";
 
 /**
  * True when the running device resolved for `args.deviceId` is not the device

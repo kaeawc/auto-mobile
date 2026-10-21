@@ -18,6 +18,7 @@ import {
 import { AuxiliarySocketHeldError } from "../../src/daemon/AuxiliarySocketHeldError";
 import { ActionableError } from "../../src/models/ActionableError";
 import { writeJsonFileAtomicSync } from "../../src/daemon/daemonFiles";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 const socketPath = "/isolated/appearance.sock";
 const sidecarPath = `${socketPath}.owner.json`;
@@ -30,6 +31,7 @@ function harness() {
   let currentInode = inode;
   let live = true;
   let token: string | undefined = identity.processGenerationToken;
+  let beforeLink = () => {};
   const files: AuxiliarySocketOwnerFiles = {
     read: (path) => {
       const text = contents.get(path);
@@ -44,6 +46,25 @@ function harness() {
     remove: (path) => {
       contents.delete(path);
     },
+    rename: (from, to) => {
+      const text = contents.get(from);
+      if (text === undefined) {
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      }
+      contents.set(to, text);
+      contents.delete(from);
+    },
+    link: (from, to) => {
+      beforeLink();
+      if (contents.has(to)) {
+        throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+      }
+      const text = contents.get(from);
+      if (text === undefined) {
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      }
+      contents.set(to, text);
+    },
     stat: () => currentInode,
     lstat: () => ({ isFile: () => true, size: 100 }),
   };
@@ -51,11 +72,19 @@ function harness() {
     isProcessRunning: (pid: number) => live && pid === identity.pid,
     readProcessGenerationToken: () => token,
   };
-  const owner = new AuxiliarySocketOwner(files, processes, () => identity);
+  const owner = new AuxiliarySocketOwner(
+    files,
+    processes,
+    () => identity,
+    new CountingIdGenerator(),
+  );
   return {
     owner,
     files,
     contents,
+    setBeforeLink: (callback: () => void) => {
+      beforeLink = callback;
+    },
     setLive: (value: boolean) => {
       live = value;
     },
@@ -108,6 +137,40 @@ describe("auxiliary socket owner records", () => {
     h.owner.remove(socketPath);
     expect(h.contents.get(sidecarPath)).toBe(successor);
   });
+
+  for (const newerAtRestore of [false, true]) {
+    test(`restores a successor sidecar published immediately after the ownership read (newerAtRestore=${newerAtRestore})`, () => {
+      const h = harness();
+      h.owner.publish(socketPath, "Appearance", inode);
+      const successor = JSON.stringify({
+        ...record,
+        pid: 742,
+        processGenerationToken: "linux:new",
+      });
+      const newest = JSON.stringify({
+        ...record,
+        pid: 743,
+        processGenerationToken: "linux:newest",
+      });
+      // Model a newer atomic publication at the no-clobber restore boundary.
+      h.setBeforeLink(() => {
+        if (newerAtRestore) {
+          h.contents.set(sidecarPath, newest);
+        }
+      });
+      const read = h.files.read;
+      h.files.read = (path) => {
+        const text = read(path);
+        if (path === sidecarPath) {
+          h.contents.set(path, successor);
+        }
+        return text;
+      };
+      h.owner.remove(socketPath);
+      expect(h.contents.get(sidecarPath)).toBe(newerAtRestore ? newest : successor);
+      expect([...h.contents.keys()]).toEqual([sidecarPath]);
+    });
+  }
 
   test("leaves metadata intact if the socket inode has changed", () => {
     const h = harness();
@@ -173,18 +236,16 @@ describe("auxiliary socket owner records", () => {
   });
 
   test.each(["linux:recycled", "darwin-utc:other", undefined])(
-    "an alive PID with a mismatched/unavailable generation %s remains unverified",
+    "an alive PID with a mismatched/unavailable generation %s has an unknown holder",
     (token) => {
       const h = harness();
       h.contents.set(sidecarPath, JSON.stringify(record));
       h.setToken(token);
       const error = h.owner.conflict(socketPath, "Appearance");
-      expect(error.holder).toEqual({
-        holderPid: 741,
-        holderVersion: "0.0.old",
-        holderVerified: false,
-      });
-      expect(error.message).toContain("unverified: process generation could not be matched");
+      expect(error.holder).toEqual({ holderVerified: false });
+      expect(error.message).toContain("unknown holder");
+      expect(error.message).not.toContain("741");
+      expect(error.message).not.toContain(identity.version);
       expect(error.message).not.toContain("kill 741");
     },
   );

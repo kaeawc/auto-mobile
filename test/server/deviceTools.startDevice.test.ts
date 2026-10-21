@@ -1859,8 +1859,12 @@ describe("startDevice handler", () => {
       platform: "android",
       sourceImage: recoveryImage,
     });
-    daemonSessionManager.releaseSessionIfOwned = async () => {
-      throw new Error("cleanup persistence failed");
+    const releaseSession = daemonSessionManager.releaseSession.bind(daemonSessionManager);
+    daemonSessionManager.releaseSession = (...args) => {
+      if (args[2]?.expectedOwner) {
+        return Promise.reject(new Error("cleanup persistence failed"));
+      }
+      return releaseSession(...args);
     };
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);

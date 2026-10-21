@@ -71,12 +71,9 @@ async function harness(withControlVeto = false) {
               if (deferral) {
                 return deferral;
               }
-              await manager.releaseSessionIfOwned(
-                session.sessionId,
-                session,
-                session.assignedDevice,
-                reason,
-              );
+              await manager.releaseSession(session.sessionId, reason, {
+                expectedOwner: { session: session, deviceId: session.assignedDevice },
+              });
               await pool.releaseDevice(session.assignedDevice, session.sessionId);
             },
           }

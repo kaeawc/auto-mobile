@@ -47,6 +47,12 @@ DOCS_PATHS=(
   "scripts/github"
   "scripts/docs"
   ".github/workflows/docs.yml"
+  # Test-count badge JSON published with the site is derived from these trees
+  # (scripts/coverage/generate-test-count-badges.sh, issue #11871).
+  "test"
+  "android"
+  "ios"
+  "scripts/coverage"
 )
 
 WORKFLOW_FILE="${DOCS_WORKFLOW_FILE:-docs.yml}"

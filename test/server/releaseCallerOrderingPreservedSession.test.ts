@@ -60,12 +60,11 @@ describe("deviceTools preserved-session release caller ordering", () => {
     let live = !scenario.startsWith("missing");
     const manager: ReadinessSessionManager = {
       getDeviceLabels: unexercised("getDeviceLabels"),
-      releaseSession: unexercised("releaseSession"),
       getSession: () => (scenario.startsWith("missing") ? null : session),
       findSession: () => (scenario.startsWith("missing") ? null : session),
       hasSession: () => live,
-      releaseSessionIfOwned: async (...args) => {
-        events.push(["session.releaseSessionIfOwned", ...args]);
+      releaseSession: async (...args) => {
+        events.push(["session.releaseSession", ...args]);
         if (scenario === "session-failure") {
           throw failure;
         }
@@ -150,11 +149,10 @@ describe("deviceTools preserved-session release caller ordering", () => {
         scenario === "session" || scenario === "session-failure" || scenario === "pool-failure"
           ? [
               [
-                "session.releaseSessionIfOwned",
+                "session.releaseSession",
                 "s1",
-                session,
-                "replacement",
                 "device-disconnected:replacement",
+                { expectedOwner: { session, deviceId: "replacement" } },
               ],
               ...(scenario === "session-failure"
                 ? []

@@ -170,7 +170,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 2,
       reason: "Publishes pool epoch/label per serial; reconciles before resolvePoolDeviceContext.",
     },
-    "src/features/deviceLifecycle/core/bootIdentity.ts": {
+    "src/features/deviceLifecycle/boot/bootIdentity.ts": {
       calls: 2,
       reason: "Pre-boot serial validation and start lifecycle target reconcile their discoveries.",
     },
@@ -351,7 +351,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/daemon/socketServer/ideDeviceRoutes.ts",
       "src/daemon/socketServer/inputDeviceGating.ts",
       "src/server/bootedDeviceResources.ts",
-      "src/features/deviceLifecycle/core/bootIdentity.ts",
+      "src/features/deviceLifecycle/boot/bootIdentity.ts",
       "src/features/deviceLifecycle/teardown/shutdownDiscovery.ts",
       "src/features/deviceLifecycle/teardown/teardownDiscovery.ts",
       "src/server/deviceToolsStartupLease.ts",

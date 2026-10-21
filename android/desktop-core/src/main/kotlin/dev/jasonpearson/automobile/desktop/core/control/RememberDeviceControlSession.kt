@@ -5,6 +5,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionState
 import dev.jasonpearson.automobile.desktop.core.daemon.inputAllocatingClient
 
 /**
@@ -20,17 +21,18 @@ import dev.jasonpearson.automobile.desktop.core.daemon.inputAllocatingClient
  */
 @Composable
 internal fun rememberDeviceControlSession(
+  desktopSessionState: DesktopDaemonSessionState,
   options: RememberDeviceControlOptions,
 ): DeviceControlSession {
   return with(options) {
     val currentProvider by rememberUpdatedState(clientProvider)
-    val currentAllocation by rememberUpdatedState(inputAllocation)
+    val currentAllocation by rememberUpdatedState(desktopSessionState.inputAllocation)
     val session =
       remember(scope) {
         DeviceControlSession(
           DeviceControlSessionOptions(
             scope = scope,
-            clientProvider = { inputAllocatingClient(currentProvider) { currentAllocation() } },
+            clientProvider = { inputAllocatingClient(currentProvider) { currentAllocation } },
             platform = platform,
             nowMs = nowMs,
             publishError = publishError,

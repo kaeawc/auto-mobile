@@ -26,7 +26,10 @@ import {
   shouldProtectLiveDaemonVersion,
   writePidFileDataAtomic,
   writePidFileDataAtomicSync,
+  type DaemonCleanupFileSystem,
 } from "../../src/daemon/daemonFiles";
+import { FakeLockFileSystem } from "../fakes/FakeLockFileSystem";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import * as loggerModule from "../../src/utils/logger";
@@ -583,6 +586,68 @@ describe("listDaemonPidFilePathsOrThrow", () => {
 
 describe("daemon file cleanup", () => {
   const scratch = useScratchRoot("daemonFiles-");
+
+  for (const sync of [false, true]) {
+    for (const newerAtRestore of [false, true]) {
+      test(`handoff: successor published after final PID ownership read survives (sync=${sync}, newerAtRestore=${newerAtRestore})`, async () => {
+        const storage = new FakeLockFileSystem();
+        const pidFilePath = "/daemon/owner.pid";
+        const original: PidFileData = {
+          pid: 100,
+          socketPath: "/daemon/control.sock",
+          port: 3000,
+          startedAt: 1,
+          version: "test",
+        };
+        const successor = { ...original, pid: 200 };
+        const newest = { ...original, pid: 300 };
+        storage.seed(pidFilePath, JSON.stringify(original));
+        storage.failure = (operation) => {
+          if (operation === "link" && newerAtRestore) {
+            storage.seed(pidFilePath, JSON.stringify(newest));
+          }
+          return undefined;
+        };
+        let reads = 0;
+        const persistedOwners: (PidFileData | null)[] = [];
+        const files: DaemonCleanupFileSystem = {
+          exists: (path) => storage.exists(path),
+          stat: (path) => ({ dev: 1, ino: storage.stat(path).ino }),
+          unlink: async (path) => storage.unlink(path),
+          unlinkSync: (path) => storage.unlink(path),
+          renameSync: (from, to) => storage.rename(from, to),
+          linkSync: (from, to) => storage.link(from, to),
+          readPid: (path = pidFilePath) => {
+            const value: PidFileData = JSON.parse(storage.readText(path));
+            if (path === pidFilePath && ++reads === 3) {
+              // Atomic successor publication immediately after the final ownership read.
+              storage.seed(path, JSON.stringify(successor));
+            }
+            return value;
+          },
+          persistOwner: (owner) => {
+            persistedOwners.push(owner);
+          },
+        };
+        const options = {
+          pidFilePath,
+          socketPaths: [],
+          expectedPid: 100,
+          idGenerator: new CountingIdGenerator(),
+        };
+        const removed = sync
+          ? cleanupDaemonFilesSync(options, files)
+          : await cleanupDaemonFiles(options, files);
+        expect(storage.exists(pidFilePath)).toBe(true);
+        expect(JSON.parse(storage.readText(pidFilePath))).toEqual(
+          newerAtRestore ? newest : successor,
+        );
+        expect(removed).toBe(false);
+        expect(persistedOwners).toEqual([original]);
+        expect(storage.paths()).toEqual([pidFilePath]);
+      });
+    }
+  }
 
   function createTempFiles(): { dir: string; socketPath: string; pidFilePath: string } {
     const dir = scratch.next();

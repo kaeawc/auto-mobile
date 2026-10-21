@@ -177,10 +177,16 @@ async function harness(
   const server = new FakeHttpServer();
   const daemon = new Daemon(
     { port, host: "127.0.0.1" },
-    { timer, httpToken: HTTP_TOKEN, httpServerFactory: () => server },
+    {
+      timer,
+      httpToken: HTTP_TOKEN,
+      httpTokenStore: new FakeDaemonHttpTokenStore(),
+      httpServerFactory: () => server,
+    },
   );
   const transport = new FakeTransport();
   const hooks = daemon.testHooks;
+  hooks.publishHttpToken();
   if (sessionManager) {
     hooks.replaceSessionManager(sessionManager);
   }
@@ -662,7 +668,7 @@ test("HTTP request callback handles unexpected rejection before transport dispat
 });
 
 describe("daemon HTTP bearer authentication", () => {
-  test("requires the in-memory token before the listen callback completes", async () => {
+  test("defers every path and method until publication without evaluating credentials", async () => {
     const server = new FakeHttpServer();
     const store = new FakeDaemonHttpTokenStore();
     const daemon = new Daemon(
@@ -683,16 +689,33 @@ describe("daemon HTTP bearer authentication", () => {
     });
     try {
       const starting = daemon.testHooks.httpIngress.start();
-      const response = await server.dispatch(
-        { host: `localhost:${port}`, authorization: undefined },
-        "OPTIONS",
-      );
-      expect(response.statusCode).toBe(401);
-      expect(response.body).toBe('{"error":"Unauthorized"}');
+      for (const method of ["GET", "POST", "OPTIONS", "DELETE"]) {
+        for (const path of ["/heartbeat", "/unknown", MCP_STREAMABLE_PATH]) {
+          const response = await server.dispatch(
+            { host: `localhost:${port}`, authorization: "invalid" },
+            method,
+            path,
+          );
+          expect(response.statusCode).toBe(503);
+          expect(response.headers.get("retry-after")).toBe("1");
+          expect(response.body).toBe('{"error":"Service unavailable"}');
+          expect(server.lastRequest?.headers.authorization).toBe("invalid");
+        }
+      }
+      expect((await server.dispatch({ host: "untrusted" })).statusCode).toBe(403);
+      expect(
+        (await server.dispatch({ host: `localhost:${port}`, origin: "http://untrusted" }))
+          .statusCode,
+      ).toBe(403);
+      expect(store.read()).toBeUndefined();
+      daemon.testHooks.publishHttpToken();
+      expect(
+        (await server.dispatch({ host: `localhost:${port}`, authorization: undefined }, "OPTIONS"))
+          .statusCode,
+      ).toBe(401);
       expect((await server.dispatch({ host: `localhost:${port}` }, "OPTIONS")).statusCode).toBe(
         200,
       );
-      expect(store.read()).toBeUndefined();
       completeBind();
       await starting;
     } finally {

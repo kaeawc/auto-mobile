@@ -7,7 +7,7 @@ import { join } from "path";
 import type { ExecResult } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { hashAppBundle } from "./AppBundleHasher";
-import { isProcessAlreadyGoneError } from "./iosProcessErrors";
+import { getExecErrorText, isDevicectlProcessGoneError } from "./devicectlProcessErrors";
 import { iosMajorVersionFromDevicectlDetails } from "./iosVersion";
 import { logger } from "../logger";
 import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostCommandExecutor";
@@ -30,6 +30,7 @@ import {
   findProcessIdentifier,
   findRunningProcessPid,
 } from "./devicectlAppQueries";
+export { isDevicectlProcessGoneError } from "./devicectlProcessErrors";
 export {
   findBundleEntry,
   extractInstalledAppEntries,
@@ -139,54 +140,6 @@ const findAppBundleInDir = async (
 };
 
 const getErrorMessage = (error: unknown): string => errorMessage(error);
-
-/**
- * Full text of a failed `exec` rejection. Promisified `child_process.exec`
- * rejects with an Error whose `message` is "Command failed: <cmd>" and whose
- * `stdout`/`stderr` carry the tool's actual diagnostic — devicectl writes its
- * ESRCH "No such process" text to stderr, so we must inspect the captured
- * streams, not just message. stdout is included as a cheap belt-and-suspenders:
- * with `--quiet` devicectl uses stderr, but its error framing is undocumented.
- */
-const getExecErrorText = (error: unknown): string => {
-  const parts = [getErrorMessage(error)];
-  if (error && typeof error === "object") {
-    for (const field of ["stderr", "stdout"] as const) {
-      const value = (error as Record<string, unknown>)[field];
-      if (typeof value === "string" && value.length > 0) {
-        parts.push(value);
-      }
-    }
-  }
-  return parts.join("\n");
-};
-
-/**
- * True when a devicectl `process terminate` failure means the target PID was
- * already gone — it exited between our `info processes` resolution and the kill
- * (a real on-device race, issue #3054). devicectl surfaces ESRCH either as the
- * localized "No such process" strerror text or, on some builds, the bare
- * `NSPOSIXErrorDomain error 3` code without the strerror gloss.
- *
- * The shared already-gone phrasings live in {@link isProcessAlreadyGoneError}
- * (used by the simulator path too, issue #3076); here we OR-in the two
- * devicectl-specific extras so a raced exit reports an effectively-terminated
- * app instead of a false `success:false`. Together these preserve the exact
- * prior devicectl behavior: shared `not running` ∪ extra `no longer running`.
- *
- * Deliberately narrow: unrelated failures (device locked, not connected,
- * permission denied) must still propagate as hard errors. The "not running"
- * family is scoped to the *process* so a device/CoreDevice-level "not running"
- * message can never be mistaken for an already-exited PID.
- */
-export const isDevicectlProcessGoneError = (message: string): boolean => {
-  const normalized = message.toLowerCase();
-  return (
-    isProcessAlreadyGoneError(message) ||
-    normalized.includes("nsposixerrordomain error 3") || // bare ESRCH code
-    /process (?:is )?no longer running/.test(normalized)
-  ); // devicectl-only phrasing
-};
 
 const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>
   bundleId.endsWith(".XCTestServiceApp") &&
@@ -847,6 +800,43 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
         `[DeviceAppManager] Failed to get physical device app info for ${bundleId}: ${getErrorMessage(error)}`,
       );
       return null;
+    }
+  }
+
+  /**
+   * PID of `bundleId`'s main process on a physical device (#14096): `null` when installed but not
+   * running, `undefined` when not installed. Matching is by the exact bundle id's installed path,
+   * so a bundle id that is a prefix of another never resolves the other app. macOS-only.
+   */
+  public async findRunningAppPid(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<number | null | undefined> {
+    if (this.deps.platform() !== "darwin") {
+      throw new ActionableError("Physical iOS process lookup requires macOS");
+    }
+    const bundlePath = await this.resolveInstalledBundlePathOnDevice(deviceUdid, bundleId);
+    return bundlePath ? this.resolveRunningPid(deviceUdid, bundlePath) : undefined;
+  }
+
+  /** `devicectl device process signal` (#14096); "already_exited" on ESRCH, else throws with stderr. */
+  public async signalProcess(
+    deviceUdid: string,
+    pid: number,
+    signal: "SIGABRT",
+  ): Promise<"signalled" | "already_exited"> {
+    const args = ["devicectl", "device", "process", "signal", "--device", deviceUdid];
+    try {
+      await this.execute("xcrun", [...args, "--pid", String(pid), "--signal", signal, "--quiet"]);
+      return "signalled";
+    } catch (error) {
+      const message = getExecErrorText(error);
+      if (!isDevicectlProcessGoneError(message)) {
+        throw new ActionableError(`Failed to send ${signal} to PID ${pid}: ${message}`);
+      }
+      // ESRCH: the process exited between PID lookup and the signal, so nothing was delivered.
+      this.deps.logger.debug(`[DeviceAppManager] PID ${pid} exited before signal: ${message}`);
+      return "already_exited";
     }
   }
 

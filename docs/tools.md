@@ -2107,8 +2107,11 @@ Do Not Disturb policy access, and `scheduleExactAlarm` sets the
 <code>crashApp</code> accepts only an <code>appId</code>; it never accepts a PID,
 signal, or shell command. Android uses ActivityManager's VM-crash path for the
 resolved user. iOS Simulator sends SIGABRT to the exact launchd application
-process. Physical iOS devices return <code>supported: false</code> and never fall
-back to normal termination.
+process. Physical iOS 17+ devices (#14096) resolve the app's main-process PID with
+<code>devicectl device info processes</code>, matched by the exact bundle ID's
+installed path, then send SIGABRT with <code>devicectl device process signal</code>
+(<code>mechanism: "ios_device_sigabrt"</code>). Neither path falls back to normal
+termination.
 
 Every result reports <code>success</code>, <code>supported</code>,
 <code>platform</code>, <code>appId</code>, <code>mechanism</code>,
@@ -2117,7 +2120,11 @@ Every result reports <code>success</code>, <code>supported</code>,
 confirmed crashes also report <code>processId</code> when available and include
 immediate OS diagnostic evidence. <code>success: true</code> and
 <code>confirmed: true</code> require fresh, target-specific crash evidence, not
-merely command dispatch or process disappearance.
+merely command dispatch or process disappearance. Physical iOS is the one
+exception, because device crash reports cannot be read yet (#14103): there
+<code>success: true</code> means SIGABRT was delivered and the PID exited,
+<code>confirmed</code> stays <code>false</code>, and <code>evidence.source</code> is
+<code>"none"</code>.
 
 After dispatch, <code>crashApp</code> also looks for the OS crash report for the
 crashed process and returns it as <code>crashReport</code>. On iOS Simulator

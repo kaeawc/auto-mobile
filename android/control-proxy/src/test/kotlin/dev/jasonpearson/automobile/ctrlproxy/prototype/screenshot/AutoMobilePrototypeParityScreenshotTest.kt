@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
@@ -15,6 +16,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -31,6 +33,10 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "w360dp-h640dp-mdpi", application = Application::class)
 class AutoMobilePrototypeParityScreenshotTest {
+  // Own Compose's frame clock and effect scheduler, as in SavedPrototypeActivityTest;
+  // the embedded API renders only after an effect.
+  @get:Rule val compose = createComposeRule()
+
   @Test fun materialControls() = parity("material_controls", "material-controls")
 
   @Test fun selectionControls() = parity("selection_controls", "selection-controls")
@@ -52,7 +58,7 @@ class AutoMobilePrototypeParityScreenshotTest {
       }
     try {
       val actual =
-        renderComposable("embedded_$golden") {
+        renderComposable("embedded_$golden", settle = { compose.waitForIdle() }) {
           ProvideEmbeddedPrototypeHost(host) {
             AutoMobilePrototype(spec, onError = { error("$fixture: $it") })
           }

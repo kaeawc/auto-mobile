@@ -80,6 +80,7 @@ import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts"
 import {
   RunnerReadinessError,
   RunnerReadinessService,
+  type ReadinessAndroidManager,
 } from "../../src/ctrlProxy/RunnerReadinessService";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
@@ -4656,7 +4657,7 @@ describe("provisionDevice handler", () => {
       exactProvisioner.provision = async () => provisionedTestDevice("android", false);
       const service = new RunnerReadinessService({
         timer,
-        getAndroidManager: () => ({
+        getAndroidManager: (): ReadinessAndroidManager => ({
           isInstalled: async () => {
             throw failure;
           },
@@ -4664,6 +4665,7 @@ describe("provisionDevice handler", () => {
           isVersionCompatible: async () => true,
           enable: async () => {},
           resetSetupState: () => {},
+          reopenSetupGate: () => {},
           setup: async () => ({ success: true, message: "ready" }),
           ensureCompatibleVersion: async () => ({ status: "compatible" }),
         }),

@@ -1,5 +1,4 @@
 import { idleReleaseField } from "../releaseReasons";
-import { DeviceReadiness } from "../readiness/DeviceReadiness";
 
 import type { SessionRecoveryAssignmentDetails } from "../../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../../utils/toolEnvelopePayload";
@@ -36,7 +35,7 @@ import type { SocketServerRuntime } from "./SocketServerRuntime";
 import type { SocketServerOperations } from "./socketServerOperations";
 type State = Pick<
   SocketServerRuntime,
-  "clientSockets" | "daemonState" | "boundMcpClientKeysBySocketSession"
+  "clientSockets" | "daemonState" | "boundMcpClientKeysBySocketSession" | "clearConnectionDevicePin"
 >;
 type Callbacks = Pick<
   SocketServerOperations,
@@ -168,7 +167,7 @@ export class McpBindings {
     }
   }
   clearConnectionDevicePin(socketSessionId: string): void {
-    DeviceReadiness.getInstance().clearConnectionDevicePin(socketSessionId);
+    this.state.clearConnectionDevicePin?.(socketSessionId);
   }
   recordBoundMcpClientKey(
     request: DaemonRequest,

@@ -22,7 +22,7 @@ const expectRejection = async (promise: Promise<unknown>): Promise<Error> => {
   throw new Error("Expected the operation to reject");
 };
 
-describe("Android emulator boot failure diagnostics", () => {
+describe("Android emulator readiness adb state probe", () => {
   test("reports a target that remains offline instead of waiting for the generic timeout", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();

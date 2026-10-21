@@ -5,6 +5,7 @@ import {
 } from "../../src/daemon/readiness/DeviceReadiness";
 import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src/models";
 import { DIRECT_DEVICE_CONNECTION_KEY } from "../../src/devices/ActiveDeviceSelection";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 
 /**
  * Fake implementation of DeviceReadiness for testing
@@ -12,9 +13,6 @@ import { DIRECT_DEVICE_CONNECTION_KEY } from "../../src/devices/ActiveDeviceSele
  */
 export class FakeDeviceReadiness implements Pick<
   DeviceReadiness,
-  | "getCurrentDevice"
-  | "getCurrentPlatform"
-  | "setCurrentDevice"
   | "getExplicitDevicePin"
   | "setExplicitDevicePin"
   | "clearExplicitDevicePin"
@@ -29,8 +27,6 @@ export class FakeDeviceReadiness implements Pick<
   | "findOrStartAndroidDevice"
   | "findOrStartIosDevice"
 > {
-  private currentDevice: BootedDevice | undefined;
-  private currentPlatform: Platform | undefined;
   private readonly explicitDevicePins = new Map<string, BootedDevice>();
   private connectedDevices: BootedDevice[] = [];
   private connectedPlatforms: BootedDevice[] = [];
@@ -46,7 +42,6 @@ export class FakeDeviceReadiness implements Pick<
   private failedPlatformScans: Record<Platform, boolean> = { android: false, ios: false };
 
   // Call tracking for assertions
-  private setCurrentDeviceCalls: BootedDevice[] = [];
   private ensureDeviceReadyCalls: number = 0;
   private detectConnectedPlatformsCalls: number = 0;
   private detectConnectedPlatformsSignals: (AbortSignal | undefined)[] = [];
@@ -144,14 +139,6 @@ export class FakeDeviceReadiness implements Pick<
   }
 
   /**
-   * Get all calls made to setCurrentDevice (for test assertions)
-   * @returns Array of devices that were set as current
-   */
-  getSetCurrentDeviceCalls(): BootedDevice[] {
-    return [...this.setCurrentDeviceCalls];
-  }
-
-  /**
    * Get the number of times ensureDeviceReady was called (for test assertions)
    * @returns Count of ensureDeviceReady calls
    */
@@ -220,7 +207,6 @@ export class FakeDeviceReadiness implements Pick<
    * Clear all call history (for test cleanup)
    */
   clearHistory(): void {
-    this.setCurrentDeviceCalls = [];
     this.ensureDeviceReadyCalls = 0;
     this.detectConnectedPlatformsCalls = 0;
     this.detectConnectedPlatformsSignals = [];
@@ -230,20 +216,6 @@ export class FakeDeviceReadiness implements Pick<
   }
 
   // Implementation of DeviceReadiness interface
-
-  getCurrentDevice(): BootedDevice | undefined {
-    return this.currentDevice;
-  }
-
-  getCurrentPlatform(): Platform | undefined {
-    return this.currentPlatform;
-  }
-
-  setCurrentDevice(device: BootedDevice, platform: Platform): void {
-    this.currentDevice = device;
-    this.currentPlatform = platform;
-    this.setCurrentDeviceCalls.push(device);
-  }
 
   getExplicitDevicePin(connectionId = DIRECT_DEVICE_CONNECTION_KEY): BootedDevice | undefined {
     return this.explicitDevicePins.get(connectionId);
@@ -296,8 +268,7 @@ export class FakeDeviceReadiness implements Pick<
         throw new ActionableError(`Device ${providedDeviceId} not found`);
       }
     } else {
-      // Find device for the specified platform. Like the real readiness, a pin or current device
-      // that is no longer connected is dropped (the pin) or ignored (the current device).
+      // An explicit connection pin is usable only while its device is connected.
       const isConnected = (device: BootedDevice | undefined): boolean =>
         !!device && this.connectedDevices.some((d) => d.deviceId === device.deviceId);
       const explicitPin = this.getExplicitDevicePin(options?.connectionId);
@@ -305,28 +276,31 @@ export class FakeDeviceReadiness implements Pick<
         this.clearExplicitDevicePin(explicitPin.deviceId);
       }
       const pin = this.getExplicitDevicePin(options?.connectionId);
-      const current = isConnected(this.currentDevice) ? this.currentDevice : undefined;
-      const currentPlatform = current ? this.currentPlatform : undefined;
-      const pick = (resolvedPlatform: Platform | undefined): BootedDevice | undefined =>
-        pin?.platform === resolvedPlatform
-          ? pin
-          : currentPlatform === resolvedPlatform
-            ? current
-            : this.connectedDevices.find((device) => device.platform === resolvedPlatform);
+      const pick = (resolvedPlatform: Platform | undefined): BootedDevice | undefined => {
+        if (pin?.platform === resolvedPlatform) {
+          return pin;
+        }
+        const candidates = this.connectedDevices.filter(
+          (device) => device.platform === resolvedPlatform,
+        );
+        if (candidates.length > 1) {
+          throw new AmbiguousDeviceTargetError(
+            `Multiple ${resolvedPlatform} devices connected; specify deviceId.`,
+            candidates,
+          );
+        }
+        return candidates[0];
+      };
       if (platform === "either") {
         const hasAndroid = this.connectedDevices.some((device) => device.platform === "android");
         const hasIos = this.connectedDevices.some((device) => device.platform === "ios");
-        if (hasAndroid && hasIos && !current && !pin) {
+        if (hasAndroid && hasIos && !pin) {
           throw new ActionableError(
             "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
           );
         }
         const resolvedPlatform =
-          hasAndroid && hasIos
-            ? (pin?.platform ?? currentPlatform)
-            : hasAndroid
-              ? "android"
-              : "ios";
+          hasAndroid && hasIos ? pin?.platform : hasAndroid ? "android" : "ios";
         selectedDevice = pick(resolvedPlatform);
       } else {
         selectedDevice = pick(platform);
@@ -350,9 +324,6 @@ export class FakeDeviceReadiness implements Pick<
     }
 
     options?.signal?.throwIfAborted();
-    if (options?.intent !== "read") {
-      this.setCurrentDevice(selectedDevice, selectedDevice.platform);
-    }
 
     return selectedDevice;
   }

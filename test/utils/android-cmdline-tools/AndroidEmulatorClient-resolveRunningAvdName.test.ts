@@ -4,6 +4,9 @@ import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
+import { resolveRunningAvdNameOnce } from "../../../src/utils/android-cmdline-tools/runningAvdName";
+import { createExecResult } from "../../../src/utils/execResult";
 import type { ExecResult } from "../../../src/models";
 import {
   executeCommandOptionsOf,
@@ -46,6 +49,56 @@ const device: BootedDevice = {
  * sequentially and must share it (#6863 review).
  */
 describe("AndroidEmulatorClient.resolveRunningAvdName", () => {
+  test.each(["empty", "error"])(
+    "marks an unresolved %s property fallback at the shared deadline as timed out",
+    async (outcome) => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      const execute = adb.executeCommand.bind(adb);
+      adb.executeCommand = async (command, options) => {
+        timer.advanceTime(command === "emu avd name" ? 500 : 1_500);
+        if (command === "emu avd name" || outcome === "error") {
+          throw new Error("probe failed");
+        }
+        return await execute(command, options);
+      };
+
+      const result = await resolveRunningAvdNameOnce(
+        {
+          timer,
+          adbFactory: new FakeAdbClientFactory(adb),
+          consoleBusyRegistry: new FakeEmulatorConsoleBusyRegistry(),
+        },
+        device,
+        2_000,
+      );
+
+      expect(result).toMatchObject({ name: "", nameProbeTimedOut: true });
+      expect(result.diagnostic).toBeDefined();
+    },
+  );
+
+  test("does not mark a resolved property fallback at the deadline as timed out", async () => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.executeCommand = async (command) => {
+      timer.advanceTime(1_000);
+      return createExecResult(command === "emu avd name" ? "" : "Pixel_A", "");
+    };
+
+    expect(
+      await resolveRunningAvdNameOnce(
+        {
+          timer,
+          adbFactory: new FakeAdbClientFactory(adb),
+          consoleBusyRegistry: new FakeEmulatorConsoleBusyRegistry(),
+        },
+        device,
+        2_000,
+      ),
+    ).toEqual({ name: "Pixel_A" });
+  });
+
   test("shares one deadline between the console probe and the property fallback", async () => {
     const timer = new FakeTimer();
     const adb = new StallingAdbExecutor(timer, 2_000);

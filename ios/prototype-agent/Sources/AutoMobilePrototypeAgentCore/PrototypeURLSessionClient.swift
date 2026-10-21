@@ -267,11 +267,16 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
             }
             return next
         }
-        if [301, 302, 303].contains(status), next.httpMethod != "GET", next.httpMethod != "HEAD" {
+        // Fetch's rule, matching the host executor: POST becomes GET on 301/302, any method but
+        // HEAD becomes GET on 303, and 307/308 keep the method and body.
+        let method = next.httpMethod ?? "GET"
+        if (status == 303 && method != "HEAD") || ([301, 302].contains(status) && method == "POST") {
             next.httpMethod = "GET"
             next.httpBody = nil
             next.httpBodyStream = nil
-            next.setValue(nil, forHTTPHeaderField: "Content-Type")
+            for name in ["Content-Type", "Content-Length", "Content-Encoding", "Content-Language", "Content-Location"] {
+                next.setValue(nil, forHTTPHeaderField: name)
+            }
         }
         try await egress.validate(next)
         lock.withLock { currentRequest = next }

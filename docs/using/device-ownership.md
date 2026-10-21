@@ -716,7 +716,7 @@ For a sessionless call naming an unheld running device whose service is not read
 the **Yes/No** classifications refer to registry readiness: `ensureDeviceReady`
 with `intent: "read"`. **Yes** means the platform manager performs CtrlProxy/runner
 setup through that path. These are the exact sets pinned
-by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 19 of 23 tools on each platform.
+by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 21 of 25 tools on each platform.
 The handlers are stubbed in that test; platform-specific feature support is separate
 from target resolution and readiness.
 
@@ -751,11 +751,13 @@ entry point. Direct (non-daemon) mode is protected by the CtrlProxy manager guar
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |
 | `accessibility`         | Yes                                         | Yes                                         |
 | `clipboard`             | Yes                                         | Yes                                         |
+| `compareScreenshot`     | Yes                                         | Yes                                         |
 | `displayConfig`         | Yes                                         | Yes                                         |
 | `getAppPermissions`     | Yes                                         | Yes                                         |
 | `getDataStore`          | Yes                                         | Yes                                         |
 | `getDeepLinks`          | Yes                                         | Yes                                         |
 | `getDeviceState`        | Yes                                         | Yes                                         |
+| `getLogs`               | Yes                                         | Yes                                         |
 | `getNavigationGraph`    | Yes                                         | Yes                                         |
 | `getNetworkGraph`       | Yes                                         | Yes                                         |
 | `getNotificationPolicy` | Yes                                         | Yes                                         |

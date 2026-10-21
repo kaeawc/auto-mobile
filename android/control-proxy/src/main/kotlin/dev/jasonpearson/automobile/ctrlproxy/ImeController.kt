@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
@@ -16,7 +15,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 /** Monotonic deadlines and suspending waits used while the IME becomes ready. */
 internal data class ImeConfig(
@@ -28,14 +26,13 @@ internal data class ImeConfig(
  * The CtrlProxy IME request surface: commitText (and its cancellation tombstones), keyboard profile
  * selection and the profile catalog, plus their result frames. Everything that needs the live
  * accessibility service, the CtrlProxyIme singleton or the late-bound WebSocket server comes
- * through [Host] and [ResponseSender].
+ * through [Host] and [ResultSender].
  */
 internal class ImeController(
   private val host: Host,
   private val timeProvider: TimeProvider,
-  private val resultBroadcaster: ResultBroadcaster,
   private val jsonCompact: Json,
-  private val responseSender: ResponseSender,
+  private val resultSender: ResultSender,
   config: ImeConfig = ImeConfig(),
 ) {
   private val uptimeMillis = config.uptimeMillis
@@ -60,19 +57,6 @@ internal class ImeController(
 
     /** Drops the remembered insert caret; a commit may move it. */
     fun forgetRememberedInsert()
-  }
-
-  /** Keeps the service's frame encoder and late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    fun isRunning(): Boolean
-
-    suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String)
-
-    suspend fun broadcastSetKeyboardProfileResult(
-      build: (perfTiming: String?) -> SetKeyboardProfileResult,
-    )
-
-    fun connectionCount(): Int
   }
 
   companion object {
@@ -176,16 +160,14 @@ internal class ImeController(
     // An absent target is a tombstone: the original frame may still be queued on another socket.
     host.launchRequestScope(requestId) {
       val result = state.finished.await()
-      resultBroadcaster.guard(requestId, "cancel_ime_commit_result") {
-        responseSender.broadcastWithPerfSync { perfTiming ->
-          cancelImeCommitResultFrame(
-            requestId,
-            targetRequestId,
-            result.partialApplication,
-            result.committedUnits,
-            perfTiming,
-          )
-        }
+      resultSender.sendFrame(requestId, "cancel_ime_commit_result") { perfTiming ->
+        cancelImeCommitResultFrame(
+          requestId,
+          targetRequestId,
+          result.partialApplication,
+          result.committedUnits,
+          perfTiming,
+        )
       }
     }
   }
@@ -279,19 +261,8 @@ internal class ImeController(
   }
 
   private suspend fun broadcastCommitTextResult(outcome: CommitTextFrameResult) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(outcome.requestId, "commit_text_result") {
-      responseSender.broadcastWithPerfSync { perfTiming ->
-        commitTextResultFrame(outcome, perfTiming)
-      }
-      Log.d(
-        TAG,
-        "Broadcasted commit text result to ${responseSender.connectionCount()} clients",
-      )
+    resultSender.sendFrame(outcome.requestId, "commit_text_result") { perfTiming ->
+      commitTextResultFrame(outcome, perfTiming)
     }
   }
 
@@ -302,40 +273,22 @@ internal class ImeController(
     previousProfileId: String? = null,
     error: String? = null,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping keyboard profile result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_keyboard_profile_result") {
-      responseSender.broadcastSetKeyboardProfileResult { perfTiming ->
-        SetKeyboardProfileResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          activeProfileId = activeProfileId,
-          previousProfileId = previousProfileId,
-          error = error,
-          perfTiming = perfTiming,
-        )
-      }
-      Log.d(
-        TAG,
-        "Broadcasted keyboard profile result to ${responseSender.connectionCount()} clients",
+    resultSender.send(requestId, "set_keyboard_profile_result") { perfTiming ->
+      SetKeyboardProfileResult(
+        timestamp = timeProvider.currentTimeMillis(),
+        requestId = requestId,
+        success = success,
+        activeProfileId = activeProfileId,
+        previousProfileId = previousProfileId,
+        error = error,
+        perfTiming = perfTiming,
       )
     }
   }
 
   private suspend fun broadcastKeyboardProfileCatalog(outcome: KeyboardProfilesResult) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping keyboard profile catalog response")
-      return
-    }
-
-    resultBroadcaster.guard(outcome.requestId, "keyboard_profiles_result") {
-      responseSender.broadcastWithPerfSync { perfTiming ->
-        keyboardProfilesResultFrame(outcome, perfTiming)
-      }
+    resultSender.sendFrame(outcome.requestId, "keyboard_profiles_result") { perfTiming ->
+      keyboardProfilesResultFrame(outcome, perfTiming)
     }
   }
 }

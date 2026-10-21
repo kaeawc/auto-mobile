@@ -465,6 +465,17 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     invoke: (h) => new CtrlProxyNavigation(h.context).requestRotate("landscape"),
   },
   {
+    name: "request_location",
+    builder: "CtrlProxyNavigation.requestLocation",
+    invoke: (h) =>
+      new CtrlProxyNavigation(h.context).requestLocation({
+        latitude: 37.33,
+        longitude: -122.03,
+        altitude: 12,
+        horizontalAccuracy: 5,
+      }),
+  },
+  {
     name: "set_hinge_angle",
     builder: "CtrlProxyNavigation.requestSetHingeAngle",
     invoke: (h) => new CtrlProxyNavigation(h.context).requestSetHingeAngle(130),

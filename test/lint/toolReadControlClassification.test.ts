@@ -41,10 +41,12 @@ const PROTOTYPE_ARGS = {
 
 const CLASSIFICATION: Classification = {
   read: [
+    "compareScreenshot",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -148,6 +150,7 @@ const CLASSIFICATION: Classification = {
     "resetKeychain",
     "rotate",
     "selectAllText",
+    "sendBroadcast",
     "sendKeys",
     "sendSms",
     "setAppLinks",

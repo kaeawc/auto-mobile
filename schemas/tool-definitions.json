@@ -4948,11 +4948,157 @@
           "type": "boolean"
         },
         "launchArguments": {
-          "description": "Arguments passed to the launched iOS app. Android does not support launch arguments.",
+          "description": "Arguments passed to the launched iOS app. On Android use intent instead.",
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "intent": {
+          "description": "Android only: start the app with this intent (component, action, data, categories, typed extras, flags) instead of the launcher intent. Always launches, even when the app is in front; am start refusals are typed (activity_not_exported, activity_not_found, intent_unresolved).",
+          "type": "object",
+          "properties": {
+            "component": {
+              "description": "Activity of the launched app: \".DebugActivity\", a fully qualified class, or \"<appId>/<class>\"; default: launcher activity. Other packages are refused",
+              "type": "string",
+              "minLength": 1
+            },
+            "action": {
+              "description": "Intent action, e.g. android.intent.action.VIEW",
+              "type": "string",
+              "minLength": 1
+            },
+            "data": {
+              "description": "Data URI",
+              "type": "string",
+              "minLength": 1
+            },
+            "mimeType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "categories": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "extras": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "description": "Extra key",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "description": "Extra key",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["int", "long", "float"]
+                      },
+                      "value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "description": "Extra key",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "boolean"
+                      },
+                      "value": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "description": "Extra key",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "stringArray"
+                      },
+                      "value": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "description": "Extra key",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "uri"
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "flags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["clearTask", "newTask", "singleTop", "clearTop", "noHistory"]
+              }
+            }
+          },
+          "additionalProperties": false
         },
         "prototype": {
           "description": "iOS simulator only: inject the prototype agent so the prototype tool can draw over this app. Always relaunches the app, losing its state. Rejected on physical iOS devices (use the in-app SDK), on Android (prototypes need no injection) and for com.apple.* apps.",

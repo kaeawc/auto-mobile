@@ -61,6 +61,42 @@ export const appLifecycleSchema = withAppIdAliases(
   ),
 );
 
+const intentExtraKey = z.string().min(1).describe("Extra key");
+
+/** Typed `am start` extras; shared with sendBroadcast (#14081). */
+export const androidIntentExtraSchema = z.discriminatedUnion("type", [
+  z.object({ key: intentExtraKey, type: z.literal("string"), value: z.string() }).strict(),
+  z
+    .object({ key: intentExtraKey, type: z.enum(["int", "long", "float"]), value: z.number() })
+    .strict(),
+  z.object({ key: intentExtraKey, type: z.literal("boolean"), value: z.boolean() }).strict(),
+  z
+    .object({ key: intentExtraKey, type: z.literal("stringArray"), value: z.array(z.string()) })
+    .strict(),
+  z.object({ key: intentExtraKey, type: z.literal("uri"), value: z.string().min(1) }).strict(),
+]);
+
+/** Android launch intent (#14080); every value is shell-quoted, never passed as raw command text. */
+export const androidIntentSchema = z
+  .object({
+    component: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Activity of the launched app: ".DebugActivity", a fully qualified class, or "<appId>/<class>"; default: launcher activity. Other packages are refused',
+      ),
+    action: z.string().min(1).optional().describe("Intent action, e.g. android.intent.action.VIEW"),
+    data: z.string().min(1).optional().describe("Data URI"),
+    mimeType: z.string().min(1).optional(),
+    categories: z.array(z.string().min(1)).optional(),
+    extras: z.array(androidIntentExtraSchema).optional(),
+    flags: z
+      .array(z.enum(["clearTask", "newTask", "singleTop", "clearTop", "noHistory"]))
+      .optional(),
+  })
+  .strict();
+
 export const launchAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z
@@ -74,8 +110,11 @@ export const launchAppSchema = withAppIdAliases(
         launchArguments: z
           .array(z.string())
           .optional()
+          .describe("Arguments passed to the launched iOS app. On Android use intent instead."),
+        intent: androidIntentSchema
+          .optional()
           .describe(
-            "Arguments passed to the launched iOS app. Android does not support launch arguments.",
+            "Android only: start the app with this intent (component, action, data, categories, typed extras, flags) instead of the launcher intent. Always launches, even when the app is in front; am start refusals are typed (activity_not_exported, activity_not_found, intent_unresolved).",
           ),
         prototype: z
           .boolean()

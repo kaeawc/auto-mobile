@@ -10,7 +10,7 @@ import { executionTracker } from "../../src/daemon/executionTracker";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -114,7 +114,7 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
       },
     }),
   );
-  const connected = new FakeDeviceSessionManager();
+  const connected = new FakeDeviceReadiness();
   connected.setConnectedDevices(devices);
   const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
   restores.push(() => ToolRegistry.setCollaboratorsForTesting(originalCollaborators));

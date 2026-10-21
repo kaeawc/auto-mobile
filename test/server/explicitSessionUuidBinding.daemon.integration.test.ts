@@ -34,7 +34,7 @@ import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/t
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import type { BootedDevice } from "../../src/models";
 
@@ -56,7 +56,7 @@ let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
 let originalCollaborators: ToolRegistryCollaborators;
-let deviceSessionManager: FakeDeviceSessionManager;
+let deviceSessionManager: FakeDeviceReadiness;
 let restorePipelineOverrides: (() => void) | undefined;
 const fixtures = new Map<string, McpTestFixture>();
 const proxies: DaemonMcpProxy[] = [];
@@ -65,7 +65,7 @@ let restoreSpies: Array<() => void> = [];
 
 beforeEach(async () => {
   originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-  deviceSessionManager = new FakeDeviceSessionManager();
+  deviceSessionManager = new FakeDeviceReadiness();
   deviceSessionManager.setConnectedDevices(devices);
   ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;

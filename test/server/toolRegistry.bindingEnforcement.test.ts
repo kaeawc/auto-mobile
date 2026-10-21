@@ -29,7 +29,7 @@ import {
   type InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -83,7 +83,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         },
       },
     });
-    const devices = new FakeDeviceSessionManager();
+    const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([slotA, slotB, free]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });

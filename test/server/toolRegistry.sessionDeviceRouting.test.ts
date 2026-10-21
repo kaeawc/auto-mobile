@@ -2,7 +2,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -34,7 +34,7 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
   };
   const sessionUuid = "session-on-a";
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
+  let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalCollaborators: ToolRegistryCollaborators;
   let sessionManager: SessionManager;
   let restoreInventory: () => void;
@@ -63,10 +63,10 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
     restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceReadiness = new FakeDeviceReadiness();
+    fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},

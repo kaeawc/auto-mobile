@@ -5,7 +5,7 @@ import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory"
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -37,8 +37,8 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   };
 
   let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: ReturnType<
+  let fakeDeviceReadiness: FakeDeviceReadiness;
+  let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
   >["deviceSessionManager"];
   let daemonSessionManager: SessionManager | undefined;
@@ -70,7 +70,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   });
 
   async function setupAutolockedSession(): Promise<string> {
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA]);
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
@@ -89,9 +89,9 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   beforeEach(() => {
     planExecutor = createDefaultPlanExecutor();
     ToolRegistry.clearTools();
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    fakeDeviceReadiness = new FakeDeviceReadiness();
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     // The default provider reads the device's displays over adb, and "emulator-5554" is a real
     // emulator on a developer's machine.
@@ -109,7 +109,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
 
   afterEach(() => {
     restorePipelineOverrides();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceReadiness });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

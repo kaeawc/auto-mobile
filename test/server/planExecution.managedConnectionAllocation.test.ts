@@ -12,7 +12,7 @@ import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisi
 import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";
 import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { BootedDevice } from "../../src/models";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -90,7 +90,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
         },
       },
     });
-    const devices = new FakeDeviceSessionManager();
+    const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([slotA, free]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });

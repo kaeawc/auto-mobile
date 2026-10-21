@@ -1,18 +1,15 @@
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { parseAppearanceConfig } from "../../src/features/appearance";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
-import {
-  runDeviceSessionManagerContract,
-  type ScriptedReadiness,
-} from "./DeviceSessionManagerContract";
+import { runDeviceReadinessContract, type ScriptedReadiness } from "./DeviceReadinessContract";
 
 function real(): ScriptedReadiness {
   const adb = new FakeAdbExecutor();
@@ -28,7 +25,7 @@ function real(): ScriptedReadiness {
     window,
     ctrlProxyManager,
   });
-  const readiness = DeviceSessionManager.createInstance(provider, new FakeAdbClientFactory(adb), {
+  const readiness = DeviceReadiness.createInstance(provider, new FakeAdbClientFactory(adb), {
     runnerReadinessTimer: new FakeTimer(),
     appearanceOnConnectDependencies: {
       isSyncEnabled: () => true,
@@ -65,9 +62,9 @@ function real(): ScriptedReadiness {
 }
 
 function fake(): ScriptedReadiness {
-  const readiness = new FakeDeviceSessionManager();
+  const readiness = new FakeDeviceReadiness();
   return { readiness, connect: (devices) => readiness.setConnectedDevices(devices) };
 }
 
-runDeviceSessionManagerContract("DeviceReadiness", real);
-runDeviceSessionManagerContract("FakeDeviceSessionManager", fake);
+runDeviceReadinessContract("DeviceReadiness", real);
+runDeviceReadinessContract("FakeDeviceReadiness", fake);

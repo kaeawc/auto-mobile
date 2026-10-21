@@ -24,7 +24,7 @@ import { SessionReleasedDuringCreationError } from "../../src/models/deviceAcqui
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 /**
@@ -134,7 +134,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
   });
 
   test.each([false, true])("ambiguous autolock read=%s has no session echo", async (readOnly) => {
-    const devices = new FakeDeviceSessionManager();
+    const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([iosDevice, { ...iosDevice, deviceId: "IOS-OTHER" }]);
     const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });

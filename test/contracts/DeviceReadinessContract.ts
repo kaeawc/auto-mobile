@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import type { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
 
 /** The readiness surface the contract exercises. */
 export type ReadinessSurface = Pick<
-  DeviceSessionManager,
+  DeviceReadiness,
   | "getCurrentDevice"
   | "getCurrentPlatform"
   | "setCurrentDevice"
@@ -28,15 +28,15 @@ const android = (id: string): BootedDevice => ({ name: id, deviceId: id, platfor
 const ios = (id: string): BootedDevice => ({ name: id, deviceId: id, platform: "ios" });
 
 /**
- * Shared behavioural contract for DeviceSessionManager's selection surface (#11868): the real
- * DeviceReadiness (adb/simctl/CtrlProxy seams faked) and FakeDeviceSessionManager agree on which
+ * Shared behavioural contract for DeviceReadiness's selection surface (#11868): the real
+ * DeviceReadiness (adb/simctl/CtrlProxy seams faked) and FakeDeviceReadiness agree on which
  * device a call resolves, what a read vs a control call remembers, how the explicit pin ranks
  * against the current device, and what an unknown target does.
  */
-export function runDeviceSessionManagerContract(name: string, make: () => ScriptedReadiness): void {
+export function runDeviceReadinessContract(name: string, make: () => ScriptedReadiness): void {
   const ready = { readiness: "booted" as const, skipCtrlProxyDownload: true };
 
-  describe(`DeviceSessionManager contract: ${name}`, () => {
+  describe(`DeviceReadiness contract: ${name}`, () => {
     test("a platform call resolves the only device of that platform and remembers it", async () => {
       const { readiness, connect } = make();
       connect([android("emulator-5554")]);

@@ -21,7 +21,7 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import { setActiveDeviceSchema } from "../../src/server/utilityTools";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 /** One device tool body that reached the device boundary. */
@@ -42,7 +42,7 @@ const SUCCESS = { content: [{ type: "text", text: JSON.stringify({ success: true
  * `createToolExecutionContext`), and the execution tracker run exactly as the daemon's tool-call
  * entry runs them, so a tool call's start, end and request deadline reach the daemon wiring the
  * harness subscribes (`subscribeToolCallEndActivity`, the release vetoes' deadline lookup). Only
- * the device boundary is fake: device discovery and readiness ({@link FakeDeviceSessionManager}),
+ * the device boundary is fake: device discovery and readiness ({@link FakeDeviceReadiness}),
  * display inventory, CtrlProxy, and the handler's device work (the audit runner, which runs
  * {@link DeviceToolBody} instead of the handler).
  *
@@ -50,7 +50,7 @@ const SUCCESS = { content: [{ type: "text", text: JSON.stringify({ success: true
  * daemon's session manager and pool.
  */
 export class RealToolCallPath {
-  readonly deviceSessionManager = new FakeDeviceSessionManager();
+  readonly deviceSessionManager = new FakeDeviceReadiness();
   /** Tool bodies that reached the device boundary, in order. */
   readonly runs: DeviceToolRun[] = [];
   /**

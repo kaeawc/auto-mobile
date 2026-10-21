@@ -9,7 +9,7 @@ import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
 } from "../../src/utils/directSessionDeviceRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -68,7 +68,7 @@ beforeEach(async () => {
   clearDirectSessionDevices();
   received.length = 0;
   originalManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-  const manager = new FakeDeviceSessionManager();
+  const manager = new FakeDeviceReadiness();
   manager.setConnectedDevices([android, ios]);
   ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
   const fixture = new McpTestFixture();
@@ -152,7 +152,7 @@ test("explicit session takes precedence over platform", async () => {
 
 test("direct setActiveDevice rebinds the default to a free device", async () => {
   const other: BootedDevice = { deviceId: "emulator-5556", platform: "android", name: "Other" };
-  const manager = new FakeDeviceSessionManager();
+  const manager = new FakeDeviceReadiness();
   manager.setConnectedDevices([android, ios, other]);
   ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
   registerUtilityTools({ legacyDeviceSelection: () => manager });

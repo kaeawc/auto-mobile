@@ -13,7 +13,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import type { IosBootInstrumentation } from "../../src/features/iosSimFleet/IosBootInstrumentation";
 import {
   isSessionlessDeviceRead,
@@ -166,7 +166,7 @@ function harness(
     iosClient.setConnectWithoutSetupResult(true);
   }
   const lifecycle = new FakeVirtualDeviceLifecycleCoordinator();
-  const manager = DeviceSessionManager.createInstance(
+  const manager = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, discovery, simctl, {
       window,
       iosCtrlProxyManager: iosManager,
@@ -1893,7 +1893,7 @@ for (const platform of ["android", "ios"] as const) {
         }
         const execution = executionTracker.startExecution("listApps");
         const callerFailure = new ActionableError("caller cancelled readiness");
-        const realVerify = DeviceSessionManager.prototype.verifyDevice.bind(current.manager);
+        const realVerify = DeviceReadiness.prototype.verifyDevice.bind(current.manager);
         const seen: Array<{ marks: string[]; cancelled: number; aborted: boolean }> = [];
         const readinessAmbientAborted: Array<boolean | undefined> = [];
         const verify = async (...args: Parameters<typeof realVerify>) => {
@@ -1914,7 +1914,7 @@ for (const platform of ["android", "ios"] as const) {
             return;
           }
           if (phase === "cold boot") {
-            await DeviceSessionManager.prototype.verifyAndroidDevice.call(
+            await DeviceReadiness.prototype.verifyAndroidDevice.call(
               current.manager,
               args[0],
               args[2],

@@ -41,7 +41,7 @@ import { registerUtilityTools } from "../../src/server/utilityTools";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
@@ -69,12 +69,12 @@ let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
 let originalCollaborators: ToolRegistryCollaborators;
-let deviceSessionManager: FakeDeviceSessionManager;
+let deviceSessionManager: FakeDeviceReadiness;
 let restorePipelineOverrides: (() => void) | undefined;
 
 beforeEach(async () => {
   originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-  deviceSessionManager = new FakeDeviceSessionManager();
+  deviceSessionManager = new FakeDeviceReadiness();
   deviceSessionManager.setConnectedDevices(devices);
   ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;

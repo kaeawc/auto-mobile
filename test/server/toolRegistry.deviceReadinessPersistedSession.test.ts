@@ -4,7 +4,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -33,7 +33,7 @@ import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
  * caller-provided `sessionUuid` recovered from a persisted, non-terminal
  * device-session row (e.g. live during a daemon restart) rather than freshly
  * minted — must honor a tool's declared `deviceReadiness` the same way the
- * legacy/no-session path already does via `DeviceSessionManager.ensureDeviceReady`'s
+ * legacy/no-session path already does via `DeviceReadiness.ensureDeviceReady`'s
  * `readiness` option. A `booted`-only tool must never pay for (or fail on)
  * full CtrlProxy accessibility-service setup on this path.
  */
@@ -76,7 +76,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     updated_at: "2026-09-03T00:00:00.000Z",
   });
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
+  let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalCollaborators: ToolRegistryCollaborators;
   let daemonSessionManager: SessionManager | undefined;
   let ctrlProxyStub: CtrlProxySetupStub;
@@ -92,7 +92,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
    * skip when the tool declares `deviceReadiness: "booted"`.
    */
   async function setupPersistedDaemonSession(sessionUuid: string): Promise<void> {
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA]);
 
     const timer = new FakeTimer();
     // Keep the cleanup interval parked while asserting the recovered session.
@@ -176,9 +176,9 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
+    fakeDeviceReadiness = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},

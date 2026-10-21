@@ -20,7 +20,7 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -131,7 +131,7 @@ describe("start admission and owner resume for restart reservations", () => {
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    const deviceSessions = new FakeDeviceSessionManager();
+    const deviceSessions = new FakeDeviceReadiness();
     deviceSessions.setConnectedDevices([device]);
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
     ToolRegistry.setCollaboratorsForTesting({

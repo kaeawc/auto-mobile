@@ -9,7 +9,7 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { VideoRecorderService } from "../../src/features/video";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -70,7 +70,7 @@ describe("videoRecording stop by id from a caller with no session", () => {
     timer = new FakeTimer();
     backend = new FakeVideoCaptureBackend();
     backend.setNowProvider(() => new Date(timer.now()));
-    const sessions = new FakeDeviceSessionManager();
+    const sessions = new FakeDeviceReadiness();
     sessions.setConnectedDevices([device]);
     videoRecording.configure({ deviceDetector: sessions });
     await setVideoRecordingManagerDependencies({

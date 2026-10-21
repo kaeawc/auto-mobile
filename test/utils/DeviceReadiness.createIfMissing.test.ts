@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -9,7 +9,7 @@ import {
   resetDeviceCreationGate,
   setDeviceCreationGate,
 } from "../../src/devices/deviceCreationGate";
-import type { DeviceClientSimctl } from "../../src/daemon/readiness/DeviceSessionManager";
+import type { DeviceClientSimctl } from "../../src/daemon/readiness/DeviceReadiness";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
@@ -111,7 +111,7 @@ function simulatorImage(
 
 describe("findOrStartIosDevice creation gate", () => {
   let recorder: SimctlRecorder;
-  let manager: DeviceSessionManager;
+  let manager: DeviceReadiness;
 
   beforeEach(() => {
     recorder = {
@@ -127,7 +127,7 @@ describe("findOrStartIosDevice creation gate", () => {
       new FakeDeviceUtils(),
       makeSimctl(recorder),
     );
-    manager = DeviceSessionManager.createInstance(provider);
+    manager = DeviceReadiness.createInstance(provider);
   });
 
   afterEach(() => {
@@ -189,7 +189,7 @@ describe("findOrStartIosDevice creation gate", () => {
       queueMicrotask(() => request.abort(new Error("request cancelled")));
       return udid;
     };
-    manager = DeviceSessionManager.createInstance(
+    manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), simctl),
       undefined,
       { lifecycleCoordinator },
@@ -223,7 +223,7 @@ describe("findOrStartIosDevice creation gate", () => {
       new FakeDeviceUtils(),
       makeSimctl(recorder, [simulatorImage("EXISTING-UDID", true)]),
     );
-    manager = DeviceSessionManager.createInstance(provider);
+    manager = DeviceReadiness.createInstance(provider);
     recorder.verifyError = new Error("verify failed");
 
     await expect(manager.findOrStartIosDevice()).rejects.toThrow("verify failed");
@@ -247,7 +247,7 @@ describe("findOrStartIosDevice creation gate", () => {
         simulatorImage("999-available", true),
       ]),
     );
-    manager = DeviceSessionManager.createInstance(provider);
+    manager = DeviceReadiness.createInstance(provider);
 
     await manager.findOrStartIosDevice();
 
@@ -261,7 +261,7 @@ describe("findOrStartIosDevice creation gate", () => {
       new FakeDeviceUtils(),
       makeSimctl(recorder, [simulatorImage("unavailable", false, "runtime unavailable")]),
     );
-    manager = DeviceSessionManager.createInstance(provider);
+    manager = DeviceReadiness.createInstance(provider);
     setDeviceCreationGate(new FakeDeviceCreationGate(true));
 
     await manager.findOrStartIosDevice();
@@ -276,7 +276,7 @@ describe("findOrStartIosDevice creation gate", () => {
       new FakeDeviceUtils(),
       makeSimctl(recorder, [simulatorImage("unavailable", false, "runtime unavailable")]),
     );
-    manager = DeviceSessionManager.createInstance(provider);
+    manager = DeviceReadiness.createInstance(provider);
     setDeviceCreationGate(new FakeDeviceCreationGate(false));
 
     await expect(manager.findOrStartIosDevice()).rejects.toThrow(
@@ -323,7 +323,7 @@ describe("findOrStartIosDevice boot admission", () => {
   });
 
   const managerWith = (images: DeviceInfo[]) =>
-    DeviceSessionManager.createInstance(
+    DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(
         new FakeAdbExecutor(),
         new FakeDeviceUtils(),

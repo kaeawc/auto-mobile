@@ -90,7 +90,7 @@ import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
@@ -5118,7 +5118,7 @@ describe("provisionDevice handler", () => {
     });
     expect(provisionCalls).toBe(1);
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
-    const followUp = DeviceSessionManager.createInstance(
+    const followUp = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), deviceManager),
     );
     await expect(followUp.ensureDeviceReady("android", "emulator-5554")).rejects.toMatchObject({

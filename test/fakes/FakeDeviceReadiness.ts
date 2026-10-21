@@ -1,16 +1,16 @@
 import {
   type ConnectedPlatformScan,
   DeviceReadyOptions,
-  DeviceSessionManager,
-} from "../../src/daemon/readiness/DeviceSessionManager";
+  DeviceReadiness,
+} from "../../src/daemon/readiness/DeviceReadiness";
 import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src/models";
 
 /**
- * Fake implementation of DeviceSessionManager for testing
+ * Fake implementation of DeviceReadiness for testing
  * Allows configuring connected devices, verification behavior, and asserting method calls
  */
-export class FakeDeviceSessionManager implements Pick<
-  DeviceSessionManager,
+export class FakeDeviceReadiness implements Pick<
+  DeviceReadiness,
   | "getCurrentDevice"
   | "getCurrentPlatform"
   | "setCurrentDevice"
@@ -227,7 +227,7 @@ export class FakeDeviceSessionManager implements Pick<
     this.lastOptions = undefined;
   }
 
-  // Implementation of DeviceSessionManager interface
+  // Implementation of DeviceReadiness interface
 
   getCurrentDevice(): BootedDevice | undefined {
     return this.currentDevice;

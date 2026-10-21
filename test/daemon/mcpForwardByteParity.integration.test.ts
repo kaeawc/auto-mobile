@@ -84,6 +84,11 @@ const PROBE_TOOL = "parityContextProbe";
 const IO_DEADLINE_MS = 5_000;
 
 const refusals = new Map(buildRefusalWireFixtures().map((fixture) => [fixture.code, fixture]));
+// The refusal parity test sends one call per code, in order, on each of two forward paths, and
+// each call builds its own MCP server (#14695). Size its timeout from the table so a loaded
+// safe-tier run, or a new refusal code, cannot push it past a fixed 20 s.
+const REFUSAL_CALL_BUDGET_MS = 500;
+const REFUSAL_PARITY_TIMEOUT_MS = Math.max(20_000, refusals.size * 2 * REFUSAL_CALL_BUDGET_MS);
 
 function fakeDaemonState(): DaemonStateAccess {
   return {
@@ -535,19 +540,23 @@ describe("control-socket forward byte parity: HTTP loopback vs in process (#1182
     expect(lines.map((line) => JSON.parse(line).id).sort()).toEqual(["cancel", "hold"]);
   });
 
-  test("every refusal fixture crosses both paths unchanged", async () => {
-    const codes = [...refusals.keys()];
-    const lines = await expectByteParity(async (conversation) => {
-      for (const code of codes) {
-        conversation.send(toolCall(`refusal:${code}`, REFUSAL_TOOL, { code }));
-        await conversation.answer(`refusal:${code}`);
+  test(
+    "every refusal fixture crosses both paths unchanged",
+    async () => {
+      const codes = [...refusals.keys()];
+      const lines = await expectByteParity(async (conversation) => {
+        for (const code of codes) {
+          conversation.send(toolCall(`refusal:${code}`, REFUSAL_TOOL, { code }));
+          await conversation.answer(`refusal:${code}`);
+        }
+      });
+      expect(lines).toHaveLength(codes.length);
+      for (const [index, code] of codes.entries()) {
+        expect(JSON.parse(lines[index]).result).toEqual(refusals.get(code)!.result);
       }
-    });
-    expect(lines).toHaveLength(codes.length);
-    for (const [index, code] of codes.entries()) {
-      expect(JSON.parse(lines[index]).result).toEqual(refusals.get(code)!.result);
-    }
-  });
+    },
+    REFUSAL_PARITY_TIMEOUT_MS,
+  );
 
   test("context-leak probe: a handler sees its own request's stores, never the socket chain's", async () => {
     const run = async (path: ForwardPath) => {

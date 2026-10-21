@@ -29,11 +29,11 @@ export class ScenarioDaemon extends Daemon {
 
   /** Device ids the monitor holds a transitional (offline/unauthorized/booting) episode for. */
   offlineEpisodeDeviceIds(): string[] {
-    return [...this.offlineEpisodes.keys()];
+    return [...this.deviceLoss.offlineEpisodes.keys()];
   }
 
   /** Devices the monitor is counting absent misses for. */
   disconnectMisses(): Map<string, number> {
-    return new Map(this.deviceDisconnectMisses);
+    return new Map(this.deviceLoss.misses);
   }
 }

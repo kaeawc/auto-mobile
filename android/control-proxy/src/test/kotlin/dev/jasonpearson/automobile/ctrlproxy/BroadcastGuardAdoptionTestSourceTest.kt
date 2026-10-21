@@ -46,8 +46,9 @@ internal class BroadcastGuardAdoptionTestSourceTest {
       val missingGuard =
         result.violations.filter { it.kind == BroadcastGuardScanner.Kind.MISSING_GUARD }
       assertTrue(
-        "Every `broadcast*Result/Error/Response(requestId: …)` helper must wrap its body in " +
-          "`resultBroadcaster.guard(...)` (issue #3045/#3085). Offenders:\n" +
+        "Every `broadcast*Result/Error/Response(requestId: …)` helper must send through " +
+          "`resultSender` or wrap its body in `resultBroadcaster.guard(...)` " +
+          "(issues #3045, #3085, #11877). Offenders:\n" +
           missingGuard.joinToString("\n") { "  - ${it.symbol} ($fileName:${it.line})" },
         missingGuard.isEmpty(),
       )
@@ -195,12 +196,20 @@ internal class BroadcastGuardAdoptionTestSourceTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  fun `removing the controller guards is detected on both moved result helpers`() {
+  fun `bypassing the result sender is detected on both controller result helpers`() {
+    // ResultSender guards every send, so the regression is a helper that writes to the server
+    // directly instead.
     val source =
       locateSource("CaCertificateController.kt")
         .readText()
-        .replace("resultBroadcaster.guard(outcome.requestId, \"ca_cert_result\")", "run")
-        .replace("resultBroadcaster.guard(requestId, \"device_owner_status_result\")", "run")
+        .replace(
+          "resultSender.sendFrame(outcome.requestId, \"ca_cert_result\")",
+          "webSocketServer.broadcastWithPerf",
+        )
+        .replace(
+          "resultSender.sendFrame(requestId, \"device_owner_status_result\")",
+          "webSocketServer.broadcastWithPerf",
+        )
 
     val missing =
       BroadcastGuardScanner.scan(source).violations.filter {

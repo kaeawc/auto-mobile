@@ -41,8 +41,6 @@ const TS_ONLY_RESPONSE_FIELDS: Record<string, string> = {
   "connected.error": "WsMessageBase permits an error; ConnectedResponse has no error slot.",
   "hierarchy_update.error":
     "WsMessageBase permits an error; HierarchyUpdateEvent has no error slot.",
-  "hierarchy_update.frameContext":
-    "CtrlProxy.kt hierarchy broadcaster appends frameContext to hand-built JSON.",
   "screenshot.error": "WsMessageBase permits an error; screenshot failures use screenshot_error.",
   "interaction_event.error": "WsMessageBase permits an error; InteractionEvent has no error slot.",
   "package_event.error": "WsMessageBase permits an error; PackageEvent has no error slot.",
@@ -78,12 +76,8 @@ const TS_ONLY_RESPONSE_FIELDS: Record<string, string> = {
   "insert_text_state_result.totalTimeMs": "Optional host timing slot; the state reply omits it.",
   "preference_files.totalTimeMs": "Optional host timing slot; storage broadcaster omits it.",
   "preferences.totalTimeMs": "Optional host timing slot; storage broadcaster omits it.",
-  "preferences.entries":
-    "CtrlProxy.kt broadcastPreferencesResult emits entries instead of legacy data JSON.",
   "subscribe_storage_result.totalTimeMs":
     "Optional host timing slot; storage broadcaster omits it.",
-  "subscribe_storage_result.subscriptionId":
-    "CtrlProxy.kt broadcastSubscribeStorageResult adds the subscription identity.",
   "unsubscribe_storage_result.totalTimeMs":
     "Optional host timing slot; storage broadcaster omits it.",
   "get_preference_result.totalTimeMs": "Optional host timing slot; storage broadcaster omits it.",

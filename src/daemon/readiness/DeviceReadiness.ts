@@ -248,10 +248,12 @@ export class DeviceReadiness implements DeviceReadinessContract {
     device: { runtimeId?: string },
     udid: string,
     signal: AbortSignal,
+    reason: "create" | "restart" = "restart",
   ): Promise<BootedDevice> {
     return await this.iosBootInstrumentation.run(
       {
         udid,
+        reason,
         runtime: device.runtimeId,
         timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
         signal,
@@ -821,6 +823,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
               provisioned,
               provisioned.deviceId!,
               signal,
+              "create",
             );
             perf.endOperation("bootSimulator");
             if (createdDevice.deviceId === provisioned.deviceId) {

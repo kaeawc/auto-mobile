@@ -344,6 +344,10 @@ class WebSocketServer(
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
+    // {data, empty} conditions and style shimmer for loading placeholders (#14207).
+    add("prototype_loading_states_v1")
+    // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
+    add("prototype_motion_v2")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).

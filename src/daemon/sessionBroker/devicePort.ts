@@ -12,6 +12,7 @@ export interface ResetOutcome {
 }
 
 export type ResetResult = "clean" | "pending" | ResetOutcome;
+export type ResetBootRunner = <Result>(operation: () => Promise<Result>) => Promise<Result>;
 
 export interface SessionPreparationTiming {
   createMs?: number;
@@ -39,6 +40,7 @@ export interface SessionDevicePreparationOptions {
  * These private resource records never cross the daemon's consumer protocol.
  */
 export interface SessionBrokerDevicePort {
+  managesResetBootSlots?: boolean;
   prepare(
     resource: BrokerResourceRecord,
     options: SessionDevicePreparationOptions,
@@ -56,5 +58,9 @@ export interface SessionBrokerDevicePort {
    */
   destroy(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<"absent" | "pending">;
   /** Optional until the clean baseline is qualified; absence means zero pooling. */
-  reset?(resource: BrokerResourceRecord): Promise<ResetResult>;
+  reset?(
+    resource: BrokerResourceRecord,
+    signal?: AbortSignal,
+    runResetBoot?: ResetBootRunner,
+  ): Promise<ResetResult>;
 }

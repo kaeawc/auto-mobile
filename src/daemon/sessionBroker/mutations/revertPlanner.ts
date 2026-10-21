@@ -29,9 +29,8 @@ export function planDeviceMutationRevert(
     .sort((left, right) => right.sequence - left.sequence)
     .map((mutation) => ({ source: "journal", mutation }));
   for (const change of diff.changes.filter((entry) => !entry.journaled)) {
-    const mutation = support.baselineRevert
-      ? support.baselineRevert(change, diff.changes)
-      : genericBaselineRevert(change);
+    const mutation =
+      support.baselineRevert?.(change, diff.changes) ?? genericBaselineRevert(change);
     if (mutation) {
       if (
         !steps.some(

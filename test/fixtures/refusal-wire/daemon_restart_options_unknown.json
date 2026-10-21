@@ -1,0 +1,13 @@
+{
+  "code": "daemon_restart_options_unknown",
+  "builder": "DaemonRestartOptionsUnknownError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"The private daemon's startup options could not be recovered, so the proxy will not start a default daemon (default port 3000) in a private namespace. Restart it with its original launcher.\",\"code\":\"daemon_restart_options_unknown\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

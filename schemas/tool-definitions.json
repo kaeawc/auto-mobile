@@ -27857,6 +27857,59 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sessionUuid": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["connection-profile", "device-session"]
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "toolNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "toolName": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "const": "always-on"
+              }
+            },
+            "required": ["toolName", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "enabledTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabledToolsError": {
+          "type": "string"
+        }
+      },
+      "required": ["sessionUuid", "scope", "enabled"],
+      "additionalProperties": {}
     }
   },
   {

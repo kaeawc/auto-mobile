@@ -87,6 +87,7 @@ const EXPECTED = [
   "getDataStore",
   "getDeepLinks",
   "getDeviceState",
+  "getLogs",
   "getNavigationGraph",
   "getNetworkGraph",
   "getNotificationPolicy",
@@ -441,6 +442,7 @@ const READS_THAT_READY_UNHELD = {
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -461,6 +463,7 @@ const READS_THAT_READY_UNHELD = {
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -511,7 +514,7 @@ test("documented unheld registry readiness matches literal classifications", () 
   }
 });
 
-test("unheld readiness literal lists partition all 21 production reads", () => {
+test("unheld readiness literal lists partition all 22 production reads", () => {
   for (const platform of ["android", "ios"] as const) {
     const classified = [
       ...READS_THAT_READY_UNHELD[platform],

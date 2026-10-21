@@ -6,6 +6,7 @@ import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
+import { registerGetLogsTools } from "./getLogsTools";
 import { registerNavigationTools } from "./navigationTools";
 import { registerNotificationTools } from "./notificationTools";
 import { registerPlanTools } from "./planTools";
@@ -63,6 +64,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerUtilityTools();
   registerDeviceTools();
   registerDeepLinkTools();
+  registerGetLogsTools();
   registerNavigationTools();
   registerNotificationTools();
   // Plan tools (executePlan, recordToolCalls, recordDeviceGestures, exportPlan)

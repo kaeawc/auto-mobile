@@ -209,7 +209,7 @@ device-side process is control; read-only access never requires a session):
 `observe`, `snapshotOf`, `hitTest`, `identifyInteractions`, `listApps`,
 `getDeviceState`, `getNetworkGraph`, `getPreference`, `listDataStores`,
 `getDataStore`, `getAppPermissions`, `getNotificationPolicy`, `getDeepLinks`,
-`getNavigationGraph`; per call, `keyboard` detect/listImes/listProfiles,
+`getNavigationGraph`, `getLogs`; per call, `keyboard` detect/listImes/listProfiles,
 `clipboard` get, `displayConfig` with no set field, `accessibility` with no
 toggle, `prototype` status/inspect, and `sqlQuery` when `isReadOnlySqlQuery`
 accepts the statement (a write, or anything the classifier cannot prove

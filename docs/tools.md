@@ -16,7 +16,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `accessibility`, `accessibilityFocus`, `appLifecycle`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
-`executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
+`executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`, `getLogs`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
@@ -1869,6 +1869,7 @@ subtree, or the whole active-window tree when owner-less.
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔏 <code>inspectPackageSigning</code>                                                            | Android: fresh read of a package's presence (`installed`, `absent`, `unknown`) for one user and its SHA-256 signing certificates, including the complete signer set and rotation history. Never cached.                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 📜 <code>getLogs</code>                                                                          | Reads filtered device logs: Android logcat for every process of an app (crashes survive process death), with tag, priority, regex and buffer filters, since the last action or session start; iOS Simulator unified log by app subsystem.                                                                                                                                                                                                                                                                                                                                                 |
 | 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                            |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📁 <code>stageSessionDownloads</code>                                                            | Deprecated session-bound alias of putAppFile target.domain user_files (Android Downloads); retains session ownership checks and remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -1900,6 +1901,38 @@ returns <code>supported: false</code> for both actions because no state-preservi
 termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 
 </details>
+
+### getLogs
+
+`getLogs` returns bounded, filtered log lines as structured data (#14082). Use it
+when a step fails and you want to know why. It reads the same sources as the
+`automobile:device-session/{sessionUuid}/apps/{appId}/logs` resource, without
+needing an MCP resource read.
+
+- `appId` scopes Android logcat to the app's **uid** (`logcat --uid`, Android 11+),
+  so lines from a process that crashed or restarted are still returned. Before
+  Android 11 it falls back to the app's currently running pids, with a warning
+  (`attribution: "pid"`). Without `appId`, every process is read.
+- `since` is `"lastAction"` (the start of the most recent control call on the
+  device), `"sessionStart"` (the caller's session creation), or `{ seconds }`. The
+  default is 300 seconds and the window is capped at 3600. An anchor that is not
+  known falls back to the default with a warning. The window is measured on the
+  device's own clock.
+- `tags` are logcat filterspecs, `"Tag"` or `"Tag:P"`. All other tags are silenced.
+  `minPriority` is one of `V`, `D`, `I`, `W`, `E`, `F` (default `V`).
+- `grep` is a regular expression matched host-side against `Tag: message`.
+- `buffers` picks logcat buffers from `main`, `system`, `crash` and `events`. The
+  default is `["main", "crash"]`, so a crash's stack trace is included.
+- `includeSystem` adds `ActivityManager`, `ActivityTaskManager` and `AndroidRuntime`
+  lines that name `appId` (launches, process deaths, ANRs).
+- `maxLines` (default 1000, at most 5000) and a 256 KiB byte bound keep the newest
+  lines; `truncated` reports that older lines were dropped.
+
+Each line has `timestamp`, `pid`, `tid`, `priority`, `tag` and `message`, and the
+result lists the `pids` seen. On the iOS Simulator, `getLogs` needs `appId`. It
+reads the unified log for the app's subsystem (`minPriority` `V`/`D` maps to
+debug, `I` to info), applies `grep`, and warns that the Android-only filters are
+ignored. iOS lines carry only `timestamp` and `message`.
 
 ### App launch, installation, links, and storage options
 

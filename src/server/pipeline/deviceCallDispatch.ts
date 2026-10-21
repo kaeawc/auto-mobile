@@ -40,6 +40,7 @@ import {
 } from "../foreignOwnedSessionRefusal";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { executionTracker } from "../../daemon/executionTracker";
+import { deviceActionClock } from "./deviceActionClock";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,
@@ -63,6 +64,7 @@ export function markDeviceCallKind(executionId: string, toolName: string, readOn
     executionTracker.markDeviceReadCall(executionId, toolName);
   } else {
     executionTracker.markDeviceControlCall(executionId);
+    deviceActionClock.markControl(executionId);
   }
 }
 
@@ -599,6 +601,11 @@ export async function invokeResolvedDeviceHandler(input: {
     // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
+  deviceActionClock.recordDispatch(
+    args.__executionId,
+    args.__executionStartTime,
+    target.device.deviceId,
+  );
   const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);
   const onAbort = () => withdraw?.();
   signal?.addEventListener("abort", onAbort, { once: true });

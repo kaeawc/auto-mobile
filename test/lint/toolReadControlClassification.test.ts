@@ -45,6 +45,7 @@ const CLASSIFICATION: Classification = {
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",

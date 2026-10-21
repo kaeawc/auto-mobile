@@ -9,6 +9,7 @@ object AutoMobilePrototype {
   val capabilities: Set<String> =
     setOf(
       "prototype_carousel_v1",
+      "prototype_chart_v1",
       "prototype_chat_scroll_v1",
       "prototype_checks_v1",
       "prototype_data_actions_v1",
@@ -16,7 +17,9 @@ object AutoMobilePrototype {
       "prototype_emit_context_v1",
       "prototype_flow_grid_v1",
       "prototype_gestures_v1",
+      "prototype_linkify_v1",
       "prototype_menus_v1",
+      "prototype_motion_v2",
       "prototype_network_device_v1",
       "prototype_network_v1",
       "prototype_pager_options_v1",

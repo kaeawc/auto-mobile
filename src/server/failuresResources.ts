@@ -21,15 +21,6 @@ const failureAnalyticsRepository = new FailureAnalyticsRepository();
 
 import type { FailureGroup, TimelineDataPoint, PeriodTotals } from "../models/failureAnalytics";
 
-export type {
-  FailureType,
-  FailureSeverity,
-  StackTraceElement,
-  FailureGroup,
-  TimelineDataPoint,
-  PeriodTotals,
-} from "../models/failureAnalytics";
-
 interface FailuresResponse {
   groups: FailureGroup[];
   generatedAt: string;

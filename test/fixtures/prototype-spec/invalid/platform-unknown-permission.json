@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "permissions": [
+        {
+          "name": "telepathy",
+          "purpose": "x"
+        }
+      ]
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "requires.permissions[0].name",
+  "expectedMessage": "Invalid enum value"
+}

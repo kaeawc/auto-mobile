@@ -195,7 +195,3 @@ export const KILL_PROFILE_NON_EMULATABLE: readonly { id: string; note: string }[
     note: "Xiaomi proprietary AppOps 10008/10021 (autostart, background start); community-reported only.",
   },
 ];
-
-export function isKillProfileId(value: string): value is KillProfileId {
-  return (KILL_PROFILE_IDS as readonly string[]).includes(value);
-}

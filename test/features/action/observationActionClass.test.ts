@@ -53,6 +53,8 @@ const buttonClasses: Record<string, ObservationActionClass> = {
   home: "navigation",
   recent: "navigation",
   power: "navigation",
+  action: "navigation",
+  camera: "navigation",
   menu: "inPlace",
   volume_up: "inPlace",
   volume_down: "inPlace",

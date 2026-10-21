@@ -42,7 +42,7 @@ import org.robolectric.util.ReflectionHelpers
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class CtrlProxyActionOverloadServiceTest {
+class CtrlProxyActionServiceTest {
   private lateinit var fixture: CtrlProxyGestureServiceFixture
   private val json = Json { ignoreUnknownKeys = true }
 

@@ -1,6 +1,6 @@
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { DeviceMatchCriteria, MatchingStrategy } from "../../src/models/DeviceMatchCriteria";
-import type { DeviceMatcher } from "../../src/server/deviceMatcher";
+import type { DeviceMatcher } from "../../src/utils/deviceMatcher";
 
 export class FakeDeviceMatcher implements DeviceMatcher {
   private bootedResult: BootedDevice | null = null;

@@ -232,7 +232,7 @@ private fun PrototypeImageBody(
     Image(
       rememberPrototypeImageBitmap(image, asset),
       contentDescription = null,
-      modifier = fillAuthoredAxes(node.style.source),
+      modifier = fillAuthoredAxes(node.style.source).prototypeZoomable(source.zoomable),
       contentScale = prototypeContentScale(source.contentScale),
     )
   } else {

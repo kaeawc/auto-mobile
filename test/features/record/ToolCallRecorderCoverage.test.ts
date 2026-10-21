@@ -65,6 +65,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   criticalSection: "Multi-device coordination primitive, handled by the plan executor",
   barrier: "Multi-device coordination primitive, handled by the plan executor",
   videoRecording: "Starts or stops a host-side capture; not part of the replayed interaction",
+  performanceTrace: "Starts or stops a diagnostic tracer; not part of the replayed interaction",
   explore: "Builds the navigation graph; an exploration run, not a scripted step",
   navigateTo: "Resolves through a host-local navigation graph, so the step is not portable",
   prototype: HOST_LOCAL,
@@ -77,6 +78,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   getAppPermissions: READ_ONLY,
   inspectPackageSigning: READ_ONLY,
   getDeepLinks: READ_ONLY,
+  accessibilityAudit: READ_ONLY,
   getDeviceState: READ_ONLY,
   getIosSimulatorCapabilities: READ_ONLY,
   getNavigationGraph: READ_ONLY,
@@ -115,6 +117,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "keyboard",
   "killProfile",
   "launchApp",
+  "mediaSession",
   "multiTouch",
   "observe",
   "openLink",
@@ -130,6 +133,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "selectAllText",
   "sendKeys",
   "sendSms",
+  "setAppLinks",
   "setAppPermissions",
   "setDeviceState",
   "setNotificationPolicy",
@@ -238,10 +242,16 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "systemTray", { action: "tap", notification: { title: "Hi" } });
     recordPlanCall(recorder, "displayConfig", { theme: "dark" });
     recordPlanCall(recorder, "displayConfig", { reset: true });
+    recordPlanCall(recorder, "displayConfig", { increaseContrast: true });
+    recordPlanCall(recorder, "displayConfig", { reduceMotion: false });
+    recordPlanCall(recorder, "displayConfig", { boldText: true });
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "keyboard",
       "clipboard",
       "systemTray",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
       "displayConfig",
       "displayConfig",
     ]);
@@ -301,6 +311,9 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
   ["biometricAuth", { action: "error", errorCode: 7 }],
   ["phoneCall", { action: "call", phoneNumber: "5551234" }],
   ["sendSms", { phoneNumber: "5551234", message: "hello" }],
+  ["mediaSession", { action: { dispatch: "pause" } }],
+  ["mediaSession", { action: { volume: { stream: "music", level: 5 } } }],
+  ["mediaSession", { action: "get", waitFor: { mediaState: "playing", timeoutMs: 3000 } }],
   [
     "windowMode",
     {
@@ -356,6 +369,7 @@ const RECORDED_TOOLS_9966 = [
   "biometricAuth",
   "phoneCall",
   "sendSms",
+  "mediaSession",
   "windowMode",
   "setNotificationPolicy",
   "setPreference",
@@ -404,6 +418,17 @@ describe("tools recorded by #9966", () => {
     recordPlanCall(recorder, "accessibility", {});
     recordPlanCall(recorder, "accessibility", { deviceId: "emulator-5554" });
     expect(recorder.stop()).toEqual([]);
+  });
+
+  test("a mediaSession read is not recorded unless it waits", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recordPlanCall(recorder, "mediaSession", { action: "get" });
+    recordPlanCall(recorder, "mediaSession", { action: "get", appId: "com.example" });
+    recordPlanCall(recorder, "mediaSession", { action: "get", waitFor: { mediaState: "playing" } });
+    expect(recorder.stop()).toEqual([
+      { tool: "mediaSession", params: { action: "get", waitFor: { mediaState: "playing" } } },
+    ]);
   });
 
   test("a file-staging call that copies a host file is not recorded", () => {

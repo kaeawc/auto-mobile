@@ -66,7 +66,6 @@ export {
 export {
   buildRawVideoFfmpegArgs,
   clampCaptureFps,
-  IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS,
   MAX_CAPTURE_FPS,
   packFrame,
   SOFTWARE_H264_ENCODER,

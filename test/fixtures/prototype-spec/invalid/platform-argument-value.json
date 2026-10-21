@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "test.echo",
+          "args": {
+            "message": {
+              "value": "x"
+            },
+            "delayMs": {
+              "value": -1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.delayMs.value",
+  "expectedMessage": "Invalid number value"
+}

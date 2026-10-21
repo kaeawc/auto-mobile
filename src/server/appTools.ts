@@ -5,6 +5,7 @@ import { AppLifecycle, type AppLifecycleExecutionOptions } from "../features/act
 import { AppPermissions, type SetAppPermissionsResult } from "../features/action/AppPermissions";
 import { CrashApp } from "../features/action/CrashApp";
 import {
+  type AndroidInstallRequest,
   InstallApp,
   type InstallAppCall,
   type InstallGuardOptions,
@@ -565,6 +566,13 @@ function installGuardFromArgs(args: InstallAppArgs): InstallGuardOptions | undef
   };
 }
 
+/** Android-only install inputs, passed only when requested so a plain call keeps its shape. */
+function androidInstallRequestFromArgs(args: InstallAppArgs): AndroidInstallRequest | undefined {
+  const { splits, bundle, grantAllPermissions, allowDowngrade } = args;
+  const request = { splits, bundle, grantAllPermissions, allowDowngrade };
+  return Object.values(request).some((value) => value !== undefined) ? request : undefined;
+}
+
 // Install app handler
 const createInstallAppHandler =
   (dependencies: InstallAppToolDependencies) =>
@@ -575,7 +583,12 @@ const createInstallAppHandler =
       const installApp = dependencies.createInstallApp(device);
       mutationMayHaveHappened = true;
       const guard = installGuardFromArgs(args);
-      const result = await installApp.execute(args.artifactPath, { signal, guard });
+      const android = androidInstallRequestFromArgs(args);
+      const result = await installApp.execute(args.artifactPath, {
+        signal,
+        guard,
+        ...(android ? { android } : {}),
+      });
       if (!result.success) {
         throw new ActionableError(
           result.error || `Failed to install app from ${args.artifactPath}`,

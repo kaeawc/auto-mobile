@@ -1,0 +1,62 @@
+Drop box contents: 3 entries
+Max entries: 1000
+
+Searching for: data_app_crash
+
+========================================
+2026-10-21 09:58:12 data_app_crash (text, 912 bytes)
+Process: com.example.app
+PID: 1111
+UID: 10123
+Flags: 0x38d83f44
+Package: com.example.app v41 (1.3.9)
+Foreground: Yes
+Process-Runtime: 4012
+Build: google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036/10722157:userdebug/dev-keys
+Loading-Progress: 1.0
+Dropped-Count: 0
+
+java.lang.IllegalStateException: stale crash from an earlier run
+	at com.example.app.MainActivity.onCreate(MainActivity.kt:12)
+
+========================================
+2026-10-21 10:00:01 data_app_crash (text, 1868 bytes)
+Process: com.other.app
+PID: 2222
+UID: 10124
+Flags: 0x38d83f44
+Package: com.other.app v1 (1.0)
+Foreground: Yes
+Process-Runtime: 5079
+Build: google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036/10722157:userdebug/dev-keys
+Loading-Progress: 1.0
+Dropped-Count: 0
+
+java.lang.RuntimeException: another app's crash
+	at com.other.app.Main.run(Main.java:1)
+
+========================================
+2026-10-21 10:00:02 data_app_crash (text, 2210 bytes)
+Process: com.example.app
+PID: 4321
+UID: 10123
+Flags: 0x38d83f44
+Package: com.example.app v42 (1.4.0)
+Foreground: Yes
+Process-Runtime: 9120
+Build: google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036/10722157:userdebug/dev-keys
+Loading-Progress: 1.0
+Dropped-Count: 0
+
+android.app.RemoteServiceException$CrashedByAdbException: shell-induced crash
+	at android.app.ActivityThread.throwRemoteServiceException(ActivityThread.java:2115)
+	at android.app.ActivityThread.-$$Nest$mthrowRemoteServiceException(Unknown Source:0)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2399)
+	at android.os.Handler.dispatchMessage(Handler.java:106)
+	at android.os.Looper.loopOnce(Looper.java:205)
+	at android.os.Looper.loop(Looper.java:294)
+	at android.app.ActivityThread.main(ActivityThread.java:8177)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:552)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:971)
+

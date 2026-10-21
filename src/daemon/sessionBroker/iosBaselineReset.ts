@@ -9,6 +9,9 @@ import { normalizeIosVersion } from "../../utils/ios-cmdline-tools/SimCtlSupport
 import { compareIosVersions } from "../../utils/ios-cmdline-tools/iosVersion";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
+import type { ResetOutcome } from "./devicePort";
+import { ResetFailureError } from "./ResetFailureError";
+import { errorMessage } from "../../utils/describeUnknownError";
 
 type IosProfile = Extract<BrokerNativeProfile, { platform: "ios" }>;
 type ResetSimctl = Pick<SimCtl, "readSimulatorTarget" | "eraseSimulator" | "bootSimulator">;
@@ -31,6 +34,38 @@ export class IosBaselineReset {
     profile: IosProfile,
     assertOwned: () => Promise<void>,
   ): Promise<"clean"> {
+    await this.runReset(device, profile, assertOwned, {});
+    return "clean";
+  }
+
+  async resetWithTiming(
+    device: BootedDevice,
+    profile: IosProfile,
+    assertOwned: () => Promise<void>,
+  ): Promise<ResetOutcome> {
+    const phases: Record<string, number> = {};
+    try {
+      return await this.runReset(device, profile, assertOwned, phases);
+    } catch (error) {
+      throw new ResetFailureError(
+        errorMessage(error),
+        {
+          outcome: "pending",
+          mode: "erase",
+          phases,
+          fallbackReason: errorMessage(error),
+        },
+        { cause: error },
+      );
+    }
+  }
+
+  private async runReset(
+    device: BootedDevice,
+    profile: IosProfile,
+    assertOwned: () => Promise<void>,
+    phases: Record<string, number>,
+  ): Promise<ResetOutcome> {
     this.assertInput(device, profile);
     // Only a capacity refusal from this resetter permits a shut-down retry. Re-erase below:
     // ownership and inventory are checked again, so a retry never trusts an old clean result.
@@ -44,16 +79,18 @@ export class IosBaselineReset {
 
     await assertOwned();
     if (!deferredBoot) {
-      await this.measureStep(device.deviceId, "stop", () => this.dependencies.stopDevice(device));
+      await this.measureStep(device.deviceId, "stop", phases, () =>
+        this.dependencies.stopDevice(device),
+      );
     }
 
     await this.readExpectedTarget(device.deviceId, profile, "Shutdown", "erase simulator");
     await assertOwned();
-    await this.measureStep(device.deviceId, "erase", () =>
+    await this.measureStep(device.deviceId, "erase", phases, () =>
       this.dependencies.simctl.eraseSimulator(device.deviceId),
     );
 
-    const booted = await this.measureStep(device.deviceId, "boot", () =>
+    const booted = await this.measureStep(device.deviceId, "boot", phases, () =>
       this.bootAdmitted(device.deviceId, profile, assertOwned),
     );
     if (booted.platform !== "ios" || booted.deviceId !== device.deviceId) {
@@ -64,7 +101,7 @@ export class IosBaselineReset {
 
     await this.readExpectedTarget(device.deviceId, profile, "Booted", "confirm clean baseline");
     await assertOwned();
-    return "clean";
+    return { outcome: "clean", mode: "erase", phases };
   }
 
   private async bootAdmitted(
@@ -93,6 +130,7 @@ export class IosBaselineReset {
   private async measureStep<T>(
     deviceId: string,
     phase: string,
+    phases: Record<string, number>,
     operation: () => Promise<T>,
   ): Promise<T> {
     const started = this.timer.now();
@@ -103,6 +141,7 @@ export class IosBaselineReset {
       completed = true;
       return result;
     } finally {
+      phases[phase] = this.timer.now() - started;
       logger.info(
         `[SessionBroker] iOS baseline reset ${phase} ${completed ? "completed" : "failed"} ` +
           `for ${deviceId} after ${this.timer.now() - started}ms`,

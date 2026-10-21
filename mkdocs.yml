@@ -170,6 +170,7 @@ nav:
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
+      - "Android windowing": design-docs/plat/android/windowing.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
       - "Pressure, hover and stylus input": design-docs/plat/pressure-hover-stylus-input.md
   - "Contributing": contributing.md

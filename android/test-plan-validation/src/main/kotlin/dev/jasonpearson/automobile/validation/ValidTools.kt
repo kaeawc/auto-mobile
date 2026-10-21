@@ -16,6 +16,7 @@ object ValidTools {
       setOf(
         "accessibility",
         "accessibilityFocus",
+        "audit",
         "barrier",
         "biometricAuth",
         "changeLocalization",
@@ -99,12 +100,14 @@ object ValidTools {
         "setDeviceResources",
         "setPosture",
         "setPreference",
+        "setSensor",
         "setToolEnabled",
         "snapshotOf",
         "stageSessionDownloads",
         "tapAny",
         "tapAt",
         "wakeAndUnlock",
+        "windowMode",
       )
 
   val DEPRECATED_FIELDS = setOf("generated", "appId", "parameters", "description")

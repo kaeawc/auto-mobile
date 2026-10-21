@@ -17,7 +17,16 @@ const VM_SNAPSHOT_CONSOLE_VERBS: Record<VmSnapshotAction, string> = {
   delete: "del",
 };
 
+/** `adb emu` form of {@link buildVmSnapshotConsoleCommand}. */
 export function buildVmSnapshotCommand(action: VmSnapshotAction, snapshotName: string): string {
+  return `emu ${buildVmSnapshotConsoleCommand(action, snapshotName)}`;
+}
+
+/** Console-protocol command line (`avd snapshot <verb> <name>`), name-validated. */
+export function buildVmSnapshotConsoleCommand(
+  action: VmSnapshotAction,
+  snapshotName: string,
+): string {
   if (VM_SNAPSHOT_INVALID_NAME_CHARACTERS.test(snapshotName)) {
     const displayName =
       snapshotName.length > 64 ? `${truncateBodyText(snapshotName, 64)}…` : snapshotName;
@@ -30,7 +39,7 @@ export function buildVmSnapshotCommand(action: VmSnapshotAction, snapshotName: s
       `VM snapshot name ${quotedName} is not valid: it must not contain whitespace or control characters. Use letters, numbers, dots, underscores and hyphens.`,
     );
   }
-  return `emu avd snapshot ${VM_SNAPSHOT_CONSOLE_VERBS[action]} ${snapshotName}`;
+  return `avd snapshot ${VM_SNAPSHOT_CONSOLE_VERBS[action]} ${snapshotName}`;
 }
 
 /** Marker appended by {@link buildVmSnapshotErrorMessage} for an absent snapshot. */

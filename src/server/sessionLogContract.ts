@@ -87,9 +87,23 @@ export interface SessionLogFileOutcome {
   reason?: string;
 }
 
+/**
+ * Machine-readable causes a source can report beside its `reason`, so clients
+ * can branch on a locked or unpaired device without parsing prose.
+ */
+export const SESSION_LOG_FAILURE_CODES = [
+  "HOST_UNSUPPORTED",
+  "HOST_NOT_ADMIN",
+  "DEVICE_NOT_CONNECTED",
+  "DEVICE_NOT_PAIRED",
+  "DEVICE_LOCKED",
+] as const;
+export type SessionLogFailureCode = (typeof SESSION_LOG_FAILURE_CODES)[number];
+
 export type SessionLogSourceFailure = {
   status: "unavailable" | "failed" | "timedOut";
   reason: string;
+  code?: SessionLogFailureCode;
 };
 
 export type SessionLogSourceOutcome<T> = ({ status: "ok" } & T) | SessionLogSourceFailure;
@@ -105,10 +119,19 @@ export interface SessionLogAppGroupResult {
   entries: SessionLogFileOutcome[];
 }
 
+/**
+ * How a unified-log window was read: `simctl spawn … log show` on a Simulator, or
+ * a host `log collect --device-udid` archive then `log show` on a physical device.
+ */
+export type UnifiedLogMechanism = "simctl-log-show" | "log-collect";
+
 export interface UnifiedLogWindowResult {
   lastSeconds: number;
   level: UnifiedLogLevel;
   predicate: string;
+  mechanism: UnifiedLogMechanism;
+  /** Wall-clock time the collection took, in milliseconds. */
+  collectionMs: number;
   timeoutMs: number;
   byteCount: number;
   truncated: boolean;

@@ -1123,8 +1123,8 @@ jobs:
       # finding in a consumer, so scoping would land it on main and redden the
       # next unrelated PR. The Gradle build cache, not a shorter task list, is
       # what makes this fast.
-      # Android Lint, unlike Detekt, only looks at one module's own inputs
-      # (checkDependencies = false), so a PR lints just the modules it changes.
+      # Lint checks each module independently (checkDependencies = false), so
+      # include changed modules and transitive consumers of their API contracts.
       # Build-logic/Gradle/lint-gate/workflow changes select every module. The
       # selection is shared with scripts/prepush-android.sh; merge.yml still
       # lints every module on each push to main.
@@ -1134,7 +1134,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if selection="$(git diff --name-only "${BASE_SHA}...HEAD" | bash scripts/android/select-lint-modules.sh)"; then
+          if selection="$(git diff --no-renames --name-only "${BASE_SHA}...HEAD" | bash scripts/android/select-lint-modules.sh)"; then
             :
           else
             echo "Could not select lint modules; linting all."
@@ -1169,7 +1169,12 @@ jobs:
 
       - name: "Check Android lint baselines only shrink"
         if: success() || failure()
-        run: bash scripts/android/check-lint-baseline-shrink.sh --base-ref origin/main
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Fetch the actual target explicitly, including for stacked PRs.
+          git fetch origin "${BASE_REF}" "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          bash scripts/android/check-lint-baseline-shrink.sh --base-ref "origin/${BASE_REF}"
 
       - name: "Upload Android Lint Reports"
         if: failure()

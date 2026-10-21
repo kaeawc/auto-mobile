@@ -72,6 +72,7 @@
     "biometricAuth",
     "phoneCall",
     "sendSms",
+    "windowMode",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -87,11 +88,13 @@
     "stageSessionDownloads",
     "setUIState",
     "accessibility",
+    "audit",
     "accessibilityFocus",
     "network",
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -164,6 +167,7 @@
     "biometricAuth",
     "phoneCall",
     "sendSms",
+    "windowMode",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -179,11 +183,13 @@
     "stageSessionDownloads",
     "setUIState",
     "accessibility",
+    "audit",
     "accessibilityFocus",
     "network",
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "setToolEnabled"
   ],
   "cli": [
@@ -249,6 +255,7 @@
     "setNotificationPolicy",
     "accessibilityFocus",
     "accessibility",
+    "audit",
     "putAppFile",
     "barrier",
     "getIosSimulatorCapabilities",
@@ -266,6 +273,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "getPreference",
     "setPreference",
     "deviceSnapshot",
@@ -278,7 +286,8 @@
     "phoneCall",
     "sendSms",
     "resetAppLogs",
-    "stageSessionDownloads"
+    "stageSessionDownloads",
+    "windowMode"
   ],
   "measurementScripts": [
     "observe",

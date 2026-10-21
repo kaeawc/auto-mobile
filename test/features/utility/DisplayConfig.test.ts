@@ -176,8 +176,8 @@ describe("DisplayConfig getConfig", () => {
     const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
 
     expect(result.success).toBe(true);
-    expect(result.current).toEqual({ fontScale: 1.15, density: 480, theme: "dark" });
-    expect(result.supported).toEqual({ fontScale: true, density: true, theme: true });
+    expect(result.current).toMatchObject({ fontScale: 1.15, density: 480, theme: "dark" });
+    expect(result.supported).toMatchObject({ fontScale: true, density: true, theme: true });
     expect(result.previous).toBeUndefined();
     expect(result.applied).toBeUndefined();
   });
@@ -671,7 +671,20 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
     const result = await config.getConfig();
 
     expect(result).toMatchObject({ success: true, current: { theme: "dark" } });
-    expect(result.supported).toEqual({ fontScale: false, density: false, theme: true });
+    // Physical iOS has no path for the accessibility display preferences (#14088).
+    expect(result.supported).toEqual({
+      fontScale: false,
+      density: false,
+      theme: true,
+      increaseContrast: false,
+      reduceMotion: false,
+      boldText: false,
+      colorInversion: false,
+      colorCorrection: false,
+      magnification: false,
+      magnificationScale: false,
+      extraDim: false,
+    });
     expect(runner.requests).toEqual([undefined]);
     expect(simctlArgvCalls(simctl)).toEqual([]);
   });

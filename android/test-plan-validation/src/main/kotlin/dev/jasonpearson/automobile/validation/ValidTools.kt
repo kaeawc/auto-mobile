@@ -87,6 +87,7 @@ object ValidTools {
         "performanceTrace",
         "appLifecycle",
         "displayConfig",
+        "displayProfile",
         "getAndroid",
         "getApple",
         "getDataStore",

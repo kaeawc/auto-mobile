@@ -13,6 +13,7 @@ import {
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_CHAT_SCROLL_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
+  PROTOTYPE_LINKIFY_CAPABILITY,
   PROTOTYPE_MENUS_CAPABILITY,
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
   PROTOTYPE_CHECKS_CAPABILITY,
@@ -64,6 +65,7 @@ import {
   prototypeSearchBarUnsupportedMessage,
 } from "./prototypeSearchBar";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
+import { prototypeLinkifyFields, prototypeLinkifyUnsupportedMessage } from "./prototypeLinkify";
 import {
   prototypeChatScrollFields,
   prototypeChatScrollUnsupportedMessage,
@@ -155,6 +157,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_RICH_TEXT_CAPABILITY,
     fields: prototypeRichTextFields,
     unsupportedMessage: prototypeRichTextUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_LINKIFY_CAPABILITY,
+    fields: prototypeLinkifyFields,
+    unsupportedMessage: prototypeLinkifyUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_MENUS_CAPABILITY,

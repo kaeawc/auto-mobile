@@ -5,6 +5,7 @@ import {
   keySchema,
   pointerSchema,
   prototypeDataActionValueSchema,
+  prototypeMatchBindingSchema,
   stateKeySchema,
   type PrototypeDataActionValue,
 } from "./prototypeActionValues";
@@ -65,6 +66,7 @@ export { prototypeJsonObjectSchema, prototypeJsonSchema, type PrototypeJson };
 export const prototypeEmitContextBindingSchema = z.union([
   ...prototypeDataActionValueSchema.options,
   z.object({ page: z.string().min(1) }).strict(),
+  prototypeMatchBindingSchema,
 ]);
 export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
 // A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
@@ -72,7 +74,10 @@ const dataActionPathSchema = z
   .string()
   .min(1)
   .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
-const dataActionFields = { path: dataActionPathSchema, value: prototypeDataActionValueSchema };
+const dataActionFields = {
+  path: dataActionPathSchema,
+  value: z.union([...prototypeDataActionValueSchema.options, prototypeMatchBindingSchema]),
+};
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
 export const prototypeEmitContextSchema = z
   .record(z.string().min(1), prototypeEmitContextBindingSchema)
@@ -99,7 +104,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.enum(["setState"]),
       key: stateKeySchema,
-      value: z.union([z.string(), z.number().finite(), z.boolean()]),
+      value: z.union([z.string(), z.number().finite(), z.boolean(), prototypeMatchBindingSchema]),
     })
     .strict(),
   z
@@ -273,6 +278,17 @@ const textSpanSchema = z
     onTap: commonNodeShape.onTap,
   })
   .strict();
+// `linkify` (#14233): mentions, hashtags and URLs in `text` become links running `onTap`.
+const linkifySchema = z
+  .object({
+    kinds: z
+      .array(z.enum(["mention", "hashtag", "url"]))
+      .min(1)
+      .max(3),
+    style: textSpanSchema.shape.style,
+    onTap: z.array(actionSchema).min(1).max(32),
+  })
+  .strict();
 const textBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -280,6 +296,7 @@ const textBaseSchema = z
     type: z.enum(["text"]),
     text: z.string().optional(),
     spans: z.array(textSpanSchema).min(1).max(MAX_PROTOTYPE_TEXT_SPANS).optional(),
+    linkify: linkifySchema.optional(),
   })
   .strict();
 const imageBaseSchema = z

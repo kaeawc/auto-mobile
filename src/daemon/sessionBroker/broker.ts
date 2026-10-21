@@ -4,6 +4,7 @@ import {
   failureFor,
   preparationFailureError,
   sameProcess,
+  storedBrokerFailure,
   unwrap,
 } from "./brokerSupport";
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
@@ -21,7 +22,6 @@ import type { SessionConfig } from "../../devices/sessionConfig";
 import {
   SESSION_OWNER_EXITED_CODE,
   SESSION_OWNER_EXITED_MESSAGE,
-  type SessionBrokerFailure,
   type SessionBrokerReleaseReason,
   type SessionBrokerReleaseResult,
   type SessionBrokerResult,
@@ -36,6 +36,7 @@ import type { BrokerLimits } from "./admission";
 import { SessionBrokerFailureError, type SessionBrokerDevicePort } from "./devicePort";
 import { BrokerTimingRecorder } from "./timingRecorder";
 import { BrokerResetRelease } from "./resetRelease";
+import { ResetReadiness } from "./resetReadiness";
 import type { SessionLiveness } from "./sessionDisposition";
 import { nativeProfile, poolProfile } from "./profile";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
@@ -111,6 +112,7 @@ export class SessionBroker {
   private readonly queuedRecoveryReleases = new Set<string>();
   private readonly timing: BrokerTimingRecorder;
   private readonly resetRelease: BrokerResetRelease;
+  private readonly resetReadiness: ResetReadiness;
 
   constructor(private readonly options: SessionBrokerOptions) {
     this.cleanup = new RecoveryCleanup(
@@ -119,11 +121,18 @@ export class SessionBroker {
       options.timer,
     );
     this.timing = new BrokerTimingRecorder(options.store, { now: () => this.now() });
+    this.resetReadiness = new ResetReadiness(options.store, {
+      now: () => this.now(),
+      setTimeout: (callback, ms) => (options.timer ?? defaultTimer).setTimeout(callback, ms),
+      clearTimeout: (handle) => (options.timer ?? defaultTimer).clearTimeout(handle),
+    });
     this.resetRelease = new BrokerResetRelease(
       options,
       this.timing,
       () => this.now(),
       (ticket, signal) => this.tryCleanup(ticket, signal),
+      (resourceId) => this.resetReadiness.notify(resourceId),
+      (resourceId, active) => this.resetReadiness.setResetActive(resourceId, active),
     );
   }
 
@@ -179,6 +188,9 @@ export class SessionBroker {
       }
       const input = await this.admissionInput(config, fingerprint, signal, exportIdentity);
       input.timingStartedAtMs = startedAtMs;
+      if (this.options.reuseCleanDevices && config.device.platform === "ios") {
+        input.resetReadiness = await this.resetReadiness.snapshot(input.matches);
+      }
       const admission = await this.options.store.admit(input);
       if (admission.kind === "existing" || admission.kind === "refused") {
         return this.resultUnlessAborted(admission.request, signal);
@@ -285,6 +297,7 @@ export class SessionBroker {
   private finishPreparation(requestId: string): void {
     const remaining = (this.preparations.get(requestId) ?? 1) - 1;
     if (remaining === 0) {
+      this.resetReadiness.releaseWait(requestId);
       this.preparations.delete(requestId);
     } else {
       this.preparations.set(requestId, remaining);
@@ -355,7 +368,14 @@ export class SessionBroker {
     livenessOwnerToken: string,
     signal: AbortSignal,
   ): Promise<SessionBrokerResult> {
-    let admission = initial;
+    const waited = await this.resetReadiness.continueAfterWait(
+      initial,
+      input,
+      config.preparationTimeoutMs,
+      signal,
+    );
+    let admission = waited.admission;
+    const preparationTimeoutMs = waited.preparationTimeoutMs;
     // Each eviction removes a distinct idle resource. No creation reservation is made until
     // the existing journal confirms that device's absence.
     while (admission.kind === "evict") {
@@ -379,14 +399,19 @@ export class SessionBroker {
       signal.throwIfAborted();
       admission = await this.options.store.continueAdmission(input);
     }
-    if (admission.kind === "refused" || admission.kind === "existing") {
+    await this.timing.recordRefusedAdmission(admission);
+    if (
+      admission.kind === "refused" ||
+      admission.kind === "existing" ||
+      admission.kind === "wait"
+    ) {
       return this.result(admission.request);
     }
     signal.throwIfAborted();
     const prepared = await this.options.devices.prepare(admission.resource, {
       livenessOwnerToken,
       signal,
-      preparationTimeoutMs: config.preparationTimeoutMs,
+      preparationTimeoutMs,
       idleTimeoutMs: config.idleTimeoutMs,
       executionOwnerPid: config.executionOwnerPid,
     });
@@ -887,30 +912,35 @@ export class SessionBroker {
       throw new ActionableError("Session has no durable resource; cannot acknowledge cleanup");
     }
     signal?.throwIfAborted();
-    const disposition = await this.resetRelease.drainAndReset(
-      request,
-      resource,
-      sessionUuid,
-      signal,
-    );
-    signal?.throwIfAborted();
-    if (disposition === "pending") {
-      return {
-        ...(await this.resetRelease.releaseStatus(request, sessionUuid)),
-        outcome: "cleanup_pending",
-      };
-    }
-    if (disposition === "idle") {
+    try {
+      const disposition = await this.resetRelease.drainAndReset(
+        request,
+        resource,
+        sessionUuid,
+        signal,
+      );
+      signal?.throwIfAborted();
+      if (disposition === "pending") {
+        return {
+          ...(await this.resetRelease.releaseStatus(request, sessionUuid)),
+          outcome: "cleanup_pending",
+        };
+      }
+      if (disposition === "idle") {
+        return this.resetRelease.releaseStatus(request, sessionUuid);
+      }
+      const ticket = await this.options.store.releaseByDestruction(
+        request.requestId,
+        this.options.owner,
+      );
+      this.resetReadiness.notify(resource.resourceId);
+      if (ticket) {
+        await this.tryCleanup(ticket, signal);
+      }
       return this.resetRelease.releaseStatus(request, sessionUuid);
+    } finally {
+      this.resetReadiness.notify(resource.resourceId);
     }
-    const ticket = await this.options.store.releaseByDestruction(
-      request.requestId,
-      this.options.owner,
-    );
-    if (ticket) {
-      await this.tryCleanup(ticket, signal);
-    }
-    return this.resetRelease.releaseStatus(request, sessionUuid);
   }
 
   private async drainAbandonedSession(sessionUuid: string): Promise<void> {
@@ -951,26 +981,8 @@ export class SessionBroker {
       profile: resource ? nativeProfile(resource) : null,
       cleanupPending: this.cleanupIsPending(request, resource),
       ...(request.timing ? { timing: request.timing } : {}),
-      ...(request.error ? { failure: this.storedFailure(request, resource) } : {}),
-    };
-  }
-
-  private storedFailure(
-    request: BrokerRequestRecord,
-    resource: BrokerResourceRecord | undefined,
-  ): SessionBrokerFailure {
-    const retryable =
-      request.retryable &&
-      (request.errorCode === "eviction_pending" || !this.cleanupIsPending(request, resource));
-    return {
-      code: request.errorCode ?? "session_preparation_failed",
-      message: request.error ?? "",
-      retryable,
-      ...(retryable && request.errorCode === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
-      // Stored terminal failures (incl. eviction, after cleanup) retry only under a new request ID.
-      ...(retryable &&
-      ["capacity_exhausted", "cancelled", "eviction_pending"].includes(request.errorCode ?? "")
-        ? { retryRequires: "new_request_id" as const }
+      ...(request.error
+        ? { failure: storedBrokerFailure(request, this.cleanupIsPending(request, resource)) }
         : {}),
     };
   }

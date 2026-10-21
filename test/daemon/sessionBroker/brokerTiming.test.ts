@@ -389,6 +389,69 @@ describe("durable broker timing", () => {
     });
   });
 
+  test("wait timing changes to the admission that continues after the reset", async () => {
+    const ready = await broker.prepare(exportConfig(), "wait-timing-source");
+    const request = (await harness.store.getRequest(ready.requestId))!;
+    const resource = (await harness.store.getResource(request.resourceId!))!;
+    const fields = pendingAcquisitionTiming(
+      {
+        ...harness.options,
+        requestId: "waited-request",
+        fingerprint: "waited-request",
+        parameters: {},
+        timingStartedAtMs: 10,
+        resolveCreation: () => resource.profile,
+        matches: () => true,
+      },
+      {
+        ...request,
+        timing: {
+          acquisition: {
+            ...request.timing!.acquisition!,
+            admission: "wait",
+            outcome: "pending",
+            startedAtMs: 10,
+          },
+        },
+      },
+      resource,
+      "create",
+      30,
+    );
+    expect(JSON.parse(fields.timing_json!).acquisition).toMatchObject({
+      admission: "create",
+      outcome: "pending",
+      admissionWaitMs: 20,
+    });
+  });
+
+  test("failed wait timing is terminal rather than left pending", async () => {
+    const ready = await broker.prepare(exportConfig(), "failed-wait-source");
+    const request = (await harness.store.getRequest(ready.requestId))!;
+    const recorder = new BrokerTimingRecorder(harness.store, harness.timer);
+    const write = spyOn(harness.store, "recordTiming");
+    try {
+      await recorder.recordFailedAcquisition({
+        ...request,
+        timing: {
+          acquisition: {
+            ...request.timing!.acquisition!,
+            admission: "wait",
+            outcome: "pending",
+          },
+        },
+      });
+      expect(write).toHaveBeenCalledWith(
+        request.requestId,
+        expect.objectContaining({
+          acquisition: expect.objectContaining({ admission: "wait", outcome: "failed" }),
+        }),
+      );
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   test("corrupt timing JSON and invalid schema are ignored", () => {
     expect(parseTimingReceipt("{")).toBeUndefined();
     expect(parseTimingReceipt('{"acquisition":{"outcome":"ready"}}')).toBeUndefined();

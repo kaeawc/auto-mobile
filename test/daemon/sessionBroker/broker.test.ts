@@ -428,6 +428,123 @@ describe("session-only broker lifecycle", () => {
     expect(devices.prepared).toHaveLength(1);
   });
 
+  test.each([false, true])(
+    "acquisition waits on reset without claiming it and falls back on failure: %s",
+    async (resetFails) => {
+      const timer = new FakeTimer();
+      timer.advanceTime(1000);
+      await registry.close();
+      registry = await openSqliteBindingRegistry({
+        dbPath: ":memory:",
+        timer,
+        isExecOwnerLive: () => ownerLive,
+      });
+      const scope = await registry.ensureScope({
+        managedHostScope: "private-host",
+        runnerNamespace: "private-broker",
+        runnerIncarnation: "persistent",
+      });
+      if (scope.kind !== "ready") {
+        throw new Error("Missing scope");
+      }
+      devices = new FakeNativePort(registry);
+      options.devices = devices;
+      options.store = registry.sessionBrokerStore(
+        scope.scope.scopeKey,
+        new CountingIdGenerator("resource"),
+      );
+      options.timer = timer;
+      options.reuseCleanDevices = true;
+      options.limits = {
+        totalDeviceCap: 2,
+        sessionCap: 2,
+        idlePoolCap: 1,
+        maxConcurrentResetBoots: 1,
+      };
+      broker = new SessionBroker(options);
+      const seed = await ready("seed");
+      await broker.release(seed);
+      const seedResource = (await options.store.listResources())[0];
+      const profile = (await broker.status("seed"))?.profile;
+      if (!profile) {
+        throw new Error("Missing seed profile");
+      }
+      await options.store.recordTiming(
+        "seed",
+        {
+          acquisition: {
+            admission: "create",
+            reuseCount: 0,
+            outcome: "ready",
+            startedAtMs: timer.now() - 600,
+            completedAtMs: timer.now(),
+            queueMs: 0,
+            admissionWaitMs: 0,
+            createMs: 200,
+            bootMs: 400,
+            totalMs: 600,
+          },
+          reset: {
+            mode: "erase",
+            outcome: "clean",
+            phases: { stop: 20, erase: 30, boot: 50 },
+            reuseCount: 0,
+            startedAtMs: timer.now() - 100,
+            completedAtMs: timer.now(),
+            totalMs: 100,
+          },
+        },
+        profile,
+      );
+      const second = await ready("second");
+      const resetEntered = Promise.withResolvers<void>();
+      const finishReset = Promise.withResolvers<"clean">();
+      const resetSpy = spyOn(devices, "reset").mockImplementation(async () => {
+        resetEntered.resolve();
+        return finishReset.promise;
+      });
+      const pendingRelease = broker.release(second);
+      await resetEntered.promise;
+      const admittedWait = Promise.withResolvers<void>();
+      const admit = options.store.admit.bind(options.store);
+      const admissionSpy = spyOn(options.store, "admit").mockImplementation(async (input) => {
+        const result = await admit(input);
+        expect(result.kind).toBe("wait");
+        admittedWait.resolve();
+        return result;
+      });
+      try {
+        const acquisition = broker.prepare(config("third"), "owner-token");
+        await admittedWait.promise;
+        expect(await options.store.getRequest("third")).toMatchObject({
+          state: "acquiring",
+          resourceId: null,
+        });
+        expect(await options.store.getResource(seedResource.resourceId)).toMatchObject({
+          state: "resetting",
+          requestId: "second",
+        });
+        expect(devices.prepared).toHaveLength(2);
+        if (resetFails) {
+          finishReset.reject(new Error("reset failed"));
+        } else {
+          finishReset.resolve("clean");
+        }
+        expect(await acquisition).toMatchObject({ outcome: "ready" });
+        await pendingRelease;
+        expect(devices.prepared).toHaveLength(3);
+        expect(devices.prepared[2] === seedResource.resourceId).toBe(!resetFails);
+        expect((await options.store.getRequest("third"))?.timing?.acquisition?.admission).toBe(
+          resetFails ? "create" : "reuse",
+        );
+      } finally {
+        finishReset.resolve("clean");
+        admissionSpy.mockRestore();
+        resetSpy.mockRestore();
+      }
+    },
+  );
+
   test("changing consumer ownership cannot replay another owner's request", async () => {
     const first = await ready("first");
     expect(await broker.prepare(config("first"), "different-owner")).toMatchObject({

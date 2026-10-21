@@ -123,6 +123,7 @@ const CLASSIFICATION: Classification = {
     "homeScreen",
     "installApp",
     "launchApp",
+    "measureStartup",
     "mockNetwork",
     "navigateTo",
     "network",

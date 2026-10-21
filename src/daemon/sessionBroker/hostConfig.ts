@@ -91,6 +91,7 @@ const hostConfig = z
         totalDeviceCap: cap.optional(),
         sessionCap: cap.optional(),
         idlePoolCap: cap.optional(),
+        maxConcurrentResetBoots: cap.positive().optional(),
       })
       .strict(),
     defaults: z

@@ -3499,6 +3499,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "measureStartup",
               "mediaSession",
               "mockNetwork",
               "multiTouch",
@@ -3640,6 +3641,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "measureStartup",
               "mediaSession",
               "mockNetwork",
               "multiTouch",
@@ -9959,6 +9961,22 @@
                 "inFlight": {
                   "$ref": "#/$defs/__schema4"
                 },
+                "admissionsByReason": {
+                  "type": "object",
+                  "properties": {
+                    "reset": {
+                      "type": "number"
+                    },
+                    "create": {
+                      "type": "number"
+                    },
+                    "restart": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["reset", "create", "restart"],
+                  "additionalProperties": false
+                },
                 "hostPressure": {
                   "type": "object",
                   "properties": {
@@ -10050,6 +10068,164 @@
     },
     "_meta": {
       "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "measureStartup",
+    "description": "Android: measure cold/warm/hot app startup over N launches; TTID/TTFD percentiles, stored in performance results.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Package to launch",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "activity": {
+          "description": "Activity or pkg/.Activity component; default launcher activity",
+          "type": "string",
+          "pattern": "^[\\w.$/]+$"
+        },
+        "mode": {
+          "description": "cold: process killed; warm: process kept, activity recreated; hot: activity resumed",
+          "type": "string",
+          "enum": ["cold", "warm", "hot"]
+        },
+        "iterations": {
+          "description": "Launches to measure; default 5",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "compilation": {
+          "description": "Recompile first (cmd package compile -m <mode> -f); default asIs",
+          "type": "string",
+          "enum": ["asIs", "speed-profile", "speed", "verify"]
+        },
+        "dropCaches": {
+          "description": "Drop the page cache before each cold launch; needs a root shell",
+          "type": "boolean"
+        },
+        "waitForFullyDrawn": {
+          "description": "Wait for reportFullyDrawn to record TTFD",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "mode"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["cold", "warm", "hot"]
+        },
+        "iterations": {
+          "type": "number"
+        },
+        "compilation": {
+          "type": "string",
+          "enum": ["asIs", "speed-profile", "speed", "verify"]
+        },
+        "ttid": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "ttfd": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "launchState": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "waitTimeMs": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "success",
+        "appId",
+        "component",
+        "mode",
+        "iterations",
+        "compilation",
+        "ttid",
+        "launchState",
+        "waitTimeMs",
+        "warnings",
+        "message"
+      ],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "number"
+            },
+            "p50": {
+              "type": "number"
+            },
+            "p90": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "required": ["min", "p50", "p90", "max", "samples"],
+          "additionalProperties": false
+        }
+      }
     }
   },
   {
@@ -14912,11 +15088,11 @@
           "enum": ["normal", "bigPicture"]
         },
         "imagePath": {
-          "description": "Host image path for bigPicture",
+          "description": "Android: host image path for bigPicture. iOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
           "type": "string"
         },
         "actions": {
-          "description": "Android action buttons",
+          "description": "Android action buttons; iOS buttons come from the registered category",
           "type": "array",
           "items": {
             "type": "object",
@@ -14937,8 +15113,21 @@
           }
         },
         "channelId": {
-          "description": "Android channel ID / iOS APNs category",
+          "description": "Android channel ID; iOS APNs category when category is omitted",
           "type": "string"
+        },
+        "category": {
+          "description": "iOS: aps.category naming a UNNotificationCategory the app registered",
+          "type": "string",
+          "minLength": 1
+        },
+        "payload": {
+          "description": "iOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
         },
         "appId": {
           "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted",
@@ -23783,6 +23972,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "measureStartup",
               "mediaSession",
               "mockNetwork",
               "multiTouch",
@@ -30895,6 +31085,7 @@
             "listDataStores",
             "listDeviceImages",
             "listDevices",
+            "measureStartup",
             "mediaSession",
             "mockNetwork",
             "multiTouch",
@@ -31002,6 +31193,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "measureStartup",
               "mediaSession",
               "mockNetwork",
               "multiTouch",

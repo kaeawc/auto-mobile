@@ -130,7 +130,7 @@ screenshots and video recording all see the prototype the same way they see app 
   The agent keeps no raw spec bytes, so it measures the shown spec's size outside `state` once,
   from the `show_prototype` request's own `spec` (re-serialized, so whitespace is not counted),
   and adds the candidate state's JSON size to it on each write. A rejection (`Spec byte limit
-  exceeded`) is therefore the same up to a few bytes of encoder difference (number spelling,
+exceeded`) is therefore the same up to a few bytes of encoder difference (number spelling,
   default fields Kotlin re-emits). A session built without a request (unit tests) counts the
   state alone.
 

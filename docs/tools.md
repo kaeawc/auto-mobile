@@ -3262,7 +3262,7 @@ every `tasks/*` request, in the per-request capabilities:
 - Tasks belong to the session key (the `x-auto-mobile-mcp-session-id` header). A request without
   one always runs synchronously, and another session key cannot read or cancel the task.
 - An opted-in call answers `{"resultType": "task", "taskId": …, "status": "working", "ttlMs":
-  null, "pollIntervalMs": 1000, …}`. Poll `tasks/get` with `{"taskId": …}` at `pollIntervalMs`.
+null, "pollIntervalMs": 1000, …}`. Poll `tasks/get` with `{"taskId": …}` at `pollIntervalMs`.
   `completed` carries the same `result` the synchronous call returns (including an `isError`
   result), `failed` carries the JSON-RPC `error`, and `input_required` carries `inputRequests`
   to answer with `tasks/update` (`{"taskId": …, "inputResponses": {…}}`).

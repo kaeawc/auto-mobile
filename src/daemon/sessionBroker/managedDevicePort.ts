@@ -197,7 +197,6 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (profile.platform !== "android" || !android || !android.canCapture) {
       return;
     }
-    android.forget(resource.resourceId);
     this.androidDevices.delete(resource.resourceId);
     try {
       const entry = result.bindings[0];
@@ -217,26 +216,48 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       });
       await runAsBindingReconciler(this.key(resource), () =>
         android.capture(resource.resourceId, device, profile, sessionId, {
+          fresh: entry.disposition === "created" || entry.disposition === "replaced",
           signal: options.signal,
           timeoutMs: Math.max(
             0,
             options.deadlineMs - (this.dependencies.timer ?? defaultTimer).now(),
           ),
           timer: this.dependencies.timer ?? defaultTimer,
+          incarnation: JSON.stringify([resource.resourceId, binding.stableId]),
+          assertOwned: async () => {
+            options.signal?.throwIfAborted();
+            const current = await this.dependencies.registry.getAssignment(this.key(resource));
+            if (
+              !current ||
+              !sameBinding(current, {
+                generation: entry.assignmentGeneration!,
+                stableDeviceId: binding.stableId,
+              }) ||
+              current.state !== "ready" ||
+              current.deviceName !== device.name ||
+              current.execOwner?.sessionUuid !== sessionId ||
+              current.settler !== null ||
+              (await this.hasOpenJournal(this.key(resource)))
+            ) {
+              throw new ActionableError(
+                "Android baseline capture lost exclusive binding ownership",
+              );
+            }
+          },
         }),
       );
     } catch (error) {
-      this.handleAndroidBaselineCaptureFailure(resource.resourceId, android, options, error);
+      await this.handleAndroidBaselineCaptureFailure(resource.resourceId, android, options, error);
     }
   }
 
-  private handleAndroidBaselineCaptureFailure(
+  private async handleAndroidBaselineCaptureFailure(
     resourceId: string,
     android: Pick<AndroidBaselineReset, "forget">,
     options: { signal?: AbortSignal; deadlineMs: number },
     error: unknown,
-  ): void {
-    android.forget(resourceId);
+  ): Promise<void> {
+    await android.forget(resourceId);
     this.androidDevices.delete(resourceId);
     options.signal?.throwIfAborted();
     if (this.preparationStopped(options.deadlineMs, options.signal)) {
@@ -499,7 +520,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       if (
         !device ||
         !acquired ||
-        !sameBinding(assignment, acquired) ||
+        !this.sameReleasedBinding(assignment, acquired) ||
         device.name !== name ||
         expected.stableDeviceId !== name ||
         !android ||
@@ -536,12 +557,11 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   ): Promise<DestructionProgress> {
     signal?.throwIfAborted();
     this.assertResource(resource, "destroying");
-    const androidDevice = this.androidDevices.get(resource.resourceId);
-    if (androidDevice) {
-      this.dependencies.resetBaseline?.android?.forget(resource.resourceId);
+    const profile = nativeProfile(resource);
+    if (profile.platform === "android") {
+      await this.dependencies.resetBaseline?.android?.forget(resource.resourceId);
       this.androidDevices.delete(resource.resourceId);
     }
-    const profile = nativeProfile(resource);
     const requestedSpec = this.requestedSpec(profile);
     const key = this.key(resource);
 
@@ -593,14 +613,23 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       return this.confirmNoBinding(key);
     }
     const unchanged = [
-      sameBinding(after, {
-        generation: assignment.generation,
-        stableDeviceId: assignment.stableDeviceId,
-      }),
+      this.sameReleasedBinding(after, assignment),
+      after.state === "ready",
+      after.settler === null,
       after.execOwner === null,
       this.belongsToResource(after, profile, requestedSpec),
     ].every(Boolean);
     return unchanged ? after : "pending";
+  }
+
+  private sameReleasedBinding(
+    assignment: BindingAssignmentRecord,
+    acquired: { generation: number; stableDeviceId: string | null },
+  ): boolean {
+    return (
+      sameBinding(assignment, acquired) ||
+      sameBinding(assignment, { ...acquired, generation: acquired.generation + 1 })
+    );
   }
 
   private async deleteAssignment(

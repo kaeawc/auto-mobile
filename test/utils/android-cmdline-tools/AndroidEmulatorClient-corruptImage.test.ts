@@ -722,8 +722,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
 
-      fakeChild.emit("exit", 1);
       expect(fakeTimer.getPendingTimeouts()[1]).toBeLessThanOrEqual(500);
+      fakeChild.emit("exit", 1);
       await fakeTimer.advanceTimeAsync(500);
       await new Promise<void>((resolve) => setImmediate(resolve));
 

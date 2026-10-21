@@ -33,7 +33,8 @@ export interface EmulatorReadinessState {
 
 export interface ReadinessPollingState {
   active: boolean;
-  failure?: unknown;
+  failure?: { reason: unknown };
+  wakeWaiters: Set<() => void>;
 }
 
 export interface EmulatorReadinessContext {

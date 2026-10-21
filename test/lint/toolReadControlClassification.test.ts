@@ -85,6 +85,8 @@ const CLASSIFICATION: Classification = {
   },
   control: [
     "accessibilityFocus",
+    // The performance and memory audits drive the app, and a baseline record writes state.
+    "audit",
     "appLifecycle",
     "barrier",
     "biometricAuth",

@@ -13,7 +13,7 @@ the exact arguments supported by your connection.
 
 The following tools expose `sessionUuid` and `keepScreenAwake`:
 
-`accessibility`, `accessibilityFocus`, `appLifecycle`, `barrier`, `biometricAuth`,
+`accessibility`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
@@ -2859,7 +2859,32 @@ accept the recording `display` argument.
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
 | 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
+| 🧪 <code>audit</code>              | Runs the accessibility (WCAG), performance or memory audit on the current Android screen on demand, with every audit feature flag off; supports container scoping, named baselines and `failOn` for plan assertions.                                                                                                                                                                                                                                        |
 | 🔀 <code>setToolEnabled</code>     | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
+
+### audit
+
+`audit` runs the existing audit engines on the current Android screen when asked (#14075),
+instead of only as a side effect of `observe` behind the `accessibility-audit`,
+`ui-perf-mode` and `mem-perf-audit` feature flags. It never reads or changes flag state,
+except that the WCAG level and failure mode follow the `accessibility-audit` config when it
+is set (WCAG AA otherwise).
+
+- `kinds`: `accessibility` (default), `performance`, `memory`.
+- `appId`: the package to audit; defaults to the foreground app. The performance audit
+  measures the foreground app, so a background `appId` reports it under `unsupported`.
+- `scope.container`: `{ elementId }` or `{ text }`. Limits the accessibility audit to
+  violations inside that element's bounds.
+- `baseline`: `{ name, mode }`. `record` saves the accessibility violations under `name`;
+  `compare` returns `baselineDiff` (`new`, `fixed` fingerprints, `unchanged` count) and only
+  new violations count toward `failOn`.
+- `failOn`: `error`, `warning` or `never` (default). When findings reach that severity,
+  or a performance or memory audit fails, the call returns `failed: true` as an error,
+  so a plan step can assert "no new accessibility violations".
+
+Accessibility violations carry the element from the same observation (`resource-id`,
+`bounds`). The output keeps the 50 most relevant (`totalViolations` and `truncated`
+report a clip). iOS reports every kind under `unsupported`; use `accessibilityAudit` there.
 
 ### Accessibility focus selectors
 

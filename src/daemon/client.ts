@@ -790,7 +790,6 @@ export class DaemonClient {
       ...this.handshakeFields(),
     };
 
-    // Explicit per-tool env overrides bypass the connection-timeout floor (#13797).
     const requestTimeoutMs = resolveClientMcpRequestTimeoutMs(
       request,
       this.connectionTimeout,

@@ -20,6 +20,7 @@ import { logger } from "../../utils/logger";
 import { defaultDisplayInventoryProvider } from "../../devices/DisplayInventoryProvider";
 import { stopLocationRouteForRemovedDevice } from "../../features/utility/LocationRoutePlayer";
 import { defaultMockLocationClearRegistry } from "../../features/utility/MockLocationClear";
+import { forgetStatusBarOverrideForRemovedDevice } from "../statusBarSessionCleanup";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import {
   type ActiveSessionExecutionQuery,
@@ -166,6 +167,7 @@ export class DaemonSessions {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
         defaultMockLocationClearRegistry.retireDevice(deviceId);
+        forgetStatusBarOverrideForRemovedDevice(deviceId);
         NetworkState.getInstance().retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);

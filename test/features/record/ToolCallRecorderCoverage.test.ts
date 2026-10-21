@@ -132,6 +132,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "setUIState",
   "shake",
   "stageSessionDownloads",
+  "statusBar",
   "swipeAt",
   "swipeOn",
   "systemTray",

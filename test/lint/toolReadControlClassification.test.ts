@@ -82,6 +82,10 @@ const CLASSIFICATION: Classification = {
       reads: [{ query: "SELECT * FROM t" }],
       controls: [{ query: "DELETE FROM t" }, { query: "SELECT 1; DELETE FROM t" }],
     },
+    statusBar: {
+      reads: [{ action: "get" }],
+      controls: [{ action: "override", time: "9:41" }, { action: "clear" }],
+    },
   },
   control: [
     "accessibilityFocus",

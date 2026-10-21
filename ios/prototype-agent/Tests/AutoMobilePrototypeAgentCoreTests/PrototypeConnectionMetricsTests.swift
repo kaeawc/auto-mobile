@@ -85,4 +85,49 @@ final class PrototypeConnectionMetricsTests: XCTestCase {
             }
         }
     }
+
+    /// #14557: a policy rejection that lands after the caller's cancel does not replace the
+    /// promised `cancelled` outcome.
+    func testCallerCancelOutranksALatePolicyRejection() async throws {
+        let (call, handle, session) = try Self.unstartedCall()
+        defer { session.invalidateAndCancel() }
+        call.cancelByCaller(handle)
+        let code = await Self.codeAfterLateRejection(call)
+        XCTAssertEqual(code, .cancelled)
+    }
+
+    /// #14557: a policy rejection that lands after the total deadline does not replace the
+    /// promised `timeout` outcome.
+    func testDeadlineOutranksALatePolicyRejection() async throws {
+        let (call, handle, session) = try Self.unstartedCall()
+        defer { session.invalidateAndCancel() }
+        call.armDeadline(cancelling: handle)
+        // The deadline marks the call timed out before it cancels the task.
+        for _ in 0 ..< 1000 where handle.task.state == .suspended {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertNotEqual(handle.task.state, .suspended)
+        let code = await Self.codeAfterLateRejection(call)
+        XCTAssertEqual(code, .timeout)
+    }
+
+    private static func unstartedCall() throws -> (PrototypeURLSessionCall, PrototypeURLSessionTaskHandle, URLSession) {
+        let url = try XCTUnwrap(URL(string: "https://public.example/"))
+        let session = URLSession(configuration: .ephemeral)
+        let call = PrototypeURLSessionCall(maxBytes: 100, timeoutMs: 1, request: URLRequest(url: url))
+        return (call, PrototypeURLSessionTaskHandle(session.dataTask(with: url)), session)
+    }
+
+    private static func codeAfterLateRejection(_ call: PrototypeURLSessionCall) async -> PrototypeRequestErrorCode? {
+        do {
+            let _: PrototypeHttpResponse = try await withCheckedThrowingContinuation { continuation in
+                call.install(continuation)
+                call.reject()
+                call.finish(error: URLError(.cancelled), measuredMs: 1)
+            }
+            return nil
+        } catch {
+            return (error as? PrototypeHttpFailure)?.error.code
+        }
+    }
 }

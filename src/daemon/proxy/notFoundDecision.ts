@@ -1,4 +1,4 @@
-import { SESSION_REHYDRATION_DEADLINE_MS } from "../sessionManager";
+import { SESSION_REHYDRATION_DEADLINE_MS } from "../sessionManager/sessionConstants";
 import { NO_HEARTBEAT_RELEASE_BUDGET_MS } from "../sessionLivenessWindows";
 import { isRecoverableDaemonReleaseReason } from "../releaseReasons";
 

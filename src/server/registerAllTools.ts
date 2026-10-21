@@ -18,6 +18,7 @@ import { registerSnapshotTools } from "./snapshotTools";
 import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
+import { registerMeasureStartupTools } from "./measureStartupTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
@@ -41,6 +42,7 @@ import { registerNetworkTools } from "./networkTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSensorTools } from "./sensorTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
+import { registerPersonaTools } from "./personaTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
 
 export interface RegisterAllToolsOptions {
@@ -91,6 +93,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSnapshotOfTools();
   registerBiometricTools();
   registerTelephonyTools();
+  registerMeasureStartupTools();
   registerMediaSessionTools();
   registerWindowModeTools();
   registerHighlightTools();
@@ -114,6 +117,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerKillProfileTools();
   registerSensorTools();
   registerDisplayProfileTools();
+  registerPersonaTools();
   if (options.includeToolSelection ?? true) {
     registerToolSelectionTools();
   }

@@ -73,6 +73,7 @@
     "biometricAuth",
     "phoneCall",
     "sendSms",
+    "measureStartup",
     "mediaSession",
     "windowMode",
     "highlight",
@@ -102,6 +103,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -175,6 +177,7 @@
     "biometricAuth",
     "phoneCall",
     "sendSms",
+    "measureStartup",
     "mediaSession",
     "windowMode",
     "highlight",
@@ -204,6 +207,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "setToolEnabled"
   ],
   "cli": [
@@ -293,6 +297,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "getPreference",
     "setPreference",
     "deviceSnapshot",
@@ -304,6 +309,7 @@
     "clearKeyValueFile",
     "phoneCall",
     "sendSms",
+    "measureStartup",
     "mediaSession",
     "resetAppLogs",
     "performanceTrace",

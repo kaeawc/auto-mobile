@@ -20,7 +20,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mediaSession`, `mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`,
+`measureStartup`, `mediaSession`, `mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`,
 `performanceTrace`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
@@ -1036,7 +1036,7 @@ strict `peek: {start?, end?}` and `pageSize` (`"fill"` default or strict `{dp}`)
 require `prototype_pager_options_v1` whenever explicitly present. Spacing and peek
 are finite 0..10000; fixed page size is finite 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
 Missing spacing/peek sides mean 0, and `{}` peek is a no-op. Units are points on iOS.
-A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical).
+A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical), and a horizontal pager or a carousel cannot have any horizontal scroll ancestor.
 Current page is the first fully visible page; page events and navigation bindings
 keep their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
 
@@ -1885,6 +1885,41 @@ subtree, or the whole active-window tree when owner-less.
 | 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ✅ <code>setAppLinks</code>                                                                      | Android 12+: approves, resets, or re-verifies an app's App Links domains, or changes a user's domain selection, so https links open the app without a chooser. Returns what changed and a restore receipt; a daemon session restores the original state on release.                                                                                                                                                                                                                                                                                                                                      |
+| ⏱️ <code>measureStartup</code>                                                                   | Android: launches an app N times cold, warm or hot and reports time-to-initial-display (TTID) and, when the app calls `reportFullyDrawn`, time-to-full-display (TTFD) percentiles. Stored in `automobile:performance-results`.                                                                                                                                                                                                                                                                                                                                                                           |
+
+<details class="note" markdown="1">
+<summary>Measuring startup with measureStartup</summary>
+
+<code>measureStartup</code> (Android only, off by default; enable it with
+<code>setToolEnabled</code>) measures one launch per iteration with plain
+<code>am start -W</code> calls. It never runs <code>launchApp</code>, observation or UI
+settling during the run, so AutoMobile adds no work of its own to the measured launch.
+
+- `appId`: the package to launch.
+- `activity`: an activity class (`.MainActivity`) or a full `pkg/.Activity` component.
+  Omitted, the launcher activity is resolved with `cmd package resolve-activity`.
+- `mode`: `cold` force-stops the app before every launch; `warm` keeps the process
+  but clears the task so the activity is recreated; `hot` presses Home and brings the
+  existing activity back. Warm and hot runs start with one unmeasured launch.
+- `iterations`: launches to measure, 1–50 (default 5).
+- `compilation`: `asIs` (default) or a `cmd package compile -m <mode> -f` mode
+  (`speed-profile`, `speed`, `verify`) applied once before the run.
+- `dropCaches`: cold only. Drops the page cache before each launch through a root
+  shell (`adb root` or `su`); refused when the device has neither.
+- `waitForFullyDrawn`: wait up to 10 s after each launch for the app's
+  `Fully drawn` log line. Without it, the log is read once per launch.
+
+The result has `ttid` (from `TotalTime`) and, when any launch logged
+`Fully drawn`, `ttfd`, each with `min`, `p50`, `p90`, `max` and the per-launch
+`samples`. `launchState` lists what `am start -W` reported per launch (`COLD`,
+`WARM`, `HOT`; `UNKNOWN` before API 29) and `waitTimeMs` the matching `WaitTime`.
+`warnings` explains a missing TTFD, launches without a `TotalTime`, and launches
+whose state differs from `mode`. Each run is stored in
+`automobile:performance-results` with the TTID p50 as `timeToFirstFrameMs`, the
+TTFD p50 as `timeToInteractiveMs`, and the full result in `diagnostics` (`kind:
+"startup"`), so runs can be compared over time.
+
+</details>
 
 <details class="note" markdown="1">
 <summary>State-preserving app lifecycle contract</summary>
@@ -2449,6 +2484,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 🪫 <code>killProfile</code>                                                    | Android: applies or resets an OEM background-kill profile (standby bucket, appops, Doze, force-stop) on a stock device; opt-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 🎭 <code>persona</code>                                                        | Android: applies, resets or describes an OEM persona (keyboard profile, kill profile and display profile, with per-facet evidence status) on a stock device; opt-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 Clock control uses `setDeviceState` with `clock: { mode: "set", instant: "2026-10-01T00:00:00Z" }`, `clock: { mode: "advance", byMs: 60000 }`, or `clock: { mode: "reset" }`. Set requires ISO-8601 with Z or an explicit offset within **2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z, inclusive** (`MIN_DEVICE_CLOCK_INSTANT_MS` / `MAX_DEVICE_CLOCK_INSTANT_MS`). Advance requires an integer `byMs >= 1000`, at most `MAX_DEVICE_CLOCK_ADVANCE_MS` (315360000000, ten 365-day years). An early device read rejects cumulative targets outside that window before any clock or other field mutation. Immediately before the clock write, after other requested fields, root acquisition and disabling automatic time, advance reads the device again and range-checks the fresh target. A target that leaves the window during those operations returns a typed clock-field failure; other fields retain their results. Read-only root-capability probes and `date +%s` may run during validation. All inputs are validated before applying any field. Only rootable Android emulators support writes; Play Store images, physical Android devices, and all iOS targets return unsupported. Changing the clock affects TLS/certificate validation, token expiry, and the daemon's own freshness checks for that device.
 
@@ -2673,6 +2709,50 @@ displayProfile({ action: "reset" });
   changes persist until `reset`. The record is in memory only. The shared `platform` and
   `keepScreenAwake` device options apply as for other tools.
 
+### OEM personas (`persona`)
+
+`persona` (Android, opt-in with `setToolEnabled`) bundles the keyboard profile, `killProfile`
+and `displayProfile` into one named OEM persona and applies it with those executors (#14055).
+It simulates what an app observes on that OEM's devices, not the firmware. See
+[OEM personas](using/oem-personas.md) for the catalog and its evidence.
+
+```ts
+persona({ action: "list" }); // catalog version, personas and evidence statuses
+persona({ action: "describe", persona: "samsung-oneui" }); // facets, evidence, nonEmulatable
+persona({ action: "apply", persona: "samsung-oneui", appId: "com.example.app" });
+persona({
+  action: "apply",
+  persona: "samsung-oneui",
+  appId: "com.example.app",
+  requires: ["samsung-dex"], // returns route_to_real_device and changes nothing
+});
+persona({ action: "reset" });
+```
+
+- `list` and `describe` change nothing on the device. `describe` reports every facet with its
+  category (`functionalityBreak` or `oemFeature`), its value and its evidence: `status`
+  (`focused_trace`, `vendor_documented`, `cdd_derived`, `inferred` or `experimental`), `note`
+  and `source`.
+- `apply` runs the keyboard, kill and display facets in that order. `appId` is required for
+  a persona with a kill profile. Each facet reports `applied`, `partial`, `unsupported` or
+  `failed`; a failed facet does not stop the others, and a persona that changes nothing is an
+  error. The result names the persona's `version` and the catalog's `catalogVersion`.
+- Personas replace one another: applying a persona other than the one recorded on the device
+  first resets the recorded one, and the result names it as `replaced`. Re-applying the same
+  persona (for example for another `appId`) does not reset it.
+- `requires` lists OEM capabilities the task needs. When the persona lists one of them as
+  `nonEmulatable`, `apply` returns `success: false` and `status: "route_to_real_device"` with
+  the capabilities and changes nothing.
+- `reset` restores every recorded display facet, the kill facet of every package a persona
+  applied to that still has a change recorded (plus `appId`), then the keyboard profile active
+  before the first persona. The display and kill records are shared with `displayProfile` and
+  `killProfile`, so reset also restores direct `displayProfile` changes and the device-wide
+  battery and Doze state. A facet the device refuses stays recorded and the reset is an error.
+- In a daemon session (`sessionUuid`), release or rebind restores the kill and display facets,
+  as with `killProfile` and `displayProfile`. The keyboard profile is restored only by `reset`,
+  as with `keyboard` `setProfile`, so it stays active for the device's next session until then. The record is in memory only. The shared `platform` and
+  `keepScreenAwake` device options apply as for other tools.
+
 ### Localization, display, and event options
 
 `changeLocalization.appId` selects the Android app package for locale changes.
@@ -2806,7 +2886,38 @@ On iOS both tools need the app under test to embed the AutoMobile iOS SDK in a
 DEBUG build and be in the foreground: `phoneCall` reports the call through
 CallKit, and `sendSms` posts an SMS-style local notification. Without the SDK
 they return an error that says so.
-`postNotification.channelId` supplies the Android channel ID or iOS APNs category.
+`postNotification.channelId` supplies the Android channel ID, and the iOS APNs
+category when `category` is omitted.
+
+On the iOS Simulator (#14097), `postNotification` builds a `simctl push` payload:
+`aps.alert` from `title`/`body` and `aps.sound: "default"`.
+
+- `category` sets `aps.category`. An app that registered a `UNNotificationCategory`
+  with that identifier shows the category's action buttons. `actions` cannot
+  create buttons on iOS, so they are ignored with a warning.
+- `imagePath` (a host path, resolved like Android's, or any URL) adds
+  `aps.mutable-content: 1` and sends the image URL under the top-level key
+  `automobile-image-url` (a host path becomes a `file://` URL). The image appears
+  only if the app's Notification Service Extension downloads and attaches it, and
+  the result carries a warning saying so.
+- `payload` is a raw APNs JSON object for custom keys, `interruption-level`,
+  `relevance-score`, `thread-id`, and similar. Its top-level keys and its `aps`
+  fields override the generated ones; `Simulator Target Bundle` always names
+  `appId`. The merged JSON must fit the 4096-byte `simctl push` limit; a larger
+  payload is refused before `simctl` runs. Custom keys reach the app's
+  `userInfo`.
+- On Android, `category` and `payload` are ignored with a warning. Physical iOS
+  devices remain unsupported: real APNs delivery is out of scope.
+
+Live Activity research (#14097), unverified: `simctl push` addresses an app
+bundle, while ActivityKit update and end pushes (`aps.event`, `aps.content-state`)
+are addressed to an activity's push token on the
+`<bundle>.push-type.liveactivity` topic. A `payload` carrying those fields is
+therefore expected to arrive as an ordinary push to the app rather than update a
+running Live Activity. This has not been confirmed against a current Xcode
+Simulator; until it is, do not rely on `postNotification` to drive Live
+Activities.
+
 `imageType` selects `normal` (default) or `bigPicture`; `imagePath` is the host
 image path for `bigPicture`. The host reads only the file's first bytes and
 rejects files over 16 MiB. It accepts PNG, JPEG, WebP, GIF and BMP everywhere,
@@ -3725,6 +3836,17 @@ may throw.
 `pressButton` reports `success`, `button`, and `keyCode`, with optional `error`,
 `warnings`, `staleDisplay`, `effect`, and finalized `observation`/`observationDiff`.
 Returned failures retain their structured payload and set MCP `isError`.
+
+`pressButton` `action` and `camera` press the iOS Action button and Camera Control
+through XCUITest's `XCUIDevice.Button.action` and `.camera` (#14100). Apple
+documents both cases, and `XCUIDevice.hasHardwareButton(_:)` (iOS 16+), in
+XCUIAutomation for Xcode 16.3 and later; the runner presses only when
+`hasHardwareButton` reports the button. Devices without the hardware (Action
+button: iPhone 15 Pro and later; Camera Control: iPhone 16 and later) and
+simulators whose runtime does not report it return `code: "unsupported_button"`
+with `retryable: false`. Android has no equivalent and refuses both with the same
+code. A press can launch the app or shortcut the user bound to the button, so
+both count as navigation buttons.
 
 `launchApp` reports `success` and `packageName`, with optional `activityName`,
 `userId`, `pid`, `alreadyForeground`, `foregroundActivityPackage`, `verifiedBy`,

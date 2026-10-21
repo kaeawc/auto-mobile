@@ -14,8 +14,12 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandIn
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -28,6 +32,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeFlowNode
@@ -79,23 +85,42 @@ internal fun rememberAnimatorDurationScale(resolver: ContentResolver): State<Flo
   return scale
 }
 
+/**
+ * The x a horizontal slide starts from (enter) or ends at (exit): off the start edge for
+ * `slideStart`, off the end edge for `slideEnd`, mirrored in right-to-left layouts (#14208).
+ */
+internal fun prototypeSlideOffset(transition: String, width: Int, rtl: Boolean): Int {
+  val fromStart = (transition == "slideStart") != rtl
+  return if (fromStart) -width else width
+}
+
+/** Whether the enclosing layout runs right to left, so start and end slides mirror. */
+@Composable
+internal fun prototypeRtl(): Boolean = LocalLayoutDirection.current == LayoutDirection.Rtl
+
 /** The `visibleWhen` enter transition for a node's `transition`; absent keeps fade + expand. */
-internal fun prototypeEnterTransition(transition: String?): EnterTransition =
+internal fun prototypeEnterTransition(transition: String?, rtl: Boolean = false): EnterTransition =
   when (transition) {
     "none" -> EnterTransition.None
     "fade" -> fadeIn()
     "expand" -> expandIn()
     "slide" -> slideInVertically() + fadeIn()
+    "slideStart",
+    "slideEnd" -> slideInHorizontally { prototypeSlideOffset(transition, it, rtl) }
+    "scale" -> scaleIn() + fadeIn()
     else -> fadeIn() + expandIn()
   }
 
 /** The `visibleWhen` exit transition for a node's `transition`; absent keeps fade + shrink. */
-internal fun prototypeExitTransition(transition: String?): ExitTransition =
+internal fun prototypeExitTransition(transition: String?, rtl: Boolean = false): ExitTransition =
   when (transition) {
     "none" -> ExitTransition.None
     "fade" -> fadeOut()
     "expand" -> shrinkOut()
     "slide" -> slideOutVertically() + fadeOut()
+    "slideStart",
+    "slideEnd" -> slideOutHorizontally { prototypeSlideOffset(transition, it, rtl) }
+    "scale" -> scaleOut() + fadeOut()
     else -> fadeOut() + shrinkOut()
   }
 

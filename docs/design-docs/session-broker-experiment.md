@@ -17,7 +17,9 @@ record. If the release reply budget expires before timing is available, that
 `cleanup_pending` reply can omit timing. Legacy receipts and pre-admission
 refusals can also omit timing.
 
-Acquisition records expose `admission` (`reuse`, `create`, `evict-then-create`),
+Acquisition records expose `admission` (`reuse`, `create`, `evict-then-create`,
+`wait`); `wait` appears only on failed or pending records because successful
+acquisitions record the admission selected after the reset wait. They also expose
 `outcome` (`pending`, `ready`, `failed`), `reuseCount`, `startedAtMs`, optional
 `completedAtMs`, and millisecond phases `queueMs`, `admissionWaitMs`, `createMs`,
 `bootMs`, `automationReadyMs`, `totalMs`. This broker has no admission queue, so
@@ -342,6 +344,25 @@ ID remains terminal; after cleanup frees capacity, retry with a new request ID.
 Permanent destroy errors remain non-retryable `session_preparation_failed` failures.
 Managed provisioning's `cleanup_pending` remains a separate failure: its retryability
 is suppressed while that request's resource cleanup is pending, with no retry delay injected.
+
+For iOS clean pooling, erase resets reserve their existing boot slot before shutdown
+and hold it through erase and boot. Optional `limits.maxConcurrentResetBoots` is a
+positive integer bounding concurrent iOS resets; excess releases wait in the broker
+cleanup queue before reserving a boot slot. If omitted, resets share the boot gate's
+host limit. This does not change Android reset behavior.
+
+Admission can wait once for a compatible resetting iOS resource when successful
+profile timing history estimates it will finish within the p50 create-plus-boot
+time. Missing or overdue estimates preserve ordinary create/evict/refuse behavior.
+Idle completion and reset failure wake waiters to reconsider admission transactionally;
+waiters never own the resetting resource. Timeout falls back to ordinary admission,
+still respecting device and session caps, and subtracts the wait from the preparation
+budget. Cancellation and deadline expiry do not start a replacement acquisition.
+
+`listDevices.capacity.ios.admissionsByReason` reports live `reset`, `create`, and
+`restart` admissions, including reset reservations while their simulator is shut
+down. These counts can overlap the booted inventory and are not additional slots.
+Boot-duration history retains the same reason tag and supports per-reason queries.
 
 ## Consumer contract
 

@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Context
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.fail
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.keyPath
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
+import dev.jasonpearson.automobile.protocol.PrototypeValidationValues.insideScroll
 import dev.jasonpearson.automobile.protocol.PrototypeValidationValues.insideVerticalScroll
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
@@ -55,6 +56,9 @@ internal object PrototypeContainerRules {
   fun pagerErrors(context: Context): PrototypeSpecError? {
     val pagers = mutableSetOf<String>()
     for ((value, path) in context.nodes) {
+      horizontalLazyError(value, path, context)?.let {
+        return it
+      }
       if (value.text("type") != "pager") continue
       val id = checkNotNull(value.text("id"))
       if (!pagers.add(id)) return fail("$path.id", "Duplicate pager id")
@@ -66,6 +70,22 @@ internal object PrototypeContainerRules {
       if (!pagers.contains(pager)) return fail("$path.pager", "Unknown pager id")
     }
     return pagerContextErrors(context, pagers)
+  }
+
+  /**
+   * A horizontal `scroll` measures its child with an infinite width, which the lazy horizontal
+   * pager and carousel layouts cannot take (#14165).
+   */
+  private fun horizontalLazyError(
+    value: JsonObject,
+    path: String,
+    context: Context,
+  ): PrototypeSpecError? {
+    val type = value.text("type")
+    val lazy = type == "carousel" || (type == "pager" && value.text("axis") != "vertical")
+    if (!lazy || !insideScroll(context, path, horizontal = true)) return null
+    return if (type == "carousel") fail(path, "A carousel cannot appear inside a horizontal scroll")
+    else fail(path, "A horizontal pager cannot appear inside a horizontal scroll")
   }
 
   fun pagerContextErrors(context: Context, pagers: Set<String>): PrototypeSpecError? {

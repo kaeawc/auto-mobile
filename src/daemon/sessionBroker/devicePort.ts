@@ -56,5 +56,5 @@ export interface SessionBrokerDevicePort {
    */
   destroy(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<"absent" | "pending">;
   /** Optional until the clean baseline is qualified; absence means zero pooling. */
-  reset?(resource: BrokerResourceRecord): Promise<ResetResult>;
+  reset?(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<ResetResult>;
 }

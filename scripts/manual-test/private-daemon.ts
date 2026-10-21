@@ -861,6 +861,7 @@ async function runExistingBatch(
           limits: host.limits,
           defaults: host.defaults,
           reuseCleanDevices: host.reuseCleanDevices,
+          reuse: host.reuse,
           clients: [],
         },
         { maxDevices: batch.broker.maxDevices ?? 2, allowReuse: batch.broker.allowReuse ?? false },

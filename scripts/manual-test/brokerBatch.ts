@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   parseSessionBrokerHostConfig,
+  iosReusePolicy,
   type SessionBrokerHostConfig,
 } from "../../src/daemon/sessionBroker/hostConfig";
 import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
@@ -24,6 +25,7 @@ const batchSchema = z
     limits: z.object({ totalDeviceCap: cap, sessionCap: cap, idlePoolCap: cap }).strict(),
     reuseCleanDevices: z.boolean(),
     reuseAndroidCleanDevices: z.boolean().optional(),
+    reuse: z.unknown().optional(),
     defaults: z.object({ ios: z.unknown().optional(), android: z.unknown().optional() }).strict(),
     // Product host-config parser owns both shapes; the Android/iOS resolvers require them.
     androidProfileArchetypes: z.unknown().optional(),
@@ -35,11 +37,12 @@ const batchSchema = z
 export type BrokerBatchClient = z.infer<typeof clientSchema>;
 export type BrokerBatch = Omit<
   z.infer<typeof batchSchema>,
-  "defaults" | "androidProfileArchetypes" | "iosClassifications"
+  "defaults" | "androidProfileArchetypes" | "iosClassifications" | "reuse"
 > & {
   defaults: SessionBrokerHostConfig["defaults"];
   androidProfileArchetypes: SessionBrokerHostConfig["androidProfileArchetypes"];
   iosClassifications: SessionBrokerHostConfig["iosClassifications"];
+  reuse?: SessionBrokerHostConfig["reuse"];
 };
 export interface BrokerBatchOptions {
   maxDevices?: number;
@@ -74,7 +77,9 @@ export function renderHostConfig(
     z.infer<typeof batchSchema>,
     "limits" | "defaults" | "reuseCleanDevices" | "reuseAndroidCleanDevices"
   > &
-    Partial<Pick<z.infer<typeof batchSchema>, "androidProfileArchetypes" | "iosClassifications">>,
+    Partial<
+      Pick<z.infer<typeof batchSchema>, "androidProfileArchetypes" | "iosClassifications" | "reuse">
+    >,
 ): SessionBrokerHostConfig {
   return parseSessionBrokerHostConfig({
     contractVersion: 1,
@@ -85,6 +90,7 @@ export function renderHostConfig(
     iosClassifications: batch.iosClassifications,
     reuseCleanDevices: batch.reuseCleanDevices,
     reuseAndroidCleanDevices: batch.reuseAndroidCleanDevices,
+    reuse: batch.reuse,
   });
 }
 
@@ -97,10 +103,12 @@ export function parseBrokerBatch(input: unknown, options: BrokerBatchOptions = {
   if (batch.limits.totalDeviceCap > maxDevices) {
     throw new Error(`totalDeviceCap exceeds --max-devices ${maxDevices} (hard ceiling 4).`);
   }
+  const host = renderHostConfig(batch);
   if (
     !options.allowReuse &&
     (batch.limits.idlePoolCap !== 0 ||
       batch.reuseCleanDevices ||
+      iosReusePolicy(host).mode !== "off" ||
       batch.reuseAndroidCleanDevices === true)
   ) {
     throw new Error(
@@ -110,7 +118,6 @@ export function parseBrokerBatch(input: unknown, options: BrokerBatchOptions = {
   if (new Set(batch.clients.map((client) => client.name)).size !== batch.clients.length) {
     throw new Error("Broker batch client names must be unique.");
   }
-  const host = renderHostConfig(batch);
   for (const client of batch.clients) {
     renderClientRequest(client, `validate-${client.name}`);
     if (!host.defaults[client.platform]) {
@@ -122,6 +129,7 @@ export function parseBrokerBatch(input: unknown, options: BrokerBatchOptions = {
     defaults: host.defaults,
     androidProfileArchetypes: host.androidProfileArchetypes,
     iosClassifications: host.iosClassifications,
+    reuse: host.reuse,
   };
 }
 

@@ -630,6 +630,20 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return this.compatibility.getInstalledApkSha256();
   }
 
+  async readSnapshotIdentity(signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted();
+    const installed = await this.getInstalledApkSha256WithDetails(signal);
+    signal.throwIfAborted();
+    const expected = await this.getExpectedChecksum(false);
+    signal.throwIfAborted();
+    if (!expected || installed.sha256 !== expected) {
+      throw new ActionableError(
+        "Android snapshot requires the current verified CtrlProxy artifact",
+      );
+    }
+    return expected;
+  }
+
   /**
    * Check if installed APK SHA256 matches expected release checksum.
    */

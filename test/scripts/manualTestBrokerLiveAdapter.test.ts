@@ -128,6 +128,13 @@ test("private batch validation refuses resident paths, ports, excessive caps and
   expect(() => assertPrivateBrokerBatch(f.batchDir, f.deps.daemon)).toThrow(
     "reuseAndroidCleanDevices false",
   );
+  host.reuseAndroidCleanDevices = false;
+  for (const mode of ["erase", "keep-booted"]) {
+    host.reuseCleanDevices = false;
+    host.reuse = { ios: { mode } };
+    f.files.set(join(f.batchDir, "broker/host-config.json"), JSON.stringify(host));
+    expect(() => assertPrivateBrokerBatch(f.batchDir, f.deps.daemon)).toThrow("reuseCleanDevices");
+  }
   expect(f.calls).toEqual([]);
   expect(f.launches).toEqual([]);
 });

@@ -61,14 +61,10 @@ class SetTextAcknowledgementOrderTest {
 
     val broadcaster = functionBody(source, "suspend fun broadcastSetTextResult(")
     assertTrue(
-      "set_text_result must use synchronous delivery instead of the backpressured event flow",
-      "responseSender.broadcastWithPerfSync" in broadcaster,
+      "set_text_result must go through the shared result sender",
+      "resultSender.sendFrame" in broadcaster,
     )
-    assertTrue(
-      "the sync sender must reach the WebSocket server's synchronous broadcast",
-      "webSocketServer.broadcastWithPerfSync" in
-        functionBody(serviceSource, "override suspend fun broadcastWithPerfSync("),
-    )
+    assertResultSenderEnqueuesDirectly(serviceSource)
   }
 
   @Test
@@ -270,8 +266,11 @@ class SetTextAcknowledgementOrderTest {
           frames.indexOf("internal fun insertTextStateResultFrame("),
         )
     assertTrue(
-      "insert acknowledgements must be synchronous",
-      "responseSender.broadcastWithPerfSync" in broadcaster,
+      "insert acknowledgements must go through the shared result sender",
+      "resultSender.sendFrame" in broadcaster,
+    )
+    assertResultSenderEnqueuesDirectly(
+      KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource()),
     )
     assertTrue("must route through the typed frame", "insertTextResultFrame(" in broadcaster)
     for (field in
@@ -307,6 +306,24 @@ class SetTextAcknowledgementOrderTest {
     assertTrue(
       "insert text must refresh changed text when caret restoration is only partially applied",
       successfulMutationRefresh > acknowledgement,
+    )
+  }
+
+  /**
+   * Acknowledgements must not wait on the backpressured event flow: the service's result transport
+   * hands the frame to [WebSocketServer.broadcast], which enqueues it on each client directly.
+   */
+  private fun assertResultSenderEnqueuesDirectly(serviceSource: String) {
+    assertTrue(
+      "the result transport must reach the WebSocket server's direct broadcast",
+      "webSocketServer.broadcast(frame)" in serviceSource,
+    )
+    val server =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("WebSocketServer.kt").readText())
+    assertTrue(
+      "WebSocketServer.broadcast(message) must enqueue on each client directly",
+      "broadcastToClients(message)" in
+        functionBody(server, "suspend fun broadcast(message: String)"),
     )
   }
 

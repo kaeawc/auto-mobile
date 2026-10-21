@@ -144,6 +144,13 @@ test("Android reuse flag requires explicit reuse permission and renders to host 
   expect(host.reuseAndroidCleanDevices).toBe(true);
 });
 
+test.each(["erase", "keep-booted"])("explicit iOS %s cannot bypass no-reuse guards", (mode) => {
+  const input = { ...brokerBatchInput(), reuseCleanDevices: false, reuse: { ios: { mode } } };
+  expect(() => parseBrokerBatch(input)).toThrow("--allow-reuse");
+  const parsed = parseBrokerBatch(input, { allowReuse: true });
+  expect(renderHostConfig(parsed).reuse?.ios.mode).toBe(mode);
+});
+
 test("planning retains excess clients and marks capacity refusals by order", () => {
   const input = brokerBatchInput();
   expect(planExpectations(parseBrokerBatch(input))).toEqual([

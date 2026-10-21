@@ -638,6 +638,11 @@ export function looksLikeMissingIosDefault(error: unknown): boolean {
   ].some((pattern) => pattern.test(message));
 }
 
+/** `get_app_container` output that means the app is not installed, so a retry cannot help. */
+export function isMissingIosAppError(detail: string): boolean {
+  return /Application not found|No such file or directory|NSPOSIXErrorDomain, code=2/i.test(detail);
+}
+
 export function isRetryableIosDefaultsError(error: unknown): boolean {
   const message = errorMessage(error);
   return (
@@ -653,6 +658,28 @@ export function iosDefaultsOperationTimeoutError(): ActionableError {
   return new ActionableError(
     `iOS UserDefaults preference operation timed out after ${IOS_DEFAULTS_OPERATION_TIMEOUT_MS}ms.`,
   );
+}
+
+/**
+ * The timeout for the bound that expires first (#14683): with no operation deadline, or for an SDK
+ * call, the command's own bound; otherwise the command's bound while the operation budget still has
+ * time beyond it, else the exhausted operation budget.
+ */
+export function iosPreferenceCommandTimeoutError(
+  command: string,
+  commandTimeoutMs: number,
+  budgetMs: number | undefined,
+): () => ActionableError {
+  if (budgetMs === undefined || commandTimeoutMs === IOS_PREFERENCE_SDK_TIMEOUT_MS) {
+    return () => new ActionableError(`iOS ${command} timed out after ${commandTimeoutMs}ms.`);
+  }
+  if (budgetMs <= commandTimeoutMs) {
+    return iosDefaultsOperationTimeoutError;
+  }
+  return () =>
+    new ActionableError(
+      `iOS ${command} timed out after ${commandTimeoutMs}ms (operation budget ${IOS_DEFAULTS_OPERATION_TIMEOUT_MS}ms).`,
+    );
 }
 
 export function preferenceWriteWarning(

@@ -10,6 +10,7 @@ import {
   type PreferenceValueType,
 } from "../../../src/features/preferences/AppPreferences";
 import { IOS_SDK_REDACTED_VALUE } from "../../../src/features/preferences/IosPreferenceTypes";
+import { iosPreferenceCommandTimeoutError } from "../../../src/features/preferences/preferenceValues";
 import { parseIosUserDefaultsPlist } from "../../../src/features/preferences/IosUserDefaultsPlist";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { CtrlProxyServicePortChangedError } from "../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
@@ -123,6 +124,9 @@ class FakeContainerSimctl {
   readonly calls: Array<{ args: string[]; timeoutMs?: number }> = [];
   containerPath = container;
   containerError?: string;
+  /** Per-attempt `get_app_container` outcomes, consumed before containerError/containerPath. */
+  containerAttempts: Array<{ elapsedMs?: number; error?: string }> = [];
+  timer?: FakeTimer;
   writeError?: string;
   processList = "PID\tStatus\tLabel\n";
   processListError?: string;
@@ -143,6 +147,11 @@ class FakeContainerSimctl {
       return createExecResult(this.processList, "");
     }
     if (args[0] === "get_app_container") {
+      const attempt = this.containerAttempts.shift();
+      this.timer?.advanceTime(attempt?.elapsedMs ?? 0);
+      if (attempt?.error) {
+        throw new Error(attempt.error);
+      }
       if (this.containerError) {
         throw new Error(this.containerError);
       }
@@ -164,6 +173,7 @@ function harness(state: "open" | "closed" | "absent" = "open") {
   const simctl = new FakeContainerSimctl();
   const plist = new FakePlistReader();
   const timer = new FakeTimer();
+  simctl.timer = timer;
   const preferences = new AppPreferences(device, {
     iosKeyValueClientProvider: () => (state === "absent" ? null : sdk),
     simctl,
@@ -843,6 +853,11 @@ describe("iOS app UserDefaults resolution", () => {
       await expect(preferences.getPreference(input)).rejects.toThrow(
         "not installed on this simulator",
       );
+      await expect(preferences.setPreference({ ...input, type: "int", value: 42 })).rejects.toThrow(
+        "not installed on this simulator",
+      );
+      // A missing app is never retried (#14683).
+      expect(simctl.calls).toHaveLength(2);
     });
   }
   for (const message of [
@@ -867,10 +882,51 @@ describe("iOS app UserDefaults resolution", () => {
   test("container lookup timeout prevents writes and identifies a resolution failure", async () => {
     const { preferences, timer, simctl } = harness("absent");
     simctl.onCommand = () => timer.advanceTime(10000);
-    await expect(preferences.setPreference({ ...input, type: "int", value: 42 })).rejects.toThrow(
-      "Check simulator availability and retry",
+    const write = preferences.setPreference({ ...input, type: "int", value: 42 });
+    await expect(write).rejects.toThrow("Check simulator availability and retry");
+    await expect(write).rejects.toThrow(
+      "iOS get_app_container timed out after 10000ms (operation budget 30000ms).",
     );
-    expect(simctl.calls).toHaveLength(1);
+    await expect(write).rejects.toThrow("Nothing was written");
+    // Both bounded attempts ran within the 30s budget, and `defaults write` never did (#14683).
+    expect(timer.now()).toBe(20_000);
+    expect(simctl.calls.map((call) => call.args[0])).toEqual([
+      "get_app_container",
+      "get_app_container",
+    ]);
+  });
+  test("a container lookup that times out once is retried and the write goes through (#14683)", async () => {
+    const { preferences, timer, simctl, plist } = harness("absent");
+    simctl.containerAttempts = [{ elapsedMs: 10_000 }];
+    plist.setValue(42, "int");
+    expect(await preferences.setPreference({ ...input, type: "int", value: 42 })).toMatchObject({
+      verified: true,
+      storeRoute: "container-plist",
+    });
+    expect(simctl.calls.map((call) => [call.args[0], call.timeoutMs])).toEqual([
+      ["get_app_container", 10_000],
+      ["get_app_container", 10_000],
+      ["spawn", 10_000],
+    ]);
+    expect(timer.now()).toBe(10_000);
+  });
+  test("a read retries a container lookup after a transient CoreSimulator error (#14683)", async () => {
+    const { preferences, simctl, plist } = harness("absent");
+    simctl.containerAttempts = [{ error: "Failed to connect to CoreSimulator service" }];
+    plist.setValue("on", "string");
+    expect(await preferences.getPreference(input)).toMatchObject({ found: true, value: "on" });
+    expect(simctl.calls.map((call) => call.args[0])).toEqual([
+      "get_app_container",
+      "get_app_container",
+    ]);
+  });
+  test("a read's container lookup timeout names the command bound, with no operation budget", async () => {
+    const { preferences, timer, simctl } = harness("absent");
+    simctl.onCommand = () => timer.advanceTime(10000);
+    await expect(preferences.getPreference(input)).rejects.toThrow(
+      "iOS get_app_container timed out after 10000ms.",
+    );
+    expect(simctl.calls).toHaveLength(2);
   });
   test("missing plist/key warns; malformed XML/permissions surface", async () => {
     const { preferences, plist } = harness("absent");
@@ -1398,6 +1454,27 @@ describe("physical iOS UserDefaults through the SDK (#14093)", () => {
     sdk.writeError = "mutation_not_authorized";
     await expect(preferences.setPreference({ ...input, value: 1, type: "int" })).rejects.toThrow(
       IOS_STORAGE_MUTATION_AUTHORIZATION_HINT,
+    );
+  });
+});
+
+describe("iOS preference timeout messages name the bound that expired (#14683)", () => {
+  test("a command bound inside a larger operation budget", () => {
+    expect(iosPreferenceCommandTimeoutError("get_app_container", 10_000, 25_000)().message).toBe(
+      "iOS get_app_container timed out after 10000ms (operation budget 30000ms).",
+    );
+  });
+  test("an operation budget that runs out before the command bound", () => {
+    expect(iosPreferenceCommandTimeoutError("get_app_container", 10_000, 4_000)().message).toBe(
+      "iOS UserDefaults preference operation timed out after 30000ms.",
+    );
+  });
+  test("a command with no operation deadline, and an SDK call", () => {
+    expect(iosPreferenceCommandTimeoutError("get_app_container", 10_000, undefined)().message).toBe(
+      "iOS get_app_container timed out after 10000ms.",
+    );
+    expect(iosPreferenceCommandTimeoutError("UserDefaults request", 2_500, 25_000)().message).toBe(
+      "iOS UserDefaults request timed out after 2500ms.",
     );
   });
 });

@@ -64,7 +64,12 @@ describe("resolveSinceSeconds (#14082)", () => {
   test("an old anchor is capped at one hour", () => {
     const warnings: string[] = [];
     expect(
-      resolveSinceSeconds("sessionStart", "d", clock({ now: () => 10_000_000, sessionStartMs: () => 0 }), warnings),
+      resolveSinceSeconds(
+        "sessionStart",
+        "d",
+        clock({ now: () => 10_000_000, sessionStartMs: () => 0 }),
+        warnings,
+      ),
     ).toBe(3600);
     expect(warnings[0]).toContain("capped");
   });

@@ -1,12 +1,7 @@
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { AndroidLogReader } from "./AndroidLogReader";
-import {
-  compileGrep,
-  type LogcatBuffer,
-  type LogcatPriority,
-  type LogLine,
-} from "./logcatQuery";
+import { compileGrep, type LogcatBuffer, type LogcatPriority, type LogLine } from "./logcatQuery";
 
 /** Default and largest look-back windows, in seconds (the resource's one-hour cap). */
 export const GET_LOGS_DEFAULT_SECONDS = 300;
@@ -158,7 +153,12 @@ export class GetLogs {
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
     const warnings: string[] = [];
-    const sinceSeconds = resolveSinceSeconds(request.since, device.deviceId, this.deps.clock, warnings);
+    const sinceSeconds = resolveSinceSeconds(
+      request.since,
+      device.deviceId,
+      this.deps.clock,
+      warnings,
+    );
     const maxLines = Math.min(request.maxLines ?? GET_LOGS_DEFAULT_MAX_LINES, GET_LOGS_MAX_LINES);
     const minPriority = request.minPriority ?? "V";
     if (device.platform === "ios") {
@@ -198,7 +198,9 @@ export class GetLogs {
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
     if (!request.appId) {
-      throw new ActionableError("getLogs on iOS needs appId: the unified log is read per app subsystem.");
+      throw new ActionableError(
+        "getLogs on iOS needs appId: the unified log is read per app subsystem.",
+      );
     }
     const ignored = [
       ...(request.tags?.length ? ["tags"] : []),

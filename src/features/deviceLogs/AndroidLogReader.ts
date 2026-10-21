@@ -145,7 +145,10 @@ export class AndroidLogReader {
         ? `${appId} is not installed; no app lines can be attributed.`
         : `Android API ${apiLevel ?? "unknown"} has no logcat --uid; only processes of ${appId} running now are covered, so a crashed process's lines are missing.`,
     );
-    return { attribution: "pid", pids: uid === null ? new Set() : await this.runningPids(appId, signal) };
+    return {
+      attribution: "pid",
+      pids: uid === null ? new Set() : await this.runningPids(appId, signal),
+    };
   }
 
   /** ActivityManager/system_server lines that name the app: launches, deaths, ANRs. */
@@ -169,9 +172,7 @@ export function mergeByTimestamp(a: readonly LogLine[], b: readonly LogLine[]): 
     `${line.timestamp}|${line.pid}|${line.tid}|${line.tag}|${line.message}`;
   return [...a, ...b]
     .map((line, index) => ({ line, index }))
-    .sort(
-      (x, y) => x.line.timestamp.localeCompare(y.line.timestamp) || x.index - y.index,
-    )
+    .sort((x, y) => x.line.timestamp.localeCompare(y.line.timestamp) || x.index - y.index)
     .map((entry) => entry.line)
     .filter((line) => {
       const k = key(line);

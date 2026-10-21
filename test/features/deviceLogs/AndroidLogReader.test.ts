@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AndroidLogReader, mergeByTimestamp } from "../../../src/features/deviceLogs/AndroidLogReader";
+import {
+  AndroidLogReader,
+  mergeByTimestamp,
+} from "../../../src/features/deviceLogs/AndroidLogReader";
 import { parseThreadtime } from "../../../src/features/deviceLogs/logcatQuery";
 import type { ExecResult } from "../../../src/models";
 
@@ -131,8 +134,12 @@ describe("AndroidLogReader (#14082)", () => {
 
 describe("mergeByTimestamp", () => {
   test("interleaves by timestamp and drops exact duplicates", () => {
-    const a = parseThreadtime("10-21 08:00:01.000  1  1 I A: one\n10-21 08:00:03.000  1  1 I A: three");
-    const b = parseThreadtime("10-21 08:00:02.000  2  2 I B: two\n10-21 08:00:03.000  1  1 I A: three");
+    const a = parseThreadtime(
+      "10-21 08:00:01.000  1  1 I A: one\n10-21 08:00:03.000  1  1 I A: three",
+    );
+    const b = parseThreadtime(
+      "10-21 08:00:02.000  2  2 I B: two\n10-21 08:00:03.000  1  1 I A: three",
+    );
     expect(mergeByTimestamp(a, b).map((line) => line.message)).toEqual(["one", "two", "three"]);
   });
 });

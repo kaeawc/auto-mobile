@@ -1,3 +1,7 @@
+import {
+  registerDirectSessionDevice,
+  unregisterDirectSession,
+} from "../../src/utils/directSessionDeviceRegistry";
 import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -45,10 +49,6 @@ import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLed
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import {
-  clearDirectSessionDevices,
-  registerDirectSessionDevice,
-} from "../../src/utils/directSessionDeviceRegistry";
 
 const writtenObservation = z.looseObject({
   viewHierarchy: z.looseObject({
@@ -92,7 +92,7 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   afterEach(() => {
-    clearDirectSessionDevices();
+    unregisterDirectSession("session-1");
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     restoreDefaultPipelineOverrides?.();
@@ -482,7 +482,6 @@ describe("ToolRegistry device-aware pipeline", () => {
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {
     const fakeDeviceReadiness = new FakeDeviceReadiness();
     fakeDeviceReadiness.setConnectedDevices([device]);
-    registerDirectSessionDevice("session-1", device);
     const log = new FakeLogger();
     const registry = new ToolRegistryClass(undefined, log);
 
@@ -506,6 +505,7 @@ describe("ToolRegistry device-aware pipeline", () => {
         async () => ({ success: true }),
       );
 
+      registerDirectSessionDevice("session-1", device);
       const tool = registry.getTool("bindFailureProbe")!;
       await expect(
         tool.handler({ platform: "android", sessionUuid: "session-1" }),

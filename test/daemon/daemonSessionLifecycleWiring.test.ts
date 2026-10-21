@@ -25,6 +25,7 @@ const REGISTRATIONS = [
 
 function hostWith(calls: string[]): DaemonSessionLifecycleHost {
   return {
+    deviceReadiness: () => ({ clearExplicitDevicePin: () => undefined }),
     deviceDataStreamServer: () => null,
     socketServer: () => null,
     managedExecutionReowner: () => undefined,

@@ -12,7 +12,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { DirectSessionNotActiveError } from "../models/DirectSessionNotActiveError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceReadiness, type DeviceReadyOptions } from "../daemon/readiness/DeviceReadiness";
+import type { DeviceReadyOptions } from "../daemon/readiness/DeviceReadiness";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
@@ -61,8 +61,7 @@ type ResumeCtrlProxy = (deviceId: string, platform: Platform) => Promise<void>;
 
 /** The legacy device selection the sessionless path readies and pins per connection. */
 export interface LegacyDeviceSelection {
-  getCurrentDevice(): BootedDevice | undefined;
-  getCurrentPlatform(): Platform | undefined;
+  getExplicitDevicePin(connectionId?: string): BootedDevice | undefined;
   ensureDeviceReady(
     platform: SomePlatform,
     providedDeviceId?: string,
@@ -80,7 +79,7 @@ interface SetActiveDeviceDependencies {
     invalidateDeviceList?: () => void;
   };
   resumeCtrlProxy: ResumeCtrlProxy;
-  /** Defaults to the process-wide DeviceReadiness. */
+  /** The process composition supplies readiness for legacy selection. */
   legacyDeviceSelection?: () => LegacyDeviceSelection;
 }
 
@@ -455,8 +454,8 @@ async function selectLegacyDevice(input: {
   transportAttempt: TransportAttempt;
 }): Promise<void> {
   const { args, resumeCtrlProxy, sessions, signal } = input;
-  const previousDevice = sessions.getCurrentDevice();
-  const previousPlatform = sessions.getCurrentPlatform();
+  const previousDevice = sessions.getExplicitDevicePin(args.__mcpSessionId);
+  const previousPlatform = previousDevice?.platform;
   // #5870: "either" lets deviceId disambiguate when platform is omitted.
   const readyDevice = await input.transportAttempt(() =>
     sessions.ensureDeviceReady(args.platform ?? "either", args.deviceId, {
@@ -501,7 +500,10 @@ function currentDisplayPinResult(
 /** Existing device selection with a session-only, side-effect-free display selection slot. */
 export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDependencies) {
   const legacyDeviceSelection =
-    dependencies.legacyDeviceSelection ?? (() => DeviceReadiness.getInstance());
+    dependencies.legacyDeviceSelection ??
+    (() => {
+      throw new ActionableError("Inject device readiness before selecting a legacy device.");
+    });
   return async (args: HandlerArgs, _progress?: unknown, signal?: AbortSignal) => {
     const mcpSessionId = args.__mcpSessionId;
     const transportAttempt = transitionalTransportAttempt(args, dependencies, signal);

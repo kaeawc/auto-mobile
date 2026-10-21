@@ -80,21 +80,6 @@ export function createDefaultDeviceClientProvider(
  * Handles device detection, verification, and lifecycle for Android and iOS platforms
  */
 export interface DeviceReadinessContract {
-  /**
-   * Get the current device ID
-   */
-  getCurrentDevice(): BootedDevice | undefined;
-
-  /**
-   * Get the current platform
-   */
-  getCurrentPlatform(): Platform | undefined;
-
-  /**
-   * Set the current device ID and platform
-   */
-  setCurrentDevice(device: BootedDevice, platform: Platform): void;
-
   /** Explicit selection made by this connection's legacy setActiveDevice tool. */
   getExplicitDevicePin(connectionId?: string): BootedDevice | undefined;
   setExplicitDevicePin(device: BootedDevice, connectionId?: string): void;

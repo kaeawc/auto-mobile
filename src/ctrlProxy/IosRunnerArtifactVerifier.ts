@@ -5,7 +5,7 @@ import type { CtrlProxyIosBuildResult, IosCtrlProxyBuilderSettings } from "./Ios
 import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
+import { ENV, readEnvBool, readEnvRaw, readEnvTrimmed } from "../config/env";
 import {
   IOS_CTRL_PROXY_APP_HASH,
   findReleaseByRunnerSha256,
@@ -20,7 +20,7 @@ import type {
   Sha256Source,
 } from "../utils/IOSCtrlProxyBundleDownloader";
 import type { CodesignVerificationOutcome } from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
-import { SKIP_CTRL_PROXY_DOWNLOAD_ENV, isTruthyEnvValue } from "../utils/ctrlProxyDownloadControl";
+import { SKIP_CTRL_PROXY_DOWNLOAD_ENV } from "../utils/ctrlProxyDownloadControl";
 import { hashAppBundle } from "../utils/ios-cmdline-tools/AppBundleHasher";
 import { ensureSecureDir } from "../utils/filesystem/securePermissions";
 import { sortedReaddirEntries } from "../utils/io";
@@ -642,7 +642,7 @@ export class IosRunnerArtifactVerifier {
     if (this.hasExplicitRunnerShaOverride()) {
       return `${IOS_CTRL_PROXY_RUNNER_SHA256_ENV} pins a source-built runner`;
     }
-    if (isTruthyEnvValue(readEnvRaw(ENV.SKIP_CTRL_PROXY_DOWNLOAD))) {
+    if (readEnvBool(ENV.SKIP_CTRL_PROXY_DOWNLOAD)) {
       return `${SKIP_CTRL_PROXY_DOWNLOAD_ENV} disables downloads`;
     }
     return null;
@@ -689,7 +689,7 @@ export class IosRunnerArtifactVerifier {
       return;
     }
 
-    const requireCodesign = isTruthyEnvValue(readEnvRaw(ENV.IOS_HELPER_REQUIRE_CODESIGN));
+    const requireCodesign = readEnvBool(ENV.IOS_HELPER_REQUIRE_CODESIGN);
     const pinnedTeamId = readEnvTrimmed(ENV.IOS_HELPER_TEAM_ID) ?? null;
 
     let outcome: CodesignVerificationOutcome;

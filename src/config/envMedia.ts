@@ -346,9 +346,9 @@ export const MEDIA_ENV = {
   },
   DEBUG_PERF: {
     name: "AUTOMOBILE_DEBUG_PERF",
-    kind: "string",
+    kind: "bool",
     default: "off",
-    doc: "Enable UI performance debug tracking; exact 1 enables.",
+    doc: "Enable UI performance debug tracking (1/true).",
   },
   VIDEO_QUALITY_PRESET: {
     name: "AUTOMOBILE_VIDEO_QUALITY_PRESET",

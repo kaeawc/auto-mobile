@@ -33,7 +33,7 @@ import {
   RUNNER_READINESS_TIMEOUT_FLAG,
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
-import { ENV, isRetiredToolsetVariable, readEnvRaw } from "../config/env";
+import { ENV, isRetiredToolsetVariable, readEnvBool, readEnvRaw } from "../config/env";
 
 export type { ParseLogger } from "./numericValidators";
 
@@ -132,8 +132,8 @@ export function parseArgs(
   const noDaemon = hasFlag("no-daemon");
   const { daemonRequested, daemonCommand, daemonArgs } = parseDaemonCommand(args);
   const debugPerf =
-    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || readEnvRaw(ENV.DEBUG_PERF) === "1";
-  const debug = hasFlag("debug") || readEnvRaw(ENV.DEBUG) === "1";
+    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || readEnvBool(ENV.DEBUG_PERF);
+  const debug = hasFlag("debug") || readEnvBool(ENV.DEBUG);
   const strictPort = hasFlag("strict-port");
   const uiPerfMode = !hasFlag("no-ui-perf-mode");
   const memPerfAuditMode = hasFlag("mem-perf-audit");

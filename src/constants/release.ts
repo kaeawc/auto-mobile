@@ -26,7 +26,7 @@
  */
 
 import { ActionableError } from "../models/ActionableError";
-import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
+import { ENV, readEnvBool, readEnvTrimmed } from "../config/env";
 
 export const LATEST_RELEASE_VERSION = "latest";
 
@@ -793,8 +793,7 @@ type EnvLike = Record<string, string | undefined>;
 
 /** True when the plaintext-http opt-out ({@link AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}) is set. */
 function isInsecureAssetUrlAllowed(env: EnvLike): boolean {
-  const value = readEnvRaw(ENV.ALLOW_INSECURE_ASSET_URL, env);
-  return value === "1" || value?.toLowerCase() === "true";
+  return readEnvBool(ENV.ALLOW_INSECURE_ASSET_URL, env);
 }
 
 /**

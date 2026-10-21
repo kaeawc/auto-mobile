@@ -309,7 +309,7 @@ export const DAEMON_ENV = {
   DAEMON_DISABLE_HANDSHAKE: {
     name: "AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE",
     legacyName: "AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE",
-    kind: "string",
+    kind: "bool",
     default: "off",
     doc: "Disable the client handshake check (1/true).",
   },
@@ -444,9 +444,9 @@ export const DAEMON_ENV = {
   },
   ALWAYS_LOAD_TOOLS: {
     name: "AUTOMOBILE_ALWAYS_LOAD_TOOLS",
-    kind: "string",
+    kind: "bool",
     default: "off",
-    doc: "Register optional tool definitions eagerly; exact true enables.",
+    doc: "Register optional tool definitions eagerly (1/true).",
   },
   DAEMON_STREAM_AUTH: {
     name: "AUTOMOBILE_DAEMON_STREAM_AUTH",
@@ -462,8 +462,8 @@ export const DAEMON_ENV = {
   },
   DEBUG: {
     name: "AUTOMOBILE_DEBUG",
-    kind: "string",
+    kind: "bool",
     default: "off",
-    doc: "Enable CLI debug logging; exact 1 enables.",
+    doc: "Enable CLI debug logging (1/true).",
   },
 } as const satisfies Record<string, EnvVarSpec>;

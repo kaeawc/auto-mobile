@@ -1452,6 +1452,14 @@ probably acted as a tap and opened the row under it instead of scrolling, and
 `warning` says so; `navigated: false` means the screen is the same. The field is
 absent when the two observations carry no comparable screen identity.
 
+On Android, `{"action":"setProfile","profile":"gboard"}` switches the AutoMobile IME's
+typing behaviour profile (`direct`, `gboard`, `samsung`; `listProfiles` returns the
+catalog). CtrlProxy keeps the profile until it is changed again, so in a daemon session
+(`sessionUuid`) AutoMobile records the profile that was active before the first change and
+puts it back when the session is released or rebound; the device's next session starts on
+that profile. A sessionless change persists until it is changed again or a `persona` `reset`
+restores it.
+
 On Android, `keyboard` can list installed input methods with
 `{"action":"listImes"}` and select an enabled component with
 `{"action":"setIme","imeId":"…"}`. To exercise one visible key in an installed
@@ -2869,13 +2877,14 @@ persona({ action: "reset" });
   the capabilities and changes nothing.
 - `reset` restores every recorded display facet, the kill facet of every package a persona
   applied to that still has a change recorded (plus `appId`), then the keyboard profile active
-  before the first persona. The display and kill records are shared with `displayProfile` and
-  `killProfile`, so reset also restores direct `displayProfile` changes and the device-wide
-  battery and Doze state. A facet the device refuses stays recorded and the reset is an error.
-- In a daemon session (`sessionUuid`), release or rebind restores the kill and display facets,
-  as with `killProfile` and `displayProfile`. The keyboard profile is restored only by `reset`,
-  as with `keyboard` `setProfile`, so it stays active for the device's next session until then. The record is in memory only. The shared `platform` and
-  `keepScreenAwake` device options apply as for other tools.
+  before the first change. The display, kill and keyboard records are shared with
+  `displayProfile`, `killProfile` and `keyboard` `setProfile`, so reset also restores direct
+  `displayProfile` and `setProfile` changes and the device-wide battery and Doze state. A facet
+  the device refuses stays recorded and the reset is an error.
+- In a daemon session (`sessionUuid`), release or rebind restores the keyboard, kill and display
+  facets, as with `keyboard` `setProfile`, `killProfile` and `displayProfile`; a facet release
+  already restored is not written again by a later `reset`. The records are in memory only. The
+  shared `platform` and `keepScreenAwake` device options apply as for other tools.
 
 ### Localization, display, and event options
 

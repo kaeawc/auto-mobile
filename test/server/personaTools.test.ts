@@ -163,7 +163,7 @@ describe("persona tool (#14055)", () => {
     expect(executors.calls.map((call) => `${call.facet}:${call.action}`)).toEqual([
       "display:reset",
       "kill:reset",
-      "keyboard:set",
+      "keyboard:reset",
     ]);
   });
 });

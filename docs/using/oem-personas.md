@@ -55,11 +55,11 @@ Facets follow the ICSME 2024 taxonomy of OEM compatibility issues
   first resets the recorded one, so its facets do not linger; the result names it as
   `replaced`.
 - `reset` restores the display facets, the kill facet of every package a persona changed, and
-  the keyboard profile that was active before the first persona. The display and kill records
-  are shared with `displayProfile` and `killProfile`, so reset also undoes their direct changes
-  on the device.
-- In a daemon session, release or rebind restores the kill and display facets. The keyboard
-  profile stays until `reset`, including for the device's next session.
+  the keyboard profile that was active before the first change. The display, kill and keyboard
+  records are shared with `displayProfile`, `killProfile` and `keyboard` `setProfile`, so reset
+  also undoes their direct changes on the device.
+- In a daemon session, release or rebind restores the keyboard, kill and display facets, so the
+  device's next session does not inherit them.
 
 ## What cannot be emulated
 

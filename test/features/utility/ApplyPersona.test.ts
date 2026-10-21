@@ -104,7 +104,7 @@ describe("applyPersona / resetPersona (#14055)", () => {
     );
     expect(result.status).toBe("applied");
     expect(executors.calls).toEqual([
-      { facet: "keyboard", action: "set", profile: "samsung" },
+      { facet: "keyboard", action: "set", profile: "samsung", owner: "session-1" },
       {
         facet: "kill",
         action: "apply",
@@ -234,7 +234,7 @@ describe("applyPersona / resetPersona (#14055)", () => {
       { facet: "display", action: "reset", owner: "session-1" },
       { facet: "kill", action: "reset", appId: APP, owner: "session-1" },
       { facet: "kill", action: "reset", appId: "com.other", owner: "session-1" },
-      { facet: "keyboard", action: "set", profile: "direct" },
+      { facet: "keyboard", action: "reset", profile: "direct" },
     ]);
     expect(registry.get(emulator.deviceId)).toBeUndefined();
   });
@@ -249,14 +249,15 @@ describe("applyPersona / resetPersona (#14055)", () => {
     expect(executors.calls).toEqual([
       { facet: "display", action: "reset", owner: undefined },
       { facet: "kill", action: "reset", appId: APP, owner: undefined },
-      { facet: "keyboard", action: "set", profile: "direct" },
+      { facet: "keyboard", action: "reset", profile: "direct" },
       { facet: "keyboard", action: "set", profile: "gboard" },
     ]);
     expect(registry.get(emulator.deviceId)).toEqual({
       personaId: "pixel-baseline",
-      keyboardProfileBefore: "direct",
+      keyboard: true,
       killAppIds: [],
     });
+    expect(executors.keyboardBefore).toBe("direct");
   });
 
   test("re-applying the same persona does not reset it", async () => {
@@ -275,8 +276,8 @@ describe("applyPersona / resetPersona (#14055)", () => {
   test("cancellation during apply ends the call instead of failing the remaining facets", async () => {
     const controller = new AbortController();
     const keyboardSet = executors.keyboard.set;
-    executors.keyboard.set = async (profile, signal) => {
-      const result = await keyboardSet(profile, signal);
+    executors.keyboard.set = async (profile, owner, signal) => {
+      const result = await keyboardSet(profile, owner, signal);
       controller.abort();
       return result;
     };
@@ -299,9 +300,44 @@ describe("applyPersona / resetPersona (#14055)", () => {
     await resetPersona(emulator, {}, { executors, registry });
     expect(executors.calls.map((call) => `${call.facet}:${call.action}`)).toEqual([
       "display:reset",
-      "keyboard:set",
+      "keyboard:reset",
     ]);
     expect(registry.get(emulator.deviceId)).toBeUndefined();
+  });
+
+  test("a keyboard profile session release already restored is forgotten, not written again", async () => {
+    await applyPersona(emulator, "pixel-baseline", {}, { executors, registry, owner: "s-1" });
+    // Session release restored the keyboard record on its own.
+    executors.keyboardBefore = undefined;
+    executors.calls.length = 0;
+    const result = await resetPersona(emulator, {}, { executors, registry });
+    expect(executors.calls).toEqual([{ facet: "display", action: "reset", owner: undefined }]);
+    expect(result.facets.map((facet) => facet.facet)).toEqual(["display"]);
+    expect(registry.get(emulator.deviceId)).toBeUndefined();
+  });
+
+  test("reset restores a keyboard profile a direct setProfile changed, as the record is shared", async () => {
+    executors.keyboardBefore = "direct";
+    await resetPersona(emulator, {}, { executors, registry });
+    expect(executors.calls.at(-1)).toEqual({
+      facet: "keyboard",
+      action: "reset",
+      profile: "direct",
+    });
+    expect(executors.keyboardBefore).toBeUndefined();
+  });
+
+  test("a keyboard profile the device refuses on reset keeps the persona recorded", async () => {
+    await applyPersona(emulator, "pixel-baseline", {}, { executors, registry });
+    executors.keyboardError = new Error("ctrl proxy gone");
+    await expect(resetPersona(emulator, {}, { executors, registry })).rejects.toThrow(
+      "ctrl proxy gone",
+    );
+    expect(registry.get(emulator.deviceId)).toMatchObject({
+      personaId: "pixel-baseline",
+      keyboard: true,
+    });
+    expect(executors.keyboardBefore).toBe("gboard");
   });
 
   test("a second reset restores nothing it already restored", async () => {
@@ -327,6 +363,7 @@ describe("applyPersona / resetPersona (#14055)", () => {
       "appops refused",
     );
     expect(registry.get(emulator.deviceId)?.killAppIds).toEqual([APP]);
-    expect(registry.get(emulator.deviceId)?.keyboardProfileBefore).toBeUndefined();
+    expect(registry.get(emulator.deviceId)?.keyboard).toBe(false);
+    expect(executors.keyboardBefore).toBeUndefined();
   });
 });

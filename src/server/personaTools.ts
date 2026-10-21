@@ -4,7 +4,7 @@ import { defineDeviceTool, type DeviceToolHandler } from "./defineTool";
 import { personaResultSchema } from "./personaToolOutputSchemas";
 import { runSessionPersonaMutation, type SessionPersonaHost } from "./sessionPersona";
 import { changedSettings, type DisplayProfileToolDependencies } from "./displayProfileTools";
-import { setKeyboardProfileForTool } from "./interactionToolHandlers";
+import { resetKeyboardProfileForTool, setKeyboardProfileForTool } from "./interactionToolHandlers";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { ActionableError } from "../models/ActionableError";
@@ -38,6 +38,7 @@ import { applyDisplayProfile, resetDisplayProfile } from "../features/utility/Di
 import { defaultDisplayProfileRestoreRegistry } from "../features/utility/DisplayProfileRestore";
 import { defaultDisplayProfilePortsFactory } from "../features/utility/DisplayProfilePorts";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
+import { defaultKeyboardProfileRestoreRegistry } from "../features/utility/KeyboardProfileRestore";
 
 const personaInput = z.object({
   action: z
@@ -103,12 +104,14 @@ export const defaultPersonaExecutors = (
   });
   return {
     keyboard: {
-      set: (profile, setSignal) => {
+      set: (profile, owner, setSignal) => {
         if (!isKeyboardProfileId(profile)) {
           throw new ActionableError(`Unknown keyboard profile '${profile}'.`);
         }
-        return setKeyboardProfileForTool(device, profile, undefined, setSignal);
+        return setKeyboardProfileForTool(device, profile, undefined, setSignal, { owner });
       },
+      pending: () => defaultKeyboardProfileRestoreRegistry.pending(device.deviceId),
+      reset: (resetSignal) => resetKeyboardProfileForTool(device, undefined, resetSignal),
     },
     kill: {
       apply: (appId, profile, owner) => applyKillProfile(device, appId, profile, killDeps(owner)),
@@ -199,8 +202,8 @@ const personaTool = defineDeviceTool({
     "describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | " +
     "experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those " +
     "returns route_to_real_device and changes nothing. applying a different persona resets the recorded one first; reset restores the display, kill " +
-    "and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). " +
-    "The keyboard profile persists until reset, even across sessions. Simulates effects, " +
+    "and keyboard changes (display, keyboard and device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile). " +
+    "In a daemon session, release or rebind restores all three. Simulates effects, " +
     "not firmware.",
   input: personaInput,
   options: {

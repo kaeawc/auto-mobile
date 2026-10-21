@@ -9,7 +9,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 internal object PrototypeRepeatKeyBindings {
-  val checkedKeyFields = listOf("key", "stateKey", "statusKey", "activeKey", "hourKey", "minuteKey")
+  val checkedKeyFields =
+    listOf("key", "stateKey", "statusKey", "activeKey", "hourKey", "minuteKey", "atEndKey")
 
   /** The state-key values the validator type-checks: node keys and an action's `key`. */
   fun checkedKeys(value: JsonObject): List<String> {

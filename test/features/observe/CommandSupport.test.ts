@@ -160,6 +160,7 @@ describe("CtrlProxy command support", () => {
         "ime_inserted_text_v1",
         "ime_commit_trace_v1",
         "multi_finger_gesture_v1",
+        "semantic_node_actions_v1",
         "put_prototype_asset",
         "remove_prototype_asset",
       ]),

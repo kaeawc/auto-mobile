@@ -21,13 +21,13 @@ import { lifecycleRequester } from "../lifecycleRequester";
 import { captureAutolockPolicy } from "../../../daemon/deviceAutolockPolicy";
 import { type SystemUiAnrRecoveryResult, rebootAndroidAfterSystemUiAnr } from "./systemUiRecovery";
 import { type StartDeviceArgs } from "./contracts";
-import { validateBootIdentity, validatePooledDeviceMapping } from "./bootIdentity";
+import { validateBootIdentity, validatePooledDeviceMapping } from "../boot/bootIdentity";
 import {
   clearColdBootShutdownMarker,
   liveHolderOtherThanThisRequest,
   shouldClearIntentionalShutdownAfterFailure,
   stopUnownedColdBoot,
-} from "./bootSettlement";
+} from "../boot/bootSettlement";
 import { type DeviceToolsDependencies, getDeviceToolsDependencies } from "./dependencies";
 import { DEVICE_SHUTDOWN_TIMEOUT_MS, runWithinShutdownDeadline } from "./deadlines";
 import { waitForDeviceShutdown } from "../teardown/shutdownDiscovery";

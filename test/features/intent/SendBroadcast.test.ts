@@ -16,12 +16,17 @@ const exec = (stdout: string, stderr = ""): ExecResult => ({
   includes: (value: string) => stdout.includes(value),
 });
 
+/** Answers the installed-package listing itself; `respond` handles the broadcast and receiver query. */
 class RecordingAdb {
   calls: string[][] = [];
-  constructor(private readonly respond: () => Promise<ExecResult>) {}
+  constructor(
+    private readonly respond: (command: string) => Promise<ExecResult>,
+    private readonly packages = `package:android\npackage:${APP}\n`,
+  ) {}
   async execute(args: string[]): Promise<ExecResult> {
     this.calls.push(args);
-    return this.respond();
+    const command = args[1] ?? "";
+    return command.startsWith("pm list packages") ? exec(this.packages) : this.respond(command);
   }
 }
 
@@ -75,7 +80,7 @@ describe("SendBroadcast", () => {
   test("runs the command as one shell argument and parses stdout", async () => {
     const adb = new RecordingAdb(async () => exec("Broadcast completed: result=0"));
     const result = await new SendBroadcast(adb).send({ appId: APP, intent: { action: "A" } });
-    expect(adb.calls).toEqual([["shell", `am broadcast -a 'A' -p '${APP}'`]]);
+    expect(adb.calls.at(-1)).toEqual(["shell", `am broadcast -a 'A' -p '${APP}'`]);
     expect(result).toMatchObject({ delivered: true, resultCode: 0 });
   });
 
@@ -101,5 +106,58 @@ describe("SendBroadcast", () => {
     await expect(
       new SendBroadcast(adb).send({ appId: APP, intent: { action: "A" } }, controller.signal),
     ).rejects.toThrow("aborted");
+  });
+
+  test("an uninstalled package is not delivered, and nothing is sent (#14740)", async () => {
+    const adb = new RecordingAdb(
+      async () => exec("Broadcast completed: result=0"),
+      "package:android\n",
+    );
+    const result = await new SendBroadcast(adb).send({
+      appId: "com.not.installed",
+      intent: { action: "x" },
+    });
+    expect(result).toMatchObject({ delivered: false, errorCode: "package_not_installed" });
+    expect(adb.calls.some((call) => call[1]?.startsWith("am broadcast"))).toBe(false);
+  });
+
+  test("an explicit component with no matching receiver is not delivered (#14740)", async () => {
+    const adb = new RecordingAdb(async (command) =>
+      exec(
+        command.startsWith("cmd package query-receivers") ? "" : "Broadcast completed: result=0",
+      ),
+    );
+    const result = await new SendBroadcast(adb).send({
+      appId: APP,
+      intent: { action: "x", component: ".DoesNotExist" },
+    });
+    expect(result).toMatchObject({ delivered: false, errorCode: "no_matching_receiver" });
+    expect(adb.calls.map((call) => call[1])).toContain(
+      `cmd package query-receivers --components -a 'x' -n '${APP}/.DoesNotExist'`,
+    );
+    expect(adb.calls.some((call) => call[1]?.startsWith("am broadcast"))).toBe(false);
+  });
+
+  test("a component that resolves is broadcast; a failing precheck fails open (#14740)", async () => {
+    const resolves = new RecordingAdb(async (command) =>
+      exec(
+        command.startsWith("cmd package query-receivers")
+          ? `${APP}/${APP}.NetworkControlContractProbeReceiver\n`
+          : "Broadcast completed: result=0",
+      ),
+    );
+    const intent = { action: "x", component: ".NetworkControlContractProbeReceiver" };
+    expect(await new SendBroadcast(resolves).send({ appId: APP, intent })).toMatchObject({
+      delivered: true,
+    });
+    const broken = new RecordingAdb(async (command) => {
+      if (command.startsWith("cmd package")) {
+        throw new Error("cmd: not found");
+      }
+      return exec("Broadcast completed: result=0");
+    });
+    expect(await new SendBroadcast(broken).send({ appId: APP, intent })).toMatchObject({
+      delivered: true,
+    });
   });
 });

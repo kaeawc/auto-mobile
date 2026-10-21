@@ -110,6 +110,13 @@ export interface InputTextTestHooks {
   ) => ReturnType<typeof executeIosTextInput>;
 }
 
+function inputTextArgs(
+  options: InputTextOptions = {},
+  call: ActionCall = {},
+): InputTextOptions & { dismissKeyboard: boolean; signal?: AbortSignal } {
+  return { ...options, dismissKeyboard: options.dismissKeyboard ?? false, signal: call.signal };
+}
+
 export class InputText extends BaseVisualChange {
   private androidApiLevel: number | undefined;
   private targetFocuser: TextInputTargetFocuser;
@@ -143,11 +150,10 @@ export class InputText extends BaseVisualChange {
 
   async execute(
     text: string | null | undefined,
-    options: InputTextOptions = {},
-    call: ActionCall = {},
+    options?: InputTextOptions,
+    call?: ActionCall,
   ): Promise<SendTextResult & { method?: InputTextMode; retryable?: false }> {
-    const { imeAction, dismissKeyboard = false, mode, selector } = options;
-    const { signal } = call;
+    const { imeAction, dismissKeyboard, mode, selector, signal } = inputTextArgs(options, call);
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
 

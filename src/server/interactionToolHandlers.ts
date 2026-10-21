@@ -17,6 +17,7 @@ import type {
   WakeAndUnlockArgs,
 } from "./interactionToolTypes";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../features/observe/android";
+import { androidCtrlProxyClientFor } from "../features/observe/android/androidCtrlProxyClientFor";
 import {
   KEYBOARD_PROFILE_CATALOG_ID,
   KEYBOARD_PROFILE_CATALOG_VERSIONS,
@@ -99,7 +100,7 @@ async function writeKeyboardProfile(
   if (device.platform !== "android") {
     throw new ActionableError("Keyboard profiles are Android-only; select an Android device.");
   }
-  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
+  const profileClient = client ?? androidCtrlProxyClientFor(device);
   const supported = await profileClient.supportsCommand("request_set_keyboard_profile");
   throwIfAborted(signal);
   if (!supported) {
@@ -181,7 +182,7 @@ export async function listKeyboardProfilesForTool(
       "AutoMobile keyboard profiles are Android-only; select an Android device.",
     );
   }
-  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
+  const profileClient = client ?? androidCtrlProxyClientFor(device);
   const command = "request_list_keyboard_profiles";
   const supported = await profileClient.supportsCommand(command);
   throwIfAborted(signal);

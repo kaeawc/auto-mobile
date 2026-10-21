@@ -1,6 +1,7 @@
 import type { BootedDevice } from "../../models";
 import { withAndroidImeLock } from "../action/androidImeLock";
-import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../observe/android";
+import type { AndroidCtrlProxy } from "../observe/android";
+import { androidCtrlProxyClientFor } from "../observe/android/androidCtrlProxyClientFor";
 import { runOutsideRequestContext } from "../../utils/AbortContext";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -15,8 +16,8 @@ export type KeyboardProfileClient = Pick<AndroidCtrlProxy, "setKeyboardProfile">
 
 export type KeyboardProfileClientFactory = (device: BootedDevice) => KeyboardProfileClient;
 
-export const defaultKeyboardProfileClientFactory: KeyboardProfileClientFactory = (device) =>
-  AndroidCtrlProxyClient.getInstance(device);
+export const defaultKeyboardProfileClientFactory: KeyboardProfileClientFactory =
+  androidCtrlProxyClientFor;
 
 interface KeyboardProfileRestoreEntry {
   device: BootedDevice;

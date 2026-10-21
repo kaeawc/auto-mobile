@@ -30,6 +30,10 @@ class InputAllocatingClient(
   private val sessionUuidProvider: () -> String? = { null },
 ) : AutoMobileClient by AllocatingStorageClient(delegate, allocation, sessionUuidProvider) {
 
+  /** The session [callTool] names: this desktop session, else the one the delegate adds. */
+  override val actingSessionUuid: String?
+    get() = sessionUuidProvider()?.takeUnless { it.isBlank() } ?: delegate.actingSessionUuid
+
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
     val deviceId = (arguments["deviceId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
     // A tool call without a device id targets no particular device, so there is nothing to

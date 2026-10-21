@@ -2196,13 +2196,13 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                           activeDeviceId = activeDeviceId,
                           activeRecordings = activeRecordings,
                           releasedDeviceId = desktopSessionState.idleReleasedDeviceId,
+                          releaseReason = desktopSessionState.releaseReason,
                           options =
                             DeviceControlsClients(
                               appearanceClient = appearanceClient,
                               recordingActions = recordingActions,
                               recordingConfigClient = recordingConfigClient,
                               streamClient = webRtcStreamClient,
-                              sessionUuidProvider = desktopSessionState.sessionUuidProvider,
                             ),
                         )
                       "diagnostics" ->

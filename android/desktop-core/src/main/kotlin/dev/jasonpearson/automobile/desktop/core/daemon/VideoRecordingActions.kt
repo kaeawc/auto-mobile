@@ -44,9 +44,19 @@ data class VideoRecordingStopResult(
         .mapValues { (_, segments) -> segments.sortedBy { it.segmentIndex } }
 }
 
+/**
+ * Outcome of starting a recording: the new recordings and the daemon session the start named, which
+ * owns them. A later stop must name that same session, because the desktop rotates to a fresh one
+ * on release (#11366).
+ */
+data class VideoRecordingStartResult(
+  val recordings: List<VideoRecordingArtifact> = emptyList(),
+  val ownerSessionUuid: String? = null,
+)
+
 /** Start/stop verbs for device video recording, which live on the MCP tool path. */
 interface VideoRecordingActions {
-  fun startRecording(deviceId: String): List<VideoRecordingArtifact>
+  fun startRecording(deviceId: String): VideoRecordingStartResult
 
   /**
    * Stops [recordingId], or every active recording on [deviceId] when null.
@@ -67,14 +77,20 @@ class McpVideoRecordingActions(private val clientProvider: () -> AutoMobileClien
   VideoRecordingActions {
   private val client by lazy(clientProvider)
 
-  override fun startRecording(deviceId: String): List<VideoRecordingArtifact> =
-    call(
+  override fun startRecording(deviceId: String): VideoRecordingStartResult {
+    // Name the owner explicitly so the session the daemon records is the one returned, whatever
+    // the desktop session's registration reads by the time the start is sent (#11366).
+    val owner = client.actingSessionUuid
+    val response =
+      call(
         buildJsonObject {
           put("action", JsonPrimitive("start"))
           put("deviceId", JsonPrimitive(deviceId))
+          if (owner != null) put("sessionUuid", JsonPrimitive(owner))
         },
       )
-      .recordings
+    return VideoRecordingStartResult(response.recordings, owner)
+  }
 
   override fun stopRecording(
     deviceId: String,
@@ -142,10 +158,12 @@ class FakeVideoRecordingActions(
     active = null
   }
 
-  override fun startRecording(deviceId: String): List<VideoRecordingArtifact> {
+  override fun startRecording(deviceId: String): VideoRecordingStartResult {
     val recordingId = "rec-${deviceId}-1"
     active = recordingId
-    return listOf(VideoRecordingArtifact(recordingId, "/tmp/$recordingId.mp4", 0, recordingId))
+    return VideoRecordingStartResult(
+      listOf(VideoRecordingArtifact(recordingId, "/tmp/$recordingId.mp4", 0, recordingId)),
+    )
   }
 
   override fun stopRecording(

@@ -86,6 +86,10 @@ private constructor(
   val sessionUuid
     get() = options.sessionUuid
 
+  // callTool names this session on every call that does not name its own.
+  override val actingSessionUuid: String?
+    get() = sessionUuid
+
   internal val inputSessionUuidProvider
     get() = options.inputSessionUuidProvider
 

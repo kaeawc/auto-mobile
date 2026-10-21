@@ -70,11 +70,13 @@ class AllocatingDeviceActionsTest {
   fun `a recording start allocates the device before the tool call`() {
     client.callToolResult = toolResponse("""{"action":"start","count":0,"recordings":[]}""")
 
-    McpVideoRecordingActions(provider).startRecording("emulator-5554")
+    val started = McpVideoRecordingActions(provider).startRecording("emulator-5554")
 
     assertEquals(listOf("setToolEnabled", "videoRecording"), client.toolCalls.map { it.name })
     assertEquals(listOf("emulator-5554@1"), allocations)
     assertEquals(DESKTOP_SESSION, sessionOf(client.toolCalls[1]))
+    // The owner a later stop names is the session this start named (#11366).
+    assertEquals(DESKTOP_SESSION, started.ownerSessionUuid)
   }
 
   @Test

@@ -6,6 +6,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -110,6 +113,7 @@ internal abstract class DesktopDaemonSessionCompositionFixture(
 
   protected companion object {
     const val HEARTBEAT_MS = 2_000L
+    const val ASYNC_TIMEOUT_S = 5L
   }
 }
 
@@ -720,6 +724,8 @@ internal class DesktopDaemonSessionOwnershipTest : DesktopDaemonSessionCompositi
         transport.sessionsFor("daemon/heartbeat").count { it == "session-1" },
       )
       assertEquals(3, transport.sessionsFor("daemon/heartbeat").count { it == "session-2" })
+      // Nothing was recorded, so leaving the device is not shown as a release.
+      assertEquals(null, host.state().idleReleasedDeviceId)
     }
 
   @Test
@@ -889,6 +895,82 @@ internal class DesktopDaemonSessionOwnershipTest : DesktopDaemonSessionCompositi
     assertEquals(0, transport.count("daemon/releaseSession"))
     assertEquals("emulator-5554", host.state().boundDeviceId)
     assertEquals(null, host.state().idleReleasedDeviceId)
+  }
+
+  @Test
+  fun `switching away from the recorded device releases it as a device switch (#11366)`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport()
+      val host = start(transport, listOf(pixel))
+      assertTrue(input(host, pixel.deviceId))
+      repeat(2) { tick() }
+      host.recordings.begin(TrackedRecording(pixel.deviceId, "rec-1", "session-1"))
+
+      host.panes.value = listOf(pixelFold)
+      settle()
+      repeat(2) { tick() }
+
+      assertEquals(listOf<String?>("session-1"), transport.sessionsFor("daemon/releaseSession"))
+      assertEquals("emulator-5554", host.state().idleReleasedDeviceId)
+      assertEquals(SessionReleaseReason.DEVICE_SWITCH, host.state().releaseReason)
+    }
+
+  @Test
+  fun `a recording started while unregistered stops under its owner after a rotation (#11366)`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport()
+      val host = start(transport, listOf(pixel, pixelFold))
+      tick()
+      // An observer that misses a heartbeat is unregistered until its loop re-registers.
+      transport.unavailable += "daemon/registerSession"
+      transport.failNext("daemon/heartbeat")
+      tick()
+      assertEquals(null, host.state().sessionUuidProvider())
+
+      val ownerRead = CountDownLatch(1)
+      transport.onSend = { key -> if (key == "tools/call:setToolEnabled") ownerRead.countDown() }
+      val actions = host.recordingActions()
+      val gate = host.state().requestInput(pixel.deviceId)
+      val started = CompletableFuture.supplyAsync { actions.startRecording(pixel.deviceId) }
+      // The start read its owner before it allocates, while the session is still unregistered.
+      assertTrue(ownerRead.await(ASYNC_TIMEOUT_S, TimeUnit.SECONDS))
+      settle()
+      assertTrue(runBlocking { gate.await() })
+      val recording = started.get(ASYNC_TIMEOUT_S, TimeUnit.SECONDS)
+      assertEquals("session-1", recording.ownerSessionUuid)
+      assertEquals(mapOf("rec-1" to "session-1"), transport.recordingOwners)
+      transport.unavailable -= "daemon/registerSession"
+
+      // Switching devices rotates to a fresh session, whose client would name itself on a stop.
+      host.panes.value = listOf(pixelFold)
+      settle()
+      repeat(2) { tick() }
+      assertEquals("session-2", host.state().sessionUuidProvider())
+
+      val stopped =
+        host
+          .recordingActions()
+          .stopRecording(
+            pixel.deviceId,
+            recording.recordings.single().recordingId,
+            recording.ownerSessionUuid,
+          )
+
+      assertEquals(listOf("session-1"), transport.recordingStopSessions)
+      assertEquals("rec-1", stopped.recordings.single().recordingId)
+    }
+
+  /** The device-acting recording actions the IDE builds over the current session (#10831). */
+  private fun Host.recordingActions(): VideoRecordingActions {
+    val current = state()
+    val session = requireNotNull(current.session)
+    val provider =
+      allocatingClientProvider(
+        { session.client },
+        allocation = { current.inputAllocation },
+        sessionUuidProvider = session.sessionUuidProvider,
+      )
+    return McpVideoRecordingActions(requireNotNull(provider))
   }
 
   @Test

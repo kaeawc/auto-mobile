@@ -1,8 +1,13 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * In-memory daemon that records `method` and the `setActiveDevice` device ids it receives and
@@ -50,6 +55,15 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
 
   /** Methods that fail like an unreachable daemon on every call until removed (#11072). */
   val unavailable: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+  /**
+   * The session each `videoRecording` start named, by the recording id it minted (#11366). Like the
+   * daemon, a stop by id finds the recording only when it names that same session.
+   */
+  val recordingOwners: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+
+  /** The `sessionUuid` each `videoRecording` stop carried, in order ("" for none). */
+  val recordingStopSessions: MutableList<String> = CopyOnWriteArrayList()
 
   /** Runs at the start of each request with its key, to model a slow call on the fake clock. */
   @Volatile var onSend: (String) -> Unit = {}
@@ -108,8 +122,57 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
     when (key) {
       "tools/call:setActiveDevice" -> bindResult(request, device)
       "daemon/registerSession" -> WireAnswers.registered.result.toString()
+      "tools/call:setToolEnabled" -> toolText(buildJsonObject { put("sessionUuid", "profile-1") })
+      "tools/call:videoRecording" -> videoRecordingResult(request)
       else -> "{}"
     }
+
+  private fun videoRecordingResult(request: DaemonRequest): String {
+    val arguments = request.params["arguments"]?.jsonObject
+    val session = arguments?.get("sessionUuid")?.jsonPrimitive?.content.orEmpty()
+    if (arguments?.get("action")?.jsonPrimitive?.content == "start") {
+      val recordingId = "rec-${recordingOwners.size + 1}"
+      recordingOwners[recordingId] = session
+      return toolText(recordingsPayload(recordingId))
+    }
+    recordingStopSessions += session
+    val recordingId = arguments?.get("recordingId")?.jsonPrimitive?.content
+    return if (recordingId != null && recordingOwners[recordingId] == session) {
+      toolText(recordingsPayload(recordingId))
+    } else {
+      // The daemon's answer to a stop by id that names another session.
+      val message =
+        "Failed to stop video recording $recordingId: No active recording found for id $recordingId"
+      toolText(buildJsonObject { put("message", message) }, isError = true)
+    }
+  }
+
+  private fun recordingsPayload(recordingId: String): JsonObject = buildJsonObject {
+    put("count", 1)
+    put(
+      "recordings",
+      JsonArray(
+        listOf(
+          buildJsonObject {
+            put("recordingId", recordingId)
+            put("filePath", "/tmp/$recordingId.mp4")
+          },
+        ),
+      ),
+    )
+  }
+
+  private fun toolText(payload: JsonObject, isError: Boolean = false): String {
+    val text = buildJsonObject {
+      put("type", "text")
+      put("text", payload.toString())
+    }
+    val response = buildJsonObject {
+      put("content", JsonArray(listOf(text)))
+      if (isError) put("isError", JsonPrimitive(true))
+    }
+    return response.toString()
+  }
 
   private fun bindResult(request: DaemonRequest, device: String?): String {
     val session =

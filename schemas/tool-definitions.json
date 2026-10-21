@@ -5251,7 +5251,7 @@
         },
         "attribution": {
           "type": "string",
-          "enum": ["uid", "pid", "subsystem", "none"]
+          "enum": ["uid", "pid", "subsystem", "process", "none"]
         },
         "warnings": {
           "type": "array",

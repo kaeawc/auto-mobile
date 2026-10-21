@@ -1,4 +1,6 @@
 import type { ZodType } from "zod/v4";
+import type { DeviceMutationRecording } from "./deviceMutationRecording";
+export type { DeviceMutationRecording };
 import type { McpToolCallResult } from "./toolCallDispatch";
 import type { DeviceReadOnlyArgShape } from "../daemon/deviceReadOnlyArgShapes";
 
@@ -308,6 +310,7 @@ export interface ToolRegistryPipelineOverrides {
   /** Booted-device listing for the read-only device path (#10830). */
   deviceReadAccess?: DeviceObservationAccess;
   auditRunner?: AuditRunner;
+  mutationRecording?: DeviceMutationRecording;
   afterToolCall?: AfterToolCallHandler;
   planLifecycleManager?: PlanLifecycleManager;
 }

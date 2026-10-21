@@ -1,6 +1,23 @@
-import { type DaemonOptions } from "../types";
+import { type DaemonOptions, type DaemonStatus } from "../types";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../../utils/outputReductionFlags";
-import { daemonReuseOptions } from "../daemonOptionScopes";
+import { daemonProcessOptions, daemonReuseOptions } from "../daemonOptionScopes";
+
+/** Recover a lost daemon without letting unspecified proxy options erase its startup policy. */
+export function restartOptionsForLostDaemon(
+  observed: Pick<DaemonStatus, "options" | "port">,
+  requested: DaemonOptions | undefined,
+): DaemonOptions {
+  const definedRequested: DaemonOptions = Object.fromEntries(
+    Object.entries(requested ?? {}).filter(([, value]) => value !== undefined),
+  );
+  return {
+    ...daemonProcessOptions(requested),
+    ...mergeDaemonOptions(
+      { ...observed.options, port: observed.options?.port ?? observed.port },
+      definedRequested,
+    ),
+  };
+}
 
 /**
  * The daemon startup options that change its observable MCP behavior and so must

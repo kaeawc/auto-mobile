@@ -463,7 +463,6 @@ test/daemon/sessionBroker/registry/registrySchemaCompatibility.test.ts
 test/daemon/sessionBroker/registry/registryUpgradeFromCapturedSchema.test.ts
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.test.ts
 test/daemon/sessionBroker/releaseReply.test.ts
-test/daemon/sessionBroker/service.test.ts
 test/daemon/sessionBroker/sqliteStore.test.ts
 test/daemon/sessionBroker/sqliteStoreBoundedReads.test.ts
 test/daemon/sessionBrokerCommands.test.ts

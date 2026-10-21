@@ -103,6 +103,24 @@ export class Rotate extends BaseVisualChange {
     return this.reader.getCurrentOrientation(signal);
   }
 
+  async getRestoreState(
+    signal?: AbortSignal,
+  ): Promise<RotationRestoreState | { orientation: string }> {
+    throwIfAborted(signal);
+    if (this.device.platform === "ios") {
+      throw new ActionableError("iOS rotation restore state is unobservable");
+    }
+    const state: RotationRestoreState = { accelerometerRotation: null, userRotation: null };
+    await this.captureSessionRotationOriginals({
+      state,
+      captureAccelerometer: true,
+      captureUser: true,
+      signal,
+    });
+    await this.captureDeviceStateRotationLock(state, signal);
+    return state;
+  }
+
   /**
    * Check if orientation is locked
    * @returns Promise with boolean indicating if auto-rotation is disabled

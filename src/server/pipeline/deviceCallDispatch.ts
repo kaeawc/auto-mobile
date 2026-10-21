@@ -52,6 +52,23 @@ import type {
 import type { ExecutionTargetContext } from "./executionTarget";
 import type { AuditRunner } from "./audit";
 import type { NavigationToolCallRecorder } from "./navigationRecording";
+import type { DeviceMutationRecording } from "../deviceMutationRecording";
+
+export function journaledDeviceHandler(
+  name: string,
+  handler: DeviceAwareToolHandler,
+  recording: DeviceMutationRecording,
+): DeviceAwareToolHandler {
+  return async (device, args, progress, signal) => {
+    const sessionUuid =
+      typeof args.sessionUuid === "string"
+        ? args.sessionUuid
+        : getToolSelectionContext()?.routingSessionUuid;
+    await recording.beforeToolCall(name, args, device, sessionUuid, signal);
+    signal?.throwIfAborted();
+    return handler(device, args, progress, signal);
+  };
+}
 
 /**
  * Tell the tracker what kind of device call runs under `executionId`. A read is not use of the
@@ -567,6 +584,7 @@ export async function invokeResolvedDeviceHandler(input: {
   signal?: AbortSignal;
   auditRunner: AuditRunner;
   navigationRecorder: NavigationToolCallRecorder;
+  mutationRecording: DeviceMutationRecording;
   traits?: ToolTraits;
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
@@ -588,6 +606,14 @@ export async function invokeResolvedDeviceHandler(input: {
   try {
     // The dispatch boundary: a call cancelled since admission (for instance because another
     // session acquired its device, #10829) never reaches the device. `finally` withdraws it.
+    signal?.throwIfAborted();
+    await input.mutationRecording.beforeToolCall(
+      name,
+      args,
+      target.device,
+      target.sessionUuid,
+      signal,
+    );
     signal?.throwIfAborted();
     // The action reports when its gesture goes out, so a tool that waited for its target
     // is attributed from the dispatch, not from the start (#10196).

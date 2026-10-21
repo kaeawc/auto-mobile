@@ -51,6 +51,8 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../models";
+import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
+import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { writeDeviceCameraPoster } from "./DeviceCameraPoster";
 import { AdbEmulatorSensorConsole, readEmulatorSensors } from "./EmulatorSensors";
 import type { QrPosterWriter } from "../../utils/qr/QrPosterWriter";
@@ -213,7 +215,15 @@ export class DeviceState {
 
   async getState(
     include: readonly DeviceStateField[] = DEFAULT_DEVICE_STATE_FIELDS,
+    signal: AbortSignal | undefined = getAbortSignal(),
   ): Promise<DeviceStateResult> {
+    signal?.throwIfAborted();
+    return runWithAbortSignal(signal, () =>
+      awaitWhileRequestIsLive(this.readState(include), signal),
+    );
+  }
+
+  private async readState(include: readonly DeviceStateField[]): Promise<DeviceStateResult> {
     // An empty selection would otherwise read nothing and report success.
     if (include.length === 0) {
       return {
@@ -377,8 +387,13 @@ export class DeviceState {
     return this.location.writeLocation(input);
   }
 
-  getBiometricEnrollmentState(): Promise<BiometricEnrollmentState> {
-    return this.biometric.getBiometricEnrollmentState();
+  getBiometricEnrollmentState(
+    signal: AbortSignal | undefined = getAbortSignal(),
+  ): Promise<BiometricEnrollmentState> {
+    signal?.throwIfAborted();
+    return runWithAbortSignal(signal, () =>
+      awaitWhileRequestIsLive(this.biometric.getBiometricEnrollmentState(), signal),
+    );
   }
 
   setBiometricEnrollmentState(enrollment: BiometricEnrollment): Promise<BiometricEnrollmentState> {

@@ -20,7 +20,11 @@ export { DefaultDeviceSettingsAccess } from "./DefaultDeviceSettingsAccess";
 /** Reads and writes the settings on a device. */
 export interface DeviceSettingsAccess {
   /** Current values of `keys`; a key the device cannot report is omitted. */
-  read(device: BootedDevice, keys: readonly DeviceSettingKey[]): Promise<DeviceSettingValues>;
+  read(
+    device: BootedDevice,
+    keys: readonly DeviceSettingKey[],
+    signal?: AbortSignal,
+  ): Promise<DeviceSettingValues>;
   /** Writes `values`; returns the keys that were written successfully. */
   write(device: BootedDevice, values: DeviceSettingValues): Promise<DeviceSettingKey[]>;
 }

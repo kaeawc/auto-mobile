@@ -2,6 +2,7 @@ import { promises as nodeFs } from "node:fs";
 import path from "node:path";
 import { z } from "zod/v4";
 import { ActionableError } from "../../models/ActionableError";
+import { sortedReaddir } from "../../utils/io";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { VisualDeviceProfile } from "./VisualDeviceProfile";
 import { visualProfileKey } from "./VisualDeviceProfile";
@@ -53,7 +54,7 @@ export const nodeBaselineFs: BaselineFs = {
   mkdir: async (dirPath) => {
     await nodeFs.mkdir(dirPath, { recursive: true, mode: 0o700 });
   },
-  readdir: (dirPath) => nodeFs.readdir(dirPath),
+  readdir: (dirPath) => sortedReaddir(dirPath),
 };
 
 const baselineMetadataSchema = z.object({

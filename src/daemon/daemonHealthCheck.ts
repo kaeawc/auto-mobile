@@ -31,6 +31,8 @@ export interface DaemonHealthCheckDeps {
   observationStreamHealthy(): boolean;
   /** Retry only the optional stream bind; a held path must not restart healthy transports. */
   retryDegradedObservationStream(): Promise<void>;
+  /** Republish discovery after a degraded stream is restored; false means publication declined. */
+  onObservationStreamRestored(): Promise<boolean>;
   databaseHealthProbe(): { check(): Promise<void> };
   /** Receives the latest probe failure message, or undefined once a probe passes. */
   onDatabaseFailureChanged(message: string | undefined): void;
@@ -148,17 +150,33 @@ export function createDaemonHealthCheck(deps: DaemonHealthCheckDeps): SingleFlig
     return true;
   };
 
-  const retryDegradedObservation = async (): Promise<void> => {
-    if (isAuxiliarySocketUnavailable("observation-stream") && !deps.observationStreamHealthy()) {
-      try {
-        await deps.retryDegradedObservationStream();
-      } catch (error) {
-        // Optional stream retries must not hide DB health or disrupt healthy transports.
-        logger.warn(
-          `Observation stream bind retry failed; keeping daemon serving: ${errorMessage(error)}`,
-          error,
-        );
+  const republishRestoredObservation = async (): Promise<void> => {
+    try {
+      if (!(await deps.onObservationStreamRestored())) {
+        logger.warn("Observation stream restored but daemon identity republish was declined");
       }
+    } catch (error) {
+      // Discovery publication is best-effort; its failure must not restart healthy transports.
+      logger.warn("Observation stream restored but daemon identity republish failed", error);
+    }
+  };
+
+  const retryDegradedObservation = async (): Promise<void> => {
+    if (!isAuxiliarySocketUnavailable("observation-stream") || deps.observationStreamHealthy()) {
+      return;
+    }
+    try {
+      await deps.retryDegradedObservationStream();
+    } catch (error) {
+      // Optional stream retries must not hide DB health or disrupt healthy transports.
+      logger.warn(
+        `Observation stream bind retry failed; keeping daemon serving: ${errorMessage(error)}`,
+        error,
+      );
+      return;
+    }
+    if (!isAuxiliarySocketUnavailable("observation-stream") && deps.observationStreamHealthy()) {
+      await republishRestoredObservation();
     }
   };
 

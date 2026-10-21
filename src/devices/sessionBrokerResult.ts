@@ -16,11 +16,12 @@ export interface SessionBrokerFailure {
   code: string;
   message: string;
   retryable: boolean;
-  /** Suggested delay under a new request ID; durable `eviction_pending` receipts derive 1000 ms. */
+  /** Suggested delay; durable `eviction_pending` receipts derive 1000 ms and require a new request ID. */
   retryAfterMs?: number;
   /**
    * Set when a retry only succeeds under a fresh request ID: this request ID's terminal refusal
    * is stored and replays byte-identically, so resending it can never succeed.
+   * Retryable `eviction_pending` receipts set `retryRequires: "new_request_id"` too.
    */
   retryRequires?: "new_request_id";
 }

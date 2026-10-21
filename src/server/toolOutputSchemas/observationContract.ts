@@ -64,7 +64,7 @@ export const snapshotReferenceUnavailableSchema = z
   .array(z.string())
   .optional()
   .describe(
-    "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+    "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext, completeHierarchy); only present when a session observe could not produce a reference.",
   );
 
 const cropNativeBoundsSchema = boundsObjectSchema

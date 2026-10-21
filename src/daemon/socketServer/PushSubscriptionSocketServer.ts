@@ -362,9 +362,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
 
       try {
         const message = this.createPushMessage(data, subscriptionId);
-        const result = this.sendOutbound(
-          subscriber.socket,
-          message,
+        const result = this.sendOutbound(subscriber.socket, message, () =>
           frame.lineFor(subscriptionId, message),
         );
         if (!result) {
@@ -555,7 +553,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     return this.sendOutbound(socket, data);
   }
 
-  private sendOutbound(socket: Socket, data: unknown, line?: string): boolean {
+  private sendOutbound(socket: Socket, data: unknown, line?: string | (() => string)): boolean {
     if (socket.destroyed) {
       return false;
     }

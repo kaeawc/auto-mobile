@@ -81,6 +81,16 @@ final class VirtualDeadlineScheduler: DeadlineScheduler, Sendable {
         }
     }
 
+    /// The request deadline may register after the operation reaches receive. Wait for a live
+    /// sleeper rather than counting an already-cancelled connection deadline.
+    func waitForPendingSleep() async throws {
+        var count = registered.count
+        while pendingCount == 0 {
+            try await registered.wait(for: count + 1)
+            count = registered.count
+        }
+    }
+
     func advance(by seconds: TimeInterval) {
         let ready = state.withLock { current in
             current.now += seconds

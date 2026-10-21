@@ -1,6 +1,7 @@
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeScope } from "../prototype/PrototypeStatusStore";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { recordNetworkEvent, type RecordNetworkEventInput } from "../../db/networkEventRepository";
 import { NetworkState } from "../../utils/NetworkState";
 import { recordLogEvent, type RecordLogEventInput } from "../../db/logEventRepository";
@@ -407,6 +408,11 @@ export class TelemetryRecorder {
     });
   }
 
+  /**
+   * True only after a confirmed repository write. Buffered adds return false:
+   * the buffer has no per-row receipt and flush() also fulfills on batch loss.
+   * Callers using this for dedupe must conservatively retry buffered captures.
+   */
   async recordLayoutEvent(event: {
     timestamp: number;
     applicationId: string | null;
@@ -418,17 +424,25 @@ export class TelemetryRecorder {
     likelyCause: string | null;
     detailsJson: string | null;
     screenName?: string | null;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordLayoutEventInput = { deviceId, sessionId, ...event };
+    let persisted = false;
 
     if (this.buffer) {
       this.buffer.addLayout(input);
     } else {
       try {
-        await this.getBarrier().track(() => this.repository.recordLayoutEvent(input));
-      } catch (e) {
-        logger.error(`[TelemetryRecorder] Failed to record layout event: ${e}`);
+        persisted =
+          (await this.getBarrier().track(async () => {
+            await this.repository.recordLayoutEvent(input);
+            return true;
+          })) === true;
+      } catch (error) {
+        logger.warn(
+          `[TelemetryRecorder] Failed to record layout event: ${errorMessage(error)}`,
+          error,
+        );
       }
     }
 
@@ -439,6 +453,7 @@ export class TelemetryRecorder {
       sessionId,
       data: event,
     });
+    return persisted;
   }
 
   /**

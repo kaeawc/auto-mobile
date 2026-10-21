@@ -7,7 +7,11 @@ import {
   type ViewHierarchyNode,
 } from "../../models/ViewHierarchyResult";
 import { isSystemUiStatusBarId } from "../../utils/androidStatusBar";
-import { captureFidelityTruncationReasons } from "./truncationReasons";
+import { getRawViewHierarchy } from "../../utils/viewHierarchySearch";
+import {
+  captureFidelityTruncationReasons,
+  isHostOutputTruncationReason,
+} from "./truncationReasons";
 import type { ObserveResult } from "../../models/ObserveResult";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
@@ -55,9 +59,21 @@ function hasTruncatedTapLayout(observation: ObserveResult): boolean {
   );
 }
 
+function hasHostOutputTruncation(observation: ObserveResult): boolean {
+  return Boolean(
+    observation.truncationReasons?.some(isHostOutputTruncationReason) ||
+    observation.viewHierarchy?.truncationReasons?.some(isHostOutputTruncationReason) ||
+    observation.viewHierarchy?.windows?.some((window) =>
+      window.truncationReasons?.some(isHostOutputTruncationReason),
+    ),
+  );
+}
+
 function hasTruncatedSnapshotLayout(observation: ObserveResult): boolean {
   return (
     hasTruncatedTapLayout(observation) ||
+    (hasHostOutputTruncation(observation) &&
+      (!observation.viewHierarchy || !getRawViewHierarchy(observation.viewHierarchy))) ||
     Boolean(
       observation.viewHierarchy?.windows?.some(
         (window) =>
@@ -268,7 +284,8 @@ function snapshotBounds(bounds: unknown): unknown {
 }
 
 /**
- * Hash only structure, geometry and tap affordances, including wrapped iOS attributes.
+ * Hash structure, geometry, resource-id identity and tap affordances, including wrapped iOS attributes.
+ * Interaction state includes visibility, actions and scrollability alongside clickable/enabled.
  * Text, descriptions, values, selection/state and capture IDs cannot retarget a coordinate.
  * Delimit each subtree so changing parentage/order cannot alias an identical flat node list.
  */
@@ -296,6 +313,10 @@ function hashSnapshotTree(hash: Hash, value: unknown): void {
       snapshotBounds(nodeBounds(node)),
       attrs.clickable,
       attrs.enabled,
+      attrs["visible-to-user"],
+      attrs.scrollable,
+      attrs["resource-id"],
+      Array.isArray(attrs.actions) ? [...attrs.actions].sort() : attrs.actions,
     ]),
   );
   hashSnapshotTree(hash, node.node);
@@ -305,6 +326,10 @@ function hashSnapshotTree(hash: Hash, value: unknown): void {
 /** Constant-sized owned digests; no observation trees or mutable bounds are retained. */
 function snapshotLayout(observation: ObserveResult) {
   const hierarchy = observation.viewHierarchy!;
+  // Snapshot preconditions require the raw carrier whenever host output was capped.
+  const layoutHierarchy = hasHostOutputTruncation(observation)
+    ? getRawViewHierarchy(hierarchy)!
+    : hierarchy;
   const hash = createHash("sha256");
   hash.update(
     stableStringify([
@@ -320,11 +345,11 @@ function snapshotLayout(observation: ObserveResult) {
       hierarchy.insets,
     ]),
   );
-  hashSnapshotTree(hash, hierarchy.hierarchy);
+  hashSnapshotTree(hash, layoutHierarchy.hierarchy);
   let windows: string | undefined;
-  if (hierarchy.windows !== undefined) {
+  if (layoutHierarchy.windows !== undefined) {
     const windowHash = createHash("sha256");
-    for (const window of hierarchy.windows) {
+    for (const window of layoutHierarchy.windows) {
       windowHash.update(
         JSON.stringify([
           window.id,

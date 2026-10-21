@@ -63,7 +63,7 @@ class AgentDaemonInjectionTest {
       listOf("observe" to JsonObject(mapOf("deviceId" to JsonPrimitive("fake-device")))),
       daemon.calls,
     )
-    assertEquals(listOf(30_000L), daemon.toolTimeouts)
+    assertEquals(listOf(90_000L), daemon.toolTimeouts) // observe uses the 90 s daemon floor
     assertEquals(1, daemon.aliveChecks)
     assertFalse(agent.recoveryConfigProvider.isRecoveryEnabled())
     assertEquals(1, daemon.reads.size)

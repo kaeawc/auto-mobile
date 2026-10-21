@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { platform, tmpdir } from "node:os";
 import { win32 } from "node:path";
-import { getMcpServerVersion } from "../utils/mcpVersion";
+import {
+  getMcpServerVersion,
+  getSettledMcpServerVersion,
+  isMcpServerVersionSettled,
+} from "../utils/mcpVersion";
 import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
@@ -9,7 +13,7 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
 } from "./sessionLivenessWindows";
-import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
+import { AMBIENT_ENV, ENV, readEnvBool, readEnvRaw } from "../config/env";
 export const DAEMON_LAUNCH_NONCE_ENV = ENV.DAEMON_LAUNCH_NONCE.name;
 export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
@@ -712,18 +716,30 @@ export const DAEMON_RELINQUISH_DEVICE_LEASE_METHOD = "daemon/relinquishDeviceLea
  * mismatched client must be allowed through during an incident. Clients that
  * declare no handshake fields are always allowed regardless of this flag.
  */
-const handshakeDisableOverride = (readEnvRaw(ENV.DAEMON_DISABLE_HANDSHAKE) ?? "")
-  .trim()
-  .toLowerCase();
-export const DAEMON_HANDSHAKE_ENABLED = !(
-  handshakeDisableOverride === "1" ||
-  handshakeDisableOverride === "true" ||
-  handshakeDisableOverride === "yes"
-);
+export const DAEMON_HANDSHAKE_ENABLED = !readEnvBool(ENV.DAEMON_DISABLE_HANDSHAKE);
 
 /**
  * Package version (read from package.json)
  * Used for version compatibility checks and PID file metadata
  */
-// Capture the startup (pre-dirty) stamp so background refinement cannot change daemon identity.
-export const DAEMON_VERSION = getMcpServerVersion();
+// Live binding: identity boundaries settle this before publishing or comparing it.
+// Imports remain cheap, and existing synchronous metadata readers share the result.
+export let DAEMON_VERSION = getMcpServerVersion();
+
+export async function resolveDaemonVersion(): Promise<string> {
+  DAEMON_VERSION = await getSettledMcpServerVersion();
+  return DAEMON_VERSION;
+}
+
+/**
+ * Synchronous fast path for identity boundaries: when the version can no longer
+ * change, copy it into {@link DAEMON_VERSION} and return true so the caller skips
+ * `await resolveDaemonVersion()` and adds no microtask turns to a hot path.
+ */
+export function syncSettledDaemonVersion(): boolean {
+  if (!isMcpServerVersionSettled()) {
+    return false;
+  }
+  DAEMON_VERSION = getMcpServerVersion();
+  return true;
+}

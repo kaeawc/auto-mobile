@@ -15,6 +15,7 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { QuietTreeStability } from "./androidLauncherPackages";
+import { KNOWN_ANDROID_LAUNCHER_PACKAGES } from "./androidLauncherRegistry";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { shellQuote } from "../../utils/shellQuote";
 
@@ -71,17 +72,8 @@ export class Idle {
       return false;
     }
 
-    const systemPackages = [
-      "com.android.systemui",
-      "com.android.launcher",
-      "com.android.launcher3",
-      "com.google.android.apps.nexuslauncher",
-      "com.samsung.android.app.launcher",
-      "com.miui.home",
-      "com.oneplus.launcher",
-      "com.huawei.android.launcher",
-      "com.sec.android.app.launcher",
-    ];
+    // SystemUI plus every known launcher, from the shared registry (#14056).
+    const systemPackages = ["com.android.systemui", ...KNOWN_ANDROID_LAUNCHER_PACKAGES];
 
     // Match by prefix, not substring. Reverse containment
     // (`sysPackage.includes(packageName)`) misclassified short strings like "a"

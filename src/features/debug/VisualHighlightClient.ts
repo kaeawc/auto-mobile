@@ -1,4 +1,4 @@
-import { DeviceReadiness } from "../../daemon/readiness/DeviceReadiness";
+import type { DeviceReadiness } from "../../daemon/readiness/DeviceReadiness";
 import {
   ActionableError,
   BootedDevice,
@@ -20,11 +20,11 @@ type HighlightAdder = Pick<VisualHighlight, "addHighlight">;
 type HighlightDeviceReadiness = Pick<DeviceReadiness, "ensureDeviceReady">;
 
 export class VisualHighlightClient {
-  private readonly deviceReadiness: HighlightDeviceReadiness;
+  private readonly deviceReadiness: HighlightDeviceReadiness | undefined;
   private readonly visualHighlightFactory: (device: BootedDevice) => HighlightAdder;
 
   constructor(
-    deviceReadiness: HighlightDeviceReadiness = DeviceReadiness.getInstance(),
+    deviceReadiness?: HighlightDeviceReadiness,
     visualHighlightFactory: (device: BootedDevice) => HighlightAdder = (device) =>
       new VisualHighlight(device),
   ) {
@@ -58,6 +58,11 @@ export class VisualHighlightClient {
     if (options.platform !== "android" && options.platform !== "ios") {
       throw new ActionableError(
         `Visual highlights are not supported on ${options.platform} devices.`,
+      );
+    }
+    if (!this.deviceReadiness) {
+      throw new ActionableError(
+        "Supply a resolved device or inject device readiness for visual highlights.",
       );
     }
     const device = await this.deviceReadiness.ensureDeviceReady(options.platform, options.deviceId);

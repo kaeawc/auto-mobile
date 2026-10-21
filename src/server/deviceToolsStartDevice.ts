@@ -790,6 +790,15 @@ export function restartResumeSessionForDevice(
     : undefined;
 }
 
+/**
+ * Human label for how the device came up. `cold-boot` only means this call launched the
+ * emulator process: a snapshot-loaded (quickboot) launch takes the same path, so the text
+ * must not claim a cold boot. The structured `acquisition` field keeps its enum value.
+ */
+export function bootSourceLabel(source: "booted" | "cold-boot"): string {
+  return source === "cold-boot" ? "started by this call" : "already booted";
+}
+
 function buildBootedResponse(
   device: BootedDevice,
   source: "booted" | "cold-boot",
@@ -826,7 +835,7 @@ function buildBootedResponse(
   const acquisition = source === "booted" ? "already-booted" : "cold-boot";
   const projected = projectBootedDevice(description);
   return createStructuredToolResponse({
-    message: `${device.platform} '${device.name}' is ready (${source})`,
+    message: `${device.platform} '${device.name}' is ready (${bootSourceLabel(source)})`,
     ...projected,
     deviceIdentity: deviceIdentityPayload(device, sourceImage),
     processId: processId ?? null,

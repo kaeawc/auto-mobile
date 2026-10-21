@@ -11,6 +11,7 @@ import {
 } from "./SimCtlSupport";
 
 import { parseSimctlRuntimes } from "./simctlRuntimes";
+import { parseSimctlDeviceTypes } from "./simctlDeviceTypes";
 
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
@@ -859,8 +860,7 @@ export class SimCtlInventory {
       signal,
     );
     try {
-      const data = JSON.parse(result.stdout) as { devicetypes?: unknown } | null;
-      return Array.isArray(data?.devicetypes) ? (data.devicetypes as AppleDeviceType[]) : [];
+      return parseSimctlDeviceTypes(result.stdout);
     } catch (error) {
       logger.warn(`Failed to parse device types from simctl: ${error}`);
       return [];
@@ -874,11 +874,7 @@ export class SimCtlInventory {
       undefined,
       signal,
     );
-    const data = JSON.parse(result.stdout) as { devicetypes?: unknown };
-    if (!Array.isArray(data?.devicetypes)) {
-      throw new Error("simctl device types response does not contain a devicetypes array");
-    }
-    return data.devicetypes as AppleDeviceType[];
+    return parseSimctlDeviceTypes(result.stdout);
   }
 
   /**

@@ -121,7 +121,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
   function expectNoReadiness(): void {
     expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+    expect(devices.getExplicitDevicePin()).toBeUndefined();
   }
 
   async function setUpDevicePath(): Promise<void> {
@@ -285,7 +285,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       expect(listed).toBe(0);
       expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
       expect(devices.getLastOptions()?.intent).toBe("read");
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
       expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
     },
   );
@@ -302,7 +302,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       // #12112: current behaviour, see issue
       expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
       expect(devices.getLastOptions()?.intent).toBe("read");
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
     },
   );
 
@@ -315,7 +315,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       await call("controlProbe", { platform: "android", deviceId: free.deviceId });
       expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
       expect(devices.getLastOptions()?.intent).toBeUndefined();
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([free]);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
     },
   );
 
@@ -339,7 +339,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
       expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
       expect(devices.getLastOptions()?.intent).toBe("read");
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
       expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
       expect(sessionManager.getSession("observer-session")).toBeNull();
       expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
@@ -531,7 +531,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       await sessionManager.createSession(other, free.deviceId, "android");
       sessionManager.setDeviceReadiness(other, "automationReady");
       // Sessionless selection would settle on the other session's device.
-      devices.setCurrentDevice(free, "android");
+      devices.setExplicitDevicePin(free);
       const earlierStart = sessionManager.sessionNow();
       sessionManager.setActiveSessionExecutionChecker(
         (sessionId, query) =>
@@ -594,7 +594,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
         );
         const deadline = sessionManager.getSession(agent)!.expiresAt;
         const args = { sessionUuid: other, deviceId: held.deviceId };
-        const pinsBefore = devices.getSetCurrentDeviceCalls();
+        const pinsBefore = devices.getExplicitDevicePin();
         const after = await outcome("controlProbe", args);
         timer.setCurrentTime(deadline - 1);
         const before = await outcome("controlProbe", args);
@@ -608,7 +608,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
         expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
         expect(audited).toEqual([]);
         expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-        expect(devices.getSetCurrentDeviceCalls()).toEqual(pinsBefore);
+        expect(devices.getExplicitDevicePin()).toEqual(pinsBefore);
       },
     );
   });
@@ -728,6 +728,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     });
 
     async function arrangeNested2(): Promise<void> {
+      // The pin is per connection (#14161); this suite's calls run under `connection` (#14385).
+      devices.setExplicitDevicePin(held, connection);
       executions = [];
       finishControl = undefined;
       pendingControl = undefined;
@@ -845,7 +847,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
         name: "readProbe",
         arguments: { sessionUuid: agent },
       });
-      expect(result.isError ?? false).toBe(false);
+      expect(result.isError ?? false, JSON.stringify(result)).toBe(false);
       expect(result.content).toEqual([
         { type: "text", text: expect.stringContaining('"success":true') },
       ]);
@@ -972,9 +974,9 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
         const before = stamps();
         await readWithoutBinding();
         expect(reads).toEqual([
-          { deviceId: held.deviceId, readPath: false, sessionUuid: undefined },
+          { deviceId: held.deviceId, readPath: true, sessionUuid: undefined },
         ]);
-        expect(devices.getLastOptions()?.intent).toBe("read");
+        expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
         expect({ lastUsedAt: session.lastUsedAt, expiresAt: session.expiresAt }).toEqual(before);
         expect(release).toHaveBeenCalledTimes(1);
         await sessionManager.cleanupExpiredSessions();
@@ -1293,7 +1295,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
           expect(error).not.toBeInstanceOf(InputDeviceOwnedError);
           expect(audited).toEqual([{ name, deviceId: free.deviceId }]);
-          expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+          expect(devices.getExplicitDevicePin()).toBeUndefined();
           expect(listed).toBe(0);
         },
       );

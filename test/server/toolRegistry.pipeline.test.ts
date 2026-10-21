@@ -1,3 +1,7 @@
+import {
+  registerDirectSessionDevice,
+  unregisterDirectSession,
+} from "../../src/utils/directSessionDeviceRegistry";
 import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -88,6 +92,7 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   afterEach(() => {
+    unregisterDirectSession("session-1");
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     restoreDefaultPipelineOverrides?.();
@@ -500,6 +505,7 @@ describe("ToolRegistry device-aware pipeline", () => {
         async () => ({ success: true }),
       );
 
+      registerDirectSessionDevice("session-1", device);
       const tool = registry.getTool("bindFailureProbe")!;
       await expect(
         tool.handler({ platform: "android", sessionUuid: "session-1" }),

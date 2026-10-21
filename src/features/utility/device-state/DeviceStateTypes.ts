@@ -1,4 +1,5 @@
 import type { BootedDevice, ExecResult } from "../../../models";
+import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
 import { ActionableError } from "../../../models/ActionableError";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -151,6 +152,8 @@ export interface DeviceStateDependencies {
   timer?: Timer;
   consoleFactory?: EmulatorConsoleClientFactory;
   routeRegistry?: LocationRouteRegistry;
+  /** Emulator detection for location writes; defaults to the shared cached reader. */
+  deviceTraits?: DeviceTraits;
   canWriteLocation?: () => boolean;
   /** Session attribution is supplied by the handler, never inferred from write admission. */
   onLocationApplied?: () => void;

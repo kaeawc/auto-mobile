@@ -9,6 +9,7 @@ import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfac
 import type { ExecResult } from "../../src/models";
 import type { BootedDevice } from "../../src/models";
 import { logger } from "../../src/utils/logger";
+import { FakeDeviceTraits, physicalDeviceTraits } from "../fakes/FakeDeviceTraits";
 
 /**
  * Unit coverage for KeepScreenAwakeManager (previously only tested indirectly
@@ -63,6 +64,9 @@ class FakeAdb implements Pick<AdbExecutor, "executeCommand"> {
   }
 }
 
+// Physical by default, so the device-type gate passes.
+const physicalTraits = (): FakeDeviceTraits => new FakeDeviceTraits(physicalDeviceTraits());
+
 const makeFactory = (adb: FakeAdb) => ({
   create: () => adb,
 });
@@ -85,6 +89,7 @@ describe("KeepScreenAwakeManager", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
 
     const state = await mgr.apply(false);
@@ -100,6 +105,7 @@ describe("KeepScreenAwakeManager", () => {
       iosDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
 
     const state = await mgr.apply(true);
@@ -111,7 +117,12 @@ describe("KeepScreenAwakeManager", () => {
   test("skips emulator devices (by deviceId prefix) with skipReason 'emulator'", async () => {
     const adb = new FakeAdb();
     const emulator: BootedDevice = { platform: "android", deviceId: "emulator-5554", name: "AVD" };
-    const mgr = new KeepScreenAwakeManager(emulator, makeFactory(adb), () => failingSettingsClient);
+    const mgr = new KeepScreenAwakeManager(
+      emulator,
+      makeFactory(adb),
+      () => failingSettingsClient,
+      physicalTraits(),
+    );
 
     const state = await mgr.apply(true);
 
@@ -119,14 +130,13 @@ describe("KeepScreenAwakeManager", () => {
     expect(state.skipReason).toBe("emulator");
   });
 
-  test("returns 'detection_failed' when ro.kernel.qemu is an unexpected value", async () => {
-    const adb = new FakeAdb({
-      responses: [{ match: "getprop ro.kernel.qemu", stdout: "garbage" }],
-    });
+  test("returns 'detection_failed' when the emulator flag is an unexpected value", async () => {
+    const adb = new FakeAdb();
     const mgr = new KeepScreenAwakeManager(
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      new FakeDeviceTraits(physicalDeviceTraits({ isEmulator: null })),
     );
 
     const state = await mgr.apply(true);
@@ -137,16 +147,14 @@ describe("KeepScreenAwakeManager", () => {
 
   test("physical device: verifies svc stayon read-back before reporting success", async () => {
     const adb = new FakeAdb({
-      responses: [
-        { match: "getprop ro.kernel.qemu", stdout: "0" }, // physical
-        { match: "settings get global stay_on_while_plugged_in", stdout: ["0", "7"] },
-      ],
+      responses: [{ match: "settings get global stay_on_while_plugged_in", stdout: ["0", "7"] }],
       // svc power stayon true resolves (not in reject list)
     });
     const mgr = new KeepScreenAwakeManager(
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
 
     const state = await mgr.apply(true);
@@ -164,7 +172,6 @@ describe("KeepScreenAwakeManager", () => {
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     const adb = new FakeAdb({
       responses: [
-        { match: "getprop ro.kernel.qemu", stdout: "0" },
         { match: "settings get global stay_on_while_plugged_in", stdout: ["0", "0", "0"] },
         { match: "settings get system screen_off_timeout", stdout: "120000" },
       ],
@@ -173,6 +180,7 @@ describe("KeepScreenAwakeManager", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
 
     const state = await mgr.apply(true);
@@ -188,7 +196,6 @@ describe("KeepScreenAwakeManager", () => {
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     const adb = new FakeAdb({
       responses: [
-        { match: "getprop ro.kernel.qemu", stdout: "0" },
         { match: "settings get global stay_on_while_plugged_in", stdout: ["0", "0"] },
         { match: "settings get system screen_off_timeout", stdout: "120000" },
       ],
@@ -198,6 +205,7 @@ describe("KeepScreenAwakeManager", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
 
     const state = await mgr.apply(true);
@@ -212,7 +220,6 @@ describe("KeepScreenAwakeManager", () => {
   test("physical device: falls back to settings when svc stayon fails (method 'settings')", async () => {
     const adb = new FakeAdb({
       responses: [
-        { match: "getprop ro.kernel.qemu", stdout: "0" },
         { match: "settings get global stay_on_while_plugged_in", stdout: "0" },
         { match: "settings get system screen_off_timeout", stdout: "120000" },
       ],
@@ -222,6 +229,7 @@ describe("KeepScreenAwakeManager", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
 
     const state = await mgr.apply(true);
@@ -240,6 +248,7 @@ describe("KeepScreenAwakeManager", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
 
     const outcome = await mgr.restore({
@@ -261,6 +270,7 @@ describe("KeepScreenAwakeManager", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
 
     expect(await mgr.restore({ applied: false, skipReason: "disabled" })).toEqual({
@@ -293,19 +303,23 @@ describe("KeepScreenAwakeManager", () => {
       };
       const adb = new FakeAdb({
         responses: [
-          { match: "getprop ro.kernel.qemu", stdout: "0" },
           { match: "settings get global stay_on_while_plugged_in", stdout: "null" },
           { match: "settings get system screen_off_timeout", stdout: "60000" },
         ],
         reject: ["svc power stayon true"],
       });
-      const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb), (device) => {
-        providerCalls.push(device);
-        if (mode === "provider throws") {
-          throw new Error("settings provider failed");
-        }
-        return client;
-      });
+      const mgr = new KeepScreenAwakeManager(
+        physicalDevice,
+        makeFactory(adb),
+        (device) => {
+          providerCalls.push(device);
+          if (mode === "provider throws") {
+            throw new Error("settings provider failed");
+          }
+          return client;
+        },
+        physicalTraits(),
+      );
 
       const state = await mgr.apply(true);
       expect(state.applied).toBe(true);
@@ -468,6 +482,7 @@ describe("KeepScreenAwakeManager restore branches", () => {
           physicalDevice,
           makeFactory(adb),
           () => failingSettingsClient,
+          physicalTraits(),
         ).restore(row.state);
         expect(adb.calls).toEqual(row.calls);
         expect(warn.mock.calls).toHaveLength(row.warnings?.length ?? 0);
@@ -485,6 +500,7 @@ describe("KeepScreenAwakeManager restore branches", () => {
       { ...physicalDevice, platform: "ios" },
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     ).restore({ applied: true, method: "svc", svcWasEnabled: false });
     expect(adb.calls).toEqual([]);
   });
@@ -542,6 +558,7 @@ describe("typed restore outcomes", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
     expect(await mgr.restore(state)).toEqual({ status: "failed", failures });
     if (state.method === "settings") {
@@ -593,6 +610,7 @@ describe("typed restore outcomes", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
     expect(await mgr.restore(state)).toEqual({ status: "restored_to_baseline", settings });
     expect(adb.calls).toEqual(calls);
@@ -636,6 +654,7 @@ describe("typed restore outcomes", () => {
       physicalDevice,
       makeFactory(adb),
       () => failingSettingsClient,
+      physicalTraits(),
     );
     const failures = reject.map<
       Extract<KeepScreenAwakeRestoreOutcome, { status: "failed" }>["failures"][number]
@@ -665,7 +684,12 @@ describe("typed restore outcomes", () => {
         return { success: true };
       },
     };
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb), () => client);
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => client,
+      physicalTraits(),
+    );
     expect(await mgr.restore(unknownSettings)).toEqual({
       status: "restored_to_baseline",
       settings: [

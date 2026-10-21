@@ -11,6 +11,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpec
  * `window.persistence: "device"` (#10494): the prototype survives the last client disconnecting and
  * the idle timeout. Absent or `session` keeps the session-scoped behaviour.
  */
+@InternalAutoMobilePrototypeApi
 fun isDevicePersistent(spec: PrototypeSpec): Boolean =
   when (spec.window.persistence) {
     null,
@@ -19,12 +20,14 @@ fun isDevicePersistent(spec: PrototypeSpec): Boolean =
     else -> error("window.persistence: Unknown persistence")
   }
 
+@InternalAutoMobilePrototypeApi
 enum class PrototypeWindowChrome {
   NONE,
   BAR,
 }
 
 /** Fullscreen defaults to chromeless, except an unattended device-persistent window. */
+@InternalAutoMobilePrototypeApi
 fun prototypeWindowChrome(spec: PrototypeSpec): PrototypeWindowChrome =
   when (spec.window.chrome) {
     "none" -> PrototypeWindowChrome.NONE
@@ -33,7 +36,7 @@ fun prototypeWindowChrome(spec: PrototypeSpec): PrototypeWindowChrome =
     else -> error("window.chrome: Unknown chrome")
   }
 
-fun mapPrototypePlacement(placement: SpecPlacement): PrototypePlacement =
+internal fun mapPrototypePlacement(placement: SpecPlacement): PrototypePlacement =
   when (placement) {
     is PrototypeFullscreenPlacement ->
       PrototypePlacement.Fullscreen(prototypeHexColor(placement.scrim), placement.scrim)

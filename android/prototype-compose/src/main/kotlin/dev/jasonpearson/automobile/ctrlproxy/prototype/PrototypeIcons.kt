@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
  * `proguard-rules.pro` keeping that package if shrinking is ever turned on. Unknown names keep the
  * neutral placeholder (`null`).
  */
-fun prototypeIcon(name: String?, variant: String? = null): ImageVector? {
+internal fun prototypeIcon(name: String?, variant: String? = null): ImageVector? {
   if (name == null || !ICON_NAME.matches(name)) return null
   val style = IconStyle.fromContract(variant)
   return ICON_CACHE.computeIfAbsent("${style.packageName}:$name") {

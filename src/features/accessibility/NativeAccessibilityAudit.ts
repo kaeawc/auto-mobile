@@ -1,5 +1,5 @@
 import type { BootedDevice } from "../../models";
-import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
+import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
 import {
   IOS_ACCESSIBILITY_AUDIT_CHECKS,
   type CtrlProxyAccessibilityAuditResult,
@@ -53,8 +53,7 @@ export type IosAccessibilityAuditSenderFactory = (
   device: BootedDevice,
 ) => IosAccessibilityAuditSender;
 
-const defaultSenderFactory: IosAccessibilityAuditSenderFactory = (device) =>
-  IOSCtrlProxyClient.getInstance(device);
+const defaultSenderFactory: IosAccessibilityAuditSenderFactory = iosCtrlProxyClientFor;
 
 const ANDROID_UNSUPPORTED_ERROR =
   "The native Android accessibility audit (Accessibility Test Framework) is not available yet. " +

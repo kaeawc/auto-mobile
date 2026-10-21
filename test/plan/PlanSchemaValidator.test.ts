@@ -104,6 +104,13 @@ steps:
     }
   });
 
+  it("accepts a screenLock step and rejects a recorded, still-redacted credential", () => {
+    const plan = (credential: string) =>
+      `name: lock\nsteps: [{tool: setDeviceState, params: {screenLock: {type: pin, credential: "${credential}"}}}]`;
+    expect(validator.validateYaml(plan("1357")).valid).toBe(true);
+    expect(validator.validateYaml(plan("<redacted>")).valid).toBe(false);
+  });
+
   it("validates native tap geometry and rejects incomplete provenance", () => {
     const geometry = {
       platform: "ios",

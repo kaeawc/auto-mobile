@@ -24,6 +24,7 @@ import type { FailureObservationSummary } from "../../models/FailureObservation"
 import { isDeviceLostError } from "../../models/DeviceLostError";
 import { type StepExecutionContext, type StepExecutionResult } from "./PlanStepExecutor";
 import { PlanToolResultsBudget, StepToolResultCollector } from "./stepToolResults";
+import { redactToolSecrets } from "../redactToolSecrets";
 
 export interface PlanDeviceTrackExecutorContext {
   timer: Timer;
@@ -216,7 +217,11 @@ export class PlanDeviceTrackExecutor {
         result: {
           status: step.optional ? "skipped" : "failed",
           error,
-          details: { params: step.params, error, ...(step.optional ? { optional: true } : {}) },
+          details: {
+            params: redactToolSecrets(step.tool, step.params),
+            error,
+            ...(step.optional ? { optional: true } : {}),
+          },
         },
       };
     }

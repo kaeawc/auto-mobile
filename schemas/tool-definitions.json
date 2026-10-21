@@ -988,7 +988,7 @@
         },
         "mechanism": {
           "type": "string",
-          "enum": ["android_am_crash", "ios_simulator_sigabrt", "unsupported"]
+          "enum": ["android_am_crash", "ios_simulator_sigabrt", "ios_device_sigabrt", "unsupported"]
         },
         "timestamp": {
           "type": "integer",
@@ -1006,7 +1006,7 @@
           "properties": {
             "source": {
               "type": "string",
-              "enum": ["android_logcat", "ios_unified_log"]
+              "enum": ["android_logcat", "ios_unified_log", "none"]
             },
             "summary": {
               "type": "string"

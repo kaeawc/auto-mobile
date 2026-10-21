@@ -841,6 +841,43 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
   }
 
   /**
+   * PID of `bundleId`'s main process on a physical device (#14096): `null` when installed but not
+   * running, `undefined` when not installed. Matching is by the exact bundle id's installed path,
+   * so a bundle id that is a prefix of another never resolves the other app. macOS-only.
+   */
+  public async findRunningAppPid(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<number | null | undefined> {
+    if (this.deps.platform() !== "darwin") {
+      throw new ActionableError("Physical iOS process lookup requires macOS");
+    }
+    const bundlePath = await this.resolveInstalledBundlePathOnDevice(deviceUdid, bundleId);
+    return bundlePath ? this.resolveRunningPid(deviceUdid, bundlePath) : undefined;
+  }
+
+  /** `devicectl device process signal` (#14096); "already_exited" on ESRCH, else throws with stderr. */
+  public async signalProcess(
+    deviceUdid: string,
+    pid: number,
+    signal: "SIGABRT",
+  ): Promise<"signalled" | "already_exited"> {
+    const args = ["devicectl", "device", "process", "signal", "--device", deviceUdid];
+    try {
+      await this.execute("xcrun", [...args, "--pid", String(pid), "--signal", signal, "--quiet"]);
+      return "signalled";
+    } catch (error) {
+      const message = getExecErrorText(error);
+      if (!isDevicectlProcessGoneError(message)) {
+        throw new ActionableError(`Failed to send ${signal} to PID ${pid}: ${message}`);
+      }
+      // ESRCH: the process exited between PID lookup and the signal, so nothing was delivered.
+      this.deps.logger.debug(`[DeviceAppManager] PID ${pid} exited before signal: ${message}`);
+      return "already_exited";
+    }
+  }
+
+  /**
    * Resolve the on-device installed bundle path for `bundleId` via
    * `devicectl device info apps --bundle-id`. Returns null when the app isn't
    * installed (no matching bundle entry / no resolvable path); devicectl exec or

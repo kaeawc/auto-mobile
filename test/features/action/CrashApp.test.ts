@@ -8,6 +8,7 @@ import {
 } from "../../../src/features/action/CrashApp";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { PhysicalIosCrashControl } from "../../../src/features/action/crashPhysicalIosApp";
 
 const androidDevice = {
   deviceId: "emulator-5554",
@@ -737,22 +738,131 @@ describe("CrashApp (iOS)", () => {
     expect(result.evidence).toBeUndefined();
   });
 
-  test("returns explicit unsupported metadata for a physical device without running commands", async () => {
+  test("physical devices never use the simulator launchctl path (#14096)", async () => {
     const commands = new FakeSimulatorCommands([]);
-    const action = new CrashApp(iosPhysicalDevice, dependencies({ simctl: commands }));
+    const crasher = new FakePhysicalCrasher([undefined]);
+    const action = new CrashApp(
+      iosPhysicalDevice,
+      dependencies({ simctl: commands, physicalIosCrasher: crasher }),
+    );
 
-    const result = await action.execute("com.example.app");
+    await action.execute("com.example.app");
 
-    expect(result).toMatchObject({
-      success: false,
-      supported: false,
-      platform: "ios",
-      appId: "com.example.app",
-      mechanism: "unsupported",
-      confirmed: false,
-    });
-    expect(result.wasRunning).toBeUndefined();
-    expect(result.error).toContain("physical iOS");
     expect(commands.calls).toEqual([]);
+  });
+});
+
+/** Scripted `findAppPid` answers (one per call) and a scripted `sendAbort` outcome. */
+class FakePhysicalCrasher implements PhysicalIosCrashControl {
+  readonly lookups: string[] = [];
+  readonly aborts: number[] = [];
+  constructor(
+    private readonly pids: Array<number | null | undefined | Error>,
+    private readonly abort: "signalled" | "already_exited" | Error = "signalled",
+  ) {}
+
+  async findAppPid(bundleId: string): Promise<number | null | undefined> {
+    this.lookups.push(bundleId);
+    const next = this.pids.length > 1 ? this.pids.shift() : this.pids[0];
+    if (next instanceof Error) {
+      throw next;
+    }
+    return next;
+  }
+
+  async sendAbort(pid: number) {
+    this.aborts.push(pid);
+    if (this.abort instanceof Error) {
+      throw this.abort;
+    }
+    return this.abort;
+  }
+}
+
+describe("CrashApp (physical iOS, #14096)", () => {
+  const run = async (crasher: FakePhysicalCrasher) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const invalidations: string[] = [];
+    const action = new CrashApp(
+      iosPhysicalDevice,
+      dependencies({
+        physicalIosCrasher: crasher,
+        timer,
+        cacheInvalidator: {
+          retireAppProcess: () => {},
+          invalidate: (device) => invalidations.push(device.deviceId),
+        },
+      }),
+    );
+    return { result: await action.execute("com.example.app"), invalidations };
+  };
+
+  test("sends SIGABRT to the resolved PID and reports the exit without claiming confirmation", async () => {
+    const crasher = new FakePhysicalCrasher([4321, 4321, null]);
+    const { result, invalidations } = await run(crasher);
+
+    expect(crasher.aborts).toEqual([4321]);
+    expect(result).toMatchObject({
+      success: true,
+      supported: true,
+      platform: "ios",
+      mechanism: "ios_device_sigabrt",
+      wasRunning: true,
+      processId: 4321,
+      confirmed: false,
+      evidence: { source: "none" },
+    });
+    expect(result.evidence?.summary).toContain("#14103");
+    expect(invalidations).toEqual([iosPhysicalDevice.deviceId]);
+  });
+
+  test("a relaunched app with a new PID counts as the crashed process exiting", async () => {
+    const { result } = await run(new FakePhysicalCrasher([4321, 9999]));
+    expect(result).toMatchObject({ success: true, processId: 4321 });
+  });
+
+  test("an app that is not installed is refused without a signal", async () => {
+    const crasher = new FakePhysicalCrasher([undefined]);
+    const { result } = await run(crasher);
+    expect(result).toMatchObject({ success: false, supported: true, wasRunning: false });
+    expect(result.error).toContain("not installed");
+    expect(crasher.aborts).toEqual([]);
+  });
+
+  test("an app that is not running is refused without a signal", async () => {
+    const crasher = new FakePhysicalCrasher([null]);
+    const { result } = await run(crasher);
+    expect(result).toMatchObject({ success: false, wasRunning: false });
+    expect(result.error).toContain("not running");
+    expect(crasher.aborts).toEqual([]);
+  });
+
+  test("a process that exited before the signal is not reported as crashed", async () => {
+    const { result } = await run(new FakePhysicalCrasher([4321], "already_exited"));
+    expect(result).toMatchObject({ success: false, wasRunning: true, confirmed: false });
+    expect(result.error).toContain("exited before the crash signal");
+    expect(result.evidence).toBeUndefined();
+  });
+
+  test("a process still running after the signal fails without evidence", async () => {
+    const { result } = await run(new FakePhysicalCrasher([4321]));
+    expect(result).toMatchObject({ success: false, processId: 4321, confirmed: false });
+    expect(result.error).toContain("still running");
+  });
+
+  test("an unreadable process table after the signal cannot prove the exit", async () => {
+    const { result } = await run(new FakePhysicalCrasher([4321, new Error("device locked")]));
+    expect(result).toMatchObject({ success: false });
+    expect(result.error).toContain("still running");
+  });
+
+  test("a devicectl signal failure surfaces its message and still invalidates caches", async () => {
+    const { result, invalidations } = await run(
+      new FakePhysicalCrasher([4321], new Error("Failed to send SIGABRT: device is locked")),
+    );
+    expect(result).toMatchObject({ success: false, wasRunning: true, processId: 4321 });
+    expect(result.error).toContain("device is locked");
+    expect(invalidations).toHaveLength(1);
   });
 });

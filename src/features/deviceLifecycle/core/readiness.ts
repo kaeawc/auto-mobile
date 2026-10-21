@@ -274,11 +274,10 @@ export function createSystemUiAnrRebooter(
             utilDeviceLossCancellationReason(replacement.id),
             {
               release: async () =>
-                await manager.releaseSessionIfOwned(
+                await manager.releaseSession(
                   sessionId,
-                  session,
-                  replacement.id,
                   utilDeviceLossCancellationReason(replacement.id),
+                  { expectedOwner: { session: session, deviceId: replacement.id } },
                 ),
             },
           );

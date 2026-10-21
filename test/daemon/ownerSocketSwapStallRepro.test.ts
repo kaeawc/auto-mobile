@@ -47,7 +47,10 @@ async function setUp(activeControl = false) {
   );
   const release = async (session: Session, reason: SessionReleaseReason) => {
     await releaseSessionAndDevice(manager, pool, session.assignedDevice, ID, reason, {
-      release: () => manager.releaseSessionIfOwned(ID, session, session.assignedDevice, reason),
+      release: () =>
+        manager.releaseSession(ID, reason, {
+          expectedOwner: { session: session, deviceId: session.assignedDevice },
+        }),
     });
   };
   const deviceManager = new FakeDeviceManager();

@@ -454,12 +454,9 @@ describe("daemon release wiring (#10975)", () => {
 
     try {
       // Held side: a killDevice-style terminal release of the FIRST session arrives late.
-      await scenario.daemon.manager.releaseSessionIfOwned(
-        first,
-        captured,
-        DEVICE_A,
-        "device-killed",
-      );
+      await scenario.daemon.manager.releaseSession(first, "device-killed", {
+        expectedOwner: { session: captured, deviceId: DEVICE_A },
+      });
       expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE_A);
       expectHeld(second);
 

@@ -365,12 +365,9 @@ export class DevicePoolInitialization {
       reason,
       {
         release: () =>
-          this.state.sessionManager.releaseSessionIfOwned(
-            sessionId,
-            session,
-            assignedDevice,
-            reason,
-          ),
+          this.state.sessionManager.releaseSession(sessionId, reason, {
+            expectedOwner: { session: session, deviceId: assignedDevice },
+          }),
       },
     );
   }

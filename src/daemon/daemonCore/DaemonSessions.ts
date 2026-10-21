@@ -397,12 +397,12 @@ export class DaemonSessions {
             if (expectedSession) {
               deviceId = await this.host.services
                 .sessionManager()
-                .releaseSessionIfOwned(
-                  sessionId,
-                  expectedSession,
-                  expectedSession.assignedDevice,
-                  releaseReason,
-                );
+                .releaseSession(sessionId, releaseReason, {
+                  expectedOwner: {
+                    session: expectedSession,
+                    deviceId: expectedSession.assignedDevice,
+                  },
+                });
             } else if (shouldCommit) {
               const release = await this.host.services
                 .sessionManager()

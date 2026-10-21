@@ -479,7 +479,9 @@ function setStateBindingErrors(
   if (new Set(controls.map((node) => String(node.value.type))).size !== 1) {
     return undefined;
   }
-  const written = { ...state, [key]: value };
+  // A linkify `{match}` (#14233) writes the matched text, so it is checked as a string.
+  const match = object(value) !== undefined && typeof object(value)?.match === "string";
+  const written = { ...state, [key]: match ? "" : value };
   for (const control of controls) {
     const error = controlErrors(control.value, control.path, written);
     if (error) {

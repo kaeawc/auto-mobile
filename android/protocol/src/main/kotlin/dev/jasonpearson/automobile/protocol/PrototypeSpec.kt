@@ -566,7 +566,21 @@ data class PrototypeTextNode(
   override val span: Int? = null,
   val text: String? = null,
   val spans: List<PrototypeTextSpan>? = null,
+  /** Mentions, hashtags and URLs in [text] as links (`prototype_linkify_v1`, #14233). */
+  val linkify: PrototypeLinkifyOptions? = null,
 ) : PrototypeNode()
+
+/**
+ * `linkify` on a text node: the [kinds] to detect, the [style] of a match and the actions a tap
+ * runs. [onTap] stays JSON because its `{match}` bindings are bound per match before decoding
+ * ([PrototypeLinkify.actions]).
+ */
+@Serializable
+data class PrototypeLinkifyOptions(
+  val kinds: List<String>,
+  val style: PrototypeTextSpanStyle? = null,
+  val onTap: JsonArray,
+)
 
 @Serializable
 data class PrototypeTextSpan(

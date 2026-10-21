@@ -344,6 +344,8 @@ class WebSocketServer(
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
+    // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
+    add("prototype_linkify_v1")
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands.
     add("prototype_emit_context_v1")
     // Prototype checks expose validity and guard actions; older APKs ignore these spec fields.

@@ -55,6 +55,11 @@ const fixtures: Record<string, Node> = {
     child: label,
   },
   prototype_rich_text_v1: { type: "text", spans: [{ text: "Hello" }] },
+  prototype_linkify_v1: {
+    type: "text",
+    text: "@ana",
+    linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
+  },
   prototype_menus_v1: {
     type: "menu",
     openWhen: { key: "liked", equals: true },

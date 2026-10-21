@@ -2301,6 +2301,23 @@ Use `tapAt` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
 `rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.
 
+### Linkify (#14233)
+
+`linkify: {kinds, style?, onTap}` on a text node with `text` (not `spans`) turns @mentions,
+#hashtags and URLs in the resolved text into links, for content from data such as `{item.body}`.
+`kinds` lists 1 to 3 of `mention`, `hashtag` and `url`; `style` takes the span style fields; a tap on
+a match runs `onTap` (1 to 32 actions). The grammar is fixed and shared by every runtime
+(`test/fixtures/prototype-spec/linkify/cases.json`): a match starts at the start of the text or
+after whitespace; a mention is `@` and 1 to 30 of `[A-Za-z0-9_]` (so `ana@example.com` is not one);
+a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a URL is `http://` or
+`https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
+`{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
+value, a `setData` / `appendData` value or an emit context entry, for example
+`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused, as
+are repeat bindings inside `onTap`. A URL tap never opens a browser; that is the `links.open`
+platform call. Matches are links like tappable spans (Android `tapOn {accessibilityLink}`, iOS
+`tapAt`) and require `prototype_linkify_v1`.
+
 Owed device checks (later platform passes): advertise the capability only after renderer support;
 verify mixed span styles, resolved concatenated observe text, per-span actions without URL navigation,
 Android semanticLinks and both selectors across windows, and iOS tapAt-only links plus platformNotes.

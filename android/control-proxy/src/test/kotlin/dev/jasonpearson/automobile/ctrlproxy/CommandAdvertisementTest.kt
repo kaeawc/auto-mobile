@@ -56,6 +56,7 @@ class CommandAdvertisementTest {
       "prototype_refresh_v1",
       "prototype_search_bar_v1",
       "prototype_rich_text_v1",
+      "prototype_linkify_v1",
       "prototype_emit_context_v1",
       "prototype_checks_v1",
       "prototype_appearance_v1",
@@ -139,6 +140,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_refresh_v1"))
     assertTrue(commands.contains("prototype_search_bar_v1"))
     assertTrue(commands.contains("prototype_rich_text_v1"))
+    assertTrue(commands.contains("prototype_linkify_v1"))
     assertTrue(commands.contains("prototype_emit_context_v1"))
     assertTrue(commands.contains("prototype_checks_v1"))
     assertTrue(commands.contains("prototype_appearance_v1"))

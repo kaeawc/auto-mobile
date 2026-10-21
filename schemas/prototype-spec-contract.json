@@ -311,7 +311,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -646,7 +646,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 10000
           },
           "optional": true
@@ -742,7 +742,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 10000
           },
           "optional": true
@@ -818,7 +818,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -859,7 +859,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -1100,7 +1100,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -1246,6 +1246,18 @@
                           "optional": false
                         }
                       }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "match": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": ["text", "kind"]
+                          },
+                          "optional": false
+                        }
+                      }
                     }
                   ]
                 }
@@ -1319,7 +1331,24 @@
             },
             "value": {
               "rule": {
-                "kind": "scalar"
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "scalar"
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "match": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["text", "kind"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
               },
               "optional": false
             }
@@ -1566,6 +1595,18 @@
                         "optional": false
                       }
                     }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "match": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["text", "kind"]
+                        },
+                        "optional": false
+                      }
+                    }
                   }
                 ]
               },
@@ -1646,6 +1687,18 @@
                         "rule": {
                           "kind": "json",
                           "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "match": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["text", "kind"]
                         },
                         "optional": false
                       }
@@ -2810,7 +2863,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -2964,6 +3017,13 @@
                 "min": 1,
                 "max": 64,
                 "unique": false
+              },
+              "optional": true
+            },
+            "linkify": {
+              "rule": {
+                "kind": "ref",
+                "name": "linkify"
               },
               "optional": true
             }
@@ -10439,7 +10499,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -10485,7 +10545,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -10622,6 +10682,43 @@
             "max": 128
           },
           "optional": true
+        }
+      }
+    },
+    "linkify": {
+      "kind": "object",
+      "fields": {
+        "kinds": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 3,
+            "unique": true,
+            "item": {
+              "kind": "enum",
+              "values": ["mention", "hashtag", "url"]
+            }
+          },
+          "optional": false
+        },
+        "style": {
+          "rule": {
+            "kind": "ref",
+            "name": "textSpanStyle"
+          },
+          "optional": true
+        },
+        "onTap": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": false
         }
       }
     }

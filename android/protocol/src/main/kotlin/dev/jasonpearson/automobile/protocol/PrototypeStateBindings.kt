@@ -98,7 +98,10 @@ internal object PrototypeStateBindings {
     state: JsonObject,
   ): PrototypeSpecError? {
     val key = action.value.text("key") ?: return null
-    val written = action.value["value"] as? JsonPrimitive
+    val raw = action.value["value"]
+    // A linkify `{match}` (#14233) writes the matched text, so it is checked as a string.
+    val written =
+      if (PrototypeLinkify.isMatchBinding(raw)) JsonPrimitive("") else raw as? JsonPrimitive
     if (written == null || action.operandTemplated) return null
     val controls = context.controlsByKey[key].orEmpty()
     if (controls.map { it.value.text("type") }.toSet().size != 1) return null

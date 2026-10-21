@@ -118,6 +118,8 @@ export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
 
 /** Renders styled text spans and their independent tap actions. */
 export const PROTOTYPE_RICH_TEXT_CAPABILITY = "prototype_rich_text_v1";
+/** `linkify` on a text node (#14233): mentions, hashtags and URLs as tappable links. */
+export const PROTOTYPE_LINKIFY_CAPABILITY = "prototype_linkify_v1";
 
 /** Future iOS capabilities that lift host-reported prototype platform differences. */
 export const PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY =

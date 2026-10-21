@@ -4313,7 +4313,7 @@ describe("systemTray automatic terminal evidence", () => {
   });
 });
 
-describe("iOS systemTray open", () => {
+describe("iOS systemTray open/close", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
   });
@@ -4323,6 +4323,49 @@ describe("iOS systemTray open", () => {
       resetSystemTrayDependencies();
       ToolRegistry.clearTools();
     });
+    test.each([true, false])(
+      "closes the captured cover sheet only when HOME clears it (%s)",
+      async (homeClearsSheet) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        let homeCalls = 0;
+        observer.setObserveResult(() =>
+          createIosObservation(
+            homeClearsSheet && homeCalls > 0
+              ? capturedIosHomeIconHierarchy
+              : ios27NotificationCenterHierarchy,
+          ),
+        );
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          pressHomeFactory: async () => {
+            homeCalls++;
+            return { success: true };
+          },
+          observeScreenFactory: () => observer,
+        });
+        registerInteractionTools();
+        const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(iosDevice, {
+          action: "close",
+          platform: "ios",
+          awaitTimeoutMs: 500,
+        });
+        const payload = toolJson(response);
+        expect(payload.success).toBe(homeClearsSheet);
+        expect(payload.skipped).toBe(false);
+        expect(homeCalls).toBe(1);
+        expect(client.swipeCalls).toHaveLength(0);
+        expect(payload.message).toBe(
+          homeClearsSheet
+            ? "Closed system tray (collapsed notification shade)"
+            : "Failed to close system tray: the tray remained open",
+        );
+      },
+    );
+
     test("opens the captured iOS 27 Notification Center after the swipe", async () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();

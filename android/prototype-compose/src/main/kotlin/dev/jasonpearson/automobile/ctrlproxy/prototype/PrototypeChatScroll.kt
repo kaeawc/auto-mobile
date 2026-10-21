@@ -37,12 +37,14 @@ sealed interface PrototypeScrollTarget {
         else -> null
       }
 
-    private fun scalar(value: JsonPrimitive): PrototypeScalar =
-      when {
+    private fun scalar(value: JsonPrimitive): PrototypeScalar {
+      val flag = value.booleanOrNull
+      return when {
         value.isString -> PrototypeScalar.Text(value.content)
-        value.booleanOrNull != null -> PrototypeScalar.BooleanValue(value.booleanOrNull!!)
+        flag != null -> PrototypeScalar.BooleanValue(flag)
         else -> PrototypeScalar.Numeric(value.doubleOrNull ?: 0.0)
       }
+    }
   }
 }
 

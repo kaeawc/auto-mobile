@@ -289,7 +289,7 @@ describe("session-free observe device read", () => {
       expect((await fs.stat(screenshotPath)).isFile()).toBe(true);
       expect(calls).toEqual(["discover", "authorize", "authorize"]);
       expect(manager.getEnsureDeviceReadyCalls()).toBe(0);
-      expect(manager.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(manager.getExplicitDevicePin()).toBeUndefined();
       expect(ownershipCalls).toEqual([]);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
@@ -801,7 +801,7 @@ describe("session-free observe device read", () => {
       ).toBeUndefined();
       expect(screenshotState.getPath(device.deviceId)).toBeUndefined();
       expect(manager.getEnsureDeviceReadyCalls()).toBe(0);
-      expect(manager.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(manager.getExplicitDevicePin()).toBeUndefined();
       expect(notify).not.toHaveBeenCalled();
       expect(nav).not.toHaveBeenCalled();
       expect(proxy).not.toHaveBeenCalled();
@@ -1014,7 +1014,7 @@ describe("session-free observe device read", () => {
     );
     expect(captures).toBe(0);
     expect(manager.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(manager.getSetCurrentDeviceCalls()).toEqual([]);
+    expect(manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("withholds an observation if ownership changes during capture", async () => {
@@ -1048,7 +1048,7 @@ describe("session-free observe device read", () => {
     expect(after).not.toHaveBeenCalled();
     after.mockRestore();
     expect(manager.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(manager.getSetCurrentDeviceCalls()).toEqual([]);
+    expect(manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("describes fresh and cached files with source, age, timestamp and failure", async () => {

@@ -5,7 +5,12 @@ import {
   isUnresolvedAndroidEmulatorName,
   type IdentityEvidence,
 } from "../devices/deviceIdentityEvidence";
-import { ActionableError, type BootedDevice } from "../models";
+import {
+  ActionableError,
+  type AvdNameProbeObservation,
+  type BootedDevice,
+  type StampedAvdNameProbeObservation,
+} from "../models";
 import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
@@ -176,10 +181,7 @@ export class DeviceRuntimeIdentity {
    */
   async reconcileObservedPooledIdentity(
     pooled: PooledDevice,
-    device: Pick<
-      BootedDevice,
-      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
-    >,
+    device: StampedAvdNameProbeObservation,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (this.matchesRuntimeIdentity(pooled, device)) {
@@ -339,10 +341,7 @@ export class DeviceRuntimeIdentity {
    */
   async reconcilePooledIdentityResolution(
     pooled: PooledDevice,
-    discovered: Pick<
-      BootedDevice,
-      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
-    >,
+    discovered: StampedAvdNameProbeObservation,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (options.namesResolved === false) {
@@ -403,14 +402,15 @@ export class DeviceRuntimeIdentity {
    */
   private shouldReconcileUnresolvedEmulatorName(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "consoleBusyDuringProbe">,
+    discovered: AvdNameProbeObservation,
   ): boolean {
     return (
       pooled.avdName !== undefined &&
       pooled.identityUnresolved !== true &&
       this.hasUnresolvedEmulatorName(discovered) &&
       discovered.name !== discovered.deviceId &&
-      !discovered.consoleBusyDuringProbe
+      !discovered.consoleBusyDuringProbe &&
+      !discovered.nameProbeTimedOut
     );
   }
 
@@ -424,10 +424,7 @@ export class DeviceRuntimeIdentity {
    */
   private async reconcileUnresolvedEmulatorName(
     pooled: PooledDevice,
-    discovered: Pick<
-      BootedDevice,
-      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
-    >,
+    discovered: StampedAvdNameProbeObservation,
     options: DiscoveryReconcileOptions,
   ): Promise<void> {
     if (pooled.identityReconcileAttempts !== undefined) {
@@ -470,7 +467,11 @@ export class DeviceRuntimeIdentity {
           if (!this.hasUnresolvedEmulatorName(observation)) {
             return { kind: "resolved", observation } as const;
           }
-          if (observation.name === observation.deviceId || observation.consoleBusyDuringProbe) {
+          if (
+            observation.name === observation.deviceId ||
+            observation.consoleBusyDuringProbe ||
+            observation.nameProbeTimedOut
+          ) {
             return { kind: "no-evidence" } as const;
           }
           latestUnresolved = observation;
@@ -541,7 +542,7 @@ export class DeviceRuntimeIdentity {
 
   private shouldQuarantineUnresolvedEmulatorName(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "consoleBusyDuringProbe">,
+    discovered: AvdNameProbeObservation,
   ): boolean {
     if (!this.hasUnresolvedEmulatorName(discovered)) {
       return false;
@@ -550,6 +551,12 @@ export class DeviceRuntimeIdentity {
       // ADB's serial-only listing did not probe an AVD label at all. It is
       // unresolved evidence, but not a failed identity probe that should
       // quarantine an otherwise labelled entry.
+      return false;
+    }
+    if (discovered.nameProbeTimedOut) {
+      logger.debug(
+        `[DevicePool] Retaining ${pooled.id}: the AVD-name probe timed out, so it supplies no identity evidence`,
+      );
       return false;
     }
     if (!discovered.consoleBusyDuringProbe) {

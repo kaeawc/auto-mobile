@@ -80,25 +80,13 @@ export function createDefaultDeviceClientProvider(
  * Handles device detection, verification, and lifecycle for Android and iOS platforms
  */
 export interface DeviceReadinessContract {
-  /**
-   * Get the current device ID
-   */
-  getCurrentDevice(): BootedDevice | undefined;
-
-  /**
-   * Get the current platform
-   */
-  getCurrentPlatform(): Platform | undefined;
-
-  /**
-   * Set the current device ID and platform
-   */
-  setCurrentDevice(device: BootedDevice, platform: Platform): void;
-
-  /** Explicit selection made by the legacy setActiveDevice tool. */
-  getExplicitDevicePin(): BootedDevice | undefined;
-  setExplicitDevicePin(device: BootedDevice): void;
+  /** Explicit selection made by this connection's legacy setActiveDevice tool. */
+  getExplicitDevicePin(connectionId?: string): BootedDevice | undefined;
+  setExplicitDevicePin(device: BootedDevice, connectionId?: string): void;
+  /** Invalidate every connection's pin naming a released or removed device. */
   clearExplicitDevicePin(deviceId: string): void;
+  /** Forget only the disconnected connection's selection. */
+  clearConnectionDevicePin(connectionId: string): void;
 
   /**
    * Ensure a device is ready for the specified platform and return its ID
@@ -135,6 +123,12 @@ export interface DeviceReadinessContract {
    * Verify an Android device is connected and ready
    */
   verifyAndroidDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void>;
+
+  /** Fresh, complete Android inventory for session-broker reset verification. */
+  listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]>;
+
+  /** Verify CtrlProxy health through the injected device-client provider. */
+  verifyAndroidCtrlProxyServiceReady(device: BootedDevice): Promise<boolean>;
 
   /**
    * Verify an iOS device is connected and ready
@@ -197,6 +191,8 @@ export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "o
 
 export interface DeviceReadyOptions {
   sessionId?: string;
+  /** MCP connection key for explicit selection; omitted for the single direct stdio connection. */
+  connectionId?: string;
   /**
    * What the caller will do with the device. A `read` gets only the readiness reading needs: no
    * current-device pin or appearance write (#11641). Defaults to `control`.

@@ -11,7 +11,7 @@ import {
   parseAndroidCommittedStateIdentifier,
   type AndroidDeviceState,
 } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
-import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
+import { type IosCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -67,6 +67,7 @@ import {
   readAndroidStates,
   readSupportedAndroidStates,
 } from "./postureCommands";
+import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
 export {
   HINGE_ANGLE_MIN_DEGREES,
   HINGE_ANGLE_MAX_DEGREES,
@@ -107,8 +108,7 @@ export class SetPosture {
       dependencies.androidHingeAngleConsole ?? new AdbAndroidHingeAngleConsole();
     this.observeFactory =
       dependencies.observeFactory ?? ((target) => new RealObserveScreen(target));
-    this.iosClientProvider =
-      dependencies.iosClientProvider ?? ((target) => IOSCtrlProxyClient.getInstance(target));
+    this.iosClientProvider = dependencies.iosClientProvider ?? iosCtrlProxyClientFor;
     this.simctl = dependencies.simctl;
     this.timer = dependencies.timer ?? defaultTimer;
     this.transitionSink = dependencies.transitionSink ?? displayTransitions;

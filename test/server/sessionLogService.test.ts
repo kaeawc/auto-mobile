@@ -499,6 +499,8 @@ describe("SessionLogService (#7006)", () => {
         lastSeconds: 90,
         level: "debug",
         predicate: 'subsystem == "com.example.app" OR subsystem BEGINSWITH "com.example.app."',
+        mechanism: "simctl-log-show",
+        collectionMs: 0,
         timeoutMs: 5_000,
         byteCount: 132,
         truncated: true,
@@ -672,7 +674,7 @@ describe("SessionLogService (#7006)", () => {
       expect(fileSystem.files.has(`${DATA_ROOT}/Documents/logs/other.log`)).toBe(true);
     });
 
-    test("refuses physical iOS devices as unavailable without touching simctl", async () => {
+    test("refuses app-container logs on physical iOS without touching simctl", async () => {
       const { simctl, service } = iosHarness();
 
       const result = await service.collect({
@@ -682,7 +684,7 @@ describe("SessionLogService (#7006)", () => {
           appId: "com.example.app",
           maxBytes: 100,
           files: { container: "documents", paths: ["app.log"] },
-          unifiedLog: { lastSeconds: 10, level: "default" },
+          appGroup: { groupId: "group.com.example.shared", paths: [] },
         },
       });
 
@@ -690,7 +692,7 @@ describe("SessionLogService (#7006)", () => {
         status: "unavailable",
         reason: expect.stringContaining("only supported on iOS simulators"),
       });
-      expect(result.unifiedLog).toEqual({
+      expect(result.appGroup).toEqual({
         status: "unavailable",
         reason: expect.stringContaining("only supported on iOS simulators"),
       });

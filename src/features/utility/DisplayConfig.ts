@@ -38,6 +38,8 @@ import {
   type AccessibilityDisplaySupportLevel,
   type AccessibilityDisplayValues,
 } from "./AccessibilityDisplayPreferences";
+import type { CtrlProxyAppearanceResult } from "../observe/ios/types";
+import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
 
 /**
  * The argv-shaped slice of the simctl client this feature needs. Routing
@@ -181,16 +183,29 @@ export interface DisplayConfigDependencies {
   simctl?: SimctlAppearanceRunner;
   /** Process-lifetime baselines for accessibility display preferences this tool replaced. */
   accessibilityBaselines?: AccessibilityBaselineStore;
+  /** Physical iOS appearance seam (#14092); defaults to the device's CtrlProxy runner client. */
+  iosRunnerAppearance?: IosRunnerAppearanceClient;
   /** Process-lifetime baselines for the Simulator text size category this tool replaced. */
   contentSizeBaselines?: ContentSizeBaselineStore;
 }
 
-const IOS_PHYSICAL_DISPLAY_CONFIG_UNSUPPORTED_ERROR =
-  "Display configuration (font scale, content size, density, theme, accessibility display " +
-  "preferences) cannot be read or set on a physical iOS " +
-  "device: there is no automatable, per-device control for the system text size, display zoom, " +
-  "or Dark Mode outside the Simulator. simctl has no verb for them on hardware, and the only " +
-  "host mechanism is manual Settings toggles. Set these manually in the iOS Settings app.";
+/** The runner's `request_appearance` (`XCUIDevice.appearance`); physical iOS has no simctl. */
+export interface IosRunnerAppearanceClient {
+  requestAppearance(appearance?: "light" | "dark"): Promise<CtrlProxyAppearanceResult>;
+}
+
+/** Reads and writes a physical iOS device's light/dark appearance through the CtrlProxy runner. */
+interface IosAppearanceBackend {
+  /** Names the target in errors. */
+  readonly target: string;
+  read(): Promise<DisplayTheme | undefined>;
+  /** Resolves on success; rejects with the backend's own error. */
+  write(theme: "light" | "dark"): Promise<void>;
+}
+
+const IOS_FONT_SCALE_UNSUPPORTED_ERROR =
+  "fontScale is not supported on iOS devices: there is no simctl, defaults or XCUITest " +
+  "control for the system text scale. The iOS Simulator supports it as a Dynamic Type category.";
 
 const ANDROID_CONTENT_SIZE_UNSUPPORTED_ERROR =
   "contentSize is an iOS Dynamic Type category and is only supported on the iOS Simulator; " +
@@ -205,6 +220,8 @@ export class DisplayConfig {
 
   private simctl: SimctlAppearanceRunner;
 
+  private iosRunnerAppearance?: IosRunnerAppearanceClient;
+
   private themeBaselines: ThemeBaselineStore;
 
   private accessibilityBaselines?: AccessibilityBaselineStore;
@@ -217,6 +234,7 @@ export class DisplayConfig {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl ?? new SimCtlClient(device);
     this.accessibilityBaselines = dependencies.accessibilityBaselines;
+    this.iosRunnerAppearance = dependencies.iosRunnerAppearance;
     this.contentSizeBaselines = dependencies.contentSizeBaselines;
   }
 
@@ -230,21 +248,47 @@ export class DisplayConfig {
     });
   }
 
-  /** iOS simulators expose `simctl`/`defaults`; physical iOS devices expose neither. */
+  /** Physical iOS appearance through the runner; the Simulator uses {@link IosSimulatorDisplayConfig}. */
+  private iosAppearance(): IosAppearanceBackend {
+    const runner = this.iosRunnerAppearance ?? iosCtrlProxyClientFor(this.device);
+    const call = async (appearance?: "light" | "dark") => {
+      const result = await runner.requestAppearance(appearance);
+      if (!result.success) {
+        throw new Error(
+          `CtrlProxy runner appearance request failed: ${result.error ?? "unknown error"}. ` +
+            "Physical-device theme control needs a runner that supports request_appearance.",
+        );
+      }
+      return result.appearance === "light" || result.appearance === "dark"
+        ? result.appearance
+        : undefined;
+    };
+    return {
+      target: "device",
+      read: () => call(),
+      write: async (theme) => {
+        await call(theme);
+      },
+    };
+  }
+
+  /** iOS simulators expose `simctl`/`defaults`; physical iOS devices use the runner instead. */
   private isIosSimulator(): boolean {
     return resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
   }
 
   private support(): DisplayConfigSupport {
     if (this.device.platform === "ios") {
-      // The iOS Simulator supports theme (`simctl ui appearance`) and font scale as a
-      // Dynamic Type category (`simctl ui content_size`, #14087). Density has no
-      // simctl/defaults equivalent, and physical iOS has no path for any field (#6096, #14088).
+      // Theme uses `simctl ui appearance` on the Simulator and the runner's
+      // `XCUIDevice.appearance` on hardware (#14092). The Simulator also supports font scale
+      // as a Dynamic Type category (`simctl ui content_size`, #14087); density has no
+      // equivalent on either iOS target (#6096), and physical iOS has no path for the
+      // font scale or the accessibility preferences (#14088).
       const simulator = this.isIosSimulator();
       return {
         fontScale: simulator,
         density: false,
-        theme: simulator,
+        theme: true,
         ...(simulator ? {} : unsupportedAccessibilityDisplay().supported),
       };
     }
@@ -267,21 +311,206 @@ export class DisplayConfig {
     };
   }
 
+  /** Read the current physical iOS theme from the runner. */
+  private async readIosTheme(): Promise<DisplayTheme | undefined> {
+    return this.iosAppearance().read();
+  }
+
+  /**
+   * Set a physical iOS device's appearance through the runner. `system` and `custom` have no
+   * runner equivalent, so they are reported as an honest per-field refusal rather than silently
+   * coerced to light or dark.
+   */
+  private async setIosAppearance(theme: DisplayTheme): Promise<string[]> {
+    const backend = this.iosAppearance();
+    if (theme !== "light" && theme !== "dark") {
+      return [
+        `Cannot set theme '${theme}' on the iOS ${backend.target}: only 'light' or 'dark' can be set.`,
+      ];
+    }
+    try {
+      await backend.write(theme);
+      return [];
+    } catch (error) {
+      return [
+        `Setting the iOS ${backend.target} appearance to ${theme} failed: ${errorMessage(error)}`,
+      ];
+    }
+  }
+
   private iosSimulator(): IosSimulatorDisplayConfig {
     return new IosSimulatorDisplayConfig(this.device, this.simctl, this.contentSizeBaselines);
   }
 
-  private async getIosSimulatorConfig(): Promise<DisplayConfigResult> {
+  /** The Simulator's theme and text size, or a physical device's theme from the runner. */
+  private async getIosConfig(): Promise<DisplayConfigResult> {
     try {
-      const current = await this.iosSimulator().read();
+      const current = this.isIosSimulator()
+        ? await this.iosSimulator().read()
+        : await this.readIosThemeSnapshot();
       return this.withAccessibilityRead(current, await this.accessibility().read());
     } catch (error) {
-      logger.warn(
-        `[DisplayConfig] getConfig failed (iOS simulator): ${errorMessage(error)}`,
-        error,
-      );
+      logger.warn(`[DisplayConfig] getConfig failed (iOS): ${errorMessage(error)}`, error);
       return this.failure(errorMessage(error));
     }
+  }
+
+  private failure(error: string): DisplayConfigResult {
+    return {
+      success: false,
+      deviceId: this.device.deviceId,
+      platform: this.device.platform,
+      supported: this.support(),
+      error,
+    };
+  }
+
+  private async applyIosChanges(input: SetDisplayConfigInput): Promise<string[]> {
+    const errors: string[] = [];
+    if (input.fontScale !== undefined || input.contentSize !== undefined) {
+      errors.push(IOS_FONT_SCALE_UNSUPPORTED_ERROR);
+    }
+    if (input.density !== undefined) {
+      errors.push(IOS_DENSITY_UNSUPPORTED_ERROR);
+    }
+    if (input.theme !== undefined) {
+      errors.push(...(await this.setIosAppearance(input.theme)));
+    }
+    return errors;
+  }
+
+  /** Shape a single `readIosTheme()` call into a `DisplayConfigValues` snapshot. */
+  private async readIosThemeSnapshot(): Promise<DisplayConfigValues> {
+    const theme = await this.readIosTheme();
+    if (theme === undefined) {
+      throw new Error(`iOS did not report a readable ${this.iosAppearance().target} appearance`);
+    }
+    return { theme };
+  }
+
+  /** Build the failure response for a pre-read that rejects before any mutation ran. */
+  private iosPreReadFailure(error: unknown): DisplayConfigResult {
+    logger.warn(
+      `[DisplayConfig] setConfig pre-read failed (iOS simulator): ${errorMessage(error)}`,
+      error,
+    );
+    return {
+      success: false,
+      deviceId: this.device.deviceId,
+      platform: this.device.platform,
+      supported: this.support(),
+      error: errorMessage(error),
+    };
+  }
+
+  /**
+   * Read the post-mutation theme, isolated in its own try/catch from the
+   * pre-read: a failure here must not discard the already-captured `previous`
+   * restoration state, since the device may now be modified even though this
+   * verification read failed (issue #6096 review).
+   */
+  private async readIosAppliedSnapshot(): Promise<{
+    applied?: DisplayConfigValues;
+    readError?: string;
+  }> {
+    try {
+      return { applied: await this.readIosThemeSnapshot() };
+    } catch (error) {
+      logger.warn(
+        `[DisplayConfig] setConfig post-read failed (iOS simulator): ${errorMessage(error)}`,
+        error,
+      );
+      return { readError: `failed to read applied theme: ${errorMessage(error)}` };
+    }
+  }
+
+  /** Reject requests that cannot produce a physical iOS mutation before a baseline read. */
+  private validateIosDeviceSetInput(input: SetDisplayConfigInput): DisplayConfigResult | undefined {
+    // A request containing only an unsupported field cannot produce a useful
+    // mutation. Reject it before requiring a theme snapshot, while a supported
+    // theme mutation still fails closed if its baseline is unreadable.
+    if (!input.reset && input.theme === undefined) {
+      if (input.fontScale !== undefined || input.contentSize !== undefined) {
+        return this.unsupported(IOS_FONT_SCALE_UNSUPPORTED_ERROR);
+      }
+      if (input.density !== undefined) {
+        return this.unsupported(IOS_DENSITY_UNSUPPORTED_ERROR);
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * `setIosAppearance`/`applyIosChanges` return failures as error fragments (mirroring the
+   * Android `runChecked` pattern), so this never throws. A physical device resets to the theme
+   * this tool first replaced there, which the user chose (#14092).
+   */
+  private async applyIosMutation(
+    input: SetDisplayConfigInput,
+    previous: DisplayConfigValues,
+  ): Promise<{ errors: string[]; expectedTheme?: DisplayTheme }> {
+    if (!input.reset) {
+      if (input.theme !== undefined) {
+        this.recordIosThemeBaseline(previous);
+      }
+      return { errors: await this.applyIosChanges(input), expectedTheme: input.theme };
+    }
+    const resetTheme = this.iosResetTheme();
+    const errors = await this.setIosAppearance(resetTheme);
+    if (errors.length === 0) {
+      this.themeBaselines.delete(this.device.deviceId);
+    }
+    return { errors, expectedTheme: resetTheme };
+  }
+
+  /** Physical iOS only: the first appearance this tool replaced, restored by `reset`. */
+  private recordIosThemeBaseline(previous: DisplayConfigValues): void {
+    const id = this.device.deviceId;
+    if (previous.theme && !this.themeBaselines.get(id)) {
+      this.themeBaselines.set(id, previous.theme);
+    }
+  }
+
+  private iosResetTheme(): DisplayTheme {
+    return this.themeBaselines.get(this.device.deviceId) ?? "light";
+  }
+
+  private async setIosDeviceConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
+    const invalidInput = this.validateIosDeviceSetInput(input);
+    if (invalidInput) {
+      return invalidInput;
+    }
+
+    // Read the pre-change state first. If this fails, no mutation has run, so
+    // there is nothing to restore and no `previous` to advertise.
+    let previous: DisplayConfigValues;
+    try {
+      previous = await this.readIosThemeSnapshot();
+    } catch (error) {
+      return this.iosPreReadFailure(error);
+    }
+
+    const { errors, expectedTheme } = await this.applyIosMutation(input, previous);
+
+    const { applied, readError } = await this.readIosAppliedSnapshot();
+    const allErrors = readError ? [...errors, readError] : [...errors];
+    // The runner can accept a write while the device has not actually adopted it. A successful command is only an attempted mutation;
+    // report success only when the authoritative post-read confirms the target.
+    if (applied && expectedTheme && applied.theme !== expectedTheme) {
+      allErrors.push(
+        `iOS ${this.iosAppearance().target} appearance remained ${applied.theme} after requesting ${expectedTheme}`,
+      );
+    }
+    const error = allErrors.length > 0 ? allErrors.join("; ") : undefined;
+    return {
+      success: error === undefined,
+      deviceId: this.device.deviceId,
+      platform: this.device.platform,
+      supported: this.support(),
+      ...(applied ? { applied } : {}),
+      previous,
+      ...(error ? { error } : {}),
+    };
   }
 
   private async setIosSimulatorConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
@@ -325,23 +554,10 @@ export class DisplayConfig {
     };
   }
 
-  private failure(error: string): DisplayConfigResult {
-    return {
-      success: false,
-      deviceId: this.device.deviceId,
-      platform: this.device.platform,
-      supported: this.support(),
-      error,
-    };
-  }
-
   /** Read the current font scale, density, and theme. */
   async getConfig(): Promise<DisplayConfigResult> {
     if (this.device.platform === "ios") {
-      if (!this.isIosSimulator()) {
-        return this.unsupported(IOS_PHYSICAL_DISPLAY_CONFIG_UNSUPPORTED_ERROR);
-      }
-      return this.getIosSimulatorConfig();
+      return this.getIosConfig();
     }
     try {
       const adb = this.adbFactory.create(this.device);
@@ -380,7 +596,11 @@ export class DisplayConfig {
    */
   async getRestorableConfig(): Promise<DisplayConfigValues> {
     if (this.device.platform === "ios") {
-      return this.isIosSimulator() ? this.iosSimulator().readRestorable() : {};
+      if (this.isIosSimulator()) {
+        return this.iosSimulator().readRestorable();
+      }
+      const theme = await this.readIosTheme();
+      return theme === undefined ? {} : { theme };
     }
     return (await this.readRawValues(this.adbFactory.create(this.device))).restorableValues;
   }
@@ -425,9 +645,6 @@ export class DisplayConfig {
     if (contradiction !== undefined) {
       return this.invalidRequest(contradiction);
     }
-    if (this.device.platform === "ios" && !this.isIosSimulator()) {
-      return this.unsupported(IOS_PHYSICAL_DISPLAY_CONFIG_UNSUPPORTED_ERROR);
-    }
     if (this.device.platform === "android" && input.contentSize !== undefined) {
       return this.unsupported(ANDROID_CONTENT_SIZE_UNSUPPORTED_ERROR);
     }
@@ -438,9 +655,12 @@ export class DisplayConfig {
   }
 
   private setDisplayFields(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
-    return this.device.platform === "ios"
+    if (this.device.platform !== "ios") {
+      return this.setAndroidConfig(input);
+    }
+    return this.isIosSimulator()
       ? this.setIosSimulatorConfig(input)
-      : this.setAndroidConfig(input);
+      : this.setIosDeviceConfig(input);
   }
 
   private mergeAccessibilityChange(
@@ -858,15 +1078,15 @@ function setInputContradiction(input: SetDisplayConfigInput): string | undefined
   const explicit = hasDisplayField(input) || requestedAccessibilityFields(input).length > 0;
   if (input.reset === true && explicit) {
     return (
-      "reset cannot be combined with an explicit fontScale, contentSize, density, theme, " +
-      "increaseContrast, reduceMotion, or boldText: reset restores the platform defaults and " +
-      "recorded baselines. Send reset on its own, or send only the explicit fields you want to change."
+      "reset cannot be combined with an explicit fontScale, contentSize, density, theme, or " +
+      "accessibility display preference: reset restores the platform defaults and recorded " +
+      "baselines. Send reset on its own, or send only the explicit fields you want to change."
     );
   }
   if (input.reset !== true && !explicit) {
     return (
-      "At least one of fontScale, contentSize, density, theme, increaseContrast, reduceMotion, " +
-      "boldText, or reset must be provided to set display config."
+      "At least one of fontScale, contentSize, density, theme, an accessibility display " +
+      "preference, or reset must be provided to set display config."
     );
   }
   if (input.fontScale !== undefined && input.contentSize !== undefined) {

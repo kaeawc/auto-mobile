@@ -18,6 +18,12 @@ export const DEVICE_SETTING_KEYS = [
   "increaseContrast",
   "reduceMotion",
   "boldText",
+  // Android accessibility display settings (#14076), recorded as their raw platform setting.
+  "colorInversion",
+  "colorCorrection",
+  "magnification",
+  "magnificationScale",
+  "extraDim",
 ] as const;
 
 export type DeviceSettingKey = (typeof DEVICE_SETTING_KEYS)[number];

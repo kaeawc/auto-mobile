@@ -81,7 +81,7 @@ export const SIGNAL_RULES: readonly SignalRule[] = [
     name: "singleton",
     tier: "B",
     pattern:
-      /getInstance\(|resetInstance|resetForTesting|\.instance\s*=(?!=)|__reset|setInstance\(|resetSingleton/,
+      /getInstance\(|resetInstance|resetForTesting|\.instance\s*=(?!=)|\.getInstance\s*=(?!=)|__reset|setInstance\(|resetSingleton/,
   },
   { name: "setSystemTime", tier: "B", pattern: /setSystemTime|useFakeTimers/ },
   // Added after the study, from randomized shared runs (#10583): module-level
@@ -94,7 +94,7 @@ export const SIGNAL_RULES: readonly SignalRule[] = [
     name: "moduleState",
     tier: "B",
     pattern:
-      /(?<![.\w$])(?:reset[A-Z]\w*|set(?!Immediate\b|Timeout\b|Interval\b)[A-Z]\w*)\(|\.resetForTests?\(/,
+      /(?<![.\w$])(?:reset[A-Z]\w*|set(?!Immediate\b|Timeout\b|Interval\b)[A-Z]\w*)\(|\.resetForTests?\(|(?<![.\w$])install[A-Z]\w*ForTesting\(/,
   },
 ];
 

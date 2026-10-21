@@ -10,6 +10,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { KNOWN_ANDROID_LAUNCHER_PACKAGES } from "./androidLauncherRegistry";
+import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 
 /**
  * Verify that a "go home" action actually landed on the home screen by
@@ -52,19 +54,10 @@ const RESOLVE_HOME_TIMEOUT_MS = 5000;
  * launcher cannot be resolved at runtime (e.g. `cmd package` unavailable, or
  * the resolve command failing/timing out). Matched by EXACT package name --
  * never by prefix, so an unrelated app like `com.android.launcher3.example`
- * cannot be misclassified as a launcher. Mirrors `Idle.isSystemLauncher`'s
- * launcher packages, including the legacy AOSP `com.android.launcher`.
+ * cannot be misclassified as a launcher. Read from the shared launcher
+ * registry, as `Idle.isSystemLauncher` is.
  */
-const FALLBACK_LAUNCHER_PACKAGES: ReadonlySet<string> = new Set([
-  "com.android.launcher",
-  "com.android.launcher3",
-  "com.google.android.apps.nexuslauncher",
-  "com.samsung.android.app.launcher",
-  "com.miui.home",
-  "com.oneplus.launcher",
-  "com.huawei.android.launcher",
-  "com.sec.android.app.launcher",
-]);
+const FALLBACK_LAUNCHER_PACKAGES: ReadonlySet<string> = new Set(KNOWN_ANDROID_LAUNCHER_PACKAGES);
 
 /**
  * How long a resolved HOME launcher package stays valid before it must be
@@ -326,6 +319,7 @@ export async function isForegroundLauncher(
 /** Best-effort stability signal for surfaces whose gfxinfo is empty. */
 export class QuietTreeStability {
   private reader?: ViewHierarchyRequestReader;
+  private lastUpdatedAt?: number;
 
   constructor(
     private readonly device: BootedDevice,
@@ -379,6 +373,7 @@ export class QuietTreeStability {
           timeoutMs: remainingMs,
           requireFreshExtraction: true,
           skipWaitForFresh: true,
+          ...(this.lastUpdatedAt === undefined ? {} : { minTimestamp: this.lastUpdatedAt + 1 }),
           signal: readSignal,
         }),
       {
@@ -389,6 +384,9 @@ export class QuietTreeStability {
         onTimeout: () => controller.abort(),
       },
     );
+    if (!tree.hierarchy.error) {
+      this.lastUpdatedAt = hierarchyUpdatedAtToMillis(tree) ?? this.lastUpdatedAt;
+    }
     return tree.fresh === true && !tree.hierarchy.error ? hierarchyFingerprint(tree) : null;
   }
 

@@ -42,6 +42,11 @@ const displayConfigValuesOutputSchema = z
     increaseContrast: z.boolean().optional(),
     reduceMotion: z.boolean().optional(),
     boldText: z.boolean().optional(),
+    colorInversion: z.boolean().optional(),
+    colorCorrection: z.string().optional(),
+    magnification: z.boolean().optional(),
+    magnificationScale: z.number().optional(),
+    extraDim: z.boolean().optional(),
   })
   .passthrough();
 
@@ -62,6 +67,11 @@ export const displayConfigResultSchema = z
         increaseContrast: accessibilityDisplaySupportOutputSchema.optional(),
         reduceMotion: accessibilityDisplaySupportOutputSchema.optional(),
         boldText: accessibilityDisplaySupportOutputSchema.optional(),
+        colorInversion: accessibilityDisplaySupportOutputSchema.optional(),
+        colorCorrection: accessibilityDisplaySupportOutputSchema.optional(),
+        magnification: accessibilityDisplaySupportOutputSchema.optional(),
+        magnificationScale: accessibilityDisplaySupportOutputSchema.optional(),
+        extraDim: accessibilityDisplaySupportOutputSchema.optional(),
       })
       .passthrough(),
     supportNotes: z
@@ -69,6 +79,11 @@ export const displayConfigResultSchema = z
         increaseContrast: z.string().optional(),
         reduceMotion: z.string().optional(),
         boldText: z.string().optional(),
+        colorInversion: z.string().optional(),
+        colorCorrection: z.string().optional(),
+        magnification: z.string().optional(),
+        magnificationScale: z.string().optional(),
+        extraDim: z.string().optional(),
       })
       .passthrough()
       .optional(),

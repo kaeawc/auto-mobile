@@ -36,7 +36,7 @@ import {
 } from "./IOSHostPortAvailabilityChecker";
 import { IosCtrlProxyHealthClient } from "./IosCtrlProxyHealthClient";
 import { IosCtrlProxyProcessClient } from "./IosCtrlProxyProcessClient";
-import { ENV, readEnvRaw } from "../../config/env";
+import { ENV, readEnvBool } from "../../config/env";
 import {
   CtrlProxyStartOptions,
   RemoteCtrlProxyIOSRunner,
@@ -244,8 +244,7 @@ export class IosCtrlProxyRuntime {
         appBundleId: IOS_CTRL_PROXY_APP_BUNDLE_ID,
         legacyAppBundleId: IOS_CTRL_PROXY_LEGACY_APP_BUNDLE_ID,
         isSimulator: () => this.host.isSimulator(),
-        isHashVerificationSkipped: () =>
-          ["true", "1"].includes(readEnvRaw(ENV.IOS_SKIP_CTRL_PROXY_APP_HASH) ?? ""),
+        isHashVerificationSkipped: () => readEnvBool(ENV.IOS_SKIP_CTRL_PROXY_APP_HASH),
         getExpectedAppHash: (platform) => this.builder.getExpectedAppHash(platform),
       })
     );

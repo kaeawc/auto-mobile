@@ -30,7 +30,7 @@ final class SdkEndpointResolverTests: XCTestCase {
     private func makeResolver(
         _ transport: any HTTPRequesting, warnings: Warnings = Warnings(),
         now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        negativeTTL: TimeInterval = 3
+        negativeTTL: TimeInterval = 30
     )
         -> SdkEndpointResolver
     {
@@ -70,7 +70,7 @@ final class SdkEndpointResolverTests: XCTestCase {
         try await assertUnavailable(resolver)
         let probeRequests = SdkSimulatorPort.probeCount + 1
         XCTAssertEqual(stub.recordedRequests.count, probeRequests)
-        clock.advance(by: 2999)
+        clock.advance(by: 29999)
         try await assertUnavailable(resolver, cached: true)
         XCTAssertEqual(stub.recordedRequests.count, probeRequests)
     }
@@ -84,6 +84,37 @@ final class SdkEndpointResolverTests: XCTestCase {
         clock.advance(by: 1001)
         try await assertUnavailable(resolver)
         XCTAssertEqual(stub.recordedRequests.count, 2 * (SdkSimulatorPort.probeCount + 1))
+    }
+
+    func testDefaultNegativeCacheSkipsProbesAtFourSecondObserveCadence() async throws {
+        let clock = FakeMonotonicClock()
+        let stub = StubHTTPTransport(refusedCandidates + [.transportError])
+        let resolver = SdkEndpointResolver(
+            environment: ["SIMULATOR_UDID": udid], healthTransport: stub,
+            now: { TimeInterval(clock.now()) / 1000 }
+        )
+        try await assertUnavailable(resolver)
+        for _ in 0 ..< 5 {
+            clock.advance(by: 4000)
+            try await assertUnavailable(resolver, cached: true)
+            XCTAssertEqual(stub.recordedRequests.count, SdkSimulatorPort.probeCount + 1)
+        }
+    }
+
+    func testAppLifecycleEventClearsNegativeCacheAndPreservesCachedSuccess() async throws {
+        let clock = FakeMonotonicClock()
+        let stub = try StubHTTPTransport(refusedCandidates + [.transportError, health(udid)])
+        let resolver = makeResolver(stub, now: { TimeInterval(clock.now()) / 1000 })
+        try await assertUnavailable(resolver)
+        try await assertUnavailable(resolver, cached: true)
+        await resolver.noteAppLifecycleEvent()
+        let discovered = try await resolver.resolve()
+        XCTAssertEqual(discovered.port, Int(SdkSimulatorPort.simulatorPort(udid: udid)))
+        await resolver.noteAppLifecycleEvent()
+        clock.advance(by: 30001)
+        let cached = try await resolver.resolve()
+        XCTAssertEqual(cached, discovered)
+        XCTAssertEqual(stub.recordedRequests.count, SdkSimulatorPort.probeCount + 2)
     }
 
     func testForegroundBundleChangesClearOnlyNegativeCache() async throws {
@@ -114,13 +145,13 @@ final class SdkEndpointResolverTests: XCTestCase {
             if bundleChanged {
                 await resolver.noteForegroundBundle("test.sdk.app")
             } else {
-                clock.advance(by: 3000)
+                clock.advance(by: 30000)
             }
             let discovered = try await resolver.resolve()
             XCTAssertEqual(discovered.port, Int(SdkSimulatorPort.simulatorPort(udid: udid)))
             // Foreground notifications must preserve successful endpoint caching.
             await resolver.noteForegroundBundle("test.another.app")
-            clock.advance(by: 3001)
+            clock.advance(by: 30001)
             let cached = try await resolver.resolve()
             XCTAssertEqual(cached, discovered)
             XCTAssertEqual(stub.recordedRequests.count, SdkSimulatorPort.probeCount + 2)
@@ -135,7 +166,10 @@ final class SdkEndpointResolverTests: XCTestCase {
         try await assertUnavailable(resolver)
         try await assertUnavailable(resolver, cached: true)
         try await assertUnavailable(resolver, cached: true)
-        clock.advance(by: 3001)
+        clock.advance(by: 29999)
+        try await assertUnavailable(resolver, cached: true)
+        XCTAssertEqual(stub.recordedRequests.count, SdkSimulatorPort.probeCount + 1)
+        clock.advance(by: 1)
         try await assertUnavailable(resolver)
         try await assertUnavailable(resolver, cached: true)
         XCTAssertEqual(stub.recordedRequests.count, 2 * (SdkSimulatorPort.probeCount + 1))
@@ -168,6 +202,20 @@ final class SdkEndpointResolverTests: XCTestCase {
         )
         try await assertUnavailable(resolver)
         await client.foregroundBundleDidChange("test.sdk.app")
+        let discovered = try await resolver.resolve()
+        XCTAssertEqual(discovered.port, Int(SdkSimulatorPort.simulatorPort(udid: udid)))
+        XCTAssertEqual(stub.recordedRequests.count, SdkSimulatorPort.probeCount + 2)
+    }
+
+    func testHierarchyClientForwardsAppLifecycleChangeThroughProtocol() async throws {
+        let clock = FakeMonotonicClock()
+        let stub = try StubHTTPTransport(refusedCandidates + [.transportError, health(udid)])
+        let resolver = makeResolver(stub, now: { TimeInterval(clock.now()) / 1000 })
+        let client: any SdkHierarchyFetching = SdkHierarchyClient(
+            baseURL: loopbackBaseURL(port: 8766), transport: stub, healthTransport: stub, endpointResolver: resolver
+        )
+        try await assertUnavailable(resolver)
+        await client.appLifecycleDidChange()
         let discovered = try await resolver.resolve()
         XCTAssertEqual(discovered.port, Int(SdkSimulatorPort.simulatorPort(udid: udid)))
         XCTAssertEqual(stub.recordedRequests.count, SdkSimulatorPort.probeCount + 2)
@@ -533,7 +581,7 @@ final class SdkEndpointResolverTests: XCTestCase {
             XCTAssertTrue(message.contains("SDK unavailable"))
             XCTAssertTrue(message.contains(udid))
         }
-        clock.advance(by: 3000)
+        clock.advance(by: 30000)
         let result = try await resolver.resolve()
         XCTAssertEqual(result.port, Int(SdkSimulatorPort.simulatorPort(udid: udid)))
     }

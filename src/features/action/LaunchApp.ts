@@ -225,10 +225,14 @@ export class LaunchApp extends BaseVisualChange {
       signal,
       launchArguments,
       launchEnvironment,
+      intent,
     }: LaunchAppCall,
   ): Promise<LaunchAppResult> {
     logger.info("execute");
     signal?.throwIfAborted();
+    if (intent && this.device.platform !== "android") {
+      throw new ActionableError("intent is supported on Android only; use launchArguments on iOS.");
+    }
     switch (this.device.platform) {
       case "ios":
         if (
@@ -244,7 +248,7 @@ export class LaunchApp extends BaseVisualChange {
       case "android":
         if (launchArguments?.length) {
           throw new ActionableError(
-            "launchArguments are supported on iOS only. Android launch intent extras require a separate interface.",
+            "launchArguments are supported on iOS only. On Android, pass intent (component, action, data, categories, extras, flags) instead.",
           );
         }
         if (launchEnvironment !== undefined) {
@@ -258,6 +262,7 @@ export class LaunchApp extends BaseVisualChange {
           userId,
           skipUiStability,
           signal,
+          intent,
         });
       default:
         throw unsupportedPlatformError(this.device.platform, "launch apps");
@@ -267,20 +272,9 @@ export class LaunchApp extends BaseVisualChange {
   private async executeAndroidWithSamplingPriority(
     options: AndroidLaunchOptions,
   ): Promise<LaunchAppResult> {
-    const { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal } =
-      options;
     return await this.performanceSamplingCoordinator.withDeviceSamplingPaused(
       this.device.deviceId,
-      async () =>
-        await this.executeAndroid({
-          packageName,
-          clearAppData,
-          coldBoot,
-          activityName,
-          userId,
-          skipUiStability,
-          signal,
-        }),
+      async () => await this.executeAndroid(options),
     );
   }
 
@@ -466,17 +460,10 @@ export class LaunchApp extends BaseVisualChange {
    * @param skipUiStability - Whether to skip UI stability checks
    */
   private async executeAndroid(options: AndroidLaunchOptions): Promise<LaunchAppResult> {
-    const { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal } =
-      options;
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
 
-    return runWithNestedPerfTracker(perf, () =>
-      this.runAndroidLaunch(
-        { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal },
-        perf,
-      ),
-    );
+    return runWithNestedPerfTracker(perf, () => this.runAndroidLaunch(options, perf));
   }
 
   private async runAndroidLaunch(
@@ -494,7 +481,7 @@ export class LaunchApp extends BaseVisualChange {
     if (preparation.failure) {
       return preparation.failure;
     }
-    if (preparation.alreadyForeground) {
+    if (preparation.alreadyForeground && !options.intent) {
       return this.observeAlreadyForegroundAndroid(options, targetUserId, perf);
     }
     return this.launchNewAndroidProcess(options, targetUserId, perf);
@@ -756,7 +743,8 @@ export class LaunchApp extends BaseVisualChange {
     targetUserId: number,
     perf: PerformanceTracker,
   ): Promise<LaunchAppResult> {
-    const { packageName, clearAppData, coldBoot, activityName, skipUiStability, signal } = options;
+    const { packageName, clearAppData, coldBoot, activityName, skipUiStability, signal, intent } =
+      options;
     logger.info(`[LaunchApp] Proceeding with app launch`);
     this.assertLaunchNotAborted(signal);
 
@@ -786,6 +774,7 @@ export class LaunchApp extends BaseVisualChange {
           targetUserId,
           perf,
           signal,
+          intent,
         );
         signal?.throwIfAborted();
         const foregroundReady = await this.waitForAppForeground(

@@ -42,7 +42,7 @@ import * as database from "../../src/db";
 function identityHarness(
   persist: (record: PidFileData) => Promise<void> = async () => {},
   platform: NodeJS.Platform = process.platform,
-  stat = () => ({ dev: 1, ino: 2 }),
+  stat = () => ({ dev: 1n, ino: 2n }),
   reportStartupFailure: (message: string) => void = () => {},
 ) {
   const host: DaemonIdentityHost = {
@@ -251,6 +251,7 @@ describe("auxiliary stream degradation", () => {
     let binds = 0;
     let probes = 0;
     let fullRecoveries = 0;
+    let identityRepublishes = 0;
     let callbacks = 0;
     const start = () =>
       identity.startAuxiliarySocket("observation-stream", async () => {
@@ -281,6 +282,10 @@ describe("auxiliary stream degradation", () => {
       httpServer: () => ({ listening: true }),
       socketServerListening: () => true,
       observationStreamHealthy: () => health.isHealthy(),
+      onObservationStreamRestored: async () => {
+        identityRepublishes++;
+        return true;
+      },
       databaseHealthProbe: () => ({
         check: async () => {
           probes++;
@@ -310,15 +315,18 @@ describe("auxiliary stream degradation", () => {
       expect(probes).toBe(4);
       expect(binds).toBe(5);
       expect(fullRecoveries).toBe(0);
+      expect(identityRepublishes).toBe(0);
       holderAlive = false;
       await tick();
       expect(health.isHealthy()).toBe(true);
       expect(getUnavailableAuxiliarySockets()).toEqual([]);
       expect(callbacks).toBe(5);
+      expect(identityRepublishes).toBe(1);
       await tick();
       expect(binds).toBe(6);
       expect(probes).toBe(6);
       expect(fullRecoveries).toBe(0);
+      expect(identityRepublishes).toBe(1);
     } finally {
       await check.stop();
     }
@@ -326,7 +334,7 @@ describe("auxiliary stream degradation", () => {
 
   test("control recovery records the replacement inode so cleanup removes socket before PID", async () => {
     const timer = new FakeTimer();
-    let inode = { dev: 1, ino: 2 };
+    let inode = { dev: 1n, ino: 2n };
     const identity = identityHarness(undefined, "linux", () => inode);
     identity.recordControlSocketIdentity();
     const ownerGuard = new IncumbentOwnerGuard({
@@ -399,7 +407,7 @@ describe("auxiliary stream degradation", () => {
     };
     // A successful fake bind replaces the inode; no real listener or path is touched.
     const start = spyOn(UnixSocketServer.prototype, "start").mockImplementation(async () => {
-      inode = { dev: 1, ino: 3 };
+      inode = { dev: 1n, ino: 3n };
     });
     const errors: string[] = [];
     const logError = spyOn(logger, "error").mockImplementation((message) => {
@@ -437,6 +445,15 @@ describe("auxiliary stream degradation", () => {
           }
           paths.add(to);
         },
+        copyFileExclusiveSync: (from, to) => {
+          if (paths.has(to)) {
+            throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+          }
+          if (!paths.has(from)) {
+            throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+          }
+          paths.add(to);
+        },
         readPid: () => ({
           pid: process.pid,
           socketPath: SOCKET_PATH,
@@ -463,7 +480,7 @@ describe("auxiliary stream degradation", () => {
     identity.recordControlSocketIdentity();
     const options = identity.getDaemonFileCleanupOptions();
     expect(options.socketPaths).toContain(SOCKET_PATH);
-    expect(options.socketFileIdentities.get(SOCKET_PATH)).toEqual({ dev: 1, ino: 2 });
+    expect(options.socketFileIdentities.get(SOCKET_PATH)).toEqual({ dev: 1n, ino: 2n });
   });
 });
 

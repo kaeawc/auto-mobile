@@ -24,6 +24,10 @@ import {
 import type { SdkTriggerRequest } from "../observe/ios/CtrlProxySdkTrigger";
 import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
+import {
+  defaultDeviceTraits,
+  type DeviceTraits,
+} from "../../utils/android-cmdline-tools/deviceTraits";
 
 // The biometric prompt needs a brief settle before verification.
 export const BIOMETRIC_PROMPT_SETTLE_MS = 100;
@@ -80,16 +84,19 @@ export class BiometricAuth extends BaseVisualChange {
     },
   } as const;
 
+  private readonly deviceTraits: DeviceTraits;
+
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private simctl: BiometricSimctl | null = null,
     private readonly iosSdkTriggers: IosSdkTriggerSenderFactory = defaultIosSdkTriggerSenderFactory,
-    collaborators: DisplayFenceDependencies = {},
+    collaborators: DisplayFenceDependencies & { deviceTraits?: DeviceTraits } = {},
   ) {
     super(device, adb, timer, undefined, collaborators);
     this.device = device;
+    this.deviceTraits = collaborators.deviceTraits ?? defaultDeviceTraits;
   }
 
   async execute(
@@ -563,8 +570,8 @@ export class BiometricAuth extends BaseVisualChange {
    */
   private async checkCapability(): Promise<{ isEmulator: boolean; supportsEmuFinger: boolean }> {
     try {
-      const qemuResult = await this.adb.executeCommand("shell getprop ro.kernel.qemu");
-      const isEmulator = qemuResult.trim() === "1";
+      const traits = await this.deviceTraits.read(this.adb, this.device.deviceId);
+      const isEmulator = traits.isEmulator === true;
 
       if (!isEmulator) {
         return { isEmulator: false, supportsEmuFinger: false };

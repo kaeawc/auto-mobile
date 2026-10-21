@@ -116,8 +116,6 @@ export { PHYSICAL_IOS_SCAN_BUDGET_MS };
 
 export class DeviceReadiness implements DeviceReadinessContract {
   private readonly selection = new ActiveDeviceSelection();
-  private static instance: DeviceReadiness;
-  private static defaultProvider: DeviceClientProvider | undefined;
   private readonly admissionGate: DeviceAdmissionGate;
   private readonly executionBinding: DeviceExecutionBinding;
   private readonly readinessSelection: ReadinessSelection;
@@ -192,7 +190,6 @@ export class DeviceReadiness implements DeviceReadinessContract {
       selection: this.selection,
       withLifecycleStart: (...args) => this.withLifecycleStart(...args),
       verifyDevice: (...args) => this.verifyDevice(...args),
-      setCurrentDevice: (...args) => this.setCurrentDevice(...args),
       applyAppearanceOnConnect: (device, sessionId) =>
         applyAppearanceOnConnect(
           device,
@@ -271,36 +268,12 @@ export class DeviceReadiness implements DeviceReadinessContract {
     return this.provider.getDeviceUtils();
   }
 
-  public static getInstance(): DeviceReadiness {
-    if (!DeviceReadiness.instance) {
-      if (!DeviceReadiness.defaultProvider) {
-        DeviceReadiness.defaultProvider = createDefaultDeviceClientProvider();
-      }
-      DeviceReadiness.instance = new DeviceReadiness(DeviceReadiness.defaultProvider);
-    }
-    return DeviceReadiness.instance;
-  }
-
   public static createInstance(
-    provider: DeviceClientProvider,
+    provider: DeviceClientProvider = createDefaultDeviceClientProvider(),
     adbFactory?: AdbClientFactory,
     options?: DeviceReadinessOptions,
   ): DeviceReadiness {
     return new DeviceReadiness(provider, adbFactory, options);
-  }
-
-  /**
-   * Get the current device ID
-   */
-  public getCurrentDevice(): BootedDevice | undefined {
-    return this.selection.currentDevice;
-  }
-
-  /**
-   * Get the current platform
-   */
-  public getCurrentPlatform(): Platform | undefined {
-    return this.selection.currentPlatform;
   }
 
   /**
@@ -310,25 +283,16 @@ export class DeviceReadiness implements DeviceReadinessContract {
     return this.deviceUtils;
   }
 
-  /**
-   * Set the current device ID and platform
-   */
-  public setCurrentDevice(device: BootedDevice, platform: Platform): void {
-    this.selection.currentDevice = device;
-    this.selection.currentPlatform = platform;
-
-    if (platform === "android") {
-      // Update AdbClient with new device ID - need a fresh client for the new device
-      this._adb = this.adbFactory.create(device);
-    }
+  public getExplicitDevicePin(connectionId?: string): BootedDevice | undefined {
+    return this.selection.getPin(connectionId);
   }
 
-  public getExplicitDevicePin(): BootedDevice | undefined {
-    return this.selection.explicitDevicePin;
+  public setExplicitDevicePin(device: BootedDevice, connectionId?: string): void {
+    this.selection.setPin(device, connectionId);
   }
 
-  public setExplicitDevicePin(device: BootedDevice): void {
-    this.selection.explicitDevicePin = device;
+  public clearConnectionDevicePin(connectionId: string): void {
+    this.selection.clearConnection(connectionId);
   }
 
   public clearExplicitDevicePin(deviceId: string): void {
@@ -346,6 +310,17 @@ export class DeviceReadiness implements DeviceReadinessContract {
     options?: ConnectedPlatformScanOptions,
   ): Promise<ConnectedPlatformScan> {
     return this.readinessSelection.detectConnectedPlatformsWithStatus(signal, options);
+  }
+
+  public listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]> {
+    return this.readinessSelection.listBootedAndroidDevicesForSelection({
+      bypassAndroidDeviceListCache: true,
+      signal: options?.signal,
+    });
+  }
+
+  public verifyAndroidCtrlProxyServiceReady(device: BootedDevice): Promise<boolean> {
+    return this.provider.getAndroidCtrlProxyClient(device).verifyServiceReady(2, 200, 2000);
   }
 
   private readonly checkedAndroidOwnership = new AsyncLocalStorage<Set<string>>();

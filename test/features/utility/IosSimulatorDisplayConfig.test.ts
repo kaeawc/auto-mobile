@@ -191,7 +191,7 @@ describe("displayConfig font scale on the iOS Simulator (#14087)", () => {
 
     expect(result.success).toBe(false);
     expect(result.supported.fontScale).toBe(false);
-    expect(result.error).toContain("physical iOS");
+    expect(result.error).toContain("fontScale is not supported on iOS");
     expect(simctl.calls).toEqual([]);
   });
 

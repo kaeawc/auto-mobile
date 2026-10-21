@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "h": false
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Hi @ana",
+          "linkify": {
+            "kinds": ["mention"],
+            "onTap": [
+              {
+                "type": "setState",
+                "key": "h",
+                "value": {
+                  "match": "text"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "switch",
+          "stateKey": "h"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].linkify.onTap[0].value",
+  "expectedMessage": "setState value does not fit the control bound to \"h\": Toggle control requires a boolean state key"
+}

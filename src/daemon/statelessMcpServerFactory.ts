@@ -37,7 +37,11 @@ export interface McpRequestSessionContext {
 /** The daemon-wide part of a request server's options, fixed when the daemon starts. */
 export type StatelessMcpServerBase = Pick<
   McpServerOptions,
-  "iosDependencies" | "debug" | "acceptanceDiscoveryCapability" | "sessionToolBindingStore"
+  | "deviceReadiness"
+  | "iosDependencies"
+  | "debug"
+  | "acceptanceDiscoveryCapability"
+  | "sessionToolBindingStore"
 >;
 
 // Fetch's `Headers` strips leading and trailing HTTP whitespace from a value before sending it,

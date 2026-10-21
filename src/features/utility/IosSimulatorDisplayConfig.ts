@@ -123,7 +123,7 @@ export interface IosSimulatorDisplayChange {
 }
 
 export const IOS_DENSITY_UNSUPPORTED_ERROR =
-  "density is not supported on the iOS Simulator: there is no simctl/defaults control for " +
+  "density is not supported on iOS: there is no simctl, defaults or XCUITest control for " +
   "display density.";
 
 type SimctlRunner = Pick<SimCtl, "executeCommandArgs">;

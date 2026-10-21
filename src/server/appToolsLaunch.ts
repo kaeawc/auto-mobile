@@ -273,6 +273,7 @@ export function executeLaunch(
     signal,
     launchArguments,
     launchEnvironment: prototypeLaunch?.environment,
+    intent: args.intent,
   });
 }
 

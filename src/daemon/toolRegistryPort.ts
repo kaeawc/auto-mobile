@@ -1,4 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
+import type { DeviceReadiness } from "./readiness/DeviceReadiness";
 
 /** The slice of a registered tool the daemon reads. */
 export interface DaemonRegisteredTool {
@@ -12,6 +13,7 @@ export interface DaemonRegisteredTool {
  * server tier.
  */
 export interface DaemonToolRegistryPort {
+  setDeviceReadiness(readiness: DeviceReadiness): void;
   isUserConfigurableTool(name: string): boolean;
   getRegisteredTool(name: string): DaemonRegisteredTool | undefined;
   callInternal(

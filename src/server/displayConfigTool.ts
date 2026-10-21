@@ -10,7 +10,10 @@ import {
   type DisplayConfigResult,
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
-import { ACCESSIBILITY_DISPLAY_FIELDS } from "../features/utility/AccessibilityDisplayPreferences";
+import {
+  ACCESSIBILITY_DISPLAY_FIELDS,
+  COLOR_CORRECTION_MODES,
+} from "../features/utility/AccessibilityDisplayPreferences";
 import { IOS_CONTENT_SIZE_CATEGORIES } from "../features/utility/IosSimulatorDisplayConfig";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import type { BootedDevice } from "../models";
@@ -85,14 +88,41 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
           "Bold Text. Android API 31+: secure font_weight_adjustment 300. iOS Simulator: partial, " +
             "written to com.apple.Accessibility defaults; relaunch the app to observe. Omit to leave unchanged.",
         ),
+      colorInversion: z
+        .boolean()
+        .optional()
+        .describe("Android: color inversion (secure accessibility_display_inversion_enabled)."),
+      colorCorrection: z
+        .enum(COLOR_CORRECTION_MODES)
+        .optional()
+        .describe(
+          "Android: color correction (daltonizer) mode, or 'off'. 'grayscale' is monochromacy.",
+        ),
+      magnification: z
+        .boolean()
+        .optional()
+        .describe(
+          "Android: enable the triple-tap magnification gesture. Enabling it does not zoom the " +
+            "screen until the gesture is performed.",
+        ),
+      magnificationScale: z
+        .number()
+        .min(1)
+        .max(8)
+        .optional()
+        .describe("Android: the magnification gesture's zoom factor (AOSP default 2)."),
+      extraDim: z
+        .boolean()
+        .optional()
+        .describe("Android API 31+: Extra dim (secure reduce_bright_colors_activated)."),
       reset: z
         .boolean()
         .optional()
         .describe(
           "On Android, restore font scale and density to device defaults. Restore night mode only " +
             "to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. " +
-            "Android reset never forces light mode. On the iOS Simulator, reset restores light appearance. " +
-            "On both, restore each of increaseContrast, reduceMotion and boldText that displayConfig " +
+            "Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. " +
+            "On both, restore each accessibility display preference that displayConfig " +
             "changed earlier in this process.",
         ),
     })
@@ -103,8 +133,8 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
       code: "custom",
       path: ["reset"],
       message:
-        "reset cannot be combined with fontScale, contentSize, density, theme, increaseContrast, " +
-        "reduceMotion, or boldText; send reset on its own.",
+        "reset cannot be combined with an explicit display field or accessibility display " +
+        "preference; send reset on its own.",
     });
   }
   if (values.fontScale !== undefined && values.contentSize !== undefined) {
@@ -125,6 +155,11 @@ const DISPLAY_CONFIG_SET_FIELDS = [
   "increaseContrast",
   "reduceMotion",
   "boldText",
+  "colorInversion",
+  "colorCorrection",
+  "magnification",
+  "magnificationScale",
+  "extraDim",
 ] as const;
 
 function displayConfigFieldsPresent(
@@ -146,12 +181,20 @@ function displayConfigSetInput(args: DisplayConfigArgs): SetDisplayConfigInput {
     ...(args.fontScale !== undefined ? { fontScale: args.fontScale } : {}),
     ...(args.density !== undefined ? { density: args.density } : {}),
     ...(args.theme !== undefined ? { theme: args.theme } : {}),
+    ...accessibilityArgs(args),
     ...(args.contentSize !== undefined ? { contentSize: args.contentSize } : {}),
-    ...(args.increaseContrast !== undefined ? { increaseContrast: args.increaseContrast } : {}),
-    ...(args.reduceMotion !== undefined ? { reduceMotion: args.reduceMotion } : {}),
-    ...(args.boldText !== undefined ? { boldText: args.boldText } : {}),
     ...(args.reset !== undefined ? { reset: args.reset } : {}),
   };
+}
+
+/** The accessibility display preferences present in the wire args. */
+function accessibilityArgs(args: DisplayConfigArgs): Partial<SetDisplayConfigInput> {
+  return Object.fromEntries(
+    ACCESSIBILITY_DISPLAY_FIELDS.filter((field) => args[field] !== undefined).map((field) => [
+      field,
+      args[field],
+    ]),
+  );
 }
 
 function displayConfigMessage(result: DisplayConfigResult): string {
@@ -206,4 +249,4 @@ export const displayConfigHandler = async (device: BootedDevice, args: DisplayCo
 };
 
 export const DISPLAY_CONFIG_DESCRIPTION =
-  "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme (via `simctl ui appearance`) and font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process. The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.";
+  "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.";

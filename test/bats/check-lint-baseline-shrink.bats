@@ -180,7 +180,7 @@ commit_fixture() {
   baseline android/one/lint-baseline.xml 'A&amp;B'
   commit_fixture
   git update-ref refs/remotes/origin/main HEAD
-  printf '<issues><!-- <issue id="New"/> --><issue id="A&#38;B"/></issues>\n' > android/one/lint-baseline.xml
+  printf '<issues><!-- <issue id="New"/> --><issue id="A&#38;B" message="a &amp; b"><location file="x"/></issue></issues>\n' > android/one/lint-baseline.xml
   commit_fixture
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -213,4 +213,102 @@ commit_fixture() {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *'initial baselines accepted'* ]]
+}
+
+located_baseline() {
+  printf '<issues><issue id="Alpha" message="same finding" errorLine1="%s"><location file="%s" line="%s" column="%s"/></issue></issues>\n' \
+    "${4:-old source}" "$2" "${3:-1}" "${3:-1}" > "$1"
+}
+
+@test "same-id replacement at another location fails" {
+  located_baseline android/one/lint-baseline.xml Old.kt
+  commit_fixture
+  git update-ref refs/remotes/origin/main HEAD
+  located_baseline android/one/lint-baseline.xml New.kt
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'Alpha'* ]]
+}
+
+@test "line column and errorLine changes alone pass" {
+  located_baseline android/one/lint-baseline.xml Old.kt
+  commit_fixture
+  git update-ref refs/remotes/origin/main HEAD
+  located_baseline android/one/lint-baseline.xml Old.kt 99 'new source'
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "new files cannot spend removed identities on a different location or message" {
+  located_baseline android/one/lint-baseline.xml Old.kt
+  commit_fixture
+  git update-ref refs/remotes/origin/main HEAD
+  rm android/one/lint-baseline.xml
+  located_baseline android/two/lint-baseline.xml New.kt
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  located_baseline android/two/lint-baseline.xml Old.kt
+  sed -i.bak 's/same finding/different finding/' android/two/lint-baseline.xml
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+}
+
+jj_fixture() {
+  mkdir -p .jj fake-bin snapshots/base snapshots/head snapshots/worktree
+  cp android/one/lint-baseline.xml snapshots/base/baseline.xml
+  cp android/one/lint-baseline.xml snapshots/head/baseline.xml
+  cp android/one/lint-baseline.xml snapshots/worktree/baseline.xml
+  # Preserve the fixture history without allowing Git discovery.
+  mv .git git-metadata
+  cat > fake-bin/git <<'STUB'
+#!/usr/bin/env bash
+echo 'Git must not be used in a jj-only workspace' >&2
+exit 97
+STUB
+  cat > fake-bin/jj <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$JJ_CALLS"
+case "$*" in
+  'workspace root') printf '%s\n' "$JJ_ROOT" ;;
+  'log -r main@origin --no-graph -T ') exit 0 ;;
+  'log -r fork_point(@- | main@origin) --no-graph -T commit_id') echo base ;;
+  'file list -r base'|'file list -r @-'|'file list -r @')
+    [[ "${JJ_LIST_FAIL:-}" != true ]] || exit 1
+    printf '%s\n' scripts/android/check-lint-baseline-shrink.sh android/one/lint-baseline.xml ;;
+  'file show -r base scripts/android/check-lint-baseline-shrink.sh') exit 0 ;;
+  'file show -r base android/one/lint-baseline.xml') cat snapshots/base/baseline.xml ;;
+  'file show -r @- android/one/lint-baseline.xml') cat snapshots/head/baseline.xml ;;
+  *) echo "unexpected jj command: $*" >&2; exit 1 ;;
+esac
+STUB
+  chmod +x fake-bin/git fake-bin/jj
+  export PATH="$PWD/fake-bin:$PATH" JJ_ROOT="$PWD" JJ_CALLS="$PWD/jj-calls"
+}
+
+@test "jj-only workspace checks committed baselines and worktree identities" {
+  jj_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'shrink-only'* ]]
+  baseline snapshots/head/baseline.xml Gamma
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  baseline android/one/lint-baseline.xml Alpha
+  run bash "$SCRIPT" --worktree --base-ref main@origin
+  [ "$status" -eq 0 ]
+  baseline android/one/lint-baseline.xml Gamma
+  run bash "$SCRIPT" --worktree
+  [ "$status" -eq 1 ]
+  grep -Fx 'file list -r @' "$JJ_CALLS"
+  grep -Fx 'file show -r @- android/one/lint-baseline.xml' "$JJ_CALLS"
+}
+
+@test "jj file-list failures fail closed" {
+  jj_fixture
+  run env JJ_LIST_FAIL=true bash "$SCRIPT" --allow-grow
+  [ "$status" -eq 2 ]
 }

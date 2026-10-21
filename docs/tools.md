@@ -20,7 +20,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mediaSession`, `mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`,
+`measureStartup`, `mediaSession`, `mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`,
 `performanceTrace`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
@@ -1885,6 +1885,41 @@ subtree, or the whole active-window tree when owner-less.
 | 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ✅ <code>setAppLinks</code>                                                                      | Android 12+: approves, resets, or re-verifies an app's App Links domains, or changes a user's domain selection, so https links open the app without a chooser. Returns what changed and a restore receipt; a daemon session restores the original state on release.                                                                                                                                                                                                                                                                                                                                      |
+| ⏱️ <code>measureStartup</code>                                                                   | Android: launches an app N times cold, warm or hot and reports time-to-initial-display (TTID) and, when the app calls `reportFullyDrawn`, time-to-full-display (TTFD) percentiles. Stored in `automobile:performance-results`.                                                                                                                                                                                                                                                                                                                                                                           |
+
+<details class="note" markdown="1">
+<summary>Measuring startup with measureStartup</summary>
+
+<code>measureStartup</code> (Android only, off by default; enable it with
+<code>setToolEnabled</code>) measures one launch per iteration with plain
+<code>am start -W</code> calls. It never runs <code>launchApp</code>, observation or UI
+settling during the run, so AutoMobile adds no work of its own to the measured launch.
+
+- `appId`: the package to launch.
+- `activity`: an activity class (`.MainActivity`) or a full `pkg/.Activity` component.
+  Omitted, the launcher activity is resolved with `cmd package resolve-activity`.
+- `mode`: `cold` force-stops the app before every launch; `warm` keeps the process
+  but clears the task so the activity is recreated; `hot` presses Home and brings the
+  existing activity back. Warm and hot runs start with one unmeasured launch.
+- `iterations`: launches to measure, 1–50 (default 5).
+- `compilation`: `asIs` (default) or a `cmd package compile -m <mode> -f` mode
+  (`speed-profile`, `speed`, `verify`) applied once before the run.
+- `dropCaches`: cold only. Drops the page cache before each launch through a root
+  shell (`adb root` or `su`); refused when the device has neither.
+- `waitForFullyDrawn`: wait up to 10 s after each launch for the app's
+  `Fully drawn` log line. Without it, the log is read once per launch.
+
+The result has `ttid` (from `TotalTime`) and, when any launch logged
+`Fully drawn`, `ttfd`, each with `min`, `p50`, `p90`, `max` and the per-launch
+`samples`. `launchState` lists what `am start -W` reported per launch (`COLD`,
+`WARM`, `HOT`; `UNKNOWN` before API 29) and `waitTimeMs` the matching `WaitTime`.
+`warnings` explains a missing TTFD, launches without a `TotalTime`, and launches
+whose state differs from `mode`. Each run is stored in
+`automobile:performance-results` with the TTID p50 as `timeToFirstFrameMs`, the
+TTFD p50 as `timeToInteractiveMs`, and the full result in `diagnostics` (`kind:
+"startup"`), so runs can be compared over time.
+
+</details>
 
 <details class="note" markdown="1">
 <summary>State-preserving app lifecycle contract</summary>

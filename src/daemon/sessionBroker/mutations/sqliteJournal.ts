@@ -1,4 +1,4 @@
-import { type Generated, type Kysely } from "kysely";
+import { sql, type Generated, type Kysely } from "kysely";
 import type { Timer } from "../../../utils/SystemTimer";
 import {
   assertDeviceMutationScope as assertScope,
@@ -113,5 +113,14 @@ export class SqliteDeviceMutationJournal implements DeviceMutationJournal {
       .where("incarnation", "=", scope.incarnation)
       .executeTakeFirst();
     return row ? deviceBaselineSchema.parse(JSON.parse(row.baseline_json)) : null;
+  }
+
+  async deleteResource(resourceId: string): Promise<void> {
+    assertScope({ deviceId: resourceId, incarnation: resourceId });
+    const matches = sql<boolean>`incarnation = ${resourceId} OR CASE WHEN json_valid(incarnation) THEN json_extract(incarnation, '$[0]') = ${resourceId} ELSE 0 END`;
+    await this.db.transaction().execute(async (transaction) => {
+      await transaction.deleteFrom("device_mutation_journal").where(matches).execute();
+      await transaction.deleteFrom("device_mutation_baselines").where(matches).execute();
+    });
   }
 }

@@ -29,19 +29,48 @@ import {
 import { computeBindingScopeKey, type BindingProcessIdentity } from "./registry/bindingRegistry";
 import { RECEIPT_PRUNE_BATCH, SessionBroker, type SessionBrokerOptions } from "./broker";
 import { ManagedDevicePort } from "./managedDevicePort";
-import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig";
+import { SESSION_BROKER_SCOPE, iosReusePolicy, type SessionBrokerHostConfig } from "./hostConfig";
 import { IosBaselineReset } from "./iosBaselineReset";
+import { IosKeepBootedReset } from "./iosKeepBootedReset";
+import { nativeIosMutationResetPort, nativeIosResetHealth } from "./iosResetNativePorts";
+import { captureFirstDeviceBaseline } from "./mutations/reset";
+import type { ManagedDevicePortDependencies } from "./managedDevicePort";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import type { BrokerResourceRecord } from "./store";
 import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "./timing";
 import {
   AndroidBaselineReset,
+  DEFAULT_ANDROID_RESET_TIMEOUT_MS,
   watchAndroidResetSession,
   type AndroidBaselineResetDependencies,
+  type AndroidResetStrategy,
 } from "./androidBaselineReset";
+import {
+  AndroidKeepBootedReset,
+  type AndroidKeepBootedResetDependencies,
+} from "./androidKeepBootedReset";
+import { AndroidDeviceMutationResetPort } from "./androidDeviceMutationResetPort";
+import type { DeviceMutationJournal } from "./mutations/types";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { executionTracker } from "../executionTracker";
+import { readFile, rm } from "node:fs/promises";
+import { resolve } from "node:path";
+import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
+import { getAndroidHomeWithSystemImages } from "../../utils/android-cmdline-tools/detection";
+import { defaultEmulatorConsoleBusyRegistry } from "../../utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
+import { reserveBootCapacity } from "../../features/bootAdmission/sharedBootAdmissionGates";
+import { invalidateDisplayCaches } from "../../features/observe/DisplayTransition";
+import { AndroidSnapshotReset } from "./androidSnapshotReset";
+import {
+  NativeAndroidSnapshotResetPort,
+  type AndroidSnapshotReadiness,
+} from "./androidSnapshotResetNativePort";
+import { deviceSnapshotIncarnationInvalidator } from "../deviceSnapshotIncarnationInvalidator";
+import { defaultDeviceClockRestoreRegistry } from "../../features/utility/DeviceClock";
+import { getHostEmulatorProcessStopper } from "../../devices/hostEmulatorProcessStopper";
+import { AVD_DEFAULT_BOOT_SNAPSHOT } from "../../utils/android-cmdline-tools/AvdSnapshotService";
+import { AVD_SNAPSHOTS_DIRNAME } from "../../utils/android-cmdline-tools/AvdConfigReader";
 
 export interface SessionBrokerHostLock {
   acquire(): void;
@@ -90,6 +119,7 @@ export interface OpenSessionBrokerServiceOptions {
   androidReset?: {
     inventory(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<BootedDevice[]>;
     ctrlProxyReady: AndroidBaselineResetDependencies["ctrlProxyReady"];
+    snapshot?: AndroidSnapshotReadiness;
   };
 }
 
@@ -135,7 +165,49 @@ export async function openSessionBrokerService(
       );
     }
     const store = options.registry.sessionBrokerStore(scopeKey);
-    const reset = nativeBaselineReset(options.config, options.androidReset, options.timer);
+    const reuse = iosReusePolicy(options.config);
+    const journal = options.registry.deviceMutationJournal();
+    const reset = nativeBaselineReset(options.config, options.androidReset, options.timer, journal);
+    const iosReset = reset?.ios;
+    let resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] =
+      iosReset
+        ? (device, profile, assertOwned, signal, context) => {
+            const operation = () => iosReset.resetWithTiming(device, profile, assertOwned, signal);
+            return context?.runResetBoot ? context.runResetBoot(operation) : operation();
+          }
+        : undefined;
+    let captureIosBaseline: ManagedDevicePortDependencies["captureIosBaseline"];
+    if (reuse.mode === "keep-booted" && iosReset) {
+      const mutations = nativeIosMutationResetPort(new SimCtlClient(null), options.timer);
+      const fast = new IosKeepBootedReset({
+        journal,
+        mutations,
+        simctl: new SimCtlClient(null),
+        timer: options.timer,
+        health: nativeIosResetHealth(options.timer),
+        erase: iosReset,
+        maxUses: reuse.maxUses,
+      });
+      captureIosBaseline = (context) => captureFirstDeviceBaseline(journal, mutations, context);
+      resetIosBaseline = async (device, profile, assertOwned, signal, context) => {
+        const request = context?.resource.requestId
+          ? await store.getRequest(context.resource.requestId)
+          : undefined;
+        if (!context || !request?.sessionId) {
+          throw new ActionableError(
+            "iOS keep-booted reset requires its durable released session identity",
+          );
+        }
+        return fast.resetWithTiming(
+          device,
+          profile,
+          assertOwned,
+          { ...context.scope, sessionUuid: request.sessionId },
+          context.resource.reuseCount ?? 0,
+          { signal, runResetBoot: context.runResetBoot },
+        );
+      };
+    }
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
@@ -146,9 +218,10 @@ export async function openSessionBrokerService(
       ...(reset
         ? {
             resetBaseline: {
-              ios: reset.ios?.resetWithTiming.bind(reset.ios),
+              ios: resetIosBaseline,
               android: reset.android,
             },
+            captureIosBaseline,
             isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
           }
         : {}),
@@ -170,7 +243,7 @@ export async function openSessionBrokerService(
         return defaults;
       },
       sessionDisposition: options.sessionDisposition,
-      reuseCleanDevices: options.config.reuseCleanDevices,
+      reuseCleanDevices: reuse.mode !== "off",
       reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,
     });
     await broker.recoverReceipts();
@@ -189,16 +262,18 @@ function nativeBaselineReset(
   config: SessionBrokerHostConfig,
   androidReset: OpenSessionBrokerServiceOptions["androidReset"],
   timer: Timer,
+  journal: DeviceMutationJournal,
 ) {
   if (config.reuseAndroidCleanDevices && config.defaults.android && !androidReset) {
     throw new ActionableError("Android baseline reset requires the daemon readiness ports");
   }
-  return config.reuseCleanDevices || config.reuseAndroidCleanDevices
+  const reuseIos = iosReusePolicy(config).mode !== "off";
+  return reuseIos || config.reuseAndroidCleanDevices
     ? {
-        ios: config.reuseCleanDevices ? nativeIosBaselineReset() : undefined,
+        ios: reuseIos ? nativeIosBaselineReset() : undefined,
         android:
           config.reuseAndroidCleanDevices && config.defaults.android
-            ? nativeAndroidBaselineReset(androidReset!, timer)
+            ? nativeAndroidBaselineReset(androidReset!, timer, config, journal)
             : undefined,
       }
     : undefined;
@@ -226,10 +301,99 @@ function nativeIosBaselineReset(): IosBaselineReset {
 function nativeAndroidBaselineReset(
   ports: NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>,
   timer: Timer,
+  config: SessionBrokerHostConfig,
+  journal: DeviceMutationJournal,
 ): AndroidBaselineReset {
   const configReader = new FileAvdConfigReader();
   const inventory = boundAndroidResetInventory(ports.inventory, timer);
+  let snapshot: AndroidSnapshotReset | undefined;
+  if (
+    config.androidResetMode === "snapshot" ||
+    (config.androidResetMode === "keep-booted" && config.androidKeepBootedFallback === "snapshot")
+  ) {
+    if (!ports.snapshot) {
+      throw new ActionableError(
+        "Android snapshot reset requires daemon readiness and identity ports",
+      );
+    }
+    snapshot = new AndroidSnapshotReset(
+      new NativeAndroidSnapshotResetPort({
+        emulator: new AndroidEmulatorClient({ timer }),
+        adb: defaultAdbClientFactory,
+        config: configReader,
+        console: defaultEmulatorConsoleBusyRegistry,
+        clockRegistry: defaultDeviceClockRestoreRegistry,
+        processStopper: getHostEmulatorProcessStopper(timer),
+        clearQuickBoot: async (device, step) => {
+          const directory = await configReader.resolveAvdDirectory(device.name);
+          await step.assertOwned();
+          if (!directory) {
+            throw new ActionableError(
+              "Android reset cannot locate its owned AVD to remove dirty quick-boot state",
+            );
+          }
+          await rm(resolve(directory, AVD_SNAPSHOTS_DIRNAME, AVD_DEFAULT_BOOT_SNAPSHOT), {
+            recursive: true,
+            force: true,
+          });
+          await step.assertOwned();
+        },
+        capacity: {
+          reserveBoot: (options) => {
+            if (!bootAdmissionServices.androidColdBootAdmitter()) {
+              throw new ActionableError(
+                "Android snapshot replacement requires boot admission before stopping",
+              );
+            }
+            return reserveBootCapacity("android", options);
+          },
+        },
+        admitColdBoot: async (device, step) => {
+          const admitter = bootAdmissionServices.androidColdBootAdmitter();
+          if (!admitter) {
+            throw new ActionableError(
+              "Android snapshot wipe-data reset requires boot admission wiring",
+            );
+          }
+          await step.assertOwned();
+          return admitter.admit({
+            avdName: device.name,
+            timeoutMs: step.timeoutMs,
+            signal: step.signal,
+          });
+        },
+        readiness: ports.snapshot,
+        inventory,
+        ctrlProxyReady: ports.ctrlProxyReady,
+        imageMetadata: async (imagePath, signal) => {
+          const sdk = getAndroidHomeWithSystemImages();
+          if (!sdk) {
+            throw new ActionableError(
+              "Android snapshot reset requires installed system-image metadata",
+            );
+          }
+          return readFile(resolve(sdk.androidHome, imagePath, "source.properties"), {
+            encoding: "utf8",
+            signal,
+          });
+        },
+        timer,
+        invalidate: (deviceId) =>
+          invalidateDisplayCaches(deviceId, "Android broker baseline reset"),
+      }),
+      timer,
+      deviceSnapshotIncarnationInvalidator,
+    );
+  }
+  const strategy = createAndroidResetStrategy(config, {
+    journal,
+    timer,
+    snapshot,
+    port: (device) => new AndroidDeviceMutationResetPort(defaultAdbClientFactory.create(device)),
+  });
   return new AndroidBaselineReset({
+    timer,
+    resetTimeoutMs: config.androidResetTimeoutMs,
     inventory: async (options) => {
       const devices = await inventory(options);
       return Promise.all(
@@ -250,7 +414,29 @@ function nativeAndroidBaselineReset(
     adb: (device) => defaultAdbClientFactory.create(device),
     watchSession: (sessionId) => watchAndroidResetSession(executionTracker, sessionId),
     ctrlProxyReady: ports.ctrlProxyReady,
+    strategy,
   });
+}
+
+export function createAndroidResetStrategy(
+  config: SessionBrokerHostConfig,
+  {
+    snapshot,
+    ...dependencies
+  }: Pick<AndroidKeepBootedResetDependencies, "journal" | "timer" | "port"> & {
+    snapshot?: AndroidResetStrategy;
+  },
+): AndroidResetStrategy | undefined {
+  return config.androidResetMode === "keep-booted"
+    ? new AndroidKeepBootedReset({
+        ...dependencies,
+        maxUses: config.androidKeepBootedMaxUses,
+        fallback: snapshot,
+        fallbackBudgetMs: snapshot
+          ? (config.androidResetTimeoutMs ?? DEFAULT_ANDROID_RESET_TIMEOUT_MS)
+          : undefined,
+      })
+    : snapshot;
 }
 
 export function boundAndroidResetInventory(

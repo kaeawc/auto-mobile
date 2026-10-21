@@ -3,6 +3,7 @@ import {
   MALFORMED_MCP_BUDGETS,
 } from "../helpers/mcpArgumentBudgetCases";
 import { describe, expect, spyOn, test, beforeEach } from "bun:test";
+import { getEventListeners } from "node:events";
 import { Duplex } from "node:stream";
 import {
   DaemonClient,
@@ -1280,7 +1281,6 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
     test(`cancelOnTimeout:false cancels after timeout with ${abortMode} abort mode`, async () => {
       const { client, timer, socket } = setup();
       const controller = new AbortController();
-      const remove = spyOn(controller.signal, "removeEventListener");
       const outcome = client
         .callDaemonMethod(
           "daemon/prepareSession",
@@ -1308,10 +1308,9 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
         });
         expect(socket.destroyed).toBe(abortMode === "connection");
         expect(await outcome).toBe(error);
-        expect(remove).toHaveBeenCalled();
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
         expect(timer.getPendingTimeoutCount()).toBe(0);
       } finally {
-        remove.mockRestore();
         await client.close();
       }
     });
@@ -1321,7 +1320,6 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
     test(`cancelOnTimeout:false removes the retained abort listener on ${settlement}`, async () => {
       const { client, timer, socket } = setup();
       const controller = new AbortController();
-      const remove = spyOn(controller.signal, "removeEventListener");
       const outcome = client
         .callDaemonMethod(
           "daemon/prepareSession",
@@ -1338,7 +1336,7 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
       try {
         timer.advanceTime(request.timeoutMs! + responseGraceMs);
         expect(await outcome).toBeInstanceOf(McpTimeoutError);
-        expect(remove).not.toHaveBeenCalled();
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(1);
         if (settlement === "response") {
           client.testHooks.simulateIncomingData(
             Buffer.from(
@@ -1361,13 +1359,12 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
           timer.advanceTime(5000 + responseGraceMs);
           await Promise.all(outcomes);
         }
-        expect(remove).toHaveBeenCalledTimes(1);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
         const frameCount = socket.getWrittenMessages().length;
         controller.abort(new Error("abort after daemon settlement"));
         expect(socket.getWrittenMessages()).toHaveLength(frameCount);
         expect(timer.getPendingTimeoutCount()).toBe(0);
       } finally {
-        remove.mockRestore();
         await client.close();
       }
     });

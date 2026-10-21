@@ -101,6 +101,7 @@ object ValidTools {
         "setDeviceResources",
         "setPosture",
         "setPreference",
+        "setSensor",
         "setToolEnabled",
         "snapshotOf",
         "stageSessionDownloads",

@@ -94,6 +94,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "displayProfile",
     "setToolEnabled"
   ],
@@ -189,6 +190,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "displayProfile",
     "setToolEnabled"
   ],
@@ -273,6 +275,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "displayProfile",
     "getPreference",
     "setPreference",

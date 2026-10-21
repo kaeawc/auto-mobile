@@ -22,6 +22,7 @@ describe("session broker host configuration", () => {
       androidProfileArchetypes: {},
       iosClassifications: [],
       reuseCleanDevices: false,
+      reuseAndroidCleanDevices: false,
     });
     expect(() => parseSessionBrokerHostConfig(config({ defaults: {} }))).toThrow(
       "At least one platform must have an explicit default policy",
@@ -67,6 +68,17 @@ describe("session broker host configuration", () => {
     });
     expect(parsed.iosClassifications[0]?.aliases).toEqual(["current-pro"]);
     expect(parsed.reuseCleanDevices).toBe(true);
+    expect(parsed.reuseAndroidCleanDevices).toBe(false);
+  });
+
+  test("Android reuse requires its own explicit opt-in", () => {
+    expect(parseSessionBrokerHostConfig(config({ reuseAndroidCleanDevices: true }))).toMatchObject({
+      reuseAndroidCleanDevices: true,
+      reuseCleanDevices: false,
+    });
+    expect(() =>
+      parseSessionBrokerHostConfig(config({ reuseAndroidCleanDevices: "true" })),
+    ).toThrow();
   });
 
   test.each([

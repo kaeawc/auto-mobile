@@ -1,5 +1,5 @@
 import { createServer, Server as NetServer, Socket } from "node:net";
-import { existsSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -8,6 +8,11 @@ import {
 } from "../daemonSocketReachability";
 import { AuxiliarySocketBindConflict } from "../auxiliarySocketAvailability";
 import { AuxiliarySocketOwner } from "../auxiliarySocketOwner";
+import {
+  isOwnedSocketFile,
+  readSocketFileIdentity,
+  type SocketFileIdentity,
+} from "../socketFileIdentity";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
@@ -44,7 +49,7 @@ export abstract class BaseSocketServer {
   protected server: NetServer | null = null;
   // Identity of the socket inode this server created, so close() never unlinks a
   // socket a successor process has already rebound at the same path.
-  private socketFileIdentity: { dev: number; ino: number } | null = null;
+  private socketFileIdentity: SocketFileIdentity | null = null;
   protected readonly socketPath: string;
   protected readonly timer: Timer;
   protected readonly serverName: string;
@@ -201,24 +206,12 @@ export abstract class BaseSocketServer {
     this.socketFileIdentity = null;
   }
 
-  private readSocketFileIdentity(): { dev: number; ino: number } | null {
-    try {
-      const stats = statSync(this.socketPath);
-      return { dev: stats.dev, ino: stats.ino };
-    } catch (error) {
-      // The socket file may already be gone (e.g. removed by another process);
-      // returning null lets ownership checks treat it as "not our socket".
-      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts stat failed: ${error}`, error);
-      return null;
-    }
+  private readSocketFileIdentity(): SocketFileIdentity | null {
+    return readSocketFileIdentity(this.socketPath);
   }
 
   private isOwnedSocketFile(identity = this.socketFileIdentity): boolean {
-    if (!identity || !existsSync(this.socketPath)) {
-      return false;
-    }
-    const currentIdentity = this.readSocketFileIdentity();
-    return currentIdentity?.dev === identity.dev && currentIdentity.ino === identity.ino;
+    return isOwnedSocketFile(identity, this.socketPath);
   }
 
   /**

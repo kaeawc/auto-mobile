@@ -741,7 +741,9 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
 
   private trackLayoutRecording(recording: Promise<boolean>, capture: LayoutCapture): void {
     // Pending writes suppress immediate duplicate calls. Only confirmed writes
-    // become committed state; failures and unconfirmed buffered adds are retryable.
+    // become committed state; failures and unconfirmed writes are retryable. The
+    // receipt is never awaited inline: in buffered mode it settles on the next
+    // TelemetryEventBuffer flush (#14625), and awaiting it would stall this poll.
     this.pendingLayoutCaptures.set(capture.sequence, capture);
     void recording.then(
       (persisted) => {

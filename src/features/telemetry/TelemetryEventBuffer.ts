@@ -1,4 +1,5 @@
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { RecordLogEventInput } from "../../db/logEventRepository";
 import type { RecordOsEventInput } from "../../db/osEventRepository";
@@ -45,6 +46,9 @@ export interface TelemetryEventBufferOptions {
 const DEFAULT_FLUSH_INTERVAL_MS = 250;
 const DEFAULT_MAX_BUFFERED_ROWS = 512;
 
+/** Settles one buffered layout row's write receipt (issue #14625). */
+type LayoutReceipt = (persisted: boolean) => void;
+
 /**
  * Coalesces inbound telemetry and flushes it as one multi-row INSERT per kind on
  * a short interval (mirrors performanceAuditRepository.startPeriodicPruning's
@@ -52,6 +56,12 @@ const DEFAULT_MAX_BUFFERED_ROWS = 512;
  *
  * Durability caveat (accepted for best-effort telemetry, issue #3138): a crash
  * loses the unflushed buffer. maxBufferedRows bounds that window.
+ *
+ * Layout rows carry a write receipt (issue #14625): {@link addLayout} returns a
+ * promise that resolves `true` only once the batch holding that row committed,
+ * and `false` when that batch failed or the row was refused by a stopped buffer.
+ * It never rejects, and {@link stop} settles every outstanding receipt, so no
+ * receipt can stay pending past shutdown.
  */
 export class TelemetryEventBuffer {
   private readonly repository: BatchTelemetryRepository;
@@ -63,8 +73,13 @@ export class TelemetryEventBuffer {
   private os: RecordOsEventInput[] = [];
   private navigation: RecordNavigationEventInput[] = [];
   private layout: RecordLayoutEventInput[] = [];
+  // One receipt per buffered layout row, snapshotted and cleared with `layout`.
+  private layoutReceipts: LayoutReceipt[] = [];
 
   private intervalHandle: NodeJS.Timeout | null = null;
+  // Set by stop(): with no timer left to drain it, a row accepted afterwards
+  // could strand forever (and its receipt with it), so new rows are refused.
+  private stopped = false;
   // Chain flushes so a slow flush can never overlap the next tick's flush and
   // interleave batches on the single mutex-guarded connection.
   private flushChain: Promise<void> = Promise.resolve();
@@ -80,8 +95,9 @@ export class TelemetryEventBuffer {
     this.maxBufferedRows = options.maxBufferedRows ?? DEFAULT_MAX_BUFFERED_ROWS;
   }
 
-  /** Begin the periodic flush timer. Idempotent. */
+  /** Begin (or, after stop(), resume) the periodic flush timer. Idempotent. */
   start(): void {
+    this.stopped = false;
     if (this.intervalHandle) {
       return;
     }
@@ -92,8 +108,14 @@ export class TelemetryEventBuffer {
     this.intervalHandle.unref?.();
   }
 
-  /** Stop the periodic flush timer and flush whatever remains. */
+  /**
+   * Stop the periodic flush timer and flush whatever remains. Rows added from
+   * here on are dropped (a layout receipt resolves `false`) until start() is
+   * called again; every receipt issued before stop() is settled by the final
+   * flush, which the flush chain orders after any in-flight one.
+   */
   async stop(): Promise<void> {
+    this.stopped = true;
     if (this.intervalHandle) {
       this.timer.clearInterval(this.intervalHandle);
       this.intervalHandle = null;
@@ -111,24 +133,52 @@ export class TelemetryEventBuffer {
     }
   }
 
+  private accepts(kind: string): boolean {
+    if (this.stopped) {
+      // Expected during shutdown: telemetry arriving after the final flush is
+      // best-effort loss, the same as a crash losing the unflushed buffer.
+      logger.debug(`[TelemetryEventBuffer] dropped ${kind} row added after stop()`);
+      return false;
+    }
+    return true;
+  }
+
   addLog(input: RecordLogEventInput): void {
-    this.logs.push(input);
-    this.maybeFlushOnCap();
+    if (this.accepts("log")) {
+      this.logs.push(input);
+      this.maybeFlushOnCap();
+    }
   }
 
   addOs(input: RecordOsEventInput): void {
-    this.os.push(input);
-    this.maybeFlushOnCap();
+    if (this.accepts("os")) {
+      this.os.push(input);
+      this.maybeFlushOnCap();
+    }
   }
 
   addNavigation(input: RecordNavigationEventInput): void {
-    this.navigation.push(input);
-    this.maybeFlushOnCap();
+    if (this.accepts("navigation")) {
+      this.navigation.push(input);
+      this.maybeFlushOnCap();
+    }
   }
 
-  addLayout(input: RecordLayoutEventInput): void {
+  /**
+   * Buffer a layout row and return its write receipt: `true` once the batch
+   * holding it committed, `false` if that batch failed or the buffer is stopped.
+   * The receipt settles on the next flush (interval tick, cap trip, explicit
+   * flush() or stop()), so callers must not await it inline on a hot path.
+   */
+  addLayout(input: RecordLayoutEventInput): Promise<boolean> {
+    if (!this.accepts("layout")) {
+      return Promise.resolve(false);
+    }
+    const receipt = Promise.withResolvers<boolean>();
     this.layout.push(input);
+    this.layoutReceipts.push(receipt.resolve);
     this.maybeFlushOnCap();
+    return receipt.promise;
   }
 
   /**
@@ -141,62 +191,53 @@ export class TelemetryEventBuffer {
   }
 
   private async doFlush(): Promise<void> {
-    // Snapshot-and-clear each buffer up front so events arriving during the
-    // awaits below land in the next batch instead of being dropped.
-    const logs = this.logs;
-    const os = this.os;
-    const navigation = this.navigation;
-    const layout = this.layout;
     if (this.bufferedRowCount() === 0) {
       return;
     }
+    // Snapshot-and-clear each buffer up front so events arriving during the
+    // awaits below land in the next batch instead of being dropped.
+    const { logs, os, navigation, layout, layoutReceipts } = this;
     this.logs = [];
     this.os = [];
     this.navigation = [];
     this.layout = [];
+    this.layoutReceipts = [];
 
-    // Best-effort telemetry: log and continue on failure so one failing kind
-    // does not strand the others or throw into the flush timer (CLAUDE.md
-    // strategy 3 — the dropped batch is acceptable loss for telemetry).
-    try {
-      if (logs.length > 0) {
-        await this.repository.recordLogEvents(logs);
-      }
-    } catch (error) {
-      logger.warn(
-        `[TelemetryEventBuffer] log batch flush failed (${logs.length} rows): ${error}`,
-        error,
-      );
+    // Each kind is written independently so one failing kind does not strand
+    // the others; writeBatch never throws, so the chain and timer stay healthy.
+    await this.writeBatch("log", logs, (rows) => this.repository.recordLogEvents(rows));
+    await this.writeBatch("os", os, (rows) => this.repository.recordOsEvents(rows));
+    await this.writeBatch("navigation", navigation, (rows) =>
+      this.repository.recordNavigationEvents(rows),
+    );
+    const layoutPersisted = await this.writeBatch("layout", layout, (rows) =>
+      this.repository.recordLayoutEvents(rows),
+    );
+    for (const settle of layoutReceipts) {
+      settle(layoutPersisted);
+    }
+  }
+
+  /** Write one kind's batch; `true` only when the INSERT resolved. */
+  private async writeBatch<Row>(
+    kind: string,
+    rows: Row[],
+    write: (rows: Row[]) => Promise<void>,
+  ): Promise<boolean> {
+    if (rows.length === 0) {
+      return true;
     }
     try {
-      if (os.length > 0) {
-        await this.repository.recordOsEvents(os);
-      }
+      await write(rows);
+      return true;
     } catch (error) {
+      // Best-effort telemetry (CLAUDE.md strategy 2): the dropped batch is
+      // accepted loss, reported to receipt holders as `false`, never retried.
       logger.warn(
-        `[TelemetryEventBuffer] os batch flush failed (${os.length} rows): ${error}`,
+        `[TelemetryEventBuffer] ${kind} batch flush failed (${rows.length} rows): ${errorMessage(error)}`,
         error,
       );
-    }
-    try {
-      if (navigation.length > 0) {
-        await this.repository.recordNavigationEvents(navigation);
-      }
-    } catch (error) {
-      logger.warn(
-        `[TelemetryEventBuffer] navigation batch flush failed (${navigation.length} rows): ${error}`,
-        error,
-      );
-    }
-    try {
-      if (layout.length > 0) {
-        await this.repository.recordLayoutEvents(layout);
-      }
-    } catch (error) {
-      logger.warn(
-        `[TelemetryEventBuffer] layout batch flush failed (${layout.length} rows): ${error}`,
-        error,
-      );
+      return false;
     }
   }
 }

@@ -409,9 +409,12 @@ export class TelemetryRecorder {
   }
 
   /**
-   * True only after a confirmed repository write. Buffered adds return false:
-   * the buffer has no per-row receipt and flush() also fulfills on batch loss.
-   * Callers using this for dedupe must conservatively retry buffered captures.
+   * True only after a confirmed write. Unbuffered, that is the repository write
+   * itself; buffered, it is the TelemetryEventBuffer receipt (issue #14625),
+   * which resolves only once the row's batch committed and `false` when that
+   * batch failed or the buffer was stopped. A buffered call therefore settles on
+   * the next flush, not immediately: callers on a poll path must not await it
+   * inline (the iOS ingestor commits its dedupe state when it settles).
    */
   async recordLayoutEvent(event: {
     timestamp: number;
@@ -427,32 +430,36 @@ export class TelemetryRecorder {
   }): Promise<boolean> {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordLayoutEventInput = { deviceId, sessionId, ...event };
-    let persisted = false;
-
-    if (this.buffer) {
-      this.buffer.addLayout(input);
-    } else {
-      try {
-        persisted =
-          (await this.getBarrier().track(async () => {
-            await this.repository.recordLayoutEvent(input);
-            return true;
-          })) === true;
-      } catch (error) {
-        logger.warn(
-          `[TelemetryRecorder] Failed to record layout event: ${errorMessage(error)}`,
-          error,
-        );
-      }
-    }
-
-    this.pushToSocket({
+    const layoutEvent: TelemetryEvent = {
       category: "layout",
       timestamp: event.timestamp,
       deviceId,
       sessionId,
       data: event,
-    });
+    };
+
+    if (this.buffer) {
+      const receipt = this.buffer.addLayout(input);
+      // Push before awaiting the receipt so the live feed is not delayed by the
+      // flush interval, matching the other buffered kinds.
+      this.pushToSocket(layoutEvent);
+      return receipt;
+    }
+
+    let persisted = false;
+    try {
+      persisted =
+        (await this.getBarrier().track(async () => {
+          await this.repository.recordLayoutEvent(input);
+          return true;
+        })) === true;
+    } catch (error) {
+      logger.warn(
+        `[TelemetryRecorder] Failed to record layout event: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    this.pushToSocket(layoutEvent);
     return persisted;
   }
 

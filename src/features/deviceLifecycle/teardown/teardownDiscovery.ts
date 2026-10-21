@@ -8,7 +8,7 @@ import { SomePlatform } from "../../../models";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { type TeardownContext, findMatchingBootedTeardownDevices } from "./teardownContracts";
-import { runWithinShutdownDeadline } from "./deadlines";
+import { runWithinShutdownDeadline } from "../core/deadlines";
 import { getShutdownInitiatingExecutionId } from "./shutdownPreparation";
 
 export async function readTeardownBootedDiscovery(

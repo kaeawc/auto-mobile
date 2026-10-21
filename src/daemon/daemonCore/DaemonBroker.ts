@@ -92,12 +92,30 @@ export interface DaemonBrokerHost {
 export function sessionBrokerAndroidResetPorts(
   readiness: () => Pick<
     ReturnType<DaemonBrokerHost["services"]["deviceReadiness"]>,
-    "listBootedAndroidDevices" | "verifyAndroidCtrlProxyServiceReady"
+    | "listBootedAndroidDevices"
+    | "verifyAndroidCtrlProxyServiceReady"
+    | "readAndroidCtrlProxySnapshotIdentity"
+    | "verifyDevice"
   >,
 ): NonNullable<OpenSessionBrokerServiceOptions["androidReset"]> {
   return {
     inventory: (options) => readiness().listBootedAndroidDevices(options),
-    ctrlProxyReady: (device) => readiness().verifyAndroidCtrlProxyServiceReady(device),
+    ctrlProxyReady: (device, options) =>
+      readiness().verifyAndroidCtrlProxyServiceReady(device, options),
+    snapshot: {
+      ctrlProxyIdentity: (device, signal) =>
+        readiness().readAndroidCtrlProxySnapshotIdentity(device, signal),
+      ready: async (device, step) => {
+        await step.assertOwned();
+        await readiness().verifyDevice(
+          device.deviceId,
+          "android",
+          { signal: step.signal, readiness: "automationReady" },
+          device,
+        );
+        await step.assertOwned();
+      },
+    },
   };
 }
 
@@ -393,6 +411,7 @@ export class DaemonBroker {
       acquisition: acquisition.acquisition,
       release,
       journal: acquisition.journalFor(registry),
+      mutationSessions: this.host.services.sessionManager(),
       owner: this.bindingJournalOwner(),
       timer: this.host.services.timer(),
       sessionDisposition: (sessionUuid) =>

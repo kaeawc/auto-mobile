@@ -44,6 +44,7 @@ export interface CtrlProxyManager extends ProxyManager {
   forceRestartProcess(): Promise<boolean>;
   isEnabledForUser(userId: number): Promise<boolean>;
   getInstalledApkSha256(): Promise<string | null>;
+  readSnapshotIdentity?(signal: AbortSignal): Promise<string>;
   isVersionCompatible(): Promise<boolean>;
   ensureCompatibleVersion(
     options?: AccessibilityVersionCheckOptions,

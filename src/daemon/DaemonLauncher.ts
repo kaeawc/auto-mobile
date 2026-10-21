@@ -16,10 +16,7 @@ import { ActionableError } from "../models";
 import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
 import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { releaseVersion } from "../utils/mcpVersion";
-export {
-  runDaemonProcessCommand,
-  type DaemonProcessCommandRunner,
-} from "../utils/daemonProcessCommand";
+export { runDaemonProcessCommand } from "../utils/daemonProcessCommand";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";

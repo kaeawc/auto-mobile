@@ -78,7 +78,6 @@ export * from "./ffmpegRecordingArgs";
 export * from "./ffmpegRecordingFiles";
 export * from "./ffmpegRecordingStartup";
 export type { FfmpegBackendHandle } from "./FfmpegRecordingHandle";
-export { FfmpegRecordingPostProcessor } from "./FfmpegRecordingPostProcessor";
 
 export { buildFfmpegFailureMessage } from "./ffmpegDiagnostics";
 

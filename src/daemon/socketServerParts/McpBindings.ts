@@ -1,4 +1,5 @@
 import { idleReleaseField } from "../releaseReasons";
+import { DeviceReadiness } from "../readiness/DeviceReadiness";
 
 import type { SessionRecoveryAssignmentDetails } from "../../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../../utils/toolEnvelopePayload";
@@ -165,6 +166,9 @@ export class McpBindings {
     if (this.state.daemonState.isInitialized()) {
       this.state.daemonState.getDevicePool().releaseMcpSessionBindings?.(socketSessionId);
     }
+  }
+  clearConnectionDevicePin(socketSessionId: string): void {
+    DeviceReadiness.getInstance().clearConnectionDevicePin(socketSessionId);
   }
   recordBoundMcpClientKey(
     request: DaemonRequest,

@@ -17,6 +17,11 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { DefaultAndroidSdkEventIngestor } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 
 import { SdkFrameMetricsStore } from "../../../../src/features/performance/SdkFrameMetricsStore";
+import {
+  goldenLayoutHierarchy,
+  largeLayoutHierarchy,
+  previousLayoutDetails,
+} from "./iosLayoutTelemetryFixture";
 
 const DEVICE_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
@@ -879,6 +884,176 @@ describe("DefaultIosSdkEventIngestor", () => {
       packageName: "com.app",
       windows: [],
       updatedAt: 123,
+    });
+
+    test("records a compact desktop-compatible tree from the real golden frame", () => {
+      const capture = goldenLayoutHierarchy();
+      ingestor.recordLayoutTelemetryEvent(capture);
+      const details = recorder.layout[0].event.detailsJson!;
+      expect(JSON.parse(details)).toMatchObject({
+        hierarchy: { node: { className: "XCUIApplication" } },
+        screenName: capture.packageName,
+        windowCount: 1,
+        nodeCount: 55,
+        packageName: capture.packageName,
+        updatedAt: capture.updatedAt,
+      });
+      expect(details).not.toContain('"bounds"');
+      expect(details).not.toContain('"windows"');
+      expect(details).not.toContain('"$"');
+      expect(Buffer.byteLength(previousLayoutDetails(capture, 55))).toBe(10398);
+      // Measured 3,560 bytes after compaction (10,398 bytes before).
+      expect(Buffer.byteLength(details)).toBeLessThan(3800);
+      expect(Buffer.byteLength(details)).toBeLessThan(
+        Buffer.byteLength(JSON.stringify(capture)) * 0.36,
+      );
+    });
+
+    test("bounds an 865-node golden-derived tree while retaining its full count", () => {
+      const capture = largeLayoutHierarchy();
+      ingestor.recordLayoutTelemetryEvent(capture);
+      const details = recorder.layout[0].event.detailsJson!;
+      expect(recorder.layout[0].event.recompositionCount).toBe(865);
+      expect(JSON.parse(details)).toMatchObject({
+        hierarchy: { node: { className: "XCUIApplication" } },
+        nodeCount: 865,
+        truncated: true,
+      });
+      // Measured 6,345 bytes with the 100-node cap (160,924 bytes before).
+      expect(Buffer.byteLength(details)).toBeLessThan(6600);
+      expect(Buffer.byteLength(details)).toBeLessThan(
+        Buffer.byteLength(JSON.stringify(capture)) * 0.25,
+      );
+    });
+
+    test("deduplicates consecutive display trees across changing capture timestamps", () => {
+      ingestor.recordLayoutTelemetryEvent(hierarchy());
+      ingestor.recordLayoutTelemetryEvent({ ...hierarchy(), updatedAt: 124 });
+      expect(recorder.layout).toHaveLength(1);
+      const changed = hierarchy();
+      changed.updatedAt = 125;
+      changed.hierarchy.node!.node![0].$!.text = "changed";
+      ingestor.recordLayoutTelemetryEvent(changed);
+      expect(recorder.layout).toHaveLength(2);
+    });
+
+    test("also skips a repeated defined updatedAt even if display properties differ", () => {
+      ingestor.recordLayoutTelemetryEvent(hierarchy());
+      const changed = hierarchy();
+      changed.hierarchy.node!.node![0].$!.text = "changed";
+      ingestor.recordLayoutTelemetryEvent(changed);
+      expect(recorder.layout).toHaveLength(1);
+    });
+
+    test("does not treat missing updatedAt as a repeated capture", () => {
+      const first = { ...hierarchy(), updatedAt: undefined };
+      ingestor.recordLayoutTelemetryEvent(first);
+      const changed = { ...hierarchy(), updatedAt: undefined };
+      changed.hierarchy.node!.node![0].$!.text = "changed";
+      ingestor.recordLayoutTelemetryEvent(changed);
+      expect(recorder.layout).toHaveLength(2);
+    });
+
+    test("includes packageName and windowCount in the dedupe key", () => {
+      const capture = goldenLayoutHierarchy();
+      ingestor.recordLayoutTelemetryEvent(capture);
+      ingestor.recordLayoutTelemetryEvent({ ...capture, packageName: "other.app", updatedAt: 1 });
+      ingestor.recordLayoutTelemetryEvent({
+        ...capture,
+        packageName: "other.app",
+        windows: [],
+        updatedAt: 2,
+      });
+      expect(recorder.layout).toHaveLength(3);
+    });
+
+    test("keeps deduplication on each device's ingestor instance", () => {
+      const second = buildIngestor({ deviceId: "second-device" });
+      ingestor.recordLayoutTelemetryEvent(hierarchy());
+      second.recordLayoutTelemetryEvent(hierarchy());
+      expect(recorder.layout.map((call) => call.contextAtCall.deviceId)).toEqual([
+        DEVICE_ID,
+        "second-device",
+      ]);
+    });
+
+    test("records A, B, A rather than suppressing a previously seen screen", () => {
+      ingestor.recordLayoutTelemetryEvent(hierarchy());
+      const changed = hierarchy();
+      changed.updatedAt = 124;
+      changed.hierarchy.node!.node![0].$!.text = "changed";
+      ingestor.recordLayoutTelemetryEvent(changed);
+      ingestor.recordLayoutTelemetryEvent({ ...hierarchy(), updatedAt: 125 });
+      expect(recorder.layout).toHaveLength(3);
+    });
+
+    test("retries a capture when recordLayoutEvent throws synchronously", () => {
+      const record = spyOn(recorder, "recordLayoutEvent").mockImplementationOnce(() => {
+        throw new Error("record failed");
+      });
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        ingestor.recordLayoutTelemetryEvent(hierarchy());
+        expect(recorder.getContext()).toEqual({
+          deviceId: "prev-device",
+          sessionId: "prev-session",
+        });
+        ingestor.recordLayoutTelemetryEvent(hierarchy());
+        expect(recorder.layout).toHaveLength(1);
+        expect(record).toHaveBeenCalledTimes(2);
+      } finally {
+        record.mockRestore();
+        warning.mockRestore();
+      }
+    });
+
+    test("retries rejected writes without an unhandled rejection", async () => {
+      const record = spyOn(recorder, "recordLayoutEvent").mockRejectedValueOnce(
+        new Error("write rejected"),
+      );
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        ingestor.recordLayoutTelemetryEvent(hierarchy());
+        await Promise.resolve();
+        await Promise.resolve();
+        ingestor.recordLayoutTelemetryEvent(hierarchy());
+        expect(recorder.layout).toHaveLength(1);
+        expect(record).toHaveBeenCalledTimes(2);
+        await Promise.resolve();
+      } finally {
+        record.mockRestore();
+        warning.mockRestore();
+      }
+    });
+
+    test("deduplicates after a write fulfills and restores context on the skipped path", async () => {
+      ingestor.recordLayoutTelemetryEvent(hierarchy());
+      await Promise.resolve();
+      ingestor.recordLayoutTelemetryEvent({ ...hierarchy(), updatedAt: 124 });
+      expect(recorder.layout).toHaveLength(1);
+      expect(recorder.getContext()).toEqual({ deviceId: "prev-device", sessionId: "prev-session" });
+    });
+
+    test("an older write completing late cannot replace the latest successful capture", async () => {
+      const pending = Promise.withResolvers<void>();
+      const record = spyOn(recorder, "recordLayoutEvent").mockImplementationOnce(
+        () => pending.promise,
+      );
+      try {
+        ingestor.recordLayoutTelemetryEvent(hierarchy());
+        const changed = hierarchy();
+        changed.updatedAt = 124;
+        changed.hierarchy.node!.node![0].$!.text = "changed";
+        ingestor.recordLayoutTelemetryEvent(changed);
+        await Promise.resolve();
+        pending.resolve();
+        await Promise.resolve();
+        ingestor.recordLayoutTelemetryEvent({ ...changed, updatedAt: 125 });
+        expect(record).toHaveBeenCalledTimes(2);
+      } finally {
+        pending.resolve();
+        record.mockRestore();
+      }
     });
 
     test("timestamps layout telemetry with the advanced injected timer", () => {

@@ -12,6 +12,7 @@ export type ReadinessSurface = Pick<
   | "getExplicitDevicePin"
   | "setExplicitDevicePin"
   | "clearExplicitDevicePin"
+  | "clearConnectionDevicePin"
   | "ensureDeviceReady"
   | "detectConnectedPlatformsWithStatus"
   | "verifyDevice"
@@ -107,6 +108,39 @@ export function runDeviceReadinessContract(name: string, make: () => ScriptedRea
       readiness.setCurrentDevice(first, "android");
       const device = await readiness.ensureDeviceReady("android", undefined, ready);
       expect(device.deviceId).toBe("emulator-5554");
+    });
+
+    test("explicit selection is scoped to the calling connection", async () => {
+      const { readiness, connect } = make();
+      const simulator = ios("SIM-1");
+      connect([android("emulator-5554"), simulator]);
+      readiness.setExplicitDevicePin(simulator, "conn-a");
+      await expect(
+        readiness.ensureDeviceReady("either", undefined, { ...ready, connectionId: "conn-b" }),
+      ).rejects.toBeInstanceOf(ActionableError);
+      const device = await readiness.ensureDeviceReady("either", undefined, {
+        ...ready,
+        connectionId: "conn-a",
+      });
+      expect(device.deviceId).toBe(simulator.deviceId);
+      readiness.setExplicitDevicePin(simulator, "conn-b");
+      readiness.clearConnectionDevicePin("conn-b");
+      expect(readiness.getExplicitDevicePin("conn-a")).toEqual(simulator);
+      readiness.clearConnectionDevicePin("conn-a");
+      expect(readiness.getExplicitDevicePin("conn-a")).toBeUndefined();
+    });
+
+    test("device-wide clearing drops every matching connection pin", () => {
+      const { readiness } = make();
+      const pinned = android("emulator-5554");
+      const other = ios("SIM-1");
+      readiness.setExplicitDevicePin(pinned, "conn-a");
+      readiness.setExplicitDevicePin(pinned, "conn-b");
+      readiness.setExplicitDevicePin(other, "conn-c");
+      readiness.clearExplicitDevicePin(pinned.deviceId);
+      expect(readiness.getExplicitDevicePin("conn-a")).toBeUndefined();
+      expect(readiness.getExplicitDevicePin("conn-b")).toBeUndefined();
+      expect(readiness.getExplicitDevicePin("conn-c")).toEqual(other);
     });
 
     test("clearing a pin for another device leaves the pin; clearing its own drops it", () => {

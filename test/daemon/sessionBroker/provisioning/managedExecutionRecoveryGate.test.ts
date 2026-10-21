@@ -529,7 +529,7 @@ describe("managed execution recovery is gated before publication", () => {
         sessions.getSession(ID)!.assignedDevice = "other-ios";
       }
       if (outcome === "shutdown") {
-        Reflect.set(daemon, "shutdownInProgress", true);
+        Reflect.set(Reflect.get(daemon, "shutdownState"), "inProgress", true);
       }
       const owner = Reflect.get(daemon, "bindingJournalOwner").call(daemon);
       const assignment: BindingAssignmentRecord = {

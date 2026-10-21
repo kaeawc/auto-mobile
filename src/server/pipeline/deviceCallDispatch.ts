@@ -8,7 +8,7 @@ import {
   DeviceReadiness,
   type ConnectedPlatformScan,
 } from "../../daemon/readiness/DeviceReadiness";
-import { ActionableError, BootedDevice, SomePlatform } from "../../models";
+import { BootedDevice, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
@@ -494,9 +494,10 @@ export async function predictReadinessTarget(
   platform: SomePlatform,
   deviceReadiness: DeviceReadiness,
   getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
+  connectionId?: string,
 ): Promise<string | undefined> {
   const { devices } = await getConnectedPlatforms();
-  const pin = deviceReadiness.getExplicitDevicePin();
+  const pin = deviceReadiness.getExplicitDevicePin(connectionId);
   const current = deviceReadiness.getCurrentDevice();
   const platforms = new Set(devices.map((device) => device.platform));
   const targetPlatform =
@@ -513,24 +514,6 @@ export async function predictReadinessTarget(
     connected(current?.deviceId) ??
     (candidates.length === 1 ? candidates[0]!.deviceId : undefined)
   );
-}
-
-export function assertDeviceReadRouting(
-  args: Record<string, unknown>,
-  options: DeviceAwareToolOptions,
-  sessionDeviceId: string | undefined,
-): void {
-  if (
-    options.sessionlessDeviceRead &&
-    typeof args.deviceId === "string" &&
-    typeof args.sessionUuid === "string" &&
-    sessionDeviceId &&
-    args.deviceId !== sessionDeviceId
-  ) {
-    throw new ActionableError(
-      `observe deviceId '${args.deviceId}' does not match session '${args.sessionUuid}' device '${sessionDeviceId}'.`,
-    );
-  }
 }
 
 // Reuse the display capability across registrations and internal dispatch without

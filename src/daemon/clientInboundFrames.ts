@@ -17,7 +17,7 @@ interface ClientInboundFramesContext {
   handleResponse: (response: DaemonResponse) => void;
   inboundClosed: boolean;
   extendPendingRequestOnProgress: (requestId: string, progressToken: string | number) => void;
-  extendPendingRequestBudget: (requestId: string, timeoutMs: number) => void;
+  adoptPendingRequestBudget: (requestId: string, timeoutMs: number) => void;
   notificationHandlers: Set<(notification: DaemonNotification) => void>;
   pendingRequests: Map<string, PendingDaemonRequest>;
   timer: Timer;
@@ -56,7 +56,7 @@ export function handleInboundLine(context: ClientInboundFramesContext, line: str
 export function handleNotification(
   context: Pick<
     ClientInboundFramesContext,
-    "extendPendingRequestOnProgress" | "extendPendingRequestBudget" | "notificationHandlers"
+    "extendPendingRequestOnProgress" | "adoptPendingRequestBudget" | "notificationHandlers"
   >,
   notification: DaemonNotification,
 ): void {
@@ -65,7 +65,7 @@ export function handleNotification(
     notification.requestId !== undefined &&
     typeof notification.timeoutMs === "number"
   ) {
-    context.extendPendingRequestBudget(notification.requestId, notification.timeoutMs);
+    context.adoptPendingRequestBudget(notification.requestId, notification.timeoutMs);
     // Internal plumbing for this client's own timer; not for notification handlers.
     return;
   }
@@ -151,7 +151,7 @@ export interface PendingDaemonRequest {
    * own independent timer still fires at the original fixed timeout
    * (issue #6222 review, P1). A request with no progressToken never has
    * these set and its timer is never touched, matching today's behavior
-   * exactly.
+   * exactly. Budget announcements can still reschedule their fixed backstop (#13797).
    */
   progressToken?: string | number;
   deadline?: ProgressExtendableDeadline;

@@ -323,12 +323,16 @@ export class DeviceReadiness implements DeviceReadinessContract {
     }
   }
 
-  public getExplicitDevicePin(): BootedDevice | undefined {
-    return this.selection.explicitDevicePin;
+  public getExplicitDevicePin(connectionId?: string): BootedDevice | undefined {
+    return this.selection.getPin(connectionId);
   }
 
-  public setExplicitDevicePin(device: BootedDevice): void {
-    this.selection.explicitDevicePin = device;
+  public setExplicitDevicePin(device: BootedDevice, connectionId?: string): void {
+    this.selection.setPin(device, connectionId);
+  }
+
+  public clearConnectionDevicePin(connectionId: string): void {
+    this.selection.clearConnection(connectionId);
   }
 
   public clearExplicitDevicePin(deviceId: string): void {

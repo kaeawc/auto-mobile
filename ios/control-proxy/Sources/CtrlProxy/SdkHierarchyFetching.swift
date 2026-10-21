@@ -2,6 +2,8 @@ import AutoMobileSdkWire
 import Foundation
 
 public protocol SdkHierarchyFetching: Sendable {
+    /// Allow discovery to retry immediately when the foreground app changes.
+    func foregroundBundleDidChange(_ bundleId: String?) async
     /// Fetch the latest cached hierarchy (fast).
     func fetchHierarchy() async -> SdkViewHierarchy?
     /// Request a fresh hierarchy walk (slower).
@@ -65,6 +67,8 @@ public struct SdkMockRulesOutcome: Sendable, Equatable {
 }
 
 extension SdkHierarchyFetching {
+    public func foregroundBundleDidChange(_: String?) async {}
+
     public func fetchFreshHierarchyResult() async -> SdkHierarchyFetchResult {
         guard let hierarchy = await fetchFreshHierarchy() else { return .unavailable }
         return .hierarchy(hierarchy)

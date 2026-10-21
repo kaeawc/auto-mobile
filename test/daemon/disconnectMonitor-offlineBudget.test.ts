@@ -1,3 +1,4 @@
+import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
@@ -94,13 +95,7 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
     deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map<string, number>(),
-    deviceDisconnectMissIncarnations: new Map([[device.id, 1]]),
-    confirmedDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceIds: new Set(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
-    offlineEpisodes: new Map<string, OfflineEpisode>(),
+    deviceLoss: new DeviceLossState({ missIncarnations: new Map([[device.id, 1]]) }),
     deferredSessionRecoverySweeps: new Set(),
     devicePool: {
       retryDueDeferredSessionRecoveries: async () => {},
@@ -151,14 +146,14 @@ describe("disconnect monitor offline budget (#11090)", () => {
       h.list(ROWS.offline);
       await h.sweepFor(30_000);
       expect(h.cleanedUp).toEqual([]);
-      expect(h.daemon.deviceDisconnectMisses.has(EMULATOR)).toBe(false);
+      expect(h.daemon.deviceLoss.misses.has(EMULATOR)).toBe(false);
       expect(h.reconnects()).toBe(1);
 
       h.list(ROWS.device);
       await h.sweepFor(POLL_MS);
       expect(h.cleanedUp).toEqual([]);
-      expect(h.daemon.offlineEpisodes.size).toBe(0);
-      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.daemon.deviceLoss.offlineEpisodes.size).toBe(0);
+      expect(h.daemon.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
     } finally {
       await h.monitor.stop();
     }
@@ -204,7 +199,7 @@ describe("physical device in a transitional adb state (#11090)", () => {
         h.list(PHONE_DEVICE_ROW);
         await h.sweepFor(POLL_MS);
         expect(h.cleanedUp).toEqual([]);
-        expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+        expect(h.daemon.deviceLoss.misses.has(PHONE)).toBe(false);
       } finally {
         await h.monitor.stop();
       }
@@ -235,13 +230,13 @@ describe("adb transitional states share the offline budget (#11592)", () => {
       h.list(unauthorizedRow);
       await h.sweepFor(30_000);
       expect(h.cleanedUp).toEqual([]);
-      expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+      expect(h.daemon.deviceLoss.misses.has(PHONE)).toBe(false);
       expect(h.reconnects()).toBe(0);
 
       h.list(PHONE_DEVICE_ROW);
       await h.sweepFor(POLL_MS);
       expect(h.cleanedUp).toEqual([]);
-      expect(h.daemon.offlineEpisodes.size).toBe(0);
+      expect(h.daemon.deviceLoss.offlineEpisodes.size).toBe(0);
     } finally {
       await h.monitor.stop();
     }

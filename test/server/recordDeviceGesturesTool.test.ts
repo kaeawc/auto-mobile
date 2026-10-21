@@ -275,8 +275,8 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
 
   function expectNoDeviceWork(): void {
     expect(readiness).not.toHaveBeenCalled();
-    expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(tools.deviceSessionManager.getSetCurrentDeviceCalls()).toEqual([]);
+    expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(tools.deviceReadiness.getSetCurrentDeviceCalls()).toEqual([]);
     expect(start).not.toHaveBeenCalled();
     expect(tools.runs).toEqual([]);
   }
@@ -289,7 +289,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
   });
 
   arranged("a sessionless predicted unheld start is refused before device work", async () => {
-    tools.deviceSessionManager.setConnectedDevices([unheld]);
+    tools.deviceReadiness.setConnectedDevices([unheld]);
     await expect(tools.call("recordDeviceGestures", {})).rejects.toMatchObject(unheldRefusal);
     expectNoDeviceWork();
   });
@@ -338,7 +338,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
       }),
     );
     await tools.call("unheldControl", { deviceId: unheld.deviceId });
-    expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(1);
     expect(tools.runs).toMatchObject([{ name: "unheldControl", deviceId: unheld.deviceId }]);
     expect(start).not.toHaveBeenCalled();
   });
@@ -383,7 +383,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     DaemonState.getInstance().reset();
     await tools.call("recordDeviceGestures", { deviceId: unheld.deviceId });
     expect(readiness).not.toHaveBeenCalled();
-    expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(1);
     expect(start).toHaveBeenCalledTimes(1);
   });
 
@@ -400,7 +400,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
   });
 
   arranged("a predicted idle binding device keeps its refusal before readiness", async () => {
-    tools.deviceSessionManager.setConnectedDevices([binding]);
+    tools.deviceReadiness.setConnectedDevices([binding]);
     await expect(tools.call("recordDeviceGestures", { platform: "ios" })).rejects.toMatchObject({
       code: "device_assigned_to_binding",
     });
@@ -419,7 +419,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
           retryable: false,
         });
         expect(readiness).not.toHaveBeenCalled();
-        expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+        expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
         expect(start).not.toHaveBeenCalled();
         expect(tools.runs).toEqual([]);
       },
@@ -453,7 +453,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
       tools.call("recordDeviceGestures", { deviceId: binding.deviceId }),
     ).rejects.toMatchObject({ code: "device_assigned_to_binding" });
     expect(readiness).not.toHaveBeenCalled();
-    expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
     expect(start).not.toHaveBeenCalled();
   });
 });

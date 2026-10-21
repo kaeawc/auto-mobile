@@ -2,6 +2,7 @@ import { EmulatorProcessOutputTail } from "../../../src/daemon/EmulatorProcessOu
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import type { SpawnFn } from "../../../src/utils/HostCommandExecutor";
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import {
   AndroidEmulatorClient,
@@ -64,13 +65,13 @@ function createClient(
   child: FakeChildProcess,
   onSpawn: () => void,
   accelCheck: ProbeResult = async () => execResult(),
+  timer = new FakeTimer(),
 ): {
   client: AndroidEmulatorClient;
   accelChecks: () => number;
   timer: FakeTimer;
   executor: FakeAdbExecutor;
 } {
-  const timer = new FakeTimer();
   const calls: string[][] = [];
   const executor = new FakeAdbExecutor();
   const factory = new TestAdbClientFactory(executor);
@@ -925,5 +926,168 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(error.message).toContain("AUTOMOBILE_EMULATOR_HEADLESS");
     expect(error.message).toContain("category=display_initialization_failed");
     expect(accelChecks()).toBe(0);
+  });
+});
+
+const startupFixture = (name: string) =>
+  readFileSync(new URL(`../../fixtures/android-emulator/${name}.txt`, import.meta.url), "utf8");
+const benignStartupLine = startupFixture("normal-startup").split("\n")[0] + "\n";
+
+async function pendingStartup(signal?: AbortSignal) {
+  const timer = new FakeTimer();
+  const child = new FakeChildProcess(timer);
+  let spawned = false;
+  const harness = createClient(
+    child,
+    () => {
+      spawned = true;
+    },
+    undefined,
+    timer,
+  );
+  let settled = false;
+  const launch = harness.client
+    .launchEmulator({ avdName, signal })
+    .then((handle) => handle.process)
+    .then(
+      (process) => {
+        settled = true;
+        return process;
+      },
+      (error: unknown) => {
+        settled = true;
+        throw error;
+      },
+    );
+  // Attach a handler before emitting failure output, so rejections are always observed.
+  const rejection = expectRejection(launch);
+  void rejection.catch(() => {});
+  await drainUntil(() => spawned, { description: "emulator startup" });
+  return { ...harness, child, launch, rejection, settled: () => settled };
+}
+
+async function immediateFailureMessage(output: string) {
+  const harness = await pendingStartup();
+  harness.child.stderr.emit("data", output);
+  const error = await harness.rejection;
+  await harness.timer.advanceTimeAsync(0);
+  AndroidEmulatorClient.resetLaunchReservationsForTesting();
+  return error.message;
+}
+
+function expectStartupTimersCleared(timer: FakeTimer) {
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  expect(timer.getPendingIntervalCount()).toBe(0);
+}
+
+describe("early startup validation diagnostic parity", () => {
+  for (const fixture of ["arch-panic", "sandbox-mprotect", "corrupt-qcow2", "display-xcb"]) {
+    test(`${fixture} during stdout grace rejects with the original actionable diagnostic`, async () => {
+      const output = startupFixture(fixture);
+      const originalMessage = await immediateFailureMessage(output);
+      const harness = await pendingStartup();
+      harness.child.stdout.emit("data", benignStartupLine);
+      await harness.timer.advanceTimeAsync(500);
+      harness.child.stderr.emit("data", output);
+      const error = await harness.rejection;
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error.message).toBe(originalMessage);
+      await harness.timer.advanceTimeAsync(0);
+      expectStartupTimersCleared(harness.timer);
+      await harness.timer.advanceTimeAsync(5000);
+      expect(await harness.rejection).toBe(error);
+    });
+  }
+
+  test("classifies PANIC in the first stdout chunk before arming grace", async () => {
+    const harness = await pendingStartup();
+    harness.child.stdout.emit("data", benignStartupLine + startupFixture("arch-panic"));
+    const error = await harness.rejection;
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error.message).toContain("AVD architecture 'x86_64' is not supported");
+    await harness.timer.advanceTimeAsync(0);
+    expectStartupTimersCleared(harness.timer);
+    await harness.timer.advanceTimeAsync(5000);
+    expect(await harness.rejection).toBe(error);
+  });
+
+  test("child exit during grace keeps early-exit diagnostics while waiting for close", async () => {
+    const harness = await pendingStartup();
+    harness.child.stdout.emit("data", benignStartupLine);
+    await harness.timer.advanceTimeAsync(500);
+    harness.child.emit("exit", 1, null);
+    expect(harness.timer.getPendingTimeouts()).toEqual([1000]);
+    expect(harness.timer.getPendingIntervals()).toEqual([]);
+    // The grace deadline must not resolve while the early-exit drain is pending.
+    await harness.timer.advanceTimeAsync(500);
+    expect(harness.settled()).toBe(false);
+    harness.child.emit("close", 1, null);
+    const error = await harness.rejection;
+    expect(error.message).toContain("Emulator process exited with code: 1");
+    expect(error.message).toContain(benignStartupLine.trim());
+    expectStartupTimersCleared(harness.timer);
+    await harness.timer.advanceTimeAsync(5000);
+    expect(await harness.rejection).toBe(error);
+  });
+});
+
+describe("client early-serial probe wiring", () => {
+  test("bypasses the inventory cache and passes the request signal on each poll", async () => {
+    const controller = new AbortController();
+    const harness = await pendingStartup(controller.signal);
+    const calls: unknown[][] = [];
+    harness.client.getBootedDevicesChecked = async (onlyEmulators, options, signal) => {
+      calls.push([onlyEmulators, options, signal]);
+      return [
+        {
+          name: avdName,
+          platform: "android",
+          deviceId: calls.length === 2 ? "emulator-5554" : "emulator-5556",
+        },
+      ];
+    };
+    await harness.timer.advanceTimeAsync(500);
+    expect(harness.settled()).toBe(false);
+    await harness.timer.advanceTimeAsync(500);
+    expect(harness.settled()).toBe(true);
+    expect(await harness.launch).toBe(harness.child);
+    expect(calls).toEqual([
+      [true, { bypassDeviceListCache: true }, controller.signal],
+      [true, { bypassDeviceListCache: true }, controller.signal],
+    ]);
+    expectStartupTimersCleared(harness.timer);
+  });
+
+  test("an unavailable adb probe falls back to stdout grace", async () => {
+    const harness = await pendingStartup();
+    let probes = 0;
+    harness.client.getBootedDevicesChecked = async () => {
+      probes++;
+      throw new Error("adb unavailable");
+    };
+    harness.child.stdout.emit("data", benignStartupLine);
+    await harness.timer.advanceTimeAsync(999);
+    expect(harness.settled()).toBe(false);
+    expect(probes).toBe(1);
+    await harness.timer.advanceTimeAsync(1);
+    expect(await harness.launch).toBe(harness.child);
+    expectStartupTimersCleared(harness.timer);
+  });
+
+  test("a pending successful probe cannot override a classified rejection", async () => {
+    const harness = await pendingStartup();
+    let finishProbe!: (devices: BootedDevice[]) => void;
+    harness.client.getBootedDevicesChecked = () =>
+      new Promise((resolve) => {
+        finishProbe = resolve;
+      });
+    harness.child.stdout.emit("data", benignStartupLine);
+    await harness.timer.advanceTimeAsync(500);
+    harness.child.stderr.emit("data", startupFixture("arch-panic"));
+    const error = await harness.rejection;
+    finishProbe([{ name: avdName, platform: "android", deviceId: "emulator-5554" }]);
+    await harness.timer.advanceTimeAsync(5000);
+    expect(await harness.rejection).toBe(error);
+    expectStartupTimersCleared(harness.timer);
   });
 });

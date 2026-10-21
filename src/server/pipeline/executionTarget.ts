@@ -64,7 +64,7 @@ export interface ExecutionTargetInput {
   name: string;
   args: any;
   options: DeviceAwareToolOptions;
-  deviceSessionManager: DeviceReadiness;
+  deviceReadiness: DeviceReadiness;
   signal?: AbortSignal;
   /** The registry's clock; rate-limits the first-sighting transport probe (#11618). */
   timer?: Timer;
@@ -223,7 +223,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
   /** Resolves the implicit autolock session and enforces a session when several devices exist. */
   private async resolveImplicitSession(state: TargetResolution): Promise<void> {
-    const { args, options, deviceSessionManager, signal } = state.input;
+    const { args, options, deviceReadiness, signal } = state.input;
     const { platform, providedDeviceId, execution, mcpSessionId, autolockEnabled } = state;
     const implicitSessionUuid = this.resolveImplicitAutolockSession(
       platform,
@@ -252,7 +252,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       platform,
       sessionUuid: state.sessionUuid,
       providedDeviceId,
-      deviceSessionManager,
+      deviceReadiness,
       signal,
       getConnectedPlatforms: state.getConnectedPlatforms,
       readOnly: isDeviceReadOnlyCall(options, args),
@@ -261,7 +261,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       platform,
       sessionUuid: state.sessionUuid,
       providedDeviceId,
-      deviceSessionManager,
+      deviceReadiness,
       signal,
       getConnectedPlatforms: state.getConnectedPlatforms,
       autolockEnabled,
@@ -595,13 +595,13 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private async resolveLegacyDevice(
     state: TargetResolution,
   ): Promise<ExecutionTargetContext | undefined> {
-    const { name, deviceSessionManager } = state.input;
+    const { name, deviceReadiness } = state.input;
     const { providedDeviceId, platform } = state;
     let readinessTarget = providedDeviceId;
     if (!providedDeviceId && defaultDaemonContext.isInitialized()) {
       readinessTarget = await predictReadinessTarget(
         platform,
-        deviceSessionManager,
+        deviceReadiness,
         state.getConnectedPlatforms,
       );
     }
@@ -860,12 +860,12 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform: SomePlatform;
     sessionUuid: string | undefined;
     providedDeviceId: string | undefined;
-    deviceSessionManager: DeviceReadiness;
+    deviceReadiness: DeviceReadiness;
     signal: AbortSignal | undefined;
     getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
     readOnly: boolean;
   }): Promise<void> {
-    const { platform, sessionUuid, providedDeviceId, deviceSessionManager, signal } = input;
+    const { platform, sessionUuid, providedDeviceId, deviceReadiness, signal } = input;
     const { getConnectedPlatforms } = input;
     if (sessionUuid || providedDeviceId) {
       return;
@@ -874,7 +874,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal?.throwIfAborted();
     const scan = await getConnectedPlatforms();
     const connectedPlatforms = scan.devices;
-    const explicitPin = this.getValidExplicitPin(deviceSessionManager, scan);
+    const explicitPin = this.getValidExplicitPin(deviceReadiness, scan);
     if (this.hasActiveDeviceForNamedPlatform(platform, explicitPin)) {
       return;
     }
@@ -912,10 +912,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   }
 
   private getValidExplicitPin(
-    deviceSessionManager: DeviceReadiness,
+    deviceReadiness: DeviceReadiness,
     scan: ConnectedPlatformScan,
   ): BootedDevice | undefined {
-    const explicitPin = deviceSessionManager.getExplicitDevicePin();
+    const explicitPin = deviceReadiness.getExplicitDevicePin();
     if (!explicitPin) {
       return undefined;
     }
@@ -928,7 +928,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return explicitPin;
     }
     if (isScanAuthoritativeFor(scan, explicitPin)) {
-      deviceSessionManager.clearExplicitDevicePin(explicitPin.deviceId);
+      deviceReadiness.clearExplicitDevicePin(explicitPin.deviceId);
       return undefined;
     }
     return explicitPin;
@@ -973,7 +973,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform,
     sessionUuid,
     providedDeviceId,
-    deviceSessionManager,
+    deviceReadiness,
     signal,
     getConnectedPlatforms,
     autolockEnabled,
@@ -982,7 +982,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform: SomePlatform;
     sessionUuid: string | undefined;
     providedDeviceId: string | undefined;
-    deviceSessionManager: DeviceReadiness;
+    deviceReadiness: DeviceReadiness;
     signal: AbortSignal | undefined;
     getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
     autolockEnabled: boolean;
@@ -998,7 +998,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal?.throwIfAborted();
     const scan = await getConnectedPlatforms();
     const connectedPlatforms = scan.devices;
-    const explicitPin = this.getValidExplicitPin(deviceSessionManager, scan);
+    const explicitPin = this.getValidExplicitPin(deviceReadiness, scan);
     if (explicitPin && (platform === "either" || platform === explicitPin.platform)) {
       return;
     }

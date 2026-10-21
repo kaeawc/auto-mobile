@@ -30,7 +30,7 @@ import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -493,11 +493,11 @@ describe("navigation tool session graph selection", () => {
   });
 
   test("registered navigation tools resolve an omitted platform to the active iOS device", async () => {
-    const fakeDevices = new FakeDeviceSessionManager();
+    const fakeDevices = new FakeDeviceReadiness();
     fakeDevices.setConnectedDevices([device]);
     fakeDevices.setCurrentDevice(device, "ios");
-    const originalDevices = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDevices });
+    const originalDevices = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDevices });
     const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -555,7 +555,7 @@ describe("navigation tool session graph selection", () => {
       expect(fakeDevices.getLastEnsureDeviceReadyPlatform()).toBe("android");
     } finally {
       restorePipelineOverrides();
-      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDevices });
+      ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDevices });
       exploreSpy.mockRestore();
     }
   });

@@ -1,3 +1,4 @@
+import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
@@ -5,7 +6,6 @@ import { Daemon } from "../../src/daemon/daemon";
 import {
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   MISSING_SIMULATOR_DISCONNECT_BUDGET_MS,
-  type OfflineEpisode,
 } from "../../src/daemon/disconnectMonitor";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -54,8 +54,7 @@ class SimulatorListingManager extends FakeDeviceManager {
 
 interface MonitorSurface {
   deviceDisconnectMonitor: SingleFlightInterval;
-  offlineEpisodes: Map<string, OfflineEpisode>;
-  deviceDisconnectMisses: Map<string, number>;
+  deviceLoss: DeviceLossState;
   startDeviceDisconnectMonitor(
     manager: SimulatorListingManager,
     listRecordings: () => Promise<[]>,
@@ -102,14 +101,7 @@ async function simulatorMonitor() {
     devicePool: pool,
     sessionManager: sessions,
     deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map<string, number>(),
-    deviceDisconnectMissIncarnations: new Map(),
-    confirmedDisconnectedDeviceIds: new Set<string>(),
-    forceDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceGenerations: new Map(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
-    offlineEpisodes: new Map<string, OfflineEpisode>(),
+    deviceLoss: new DeviceLossState(),
     deferredSessionRecoverySweeps: new Set(),
   }) as MonitorSurface;
   daemon.startDeviceDisconnectMonitor(manager, async () => []);
@@ -174,8 +166,8 @@ describe("disconnect monitor: held simulator in a transitional simctl state (#11
       h.failSimctl(false);
       h.set(HELD, "Booted");
       await h.pollFor(POLL_MS);
-      expect(h.daemon.deviceDisconnectMisses.has(HELD.deviceId)).toBe(false);
-      expect(h.daemon.offlineEpisodes.has(HELD.deviceId)).toBe(false);
+      expect(h.daemon.deviceLoss.misses.has(HELD.deviceId)).toBe(false);
+      expect(h.daemon.deviceLoss.offlineEpisodes.has(HELD.deviceId)).toBe(false);
       h.set(HELD, "Shutdown");
       await h.pollFor(2 * POLL_MS);
       expect(h.held()).toBe(true);
@@ -202,8 +194,8 @@ describe("disconnect monitor: held simulator in a transitional simctl state (#11
       h.failSimctl(true);
       await h.pollFor(2 * MISSING_SIMULATOR_DISCONNECT_BUDGET_MS);
       expect(h.held()).toBe(true);
-      expect(h.daemon.deviceDisconnectMisses.has(HELD.deviceId)).toBe(false);
-      expect(h.daemon.offlineEpisodes.size).toBe(0);
+      expect(h.daemon.deviceLoss.misses.has(HELD.deviceId)).toBe(false);
+      expect(h.daemon.deviceLoss.offlineEpisodes.size).toBe(0);
     });
   });
 
@@ -214,12 +206,12 @@ describe("disconnect monitor: held simulator in a transitional simctl state (#11
       await h.pollFor(20_000);
       expect(h.sessions.getSession(SESSION)).not.toBeNull();
       expect(h.held()).toBe(true);
-      expect(h.daemon.deviceDisconnectMisses.has(HELD.deviceId)).toBe(false);
+      expect(h.daemon.deviceLoss.misses.has(HELD.deviceId)).toBe(false);
 
       h.set(HELD, "Booted");
       await h.pollFor(POLL_MS);
       expect(h.held()).toBe(true);
-      expect(h.daemon.offlineEpisodes.size).toBe(0);
+      expect(h.daemon.deviceLoss.offlineEpisodes.size).toBe(0);
     });
   });
 
@@ -272,8 +264,8 @@ describe("disconnect monitor: held simulator in a transitional simctl state (#11
       h.failSimctl(true);
       await h.pollFor(30_000);
       expect(h.held()).toBe(true);
-      expect(h.daemon.offlineEpisodes.size).toBe(0);
-      expect(h.daemon.deviceDisconnectMisses.has(HELD.deviceId)).toBe(false);
+      expect(h.daemon.deviceLoss.offlineEpisodes.size).toBe(0);
+      expect(h.daemon.deviceLoss.misses.has(HELD.deviceId)).toBe(false);
     });
   });
 

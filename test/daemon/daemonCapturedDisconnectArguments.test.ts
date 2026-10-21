@@ -1,3 +1,4 @@
+import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { expect, mock, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
@@ -38,7 +39,7 @@ test.each(["waiting", "in-flight", "absent", "prepared"])(
     );
     pool.finishSessionPreservingRecoveryPreparation = finishPreparation;
     const daemon: Daemon = Object.create(Daemon.prototype);
-    Object.assign(daemon, { devicePool: pool, forceDisconnectedDeviceIds: new Set<string>() });
+    Object.assign(daemon, { devicePool: pool, deviceLoss: new DeviceLossState() });
     daemon["shouldSkipStaleDisconnectCleanup"] = async () => false;
     daemon["isCapturedDisconnectTargetCurrent"] = () => true;
     const retire = mock<Daemon["retireAdbServerResetDisconnectState"]>(() => {});
@@ -138,7 +139,7 @@ test.each([
     const finish = mock<DevicePool["finishSessionPreservingRecoveryPreparation"]>(() => {});
     pool.finishSessionPreservingRecoveryPreparation = finish;
     const daemon: Daemon = Object.create(Daemon.prototype);
-    Object.assign(daemon, { devicePool: pool, forceDisconnectedDeviceIds: new Set<string>() });
+    Object.assign(daemon, { devicePool: pool, deviceLoss: new DeviceLossState() });
     const skip = mock<Daemon["shouldSkipStaleDisconnectCleanup"]>(async () => false);
     daemon["shouldSkipStaleDisconnectCleanup"] = skip;
     const current = mock<Daemon["isCapturedDisconnectTargetCurrent"]>(() => true);

@@ -35,9 +35,8 @@ import { daemonProcessOptions } from "../daemonOptionScopes";
 import { type DaemonProcessRecord } from "../processTable";
 import { stderrLog } from "./DaemonLaunch";
 import type { DaemonStartResult } from "../manager";
-import { recordedProcessGenerationToken } from "../processGenerationFields";
 import {
-  takeoverDeferralBoundExceeded,
+  deferredRestartError,
   type TakeoverDeferralKind,
   type TakeoverDeferralLedger,
 } from "./TakeoverDeferralLedger";
@@ -369,25 +368,14 @@ export class DaemonStart {
     kind: TakeoverDeferralKind,
     original: DaemonRestartDeferredError,
   ): never {
-    const nowMs = this.host.timer.now();
-    const record = this.host.takeoverDeferrals.recordDeferral(
-      {
-        pid: status.pid,
-        startedAt: status.startedAt,
-        processGenerationToken: recordedProcessGenerationToken(status),
-      },
-      nowMs,
-    );
-    if (!takeoverDeferralBoundExceeded(kind, record, nowMs)) {
-      throw original;
-    }
-    const reason =
-      `older daemon pid ${status.pid} (version ${status.version ?? "unknown"}) has deferred this takeover ` +
-      `${record.attempts} times since ${new Date(record.firstDeferredAtMs).toISOString()} (${original.message}); ` +
-      `it is never stopped automatically — run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` ` +
-      "to replace it once no device operation is active";
-    logger.warn(reason);
-    throw new DaemonRestartDeferredError(reason);
+    throw deferredRestartError({
+      ledger: this.host.takeoverDeferrals,
+      incumbent: status,
+      kind,
+      original,
+      nowMs: this.host.timer.now(),
+      subject: "older daemon",
+    });
   }
 
   /**

@@ -48,6 +48,10 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         self.healthTransport = healthTransport
     }
 
+    public func foregroundBundleDidChange(_ bundleId: String?) async {
+        await endpointResolver?.noteForegroundBundle(bundleId)
+    }
+
     /// Fetch the latest cached hierarchy from the SDK (fast, no main-thread work in the target app).
     public func fetchHierarchy() async -> SdkViewHierarchy? {
         await optionalHierarchy(path: SdkRoute.cachedHierarchy.path)
@@ -275,6 +279,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     }
 
     private static func logEndpointError(_ error: SdkEndpointError) {
+        if case .unavailableCached = error { return }
         Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
             .warning("\(error.localizedDescription, privacy: .public)")
     }

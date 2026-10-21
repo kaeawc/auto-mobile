@@ -20,7 +20,7 @@ export class PushSubscriberOutbox {
 
   constructor(private readonly socket: PushSocketWriter) {}
 
-  send(message: unknown, drainPending: boolean): boolean {
+  send(message: unknown, drainPending: boolean, serialized?: string): boolean {
     if (this.socket.writableLength <= PUSH_SOCKET_WRITABLE_LIMIT_BYTES) {
       this.reportedDrops.clear();
     }
@@ -49,12 +49,13 @@ export class PushSubscriberOutbox {
         droppedType: "screenshot_update",
         reason: "backpressure",
       } satisfies FramesDroppedMessage;
+      serialized = undefined;
     }
     if (drainPending) {
-      this.enqueue(message);
+      this.enqueue(message, serialized);
       return false;
     }
-    return this.write(message);
+    return this.write(message, serialized);
   }
 
   flush(): boolean {
@@ -63,9 +64,9 @@ export class PushSubscriberOutbox {
       this.pending.delete(key);
       const ok =
         !this.socket.destroyed &&
-        (entry.serialized === undefined
-          ? this.send(entry.message, false)
-          : this.socket.write(entry.serialized));
+        (typeof key === "string"
+          ? this.send(entry.message, false, entry.serialized)
+          : this.socket.write(entry.serialized!));
       if (!ok) {
         return false;
       }
@@ -86,7 +87,7 @@ export class PushSubscriberOutbox {
     }
   }
 
-  private enqueue(message: unknown): void {
+  private enqueue(message: unknown, serialized?: string): void {
     const { type, subscriptionId, deviceId, deviceSessionUuid, correlated } = this.fields(message);
     // Only these full-state observation frames are replaceable. hierarchy_update
     // carries the complete tree; hierarchyDiff is advisory. There is no separate
@@ -106,12 +107,13 @@ export class PushSubscriberOutbox {
       message: typeof key === "string" ? message : undefined,
       subscriptionId,
       // Snapshot lossless events now: callers may reuse/mutate their event data.
-      serialized: typeof key === "number" ? JSON.stringify(message) + "\n" : undefined,
+      serialized:
+        serialized ?? (typeof key === "number" ? JSON.stringify(message) + "\n" : undefined),
     });
   }
 
-  private write(message: unknown): boolean {
-    return this.socket.write(JSON.stringify(message) + "\n");
+  private write(message: unknown, serialized?: string): boolean {
+    return this.socket.write(serialized ?? JSON.stringify(message) + "\n");
   }
 
   private stateKey(

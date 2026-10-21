@@ -4,10 +4,7 @@ import type { DeviceReadOnlyArgShape } from "../daemon/deviceReadOnlyArgShapes";
 
 import { type ToolTransportRecovery } from "../daemon/toolTransportRecovery";
 
-import {
-  DeviceSessionManager,
-  type DeviceReadinessLevel,
-} from "../daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness, type DeviceReadinessLevel } from "../daemon/readiness/DeviceReadiness";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";
 
 import { type DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
@@ -297,7 +294,7 @@ export function toolHasOutputSchema(tool: Pick<RegisteredTool, "outputSchema">):
 
 /** The collaborators a test may read and swap on the ToolRegistry singleton. */
 export interface ToolRegistryCollaborators {
-  deviceSessionManager: DeviceSessionManager;
+  deviceReadiness: DeviceReadiness;
   toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   timer: Timer;
   navigationToolCallRecorder: NavigationToolCallRecorder;

@@ -21,6 +21,10 @@ export interface EmulatorLaunchState {
   duplicateAvdDetected: boolean;
   earlyExitCategory: LaunchFailureCategory | undefined;
   startupValidationComplete: boolean;
+  stdoutGraceTimeout: NodeJS.Timeout | undefined;
+  serialPollInterval: NodeJS.Timeout | undefined;
+  serialProbeInFlight: boolean;
+  startupAccelerationFailureDetected: boolean;
   childTerminationObserved: boolean;
   exitCode: number | null | undefined;
   exitSignal: NodeJS.Signals | null | undefined;
@@ -237,6 +241,7 @@ export interface EmulatorLauncherHost {
   launchErrors(): WeakMap<ChildProcess, ActionableError>;
   launchErrorFinalizations(): WeakMap<ChildProcess, Promise<ActionableError | undefined>>;
   launchTargetDeviceIds(): WeakMap<ChildProcess, string>;
+  isEmulatorSerialListed(serial: string, signal?: AbortSignal): Promise<boolean>;
   accelerationCheckCategory(output: string): LaunchFailureCategory | undefined;
   adoptsExistingAvdLaunch(
     avdName: string,

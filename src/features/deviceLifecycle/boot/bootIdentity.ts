@@ -27,7 +27,7 @@ import {
   isVirtualAndroidDevice,
   getBootedAndroidStableName,
   getValidatedPooledAndroidAvdName,
-} from "../core/androidIdentity";
+} from "../identity/androidIdentity";
 
 /**
  * True when the running device resolved for `args.deviceId` is not the device

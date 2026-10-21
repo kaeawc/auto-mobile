@@ -4452,7 +4452,7 @@ finish_ios_runtime_probe() {
     fi
 
     # `xcrun simctl list` can stall indefinitely on a loaded macOS runner -- the
-    # hazard #3943 documents and the reason FakeDeviceSessionManager exists. This
+    # hazard #3943 documents and the reason FakeDeviceReadiness exists. This
     # probe only decorates output with the installed runtimes, so an unbounded
     # `wait` traded a cosmetic detail for a hang: on CI it pinned a BATS job for
     # 6 hours until the runner cancelled it. Bound the join and degrade to

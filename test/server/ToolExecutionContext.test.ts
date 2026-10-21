@@ -1017,7 +1017,7 @@ describe("ToolExecutionContext", () => {
   // #6227: the persisted daemon-session path (ToolRegistry passing sessionUuid
   // into createToolExecutionContext) must honor a tool's declared
   // deviceReadiness the same way the legacy/no-session path already does via
-  // DeviceSessionManager.ensureDeviceReady's `readiness` option.
+  // DeviceReadiness.ensureDeviceReady's `readiness` option.
   arranged(
     "skips accessibility setup for a new session when deviceReadiness is booted (#6227)",
     async () => {

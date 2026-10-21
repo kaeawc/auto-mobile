@@ -21,7 +21,7 @@ import { describeDevice, projectConfiguredImage } from "../daemon/deviceDescript
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
-import { getAbortSignal } from "../utils/AbortContext";
+import type { ProgressCallback } from "./toolRegistry";
 import { ResourceRegistry } from "./resourceRegistry";
 import {
   BOOTED_DEVICE_RESOURCE_URIS,
@@ -53,6 +53,7 @@ async function transitionalHeldListing(input: {
   discovery: BootedDeviceDiscovery;
   pool: ReturnType<typeof initializedDevicePool>;
   deviceManager: ReturnType<ReturnType<typeof getDeviceToolsDependencies>["deviceManagerFactory"]>;
+  signal: AbortSignal | undefined;
 }): Promise<{
   devices: BootedDevice[];
   holds: Map<string, TransitionalHold>;
@@ -68,7 +69,7 @@ async function transitionalHeldListing(input: {
     discovered,
     devicePool: pool,
     deviceManager,
-    signal: getAbortSignal(),
+    signal: input.signal,
     onProbeFailure: (failure) => {
       probeFailure = failure;
     },
@@ -207,7 +208,11 @@ export function createListingHandlers() {
     }
   };
 
-  const listDevicesHandler = async (args: ListDevicesArgs & Record<string, unknown>) => {
+  const listDevicesHandler = async (
+    args: ListDevicesArgs & Record<string, unknown>,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
     // #5870: a tool named `listDevices` returns the devices. The data is right
     // here — enumerate booted devices directly instead of forcing a modality
     // switch to resources. The resource pointers (which also cover not-yet-booted
@@ -263,6 +268,7 @@ export function createListingHandlers() {
         discovery,
         pool,
         deviceManager,
+        signal,
       });
       booted = [...booted, ...transitional.devices];
       for (const [deviceId, hold] of transitional.holds) {

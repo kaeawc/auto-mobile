@@ -1,6 +1,6 @@
 import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -11,7 +11,7 @@ afterEach(() => {
   mock.restore();
 });
 
-describe("DeviceSessionManager platform scan status", () => {
+describe("DeviceReadiness platform scan status", () => {
   const android: BootedDevice = {
     deviceId: "emulator-5554",
     name: "Pixel",
@@ -30,7 +30,7 @@ describe("DeviceSessionManager platform scan status", () => {
       const simctl = new FakeSimctl();
       adb.setDevices([android]);
       simctl.setBootedSimulators([ios]);
-      const manager = DeviceSessionManager.createInstance(
+      const manager = DeviceReadiness.createInstance(
         new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), simctl),
       );
       const pinned = failedPlatform === "android" ? android : ios;
@@ -72,7 +72,7 @@ describe("DeviceSessionManager platform scan status", () => {
   test("does not treat a missing adb binary as a complete, empty Android scan", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([android]);
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), new FakeSimctl()),
     );
     manager.setExplicitDevicePin(android);
@@ -97,7 +97,7 @@ describe("DeviceSessionManager platform scan status", () => {
   });
 
   test("does not treat absent simctl as a successful iOS scan", async () => {
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
     );
     const scan = await manager.detectConnectedPlatformsWithStatus();

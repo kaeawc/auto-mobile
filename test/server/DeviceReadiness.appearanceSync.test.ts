@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { applyAppearanceOnConnect } from "../../src/daemon/applyAppearanceOnConnect";
 import { isAppearanceSyncEnabled } from "../../src/utils/appearance/appearanceSyncPolicy";
 import { installDeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
@@ -60,7 +60,7 @@ function harness(
     }
   });
   const dependencies = { isSyncEnabled, getConfig, resolveMode, apply };
-  const manager = DeviceSessionManager.createInstance(
+  const manager = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, devices, simctl, {
       window,
       ctrlProxyManager,

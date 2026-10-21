@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import {
   InMemoryProvisionedDeviceTransportFence,
@@ -13,7 +13,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeWindow } from "../fakes/FakeWindow";
 
-describe("DeviceSessionManager retired transport tombstones (#11134)", () => {
+describe("DeviceReadiness retired transport tombstones (#11134)", () => {
   afterEach(() => resetProvisionedDeviceTransportFenceForTests());
 
   function setup(liveName: string) {
@@ -30,7 +30,7 @@ describe("DeviceSessionManager retired transport tombstones (#11134)", () => {
       activityName: "MainActivity",
       layoutSeqSum: 0,
     });
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), { window }),
     );
     return { manager, fence };

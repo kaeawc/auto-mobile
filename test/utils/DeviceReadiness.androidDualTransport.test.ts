@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import type { BootedDevice } from "../../src/models";
 import {
   AdbClient,
@@ -102,7 +102,7 @@ describe("Android dual-transport readiness (#11133)", () => {
     const window = new FakeWindow();
     window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
     const adb = h.client(null);
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), undefined, {
         window,
         ctrlProxyManager: new FakeCtrlProxyManager(),
@@ -148,7 +148,7 @@ describe("Android dual-transport readiness by alias id (#11133)", () => {
       }
       const window = new FakeWindow();
       window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
-      const manager = DeviceSessionManager.createInstance(
+      const manager = DeviceReadiness.createInstance(
         new FakeDeviceClientProvider(h.client(null), new FakeDeviceUtils(), undefined, {
           window,
           ctrlProxyManager: new FakeCtrlProxyManager(),

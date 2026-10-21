@@ -5,7 +5,7 @@ import {
   type DeviceGestureRecordingDeviceResolution,
 } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import {
   ActionableError,
   type AppearanceConfig,
@@ -28,7 +28,7 @@ import { FakeWindow } from "../fakes/FakeWindow";
  * syncWithHost false) keeps a light device when it starts a recording on a dark host. Without the
  * session, readiness read the global config, which follows the host.
  *
- * The production resolution runs here over a real DeviceSessionManager on fakes, so the assertion
+ * The production resolution runs here over a real DeviceReadiness on fakes, so the assertion
  * is the device write itself.
  */
 class TestableServer extends DeviceGestureRecordingSocketServer {
@@ -58,7 +58,7 @@ function harness() {
   const window = new FakeWindow();
   window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
   const configKeys: Array<string | undefined> = [];
-  const manager = DeviceSessionManager.createInstance(
+  const manager = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), {
       window,
       ctrlProxyManager: new FakeCtrlProxyManager(),

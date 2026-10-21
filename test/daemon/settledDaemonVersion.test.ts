@@ -206,7 +206,7 @@ test("PID publication records the settled identity, not the import-time clean st
   };
   const identity = new DaemonIdentity(
     host,
-    { stat: () => ({ dev: 0, ino: 0 }) },
+    { stat: () => ({ dev: 0n, ino: 0n }) },
     "linux",
     () => "/fake/auto-mobile.db",
   );

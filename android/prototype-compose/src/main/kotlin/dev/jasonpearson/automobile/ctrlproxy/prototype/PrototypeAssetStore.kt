@@ -11,6 +11,7 @@ import java.util.concurrent.Executor
  * tests use an in-memory fake. Names are opaque store-generated tokens, never asset ids, so an id
  * can never reach the file system.
  */
+@InternalAutoMobilePrototypeApi
 interface PrototypeAssetFiles {
   @Throws(IOException::class) fun write(name: String, bytes: ByteArray)
 
@@ -25,6 +26,7 @@ interface PrototypeAssetFiles {
 }
 
 /** Caps and allowed types, defaulting to the contract shared with the TypeScript host. */
+@InternalAutoMobilePrototypeApi
 data class PrototypeAssetLimits(
   val maxAssetBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_BYTES,
   val maxFontBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_FONT_ASSET_BYTES,
@@ -41,6 +43,7 @@ data class PrototypeAssetLimits(
  * Metadata the renderer needs to decide how to decode; the bytes come from
  * [PrototypeAssetStore.read].
  */
+@InternalAutoMobilePrototypeApi
 data class PrototypeAssetInfo(val id: String, val mimeType: String, val byteCount: Int)
 
 /**
@@ -50,11 +53,13 @@ data class PrototypeAssetInfo(val id: String, val mimeType: String, val byteCoun
  * before that call returns. A listener may therefore call back into the store (`lookup`, `read`)
  * without deadlocking; it must still be quick, since it runs on the caller's thread.
  */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeAssetChangeListener {
   fun onAssetsChanged(ids: Set<String>?)
 }
 
 /** What the renderer needs from the store: metadata, bytes, and a change signal. */
+@InternalAutoMobilePrototypeApi
 interface PrototypeAssetSource {
   fun lookup(id: String): PrototypeAssetInfo?
 
@@ -68,6 +73,7 @@ interface PrototypeAssetSource {
   fun setChangeListener(listener: PrototypeAssetChangeListener?)
 }
 
+@InternalAutoMobilePrototypeApi
 enum class PrototypeAssetRejection {
   INVALID_ID,
   UNSUPPORTED_MIME_TYPE,
@@ -80,6 +86,7 @@ enum class PrototypeAssetRejection {
   SESSION_ENDED,
 }
 
+@InternalAutoMobilePrototypeApi
 sealed interface PrototypeAssetPutResult {
   data class Stored(val info: PrototypeAssetInfo, val replaced: Boolean) : PrototypeAssetPutResult
 
@@ -112,6 +119,7 @@ sealed interface PrototypeAssetPutResult {
  * The lock order is therefore store monitor, never listener; the listener's own locks (the image
  * cache's) are only ever taken with none of the store's locks held.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeAssetStore(
   private val files: PrototypeAssetFiles,
   val limits: PrototypeAssetLimits = PrototypeAssetLimits(),

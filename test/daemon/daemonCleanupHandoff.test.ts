@@ -8,9 +8,9 @@ import type { PidFileData } from "../../src/daemon/types";
 
 class CleanupFiles implements DaemonCleanupFileSystem {
   readonly paths = new Map([
-    ["control.sock", { dev: 1, ino: 1 }],
-    ["aux.sock", { dev: 1, ino: 2 }],
-    ["owner.pid", { dev: 1, ino: 3 }],
+    ["control.sock", { dev: 1n, ino: 1n }],
+    ["aux.sock", { dev: 1n, ino: 2n }],
+    ["owner.pid", { dev: 1n, ino: 3n }],
   ]);
   owner = 100;
   failControl = false;
@@ -63,7 +63,7 @@ class CleanupFiles implements DaemonCleanupFileSystem {
     const entry = this.stat(from);
     this.paths.set(to, {
       dev: entry.dev,
-      ino: Math.max(...[...this.paths.values()].map(({ ino }) => ino)) + 1,
+      ino: [...this.paths.values()].reduce((max, { ino }) => (ino > max ? ino : max), 0n) + 1n,
     });
   };
 }
@@ -73,7 +73,7 @@ const options = {
   controlSocketPath: "control.sock",
   socketPaths: ["control.sock", "aux.sock"],
   expectedPid: 100,
-  socketFileIdentities: new Map([["control.sock", { dev: 1, ino: 1 }]]),
+  socketFileIdentities: new Map([["control.sock", { dev: 1n, ino: 1n }]]),
 };
 
 describe("daemon cleanup handoff", () => {
@@ -101,9 +101,9 @@ describe("daemon cleanup handoff", () => {
 
     test(`preserves a replaced control socket (sync=${synchronous})`, async () => {
       const files = new CleanupFiles();
-      files.paths.set("control.sock", { dev: 1, ino: 9 });
+      files.paths.set("control.sock", { dev: 1n, ino: 9n });
       await cleanup(files);
-      expect(files.stat("control.sock").ino).toBe(9);
+      expect(files.stat("control.sock").ino).toBe(9n);
     });
 
     test(`keeps PID when our control socket cannot be removed (sync=${synchronous})`, async () => {

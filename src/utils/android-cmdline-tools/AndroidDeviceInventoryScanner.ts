@@ -75,6 +75,7 @@ export type InventoryNameResult = {
   name: string;
   diagnostic?: ReadinessDiagnostic;
   consoleBusyDuringProbe?: boolean;
+  nameProbeTimedOut?: boolean;
 };
 export type InventoryDisplayResult = Awaited<ReturnType<typeof readAndroidDeviceDisplaysChecked>>;
 export interface ReadNameConnection {
@@ -517,6 +518,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
             result.name.trim() &&
             !result.diagnostic &&
             !result.consoleBusyDuringProbe &&
+            !result.nameProbeTimedOut &&
             !flightSignal?.aborted &&
             state.readNameConnections.get(device.deviceId) === currentConnection
           ) {
@@ -719,7 +721,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
 
   private async modelForBootedEmulator(
     device: BootedDevice,
-    avdName: { name: string; consoleBusyDuringProbe?: boolean },
+    avdName: { name: string; consoleBusyDuringProbe?: boolean; nameProbeTimedOut?: boolean },
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
     signal?: AbortSignal,
@@ -740,7 +742,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
 
   private async resolveEmulatorArchitecture(
     device: BootedDevice,
-    avdName: { name: string; consoleBusyDuringProbe?: boolean },
+    avdName: { name: string; consoleBusyDuringProbe?: boolean; nameProbeTimedOut?: boolean },
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
     signal?: AbortSignal,
@@ -772,7 +774,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
 
   private discoveredEmulatorDevice(
     device: BootedDevice,
-    avdName: { name: string; consoleBusyDuringProbe?: boolean },
+    avdName: { name: string; consoleBusyDuringProbe?: boolean; nameProbeTimedOut?: boolean },
     model: string | undefined,
     architecture: string | undefined,
   ): BootedDevice {
@@ -786,6 +788,10 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       ...(avdName.name === "" &&
         avdName.consoleBusyDuringProbe === true && {
           consoleBusyDuringProbe: avdName.consoleBusyDuringProbe,
+        }),
+      ...(avdName.name === "" &&
+        avdName.nameProbeTimedOut === true && {
+          nameProbeTimedOut: true,
         }),
       ...(model ? { model } : {}),
       ...(architecture ? { architecture } : {}),

@@ -231,13 +231,24 @@ export const crashAppResultSchema = z.object({
   platform: z.enum(["android", "ios"]),
   appId: z.string(),
   processId: z.number().int().positive().optional(),
-  mechanism: z.enum(["android_am_crash", "ios_simulator_sigabrt", "unsupported"]),
+  mechanism: z.enum([
+    "android_am_crash",
+    "ios_simulator_sigabrt",
+    "ios_device_sigabrt",
+    "unsupported",
+  ]),
   timestamp: z.number().int().nonnegative(),
   wasRunning: z.boolean().optional(),
   confirmed: z.boolean(),
   evidence: z
     .object({
-      source: z.enum(["android_logcat", "ios_unified_log", "android_dropbox", "ios_crash_report"]),
+      source: z.enum([
+        "android_logcat",
+        "ios_unified_log",
+        "android_dropbox",
+        "ios_crash_report",
+        "none",
+      ]),
       summary: z.string(),
     })
     .optional(),

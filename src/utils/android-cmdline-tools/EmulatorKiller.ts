@@ -19,6 +19,7 @@ import type { Timer } from "../SystemTimer";
 export const EMULATOR_CONSOLE_KILL_BOUND_MS = 10_000;
 
 export interface EmulatorKillOptions {
+  beforeDispatch?: () => Promise<void>;
   timeoutMs?: number;
   signal?: AbortSignal;
   force?: boolean;
@@ -201,6 +202,7 @@ export class DefaultEmulatorKiller implements EmulatorKiller {
       : options.timeoutMs;
     try {
       await this.adbFactory().create(target).execute(["emu", "kill"], {
+        beforeDispatch: options.beforeDispatch,
         timeoutMs,
         noRetry: true,
         signal: options.signal,

@@ -128,7 +128,11 @@ export interface DeviceReadinessContract {
   listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]>;
 
   /** Verify CtrlProxy health through the injected device-client provider. */
-  verifyAndroidCtrlProxyServiceReady(device: BootedDevice): Promise<boolean>;
+  verifyAndroidCtrlProxyServiceReady(
+    device: BootedDevice,
+    options?: { signal?: AbortSignal; timeoutMs?: number; noRetry?: boolean },
+  ): Promise<boolean>;
+  readAndroidCtrlProxySnapshotIdentity(device: BootedDevice, signal: AbortSignal): Promise<string>;
 
   /**
    * Verify an iOS device is connected and ready

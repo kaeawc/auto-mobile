@@ -5,6 +5,8 @@ import {
 } from "../../../../src/daemon/sessionBroker/androidBaselineReset";
 import type { BootedDevice, DeviceInfo } from "../../../../src/models/DeviceInfo";
 import { createExecResult } from "../../../../src/utils/execResult";
+import type { AdbExecuteOptions } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 
 export const ANDROID_RESET_PROFILE: AndroidResetProfile = {
   platform: "android",
@@ -39,15 +41,20 @@ export class FakeAndroidResetHost implements AndroidBaselineResetDependencies {
   commands: string[] = [];
   safe = true;
   booted = true;
+  bootId = "12345678-1234-1234-1234-123456789abc";
   healthy = true;
   packageManager = true;
   failCommand: string | undefined;
   strategy: AndroidResetStrategy | undefined;
+  timer: FakeTimer | undefined;
+  resetTimeoutMs: number | undefined;
   closed = 0;
   inventoryCalls = 0;
   lastInventorySignal: AbortSignal | undefined;
   onInventory: (() => void) | undefined;
   onHealth: (() => void) | undefined;
+  commandOptions: Array<AdbExecuteOptions | undefined> = [];
+  healthOptions: Parameters<AndroidBaselineResetDependencies["ctrlProxyReady"]>[1];
 
   async inventory(options?: { signal?: AbortSignal }): Promise<DeviceInfo[]> {
     this.inventoryCalls++;
@@ -58,13 +65,17 @@ export class FakeAndroidResetHost implements AndroidBaselineResetDependencies {
 
   adb() {
     return {
-      executeCommand: async (command: string) => {
+      executeCommand: async (command: string, options?: AdbExecuteOptions) => {
         this.commands.push(command);
+        this.commandOptions.push(options);
         if (command === this.failCommand) {
           throw new Error("adb command timed out after 2000ms");
         }
         if (command === "shell getprop sys.boot_completed") {
           return createExecResult(this.booted ? "1" : "0", "");
+        }
+        if (command === "shell cat /proc/sys/kernel/random/boot_id") {
+          return createExecResult(this.bootId, "");
         }
         if (command === "shell pm path android") {
           return createExecResult(
@@ -92,7 +103,11 @@ export class FakeAndroidResetHost implements AndroidBaselineResetDependencies {
     };
   }
 
-  async ctrlProxyReady(): Promise<boolean> {
+  async ctrlProxyReady(
+    _device?: BootedDevice,
+    options?: Parameters<AndroidBaselineResetDependencies["ctrlProxyReady"]>[1],
+  ): Promise<boolean> {
+    this.healthOptions = options;
     this.onHealth?.();
     return this.healthy;
   }

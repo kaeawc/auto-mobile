@@ -22,6 +22,7 @@ export interface AvdConfig {
   osVersion?: string;
   /** Exact Android SDK package identity derived from image.sysdir.1. */
   systemImagePackage?: string;
+  systemImagePath?: string;
   /** Normalized emulator CPU architecture used by the AVD. */
   architecture?: string;
   screenWidth?: number;
@@ -342,6 +343,7 @@ export function parseAvdConfig(content: string): AvdConfig {
   }
   return {
     hardware: hardware as AndroidAvdConfiguration,
+    systemImagePath: props.get("image.sysdir.1"),
     gpuEnabled: parseYesNo(props.get("hw.gpu.enabled")),
     ...parseScreenDimensions(props),
     ...parseRamSize(props),

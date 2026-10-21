@@ -388,6 +388,11 @@ class WebSocketServer(
     // prototype.
     add("screenshot_hide_prototype_v1")
     add("prototype_menus_v1")
+    // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
+    // page directions, press_and_hold, set_progress with progress, custom with customAction) and
+    // lists the node's available actions in a refusal (#14077). Older APKs refuse them as
+    // unsupported, so hosts require this flag before sending one.
+    add("semantic_node_actions_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.

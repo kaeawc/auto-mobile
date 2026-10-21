@@ -1202,8 +1202,10 @@ describe("AppPreferences", () => {
     expect(simctl.calls.map((call) => call.args[3])).toEqual(["write", "read", "read"]);
   });
 
-  test("rejects physical iOS UserDefaults instead of reading the runner process defaults", async () => {
-    const preferences = new AppPreferences(physicalIosDevice);
+  test("physical iOS UserDefaults require a connected SDK, never the runner's defaults (#14093)", async () => {
+    const preferences = new AppPreferences(physicalIosDevice, {
+      iosKeyValueClientProvider: () => null,
+    });
 
     await expect(
       preferences.getPreference({
@@ -1211,7 +1213,7 @@ describe("AppPreferences", () => {
         appId: "com.example.app",
         key: "onboardingComplete",
       }),
-    ).rejects.toThrow("iOS physical devices");
+    ).rejects.toThrow("require the app to embed the AutoMobile SDK");
   });
 
   describe("Android user targeting (#9919)", () => {

@@ -35,6 +35,7 @@ import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
+import { registerKillProfileTools } from "./killProfileTools";
 import { registerSensorTools } from "./sensorTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
@@ -104,6 +105,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerAccessibilityTools();
   registerAccessibilityFocusTools();
   registerNetworkTools();
+  registerKillProfileTools();
   registerSensorTools();
   registerDisplayProfileTools();
   if (options.includeToolSelection ?? true) {

@@ -317,6 +317,10 @@ data class RequestAction(
   val boundsTop: Int? = null,
   val boundsRight: Int? = null,
   val boundsBottom: Int? = null,
+  /** For action `custom`: the label of the app-defined accessibility action to perform. */
+  val customAction: String? = null,
+  /** For action `set_progress`: the value passed as ACTION_ARGUMENT_PROGRESS_VALUE. */
+  val progress: Float? = null,
 ) : WebSocketRequest()
 
 /**

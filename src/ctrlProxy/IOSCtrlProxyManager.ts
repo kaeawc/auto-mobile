@@ -95,7 +95,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       fenceLateRemoteStartAfterShutdown: (...args) =>
         this.launch.fenceLateRemoteStartAfterShutdown(...args),
       start: (...args) => this.start(...args),
-      isSupervisedCtrlProxyProcessAlive: () => this.launch.isSupervisedCtrlProxyProcessAlive(),
+      isSupervisedCtrlProxyProcessAlive: (...args) =>
+        this.launch.isSupervisedCtrlProxyProcessAlive(...args),
       clearCaches: () => this.clearCaches(),
       isProcessRunning: (...args) => this.isProcessRunning(...args),
       restartIproxyTunnel: () => this.restartIproxyTunnel(),
@@ -171,7 +172,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.health.checkHealthEndpointOnPortForDevice(...args),
       adoptServicePort: (...args) => this.ports.adoptServicePort(...args),
       clearCaches: () => this.clearCaches(),
-      startProcessSupervision: () => this.launch.startProcessSupervision(),
+      startProcessSupervision: (...args) => this.launch.startProcessSupervision(...args),
       assertDeviceNotRetired: () => this.assertDeviceNotRetired(),
       prepareSimulatorRunner: (...args) => this.startup.prepareSimulatorRunner(...args),
       prepareDeviceRunner: (...args) => this.startup.prepareDeviceRunner(...args),
@@ -204,9 +205,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       start: (...args) => this.start(...args),
       extendHealthPollDeadline: (...args) => this.readiness.extendHealthPollDeadline(...args),
       waitForSharedStart: (...args) => this.readiness.waitForSharedStart(...args),
-      isCtrlProxyProcessAlive: () => this.discovery.isCtrlProxyProcessAlive(),
+      checkCtrlProxyProcessLiveness: () => this.discovery.checkCtrlProxyProcessLiveness(),
       isSimulator: () => this.isSimulator(),
-      startProcessSupervision: () => this.launch.startProcessSupervision(),
+      startProcessSupervision: (...args) => this.launch.startProcessSupervision(...args),
       isRunning: () => this.isRunning(),
       resolveHealthPollMaxAttempts: (...args) =>
         IOSCtrlProxyManager.resolveHealthPollMaxAttempts(...args),

@@ -17,6 +17,7 @@ import {
   ListeningProcess,
   IOS_CTRL_PROXY_DEFAULT_PORT,
   IOS_CTRL_PROXY_HEALTH_POLL_INTERVAL_MS,
+  type CtrlProxyProcessLiveness,
 } from "./IosCtrlProxyContracts";
 
 interface IosCtrlProxyStartupHost {
@@ -38,9 +39,9 @@ interface IosCtrlProxyStartupHost {
     signal: AbortSignal | undefined,
     callerId?: symbol,
   ): Promise<void>;
-  isCtrlProxyProcessAlive(): Promise<boolean>;
+  checkCtrlProxyProcessLiveness(): Promise<CtrlProxyProcessLiveness>;
   isSimulator(): boolean;
-  startProcessSupervision(): Promise<void>;
+  startProcessSupervision(options?: { healthConfirmed?: boolean }): Promise<void>;
   isRunning(): Promise<boolean>;
   resolveHealthPollMaxAttempts(env?: NodeJS.ProcessEnv): number;
   refreshHealthPollDeadline(sharedStart: SharedCtrlProxyStart): void;
@@ -314,8 +315,9 @@ export class IosCtrlProxyStartup {
     // Prefer process liveness check over health endpoint: a busy-but-alive CtrlProxy
     // would fail the HTTP health check and incorrectly trigger a restart.
     perf.startOperation("processAliveCheck");
-    const isAlive = await this.host.isCtrlProxyProcessAlive();
+    const liveness = await this.host.checkCtrlProxyProcessLiveness();
     perf.endOperation("processAliveCheck");
+    const isAlive = liveness !== "dead";
     let restartedAliveProcess = false;
     // True when we deferred to an already-starting own runner instead of respawning;
     // drives hung-runner recovery after the health wait below (#2834 review).
@@ -330,7 +332,9 @@ export class IosCtrlProxyStartup {
         restartedAliveProcess = await this.resumeAliveDeviceRunner(perf);
       }
       if (!restartedAliveProcess) {
-        await this.host.startProcessSupervision();
+        // A local check answered health just now, which breaks any miss streak;
+        // a remote alive-only reuse proved nothing about health and keeps it (#14493).
+        await this.host.startProcessSupervision({ healthConfirmed: liveness === "healthy" });
         return { ready: true, waitedForStartingRunner };
       }
     }
@@ -485,7 +489,7 @@ export class IosCtrlProxyStartup {
   /**
    * Physical-device counterpart of {@link prepareSimulatorRunner}: a runner THIS
    * manager launched that is still alive is waited for instead of respawned (#10234).
-   * `isCtrlProxyProcessAlive()` needs a health answer, and on a local device that
+   * `checkCtrlProxyProcessLiveness()` needs a health answer, and on a local device that
    * only reaches the runner through `iproxy`, so a missing tunnel hides a live
    * runner from it. Repair the tunnel here, then let the health wait (and, if it
    * never answers, the hung-runner termination) take over. Returns true when an own

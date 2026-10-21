@@ -425,7 +425,7 @@ Confirmed facts:
 
 - **`registerTool` / `registerResource`** (declarative, Standard-Schema input)
   **replace** the v1 `server.server.setRequestHandler(ListToolsRequestSchema |
-CallToolRequestSchema | …)` wiring.
+  CallToolRequestSchema | …)` wiring.
 - **`serveStdio` takes a factory `(ctx: McpRequestContext) => McpServer`**, not a
   singleton. For stdio (one connection) that factory runs per-connection; the
   per-request stateless construction is the `createMcpHandler` HTTP path. The

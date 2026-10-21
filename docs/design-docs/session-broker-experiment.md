@@ -307,7 +307,7 @@ The daemon protocol is:
   terminal `failed`/`session_owner_exited` receipt, answers `cleanup_pending`,
   and finishes the drain and device destruction as tracked release work (#12791).
 - Reconnect registration: `{sessionId, clientName, sessionBroker:
-{requestId, livenessOwnerToken}}`.
+  {requestId, livenessOwnerToken}}`.
 
 The token and complete request configuration define operation identity.
 After an ambiguous reply, query the same identity. Replaying a request returns

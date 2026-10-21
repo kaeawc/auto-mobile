@@ -417,7 +417,7 @@ bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role a-ph
   attempt ID. Both are for `up`/`serve` and are mutually exclusive.
 - `--owner driver` is the default; `--owner disposable` starts a recorded
   harness-owned sleep process with a process start identity. `owner-kill
---client NAME` signals only that disposable owner after identity confirmation.
+  --client NAME` signals only that disposable owner after identity confirmation.
   This tests owner death without killing an unrelated driver or parent.
 - `release --client NAME` releases the granted session using its stored token;
   `abandon --client NAME` consumes its stored request identity even if unknown

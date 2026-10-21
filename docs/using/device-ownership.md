@@ -310,7 +310,7 @@ its device stays held until the release cascade frees it.
 
 - A control call naming the label (a tool call, an `input/*` frame for its
   device, a plan step) is refused with `session_ownership_lost`, `retryable:
-false` and `nextAction: "acquire_new_session"`, carrying the label's id and
+  false` and `nextAction: "acquire_new_session"`, carrying the label's id and
   the base's release reason: the recorded one, or the one its expiry is about to
   record (`cleanup-expired`, or `heartbeat-timeout` when the owner's lease lapsed).
   The lookup and sweep record the same idle reason. `lazy-expiry` is no longer
@@ -342,7 +342,7 @@ false` and `nextAction: "acquire_new_session"`, carrying the label's id and
 - A plan whose step is refused because its base ended fails with that end, not
   with "label is not allocated": the `executePlan` result has `success: false`,
   `code: "session_ownership_lost"`, `retryable: false`, `nextAction:
-"acquire_new_session"` and `details.reason` set to the base's release reason,
+  "acquire_new_session"` and `details.reason` set to the base's release reason,
   and its failed step's error names that reason. An unrelated step failure keeps
   its own error without those terminal fields. Building the result releases
   nothing.

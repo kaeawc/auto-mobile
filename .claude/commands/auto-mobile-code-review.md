@@ -244,7 +244,7 @@ routinely ships nothing.
   a re-cut is explicitly sequenced), the feature is **undeliverable** and the issue is not
   closed. Blocking. Check with the Step 2 `$BASE`, not `origin/main...HEAD`, so an uncommitted
   runner edit still trips it: `git diff --name-only "${DIFF_ARGS[@]}" | grep -E
-'^(ios|android)/control-proxy/'`, then whether `src/constants/release.ts` is in the same diff.
+  '^(ios|android)/control-proxy/'`, then whether `src/constants/release.ts` is in the same diff.
 - **New Swift file ⇒ regenerate the Xcode project.** A file under `ios/control-proxy/Sources/**`
   absent from the committed `ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj` is not
   compiled on a normal checkout. `grep -c '<NewSymbol>'` against the pbxproj returning zero means
@@ -286,7 +286,7 @@ routinely ships nothing.
     GitHub expression pasted into a quoted shell string fails differently from one passed as an
     argument.
   - **A new path filter can silently un-gate a job.** When a job gains `if:
-needs.detect-changes.outputs.<x> == 'true'`, compare the `dorny/paths-filter` globs against
+    needs.detect-changes.outputs.<x> == 'true'`, compare the `dorny/paths-filter` globs against
     the paths the script _it runs_ treats as significant. [#4026](https://github.com/kaeawc/auto-mobile/pull/4026) gated detekt on a filter omitting
     `android/gradle/wrapper/**`, which the former Detekt scope script treated as a full-scope
     trigger — so a wrapper bump skipped detekt entirely instead of failing open.

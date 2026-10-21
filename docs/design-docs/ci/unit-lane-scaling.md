@@ -13,7 +13,7 @@ data: where the Node unit lane's wall time goes, which test files need
   `test/daemon/manager.test.ts`, which leaves **1,919 files and 40,468 tests**.
 - **Runs:** sequential batches of 60 files, one `bun test` process per batch,
   never two at once. Each run used the canonical flags (`--timeout 20000
---no-orphans`, the `bunfig.toml` preloads and `test/setup/fileTimingProbe.ts`),
+  --no-orphans`, the `bunfig.toml` preloads and `test/setup/fileTimingProbe.ts`),
   with and without `--isolate`, and produced JUnit and per-file timing logs.
 - **Sample:** every 19th file of the sorted list, 101 files in all. It was used
   for the one-process-per-file and cold-transpile-cache runs.

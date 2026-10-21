@@ -1,6 +1,7 @@
 import type { ExecResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { defaultDemoAllowedReceipts, type DemoAllowedReceipts } from "./DemoAllowedReceipts";
 import {
   STATUS_BAR_COMMAND_TIMEOUT_MS,
   throwOnExecError,
@@ -33,7 +34,11 @@ export function androidDemoClock(time: string): string | null {
  * `operatorName` is reported unsupported rather than silently dropped.
  */
 export class AndroidDemoModeStatusBarController implements StatusBarController {
-  constructor(private readonly adb: Pick<AdbExecutor, "execute">) {}
+  constructor(
+    private readonly adb: Pick<AdbExecutor, "execute">,
+    private readonly deviceId: string = "",
+    private readonly receipts: DemoAllowedReceipts = defaultDemoAllowedReceipts,
+  ) {}
 
   private async shell(args: string[], signal?: AbortSignal): Promise<ExecResult> {
     const result = await this.adb.execute(["shell", ...args], {
@@ -70,6 +75,12 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
     const applied: StatusBarField[] = [];
     const unsupported: StatusBarField[] =
       overrides.operatorName === undefined ? [] : ["operatorName"];
+    if (!this.receipts.has(this.deviceId)) {
+      const prior = (
+        await this.shell(["settings", "get", "global", DEMO_ALLOWED_SETTING], signal)
+      ).stdout.trim();
+      this.receipts.save(this.deviceId, prior === "" || prior === "null" ? null : prior);
+    }
     await this.shell(["settings", "put", "global", DEMO_ALLOWED_SETTING, "1"], signal);
     await this.demo([["command", "enter"]], signal);
     if (clock !== undefined) {
@@ -161,6 +172,16 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
 
   async clear(signal?: AbortSignal): Promise<void> {
     await this.demo([["command", "exit"]], signal);
+    const prior = this.receipts.take(this.deviceId);
+    if (prior === undefined) {
+      return;
+    }
+    await this.shell(
+      prior === null
+        ? ["settings", "delete", "global", DEMO_ALLOWED_SETTING]
+        : ["settings", "put", "global", DEMO_ALLOWED_SETTING, prior],
+      signal,
+    );
   }
 
   async read(signal?: AbortSignal): Promise<string | null> {

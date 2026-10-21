@@ -6,6 +6,10 @@ import { judgedLeaseHeartbeat } from "../../src/daemon/livenessOwnerLease";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import { handleHeartbeat } from "../../src/daemon/daemonRequestHandlersParts/heartbeat";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -21,7 +25,10 @@ const TOKEN = "same-liveness-owner";
 const OLD = "old-socket";
 const NEW = "replacement-socket";
 const DEVICE = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" } as const;
-const SCAN = 2_000;
+// Pinned, not read from AUTOMOBILE_SESSION_HEARTBEAT_* in the runner's env (#14511): every
+// phase and timestamp below assumes the 4 s lease and the 2 s scan.
+const LEASE = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS;
+const SCAN = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 const STALL = 120_000;
 
 // Investigation only: use the real close, restore, ownership and heartbeat paths. Never detach
@@ -71,7 +78,12 @@ async function setUp(activeControl = false) {
   const unsubscribe = tracker.onSessionExecutionEnded((ids) => pool.sessionExecutionsEnded(ids));
   await pool.initializeWithDevices([DEVICE]);
   // Long idle window isolates owner liveness from idle expiry, including the cap control.
-  await manager.createSession(ID, DEVICE.deviceId, DEVICE.platform, { timeoutMs: 1_200_000 });
+  // An explicit lease marks the session "custom", which only changes the pre-first-heartbeat
+  // grace; setup heartbeats before the monitor starts, so the lease judgement is the default one.
+  await manager.createSession(ID, DEVICE.deviceId, DEVICE.platform, {
+    timeoutMs: 1_200_000,
+    heartbeatTimeoutMs: LEASE,
+  });
   pool.declareMcpSessionLivenessOwnerToken(OLD, TOKEN);
   await pool.bindOrReuseDeviceSession({
     sessionId: ID,
@@ -109,6 +121,7 @@ async function setUp(activeControl = false) {
       }
     },
     timer,
+    { checkIntervalMs: SCAN, heartbeatTimeoutMs: LEASE },
   );
   const control = activeControl ? tracker.startExecution("tapOn", undefined, ID) : undefined;
   const settle = (ms: number) =>

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { BrokerSessions, type BrokerSessionsPort } from "../../../src/daemon/proxy/BrokerSessions";
 import type { DaemonClientLike } from "../../../src/daemon/client";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
@@ -189,7 +189,7 @@ describe("BrokerSessions", () => {
 
       expect(attempts).toBe(58);
       const releases = calls.filter(({ method }) => method === "daemon/releaseBrokerSession");
-      expect(releases.at(-1)?.params.replyBudgetMs).toBe(250);
+      expect(releases.at(-1)?.params.replyBudgetMs).toBe(80);
       expect(timer.now() - started).toBe(6_840);
       expect(timer.getSleepHistory()).toEqual(Array<number>(57).fill(120));
       expect(result.cleanupPending).toBe(true);
@@ -428,6 +428,55 @@ describe("BrokerSessions", () => {
     expect(events).toContain("forget:session-1");
     expect(brokerSessions.sessions.size).toBe(0);
   });
+
+  for (const [remainingMs, replyBudgetMs] of [
+    [50, 25],
+    [101, 50],
+    [200, 100],
+    [749, 250],
+    [750, 250],
+  ] as const) {
+    test(`release retry leaves transport headroom with ${remainingMs}ms remaining`, async () => {
+      let attempts = 0;
+      const retryAfterMs = BROKER_EXECUTION_RELEASE_TIMEOUT_MS - remainingMs;
+      const { brokerSessions, client, timer } = rig(({ method, params }) => {
+        if (method !== "daemon/releaseBrokerSession") {
+          return ready;
+        }
+        if (++attempts === 1) {
+          return { ...handoffPending, retryAfterMs };
+        }
+        return new Promise((resolve) => {
+          timer.setTimeout(
+            () => resolve({ sessionUuid: "session-1", outcome: "cleanup_pending" }),
+            Number(params.replyBudgetMs),
+          );
+        });
+      });
+      await brokerSessions.hold("request-1", "session-1");
+      const releaseCall = spyOn(client, "callDaemonMethod");
+
+      await brokerSessions.releaseAll();
+
+      const releases = releaseCall.mock.calls.filter(
+        ([method]) => method === "daemon/releaseBrokerSession",
+      );
+      releaseCall.mockRestore();
+      expect(releases).toHaveLength(2);
+      const [, firstParams, firstOptions] = releases[0]!;
+      expect(firstOptions?.timeoutMs).toBe(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
+      expect(firstParams.replyBudgetMs).toBe(firstOptions!.timeoutMs! - 500);
+      const [, finalParams, finalOptions] = releases[1]!;
+      expect(finalOptions?.timeoutMs).toBe(remainingMs);
+      expect(finalParams.replyBudgetMs).toBeGreaterThan(0);
+      expect(finalParams.replyBudgetMs).toBeLessThan(finalOptions!.timeoutMs!);
+      expect(finalParams.replyBudgetMs).toBe(replyBudgetMs);
+      expect(timer.getSleepHistory()).toEqual([retryAfterMs]);
+      expect(timer.now()).toBe(retryAfterMs + replyBudgetMs);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(brokerSessions.sessions.size).toBe(0);
+    });
+  }
 
   test("releaseAll retries handoff with its reason inside the existing shutdown budget", async () => {
     let attempts = 0;

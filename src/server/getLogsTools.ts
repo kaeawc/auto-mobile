@@ -1,13 +1,13 @@
 import { z } from "zod/v4";
 import { defaultDaemonContext } from "../daemon/daemonContext";
-import { AndroidLogReader } from "../features/logs/AndroidLogReader";
+import { AndroidLogReader } from "../features/deviceLogs/AndroidLogReader";
 import {
   GET_LOGS_MAX_LINES,
   GET_LOGS_MAX_SECONDS,
   GetLogs,
   type GetLogsDependencies,
-} from "../features/logs/GetLogs";
-import { LOGCAT_BUFFERS, LOGCAT_PRIORITIES } from "../features/logs/logcatQuery";
+} from "../features/deviceLogs/GetLogs";
+import { LOGCAT_BUFFERS, LOGCAT_PRIORITIES } from "../features/deviceLogs/logcatQuery";
 import type { BootedDevice } from "../models";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";

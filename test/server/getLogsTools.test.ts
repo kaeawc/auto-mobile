@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createGetLogsHandler, type GetLogsArgs } from "../../src/server/getLogsTools";
 import { getLogsResultSchema } from "../../src/server/getLogsToolOutputSchemas";
 import type { BootedDevice } from "../../src/models";
-import { parseThreadtime } from "../../src/features/logs/logcatQuery";
+import { parseThreadtime } from "../../src/features/deviceLogs/logcatQuery";
 
 const ANDROID: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 

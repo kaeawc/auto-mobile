@@ -147,6 +147,39 @@ fi
 
 mkdir -p "$(dirname "$report_path")"
 
+# The staging/recheck directories are derived from the caller-supplied report
+# path (`<report>.d`, `<report>.recheck.d`), so an unrelated sibling directory
+# can sit at the same name. Only a directory this script created earlier (it
+# carries the marker) may be deleted; anything else non-empty is refused rather
+# than removed (#14500).
+scratch_marker=".bun-test-timings-scratch"
+reset_scratch_dir() {
+  local dir="$1"
+  case "$dir" in
+    "" | / | . | .. | "$HOME" | "$HOME/")
+      echo "Refusing to use '${dir}' as timing scratch." >&2
+      exit 2
+      ;;
+  esac
+  if [[ -L "$dir" ]]; then
+    echo "Refusing to reuse symlinked timing scratch '${dir}'; remove it and retry." >&2
+    exit 2
+  fi
+  if [[ -d "$dir" && ! -e "$dir/$scratch_marker" ]]; then
+    if [[ -n "$(ls -A "$dir" 2> /dev/null)" ]]; then
+      echo "Refusing to delete '${dir}': it was not created by this script (no ${scratch_marker}). Remove it or pick another report path." >&2
+      exit 2
+    fi
+  elif [[ -d "$dir" ]]; then
+    rm -rf "$dir"
+  elif [[ -e "$dir" ]]; then
+    echo "Refusing to replace non-directory '${dir}' with timing scratch." >&2
+    exit 2
+  fi
+  mkdir -p "$dir"
+  : > "$dir/$scratch_marker"
+}
+
 # Rows are separated by US (0x1f) rather than tab: a parameterized test title can
 # contain a literal tab, and a tab-delimited row would shift the duration out of
 # its field and read as zero, silently clearing an over-budget test.
@@ -167,8 +200,7 @@ testcase_rows() {
 changed_test_files=()
 
 if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
-  rm -rf "$report_dir"
-  mkdir -p "$report_dir"
+  reset_scratch_dir "$report_dir"
   changed_files=()
   while IFS= read -r file; do
     changed_files+=("$file")
@@ -262,10 +294,15 @@ elif [[ -d "$report_path" ]]; then
   report_dir="$report_path"
 else
   # Stage a single report for the same glob/calibration/recheck path as shards.
-  rm -rf "$report_dir"
-  mkdir -p "$report_dir"
+  reset_scratch_dir "$report_dir"
   # A fixed, visible name also includes dot-prefixed inputs in the shard glob.
   cp "$report_path" "$report_dir/report.xml"
+fi
+
+# A unit lane may recreate its junit directory and drop the marker. The derived
+# directory is scratch this run populated, so re-mark it for the next run.
+if [[ "$report_dir" == "${report_path%.xml}.d" && -d "$report_dir" && ! -L "$report_dir" ]]; then
+  : > "$report_dir/$scratch_marker"
 fi
 
 set -- "$report_dir"/*.xml
@@ -330,8 +367,7 @@ if [[ -n "$runner_slowdown" ]]; then
   echo "$calibration_note" || true
 fi
 
-rm -rf "$recheck_dir"
-mkdir -p "$recheck_dir"
+reset_scratch_dir "$recheck_dir"
 # Per-shard slowdowns (final attempt only) scope the budget to the shard that
 # produced each sample. An explicit BUN_TEST_TIMING_SLOWDOWN applies to all.
 shard_slowdowns_file="$recheck_dir/shard-slowdowns.tsv"

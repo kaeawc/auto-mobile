@@ -14,6 +14,10 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { registerScreenLockSessionCleanup } from "../../src/daemon/screenLockSessionCleanup";
+import { ScreenLockRegistry } from "../../src/features/utility/screenLock/ScreenLockRegistry";
+import { logger } from "../../src/utils/logger";
+import { FakeLockSettingsClient } from "../fakes/FakeLockSettingsClient";
 
 const deviceId = "emulator-5554";
 const explicitSessionId = "00000000-0000-4000-8000-000000000001";
@@ -256,6 +260,36 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
       }
     },
   );
+
+  arranged("a lock-screen clear that fails is reported in the release result", async () => {
+    const registry = new ScreenLockRegistry();
+    const client = new FakeLockSettingsClient({ type: "pin", credential: "1357" });
+    client.nextResults.push({ outcome: "failed" }, { outcome: "failed" });
+    const cleanupTimer = new FakeTimer();
+    cleanupTimer.enableAutoAdvance();
+    registerScreenLockSessionCleanup(manager, {
+      registry,
+      timer: cleanupTimer,
+      clientFactory: () => client,
+      forgetRememberedUnlock: async () => {},
+    });
+    registry.record({ deviceId, sessionId, type: "pin", credential: "1357" });
+    state = { ...state, getScreenLockRegistry: () => registry };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const released = await release();
+      expect(released).toMatchObject({
+        success: true,
+        result: { screenLockRestore: { status: "failed", deviceId, type: "pin" } },
+      });
+      expect(JSON.stringify(released)).not.toContain("1357");
+      expect(await release()).toMatchObject({
+        result: { alreadyReleased: true, screenLockRestore: { status: "failed" } },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   arranged("normal release and genuinely absent retries remain idempotent", async () => {
     const free = spyOn(pool, "releaseDevice");

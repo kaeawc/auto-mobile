@@ -17,15 +17,11 @@ import {
   PHYSICAL_UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
   PhysicalIosSessionLogProvider,
 } from "./PhysicalIosSessionLogProvider";
-export { AndroidSessionLogProvider } from "./AndroidSessionLogProvider";
-export { IosSimulatorSessionLogProvider } from "./IosSimulatorSessionLogProvider";
-export { SessionLogTimeoutError } from "./SessionLogTimeoutError";
 export type {
   SessionLogSimctl,
   SessionLogCollectRequest,
   ResetAppLogsRequest,
   SessionLogService,
-  SessionLogProvider,
   SessionLogServiceDependencies,
 } from "./DefaultSessionLogService";
 

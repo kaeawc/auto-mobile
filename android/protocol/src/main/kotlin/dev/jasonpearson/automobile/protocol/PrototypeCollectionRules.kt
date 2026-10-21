@@ -17,6 +17,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationValues.isScalarPr
 import dev.jasonpearson.automobile.protocol.PrototypeValidationValues.validText
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -127,6 +128,7 @@ internal object PrototypeCollectionRules {
         "array" -> value is JsonArray
         "object" -> value is JsonObject
         "number" -> value is JsonPrimitive && !value.isString && value.doubleOrNull != null
+        "scalar" -> value is JsonPrimitive && value !is JsonNull
         else -> value is JsonPrimitive && value.isString
       }
     }

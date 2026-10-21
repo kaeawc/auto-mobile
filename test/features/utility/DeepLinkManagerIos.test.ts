@@ -355,7 +355,7 @@ describe("DeepLinkManager iOS", () => {
     expect(result.deepLinks.schemes).toEqual([]);
   });
 
-  test("physical-device UDID returns explicit not-yet-implemented error", async () => {
+  test("physical-device UDID never uses simctl or the host container path", async () => {
     const simctl = new FakeSimctl();
     const { exec, plist, calls } = fakeHostExec([]);
     const physicalDevice: BootedDevice = {
@@ -369,12 +369,16 @@ describe("DeepLinkManager iOS", () => {
       hostExec: exec,
       plist,
       appBundleMetadata: fakeMetadata(),
+      deviceApps: {
+        getInstalledAppInfo: async () => null,
+        withInstalledAppBundle: async () => null,
+      },
+      physicalDeepLinkCache: new Map(),
     });
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("not yet implemented");
-    // No simctl or host exec invoked for physical devices.
+    expect(result.error).toContain("not installed");
     expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(0);
     expect(calls).toHaveLength(0);
   });

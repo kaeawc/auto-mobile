@@ -406,7 +406,7 @@ function iosIncreaseContrast(simctl: SimctlRunner, udid: string): PreferenceSett
 function isMissingDefault(error: unknown): boolean {
   const stderr =
     typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : "";
-  return /does not exist/i.test(`${errorMessage(error)} ${stderr}`);
+  return /does not exist|could not find key/i.test(`${errorMessage(error)} ${stderr}`);
 }
 
 function iosAccessibilityDefault(
@@ -431,6 +431,8 @@ function iosAccessibilityDefault(
         return value;
       } catch (error) {
         if (isMissingDefault(error)) {
+          // An absent Simulator default is off and must stay absent when restored.
+          logger.debug(`[DisplayConfig] Simulator default ${key} is unset`, error);
           return null;
         }
         throw error;

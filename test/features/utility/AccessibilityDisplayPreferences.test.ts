@@ -61,6 +61,7 @@ class FakeSettingsAdb implements SettingsAdb {
 class FakeAccessibilitySimctl implements SimctlRunner {
   contrast = "disabled";
   contrastVerbMissing = false;
+  missingDefaultError: "message" | "stderr" | "legacy" = "message";
   readonly defaults = new Map<string, string>();
   readonly calls: string[][] = [];
 
@@ -79,9 +80,16 @@ class FakeAccessibilitySimctl implements SimctlRunner {
     if (verb === "read") {
       const stored = this.defaults.get(key!);
       if (stored === undefined) {
-        throw new Error(
-          `The domain/default pair of (com.apple.Accessibility, ${key}) does not exist`,
-        );
+        if (this.missingDefaultError === "legacy") {
+          throw new Error(
+            `The domain/default pair of (com.apple.Accessibility, ${key}) does not exist`,
+          );
+        }
+        // Captured in cyc-off-ios.log (20261021e) and issue #14736; only the key/domain vary.
+        const message = `Error: Could not find key '${key}' in domain 'com.apple.Accessibility'.`;
+        throw this.missingDefaultError === "stderr"
+          ? Object.assign(new Error(), { stderr: message })
+          : new Error(message);
       }
       return createExecResult(`${stored}\n`, "");
     }
@@ -372,6 +380,58 @@ describe("Android accessibility display settings (#14076)", () => {
 });
 
 describe("AccessibilityDisplayPreferences on the iOS Simulator", () => {
+  for (const missingDefaultError of ["message", "stderr", "legacy"] as const) {
+    test(`absent defaults read as null and off (${missingDefaultError})`, async () => {
+      const simctl = new FakeAccessibilitySimctl();
+      simctl.missingDefaultError = missingDefaultError;
+      const preferences = simulatorPreferences(simctl);
+
+      expect(await preferences.readSnapshot(["boldText", "reduceMotion"])).toEqual({
+        boldText: null,
+        reduceMotion: null,
+      });
+      const read = await preferences.read();
+      expect(read.values).toMatchObject({ boldText: false, reduceMotion: false });
+      expect(read.supported).toMatchObject({ boldText: "partial", reduceMotion: "partial" });
+    });
+
+    for (const [field, key] of [
+      ["boldText", "EnhancedTextLegibilityEnabled"],
+      ["reduceMotion", "ReduceMotionEnabled"],
+    ] as const) {
+      test(`${field} round-trips an absent default (${missingDefaultError})`, async () => {
+        const simctl = new FakeAccessibilitySimctl();
+        simctl.missingDefaultError = missingDefaultError;
+        const baselines = new Map<string, AccessibilityDisplaySnapshot>();
+        const preferences = simulatorPreferences(simctl, baselines);
+
+        const change = await preferences.set({ [field]: true });
+
+        expect(change.errors).toEqual([]);
+        expect(change.previous[field]).toBe(false);
+        expect(change.applied[field]).toBe(true);
+        expect(simctl.defaults.get(key)).toBe("1");
+        expect(baselines.get(simulator.deviceId)).toEqual({ [field]: null });
+
+        const reset = await preferences.reset();
+
+        expect(reset.errors).toEqual([]);
+        expect(reset.restored).toEqual([field]);
+        expect(reset.values[field]).toBe(false);
+        expect(simctl.defaults.has(key)).toBe(false);
+        expect(simctl.calls).toContainEqual([
+          "spawn",
+          simulator.deviceId,
+          "defaults",
+          "delete",
+          "com.apple.Accessibility",
+          key,
+        ]);
+        expect(baselines.size).toBe(0);
+      });
+    }
+  }
+
   test("reads increase_contrast via simctl and the defaults-backed fields as partial", async () => {
     const simctl = new FakeAccessibilitySimctl();
     simctl.contrast = "enabled";

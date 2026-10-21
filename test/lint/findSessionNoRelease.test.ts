@@ -288,6 +288,7 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionBroker/broker.ts#hasActiveSession": 1,
   "sessionBroker/broker.ts#ownedSessionRequest": 1,
   "sessionBroker/provisioning/executionReleaseContracts.ts#deviceOf": 1,
+  "sessionBroker/service.ts#recoverSessionMutationRecorder": 1,
   "sessionBroker/sessionDisposition.ts#sessionDisposition": 1,
   "sessionClockPersistence.ts#getSession": 1,
   "sessionForIngress.ts#sessionForIngress": 1,

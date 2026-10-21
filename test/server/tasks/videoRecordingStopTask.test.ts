@@ -53,12 +53,20 @@ describe("videoRecording stop as an MCP task (#13090)", () => {
   beforeAll(async () => {
     restoreHermetic = installHermeticServerFixture();
     archiveRoot = await fs.mkdtemp(path.join(os.tmpdir(), "video-stop-task-"));
+    // Warm the server connect and one stop outside the per-test budget: the first test otherwise
+    // pays the cold MCP setup in its beforeEach (113 ms median on CI for a pure-function test).
+    await setUp();
+    try {
+      await server.wire.call("videoRecording", await activeRecording(), false);
+    } finally {
+      await tearDown();
+    }
   });
   afterAll(async () => {
     restoreHermetic();
     await fs.rm(archiveRoot, { recursive: true, force: true });
   });
-  beforeEach(async () => {
+  async function setUp(): Promise<void> {
     timer = new FakeTimer();
     manager = new FakeTaskManager({ timer });
     backend = new FakeVideoCaptureBackend();
@@ -120,15 +128,17 @@ describe("videoRecording stop as an MCP task (#13090)", () => {
         isDeviceHeld: () => false,
       },
     });
-  });
-  afterEach(async () => {
+  }
+  async function tearDown(): Promise<void> {
     await server.close();
     restorePipeline();
     videoTools.clear();
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
     timer.reset();
-  });
+  }
+  beforeEach(setUp);
+  afterEach(tearDown);
 
   async function activeRecording() {
     const active = await startVideoRecording({ device, ownerSessionUuid: SESSION });

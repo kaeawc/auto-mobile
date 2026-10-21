@@ -3,7 +3,10 @@ import type { DaemonManagerLike, DaemonRestartResult } from "../manager";
 import type { DaemonOptions, DaemonStatus } from "../types";
 import type { Timer } from "../../utils/SystemTimer";
 import type { DaemonMcpProxyConfig } from "../daemonMcpProxy";
-import { assertDaemonNamespaceMatchesState } from "../sharedNamespaceGuard";
+import {
+  assertDaemonNamespaceMatchesState,
+  isDaemonNamespaceIsolated,
+} from "../sharedNamespaceGuard";
 import { logger } from "../../utils/logger";
 import {
   DAEMON_STARTUP_TIMEOUT_MS,
@@ -11,6 +14,7 @@ import {
   syncSettledDaemonVersion,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
+  DEFAULT_DAEMON_PORT,
 } from "../constants";
 import {
   buildIdentitiesMatch,
@@ -21,7 +25,12 @@ import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
 import { releaseVersion } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";
 import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
-import { startupOptionDeficits, mergeDaemonOptions } from "./startupOptions";
+import {
+  startupOptionDeficits,
+  mergeDaemonOptions,
+  restartOptionsForLostDaemon,
+} from "./startupOptions";
+import { DaemonRestartOptionsUnknownError } from "./DaemonRestartOptionsUnknownError";
 import {
   DaemonVersionMismatchError,
   type VersionMismatchReason,
@@ -112,7 +121,19 @@ export interface DaemonLifecycleReconcilerDeps {
 }
 
 export class DaemonLifecycleReconciler {
+  private lastRunningStatus: DaemonStatus | undefined;
+
   constructor(private readonly deps: DaemonLifecycleReconcilerDeps) {}
+
+  private observeStatus(status: DaemonStatus): DaemonStatus {
+    if (status.running) {
+      this.lastRunningStatus = {
+        ...status,
+        options: status.options ? { ...status.options } : undefined,
+      };
+    }
+    return status;
+  }
 
   createStatusProbe(config: DaemonMcpProxyConfig): (() => Promise<DaemonStatus>) | undefined {
     // Custom transports supply their matching probe separately; constructing a
@@ -131,11 +152,16 @@ export class DaemonLifecycleReconciler {
   }
 
   reconciliationStatus(): Promise<DaemonStatus> {
-    if (!this.deps.daemonStatusProbe) {
-      return this.deps.daemonManager.status();
-    }
-    this.deps.reconciliationSnapshot ??= this.deps.readSocketReconciliationStatus();
-    return this.deps.reconciliationSnapshot;
+    const status = this.deps.daemonStatusProbe
+      ? (this.deps.reconciliationSnapshot ??= this.deps.readSocketReconciliationStatus())
+      : this.deps.daemonManager.status();
+    // Observe before consumers resume, preserving the original promise's reconciliation timing.
+    // Its rejection still propagates through the returned promise to the caller.
+    void status.then(
+      (observed) => this.observeStatus(observed),
+      () => undefined,
+    );
+    return status;
   }
 
   isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
@@ -232,14 +258,16 @@ export class DaemonLifecycleReconciler {
       recorded.buildId === actualBuild.buildId &&
       recorded.entryScript === actualBuild.entryScript;
     // Only the socket owner can advertise support, even when PID metadata matches.
-    return matchesRecord
-      ? {
-          ...recorded,
-          ...actual,
-          structuredSessionNotFound: actual.structuredSessionNotFound,
-          structuredToolErrorCodes: actual.structuredToolErrorCodes,
-        }
-      : actual;
+    return this.observeStatus(
+      matchesRecord
+        ? {
+            ...recorded,
+            ...actual,
+            structuredSessionNotFound: actual.structuredSessionNotFound,
+            structuredToolErrorCodes: actual.structuredToolErrorCodes,
+          }
+        : actual,
+    );
   }
 
   assertAutomaticRestartAllowed(status: DaemonStatus, reason: string): void {
@@ -275,7 +303,7 @@ export class DaemonLifecycleReconciler {
     reconciliationDeadline: number,
     observedStatus: DaemonStatus | undefined,
   ): Promise<void> {
-    const status = observedStatus ?? (await this.deps.reconciliationStatus());
+    const status = this.observeStatus(observedStatus ?? (await this.deps.reconciliationStatus()));
     if (!status.running) {
       return;
     }
@@ -488,7 +516,7 @@ export class DaemonLifecycleReconciler {
     reconciliationDeadline = this.deps.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
     observedStatus?: DaemonStatus,
   ): Promise<void> {
-    const status = observedStatus ?? (await this.deps.reconciliationStatus());
+    const status = this.observeStatus(observedStatus ?? (await this.deps.reconciliationStatus()));
     if (!status.running) {
       return;
     }
@@ -661,17 +689,33 @@ export class DaemonLifecycleReconciler {
     );
   }
 
-  /**
-   * Start the daemon process
-   */
+  /** Choose recovery options only after a previously observed daemon has disappeared. */
+  private daemonStartOptions(): DaemonOptions {
+    const observed = this.lastRunningStatus;
+    const requested = this.deps.config.daemonOptions;
+    if (!observed) {
+      return daemonProcessOptions(requested);
+    }
+    const env = this.deps.config.lifecycleNamespaceEnv;
+    if (!observed.options && observed.port === undefined && env && isDaemonNamespaceIsolated(env)) {
+      throw new DaemonRestartOptionsUnknownError();
+    }
+    const options = restartOptionsForLostDaemon(observed, requested);
+    logger.info(
+      `[DaemonMcpProxy] Restarting lost daemon with its recorded startup options ` +
+        `(port ${options.port ?? DEFAULT_DAEMON_PORT}, flags ${JSON.stringify(options)})`,
+    );
+    return options;
+  }
+
+  /** Start the daemon process or join an in-progress startup. */
   async startDaemon(): Promise<void> {
-    const status = await this.deps.daemonManager.status();
+    const status = this.observeStatus(await this.deps.daemonManager.status());
     this.deps.assertDaemonLifecycleUnfenced();
 
     if (!status.running) {
       logger.info("[DaemonMcpProxy] Starting daemon...");
-      // Pass through daemon options (debug flags, video defaults, etc.)
-      await this.deps.daemonManager.start(daemonProcessOptions(this.deps.config.daemonOptions));
+      await this.deps.daemonManager.start(this.daemonStartOptions());
 
       // Wait for daemon to be ready
       const ready = await this.deps.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
@@ -680,6 +724,8 @@ export class DaemonLifecycleReconciler {
           `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
         );
       }
+      this.deps.reconciliationSnapshot = undefined;
+      await this.deps.reconciliationStatus();
       logger.info("[DaemonMcpProxy] Daemon started successfully");
       return;
     }
@@ -725,6 +771,8 @@ export class DaemonLifecycleReconciler {
           `process is completing its startup`,
       );
     }
+    this.deps.reconciliationSnapshot = undefined;
+    await this.deps.reconciliationStatus();
     logger.info("[DaemonMcpProxy] Daemon reported running; socket became ready");
   }
 }

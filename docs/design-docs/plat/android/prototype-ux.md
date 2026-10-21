@@ -756,6 +756,12 @@ vertical), even through intervening containers or horizontal scrolls. A vertical
 pager inside only a horizontal scroll is valid; horizontal pagers stay valid.
 The error is at the pager's `.axis`: "A vertical pager cannot appear inside a vertical scroll".
 
+The horizontal counterpart (#14165): a horizontal (or default-axis) pager or a carousel cannot have
+any horizontal scroll ancestor, because a horizontal scroll measures its child with an infinite
+width that their lazy layouts cannot take. The errors are at the pager or carousel itself: "A
+horizontal pager cannot appear inside a horizontal scroll" and "A carousel cannot appear inside a
+horizontal scroll".
+
 Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
 navigation pager bindings keep their meaning. Stable keys and neighbour retention

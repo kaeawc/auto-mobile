@@ -34,6 +34,7 @@ const launchedHandle = (avdName: string): AndroidEmulatorLaunchHandle => ({
   process: null,
   outcome: "launched",
   dispose: () => {},
+  release: () => {},
 });
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
@@ -751,7 +752,14 @@ describe("MultiPlatformDeviceManager", () => {
     );
 
     expect(requests).toEqual([
-      { udid: "UDID-1", runtime: "rt", profile: resourceProfile, timeoutMs: 60_000 },
+      {
+        udid: "UDID-1",
+        runtime: "rt",
+        profile: resourceProfile,
+        timeoutMs: 60_000,
+        reason: "restart",
+        signal: undefined,
+      },
     ]);
     expect(started).toEqual([{ udid: "UDID-1", timeoutMs: 1234 }]);
   });
@@ -825,6 +833,7 @@ describe("MultiPlatformDeviceManager", () => {
           process: null,
           outcome: "joined-in-process-launch",
           dispose: () => {},
+          release: () => {},
         }),
       }),
     );

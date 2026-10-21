@@ -2,7 +2,10 @@ import "./harnessLogSink";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
-import { parseSessionBrokerHostConfig } from "../../src/daemon/sessionBroker/hostConfig";
+import {
+  iosReusePolicy,
+  parseSessionBrokerHostConfig,
+} from "../../src/daemon/sessionBroker/hostConfig";
 import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import { readBrokerClients, readBrokerIdentity, resolveBrokerClient } from "./brokerClientFiles";
 import { BrokerDeviceLedger, type LedgerDevicesView } from "./brokerDeviceLedger";
@@ -92,6 +95,7 @@ export function assertPrivateBrokerBatch(
     sessionCap < totalDeviceCap ||
     host.limits.idlePoolCap !== 0 ||
     host.reuseCleanDevices ||
+    iosReusePolicy(host).mode !== "off" ||
     host.reuseAndroidCleanDevices
   ) {
     throw new Error(

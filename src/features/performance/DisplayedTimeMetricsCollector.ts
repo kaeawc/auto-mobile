@@ -52,6 +52,84 @@ export function parseDisplayedDurationMs(value: string): number | null {
   return null;
 }
 
+/** One `ActivityManager`/`ActivityTaskManager` line of `logcat -v epoch` output. */
+export interface ActivityManagerLogcatLine {
+  timestampMs: number;
+  logcatTag: DisplayedLogcatTag;
+  message: string;
+}
+
+/**
+ * Parse one `logcat -v epoch` line from the activity manager. Shared by the
+ * `Displayed` (TTID) and `Fully drawn` (TTFD) readers so both agree on format.
+ */
+export function parseActivityManagerLogcatLine(line: string): ActivityManagerLogcatLine | null {
+  // Allow leading whitespace - logcat epoch format often has spaces before timestamp
+  const match = line.match(/^\s*(\d+\.\d+)\s+\d+\s+\d+\s+[VDIWEF]\s+(\w+):\s+(.*)$/);
+  if (!match) {
+    return null;
+  }
+
+  const timestampSeconds = Number.parseFloat(match[1]);
+  if (Number.isNaN(timestampSeconds)) {
+    return null;
+  }
+
+  const logcatTag = match[2];
+  if (logcatTag !== "ActivityManager" && logcatTag !== "ActivityTaskManager") {
+    return null;
+  }
+
+  return {
+    timestampMs: Math.round(timestampSeconds * 1000),
+    logcatTag,
+    message: match[3],
+  };
+}
+
+/** The `pkg/.Activity` component a `Displayed` or `Fully drawn` message names. */
+export function extractTimingComponentName(
+  message: string,
+  marker: "Displayed" | "Fully drawn",
+): string | null {
+  const pattern =
+    marker === "Displayed"
+      ? /Displayed\s+(\S+?)(?:\s+for user \d+)?:/
+      : /Fully drawn\s+(\S+?)(?:\s+for user \d+)?:/;
+  const match = message.match(pattern);
+  return match ? match[1] : null;
+}
+
+/** Split a `pkg/.Activity` component, expanding a relative activity name. */
+export function parseLaunchComponent(component: string): {
+  packageName: string;
+  activityName: string;
+  componentName: string;
+} {
+  const [packageName, activityPart] = component.split("/");
+  let activityName = activityPart ?? "";
+
+  if (activityName.startsWith(".")) {
+    activityName = `${packageName}${activityName}`;
+  }
+
+  return {
+    packageName,
+    activityName,
+    componentName: component,
+  };
+}
+
+/** The `+1s234ms` duration a `Displayed` or `Fully drawn` message carries. */
+export function extractLaunchDurationMs(message: string): number | null {
+  const durationMatch = message.match(/\+\s*\d+(?:s\d+ms|ms|s)/);
+  if (!durationMatch) {
+    return null;
+  }
+
+  return parseDisplayedDurationMs(durationMatch[0]);
+}
+
 export class DisplayedTimeMetricsCollector {
   private adb: ExtendedAdbExecutor;
   private device: BootedDevice;
@@ -139,7 +217,7 @@ export class DisplayedTimeMetricsCollector {
     }
 
     for (const line of lines) {
-      const parsedLine = this.parseLogcatLine(line);
+      const parsedLine = parseActivityManagerLogcatLine(line);
       if (!parsedLine) {
         continue;
       }
@@ -156,17 +234,17 @@ export class DisplayedTimeMetricsCollector {
         continue;
       }
 
-      const component = this.extractComponentName(message);
+      const component = extractTimingComponentName(message, "Displayed");
       if (!component) {
         continue;
       }
 
-      const componentInfo = this.parseComponent(component);
+      const componentInfo = parseLaunchComponent(component);
       if (componentInfo.packageName !== options.packageName) {
         continue;
       }
 
-      const displayedTimeMs = this.extractDisplayedDurationMs(message);
+      const displayedTimeMs = extractLaunchDurationMs(message);
       if (displayedTimeMs === null) {
         continue;
       }
@@ -185,68 +263,5 @@ export class DisplayedTimeMetricsCollector {
     }
 
     return metrics;
-  }
-
-  private parseLogcatLine(
-    line: string,
-  ): { timestampMs: number; logcatTag: DisplayedLogcatTag; message: string } | null {
-    // Allow leading whitespace - logcat epoch format often has spaces before timestamp
-    const match = line.match(/^\s*(\d+\.\d+)\s+\d+\s+\d+\s+[VDIWEF]\s+(\w+):\s+(.*)$/);
-    if (!match) {
-      return null;
-    }
-
-    const timestampSeconds = Number.parseFloat(match[1]);
-    if (Number.isNaN(timestampSeconds)) {
-      return null;
-    }
-
-    const logcatTag = match[2] as DisplayedLogcatTag;
-    if (logcatTag !== "ActivityManager" && logcatTag !== "ActivityTaskManager") {
-      return null;
-    }
-
-    return {
-      timestampMs: Math.round(timestampSeconds * 1000),
-      logcatTag,
-      message: match[3],
-    };
-  }
-
-  private extractComponentName(message: string): string | null {
-    const match = message.match(/Displayed\s+(\S+?)(?:\s+for user \d+)?:/);
-    return match ? match[1] : null;
-  }
-
-  private parseComponent(component: string): {
-    packageName: string;
-    activityName: string;
-    componentName: string;
-  } {
-    const [packageName, activityPart] = component.split("/");
-    let activityName = activityPart ?? "";
-
-    if (activityName.startsWith(".")) {
-      activityName = `${packageName}${activityName}`;
-    }
-
-    return {
-      packageName,
-      activityName,
-      componentName: component,
-    };
-  }
-
-  private extractDisplayedDurationMs(message: string): number | null {
-    const durationMatch = message.match(/\+\s*\d+(?:s\d+ms|ms|s)/);
-    if (!durationMatch) {
-      return null;
-    }
-
-    return this.parseDurationMs(durationMatch[0]);
-  }
-
-  private parseDurationMs(value: string): number | null {
-    return parseDisplayedDurationMs(value);
   }
 }

@@ -227,6 +227,7 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     error: "optional",
   },
   highlight_response: {
+    perfTiming: "optional",
     type: "required",
     requestId: "optional",
     success: "optional",
@@ -402,7 +403,6 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
   preferences: {
     packageName: "optional",
     fileName: "optional",
-    data: "optional",
     type: "required",
     requestId: "optional",
     success: "optional",

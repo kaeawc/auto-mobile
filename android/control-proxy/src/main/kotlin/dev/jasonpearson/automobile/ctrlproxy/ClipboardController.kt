@@ -8,7 +8,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.json.JsonElement
 
 /** Clipboard copy/get/clear/paste requests, with platform and socket access supplied per call. */
 internal class ClipboardController(
@@ -16,18 +15,8 @@ internal class ClipboardController(
   private val activeWindowRoot: () -> AccessibilityNodeInfo?,
   private val perfProvider: PerfProvider,
   private val timeProvider: TimeProvider,
-  private val resultBroadcaster: ResultBroadcaster,
-  private val responseSender: ResponseSender,
+  private val resultSender: ResultSender,
 ) {
-  /** Keeps the service's frame encoder and late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    fun isRunning(): Boolean
-
-    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
-
-    fun connectionCount(): Int
-  }
-
   companion object {
     private const val TAG = "CtrlProxy"
   }
@@ -224,16 +213,8 @@ internal class ClipboardController(
 
   /** Broadcast clipboard result to WebSocket clients */
   private suspend fun broadcastClipboardResult(outcome: ClipboardFrameResult) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping clipboard result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(outcome.requestId, "clipboard_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        clipboardResultFrame(outcome, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted clipboard result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(outcome.requestId, "clipboard_result") { perfTiming ->
+      clipboardResultFrame(outcome, perfTiming)
     }
   }
 }

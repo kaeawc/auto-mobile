@@ -1,0 +1,3 @@
+--------- beginning of system
+  1729500000.120  1234  1290 I ActivityManager: Displayed dev.jasonpearson.automobile.playground/.MainActivity: +1s180ms
+  1729500000.700  1234  1290 I ActivityManager: Fully drawn dev.jasonpearson.automobile.playground/.MainActivity: +1s950ms

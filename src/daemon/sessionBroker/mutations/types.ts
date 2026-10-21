@@ -4,9 +4,15 @@ import { ActionableError } from "../../../models/ActionableError";
 export const mutationValueSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("absent") }),
   z.object({ state: z.literal("present"), value: z.json() }),
+  z.object({ state: z.literal("unobservable") }),
 ]);
 
 export type MutationValue = z.infer<typeof mutationValueSchema>;
+
+export function observableMutationValue(value: unknown): MutationValue {
+  const parsed = mutationValueSchema.safeParse({ state: "present", value });
+  return parsed.success ? parsed.data : { state: "unobservable" };
+}
 
 export interface DeviceIncarnationScope {
   deviceId: string;
@@ -49,6 +55,7 @@ export const deviceBaselineSchema = z.object({
     z.object({ kind: z.string().min(1), key: z.string().min(1), value: mutationValueSchema }),
   ),
   unobservable: z.array(z.string().min(1)),
+  unobservableReasons: z.record(z.string(), z.string()).optional(),
 });
 
 export type DeviceBaseline = z.infer<typeof deviceBaselineSchema>;
@@ -60,6 +67,7 @@ export interface DeviceMutationJournal {
   deleteSession(scope: DeviceMutationScope): Promise<void>;
   captureBaseline(scope: DeviceIncarnationScope, baseline: DeviceBaseline): Promise<void>;
   getBaseline(scope: DeviceIncarnationScope): Promise<DeviceBaseline | null>;
+  deleteResource(resourceId: string): Promise<void>;
 }
 
 export const DEVICE_MUTATION_KINDS = [

@@ -6,6 +6,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeDeviceClientProvider } from "../../fakes/FakeDeviceClientProvider";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
+import { getAbortSignal } from "../../../src/utils/AbortContext";
 
 const androidDevice: BootedDevice = {
   name: "Pixel_API_35",
@@ -50,5 +51,40 @@ describe("DeviceReadiness session broker ports", () => {
 
     await expect(readiness.verifyAndroidCtrlProxyServiceReady(androidDevice)).resolves.toBe(true);
     expect(verifyServiceReady).toHaveBeenCalledWith(2, 200, 2000);
+  });
+
+  test("broker health probes use one attempt, the caller timeout and its cancellation signal", async () => {
+    const adb = new FakeAdbExecutor();
+    const deviceUtils = new FakeDeviceUtils();
+    let probeSignal: AbortSignal | undefined;
+    const verifyServiceReady = mock(async () => {
+      probeSignal = getAbortSignal();
+      probeSignal?.throwIfAborted();
+      return true;
+    });
+    const ctrlProxy = Object.assign(new FakeCtrlProxy(), { verifyServiceReady });
+    const readiness = DeviceReadiness.createInstance(
+      new FakeDeviceClientProvider(adb, deviceUtils, undefined, {
+        ctrlProxyClient: ctrlProxy as AndroidCtrlProxy,
+      }),
+    );
+    const controller = new AbortController();
+    await expect(
+      readiness.verifyAndroidCtrlProxyServiceReady(androidDevice, {
+        signal: controller.signal,
+        timeoutMs: 847,
+        noRetry: true,
+      }),
+    ).resolves.toBe(true);
+    expect(verifyServiceReady).toHaveBeenCalledWith(1, 200, 847);
+    expect(probeSignal).toBe(controller.signal);
+    controller.abort(new Error("health cancelled"));
+    await expect(
+      readiness.verifyAndroidCtrlProxyServiceReady(androidDevice, {
+        signal: controller.signal,
+        timeoutMs: 847,
+        noRetry: true,
+      }),
+    ).rejects.toThrow("health cancelled");
   });
 });

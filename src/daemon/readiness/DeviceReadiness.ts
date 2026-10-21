@@ -248,10 +248,12 @@ export class DeviceReadiness implements DeviceReadinessContract {
     device: { runtimeId?: string },
     udid: string,
     signal: AbortSignal,
+    reason: "create" | "restart" = "restart",
   ): Promise<BootedDevice> {
     return await this.iosBootInstrumentation.run(
       {
         udid,
+        reason,
         runtime: device.runtimeId,
         timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
         signal,
@@ -319,8 +321,27 @@ export class DeviceReadiness implements DeviceReadinessContract {
     });
   }
 
-  public verifyAndroidCtrlProxyServiceReady(device: BootedDevice): Promise<boolean> {
-    return this.provider.getAndroidCtrlProxyClient(device).verifyServiceReady(2, 200, 2000);
+  public verifyAndroidCtrlProxyServiceReady(
+    device: BootedDevice,
+    options?: { signal?: AbortSignal; timeoutMs?: number; noRetry?: boolean },
+  ): Promise<boolean> {
+    const verify = () =>
+      this.provider
+        .getAndroidCtrlProxyClient(device)
+        .verifyServiceReady(options?.noRetry ? 1 : 2, 200, options?.timeoutMs ?? 2000);
+    return options?.signal ? runWithAbortSignal(options.signal, verify) : verify();
+  }
+
+  public async readAndroidCtrlProxySnapshotIdentity(
+    device: BootedDevice,
+    signal: AbortSignal,
+  ): Promise<string> {
+    signal.throwIfAborted();
+    const manager = this.provider.getAndroidCtrlProxyManager(device);
+    if (!manager.readSnapshotIdentity) {
+      throw new ActionableError("Android snapshot CtrlProxy identity provider is unavailable");
+    }
+    return manager.readSnapshotIdentity(signal);
   }
 
   private readonly checkedAndroidOwnership = new AsyncLocalStorage<Set<string>>();
@@ -814,6 +835,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
               provisioned,
               provisioned.deviceId!,
               signal,
+              "create",
             );
             perf.endOperation("bootSimulator");
             if (createdDevice.deviceId === provisioned.deviceId) {

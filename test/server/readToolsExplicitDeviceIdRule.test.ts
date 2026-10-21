@@ -78,16 +78,19 @@ const readArgs: Record<string, Record<string, unknown>> = {
   mediaSession: { action: "get" },
   sqlQuery: { query: "SELECT 1" },
   prototype: { action: "inspect" },
+  statusBar: { action: "get" },
 };
 // All handler bodies are stubbed, so even platform-specific reads can exercise resolution.
 const EXPECTED = [
   "accessibility",
   "clipboard",
+  "compareScreenshot",
   "displayConfig",
   "getAppPermissions",
   "getDataStore",
   "getDeepLinks",
   "getDeviceState",
+  "getLogs",
   "getNavigationGraph",
   "getNetworkGraph",
   "getNotificationPolicy",
@@ -103,6 +106,7 @@ const EXPECTED = [
   "prototype",
   "snapshotOf",
   "sqlQuery",
+  "statusBar",
 ];
 const deviceFor = (platform: Platform): BootedDevice => ({
   platform,
@@ -438,11 +442,13 @@ const READS_THAT_READY_UNHELD = {
   android: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -454,15 +460,18 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
   ios: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -474,6 +483,7 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
 };
 const READS_WITHOUT_UNHELD_READINESS = {

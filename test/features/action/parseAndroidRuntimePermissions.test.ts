@@ -9,6 +9,15 @@ const fixture = (name: string) =>
 const playground = fixture("dumpsys-package-installed");
 const egg = fixture("dumpsys-package-system-installed");
 
+test("a permissionless package may omit requested permissions entirely", () => {
+  const state = parseAndroidRuntimePermissions(
+    "  Package [com.example.empty] (123):\n    User 0: installed=true",
+    "com.example.empty",
+  );
+  expect(state?.requestedPermissions.size).toBe(0);
+  expect(state?.runtimePermissions.size).toBe(0);
+});
+
 test("captured Playground requested and install permissions with empty runtime block", () => {
   const state = parseAndroidRuntimePermissions(
     playground,

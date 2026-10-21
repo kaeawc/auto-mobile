@@ -393,7 +393,6 @@ test/daemon/runDaemonLivenessRelease.test.ts
 test/daemon/runDaemonSessionCommandArgs.test.ts
 test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
 test/daemon/sessionBroker/admission.test.ts
-test/daemon/sessionBroker/broker.test.ts
 test/daemon/sessionBroker/brokerAbortAfterActivate.test.ts
 test/daemon/sessionBroker/brokerCleanReleaseRetry.test.ts
 test/daemon/sessionBroker/brokerPostActivationRead.test.ts
@@ -464,7 +463,6 @@ test/daemon/sessionBroker/registry/registrySchemaCompatibility.test.ts
 test/daemon/sessionBroker/registry/registryUpgradeFromCapturedSchema.test.ts
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.test.ts
 test/daemon/sessionBroker/releaseReply.test.ts
-test/daemon/sessionBroker/service.test.ts
 test/daemon/sessionBroker/sqliteStore.test.ts
 test/daemon/sessionBroker/sqliteStoreBoundedReads.test.ts
 test/daemon/sessionBrokerCommands.test.ts

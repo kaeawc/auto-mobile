@@ -5,9 +5,26 @@ export interface MutationToolTraits {
 }
 
 export interface PendingMutationAdapter {
-  status: "notJournaled" | "pending-adapter";
+  status: "notJournaled" | "pending-adapter" | "journaled";
   reason: string;
 }
+
+export const DEVICE_MUTATION_CALL_EXEMPTIONS: Readonly<
+  Record<string, { actions: readonly string[]; status: "notJournaled"; reason: string }>
+> = {
+  keyboard: {
+    actions: ["open", "close"],
+    status: "notJournaled",
+    reason:
+      "Keyboard visibility is transient UI state. Typing profiles and IME key actions remain journaled because they can leave persistent device state.",
+  },
+  biometricAuth: {
+    actions: ["match", "fail", "cancel", "error"],
+    status: "notJournaled",
+    reason:
+      "Authentication responses affect only the current prompt, not biometric enrollment. App-owned changes remain subject to baseline verification.",
+  },
+};
 
 function pendingTools(
   names: readonly string[],
@@ -47,7 +64,12 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "setUIState",
       "uninstallApp",
     ],
-    "Pending platform prior-value capture and broker tool-surface wiring (#14359); never evidence of a clean reset.",
+    "Session-scoped tool dispatch attempts to record before action; recording failures warn and proceed. Unreadable priors and opaque intents are non-revertible. Legacy sessions are unchanged.",
+    "journaled",
+  ),
+  ...pendingTools(
+    ["persona", "statusBar"],
+    "Pending device-appearance intent and prior-value adapters (#14359); unavailable journal coverage limits best-effort reverts but does not gate tool actions or unconditional keep-booted cleaning.",
   ),
   ...pendingTools(
     [
@@ -58,13 +80,14 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "phoneCall",
       "removeKeyValue",
       "resetAppLogs",
+      "sendBroadcast",
       "sendSms",
       "setKeyValue",
       "setPreference",
       "sqlQuery",
       "stageSessionDownloads",
     ],
-    "Pending data/provider-specific journal adapter (#14359); opaque persistent changes require fallback.",
+    "Pending data/provider-specific journal adapter (#14359); opaque priors cannot drive best-effort reverts and do not gate keep-booted cleaning.",
   ),
   ...pendingTools(
     [
@@ -77,6 +100,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "highlight",
       "homeScreen",
       "launchApp",
+      "measureStartup",
       "multiTouch",
       "pinchOn",
       "pressButton",
@@ -93,7 +117,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "terminateApp",
       "wakeAndUnlock",
     ],
-    "UI/process interaction can induce app-owned persistent changes; pending opaque-mutation tracking and qualified baseline fallback (#14359).",
+    "UI/process interaction can induce app-owned persistent changes; pending opaque-mutation tracking for best-effort reverts (#14359). Keep-booted cleaning runs unconditionally.",
   ),
   ...pendingTools(
     [
@@ -137,9 +161,12 @@ export function mutationToolCoverageViolations(
       const adapter = Object.hasOwn(coverage, tool.name) ? coverage[tool.name] : undefined;
       return (
         !adapter ||
-        !["pending-adapter", "notJournaled"].includes(adapter.status) ||
+        !["journaled", "pending-adapter", "notJournaled"].includes(adapter.status) ||
         !adapter.reason.trim()
       );
     })
-    .map((tool) => `${tool.name}: missing pending-adapter or explicit notJournaled justification`);
+    .map(
+      (tool) =>
+        `${tool.name}: missing journaled adapter, pending-adapter or explicit notJournaled justification`,
+    );
 }

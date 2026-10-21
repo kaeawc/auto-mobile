@@ -67,7 +67,8 @@ describe("device mutation tool coverage", () => {
 
   test("journaled adapters, pending device adapters and host-only exemptions are distinct", () => {
     expect(DEVICE_MUTATION_TOOL_COVERAGE.clipboard.status).toBe("journaled");
-    expect(DEVICE_MUTATION_TOOL_COVERAGE.setPreference.status).toBe("pending-adapter");
+    expect(DEVICE_MUTATION_TOOL_COVERAGE.setPreference.status).toBe("journaled");
+    expect(DEVICE_MUTATION_TOOL_COVERAGE.stageSessionDownloads.status).toBe("pending-adapter");
     expect(DEVICE_MUTATION_TOOL_COVERAGE.setActiveDevice.status).toBe("notJournaled");
     expect(
       mutationToolCoverageViolations([{ name: "clipboard" }], {

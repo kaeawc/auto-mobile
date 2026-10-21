@@ -9,7 +9,7 @@ import {
 } from "../../src/daemon/inputDeviceOwnership";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { isReadOnlySqlQuery } from "../../src/server/databaseTools";
+import { isReadOnlySqlQuery } from "../../src/features/database/sqlQueryClassification";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

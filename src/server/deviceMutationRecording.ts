@@ -140,7 +140,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     sessionUuid?: string,
     signal: AbortSignal | undefined = getAbortSignal(),
   ): Promise<void> {
-    let mutations = deviceToolMutations(name, args);
+    let mutations = deviceToolMutations(name, args, device.platform);
     if (mutations.length === 0) {
       return;
     }
@@ -167,7 +167,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
         const appId = await runWithAbortSignal(signal, () =>
           this.artifactReader.appId(device, args, signal),
         );
-        mutations = deviceToolMutations(name, { ...args, appId });
+        mutations = deviceToolMutations(name, { ...args, appId }, device.platform);
       }
       await this.recordMutations(name, device, recorder, mutations, signal);
     } catch (error) {

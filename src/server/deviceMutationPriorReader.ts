@@ -20,6 +20,7 @@ import { TalkBackToggle } from "../features/accessibility/TalkBackToggle";
 import { VoiceOverToggle } from "../features/accessibility/VoiceOverToggle";
 import { awaitWhileRequestIsLive } from "../utils/toolUtils";
 import { type AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
+import { DataMutationPriorReader } from "./deviceMutationDataPriorReader";
 
 function stateField(entry: ToolMutation): DeviceStateField | undefined {
   const settingFields: Readonly<Record<string, DeviceStateField>> = {
@@ -101,10 +102,12 @@ export interface MutationPriorReader {
 export interface MutationObservationReaders {
   screenReaderFor(device: BootedDevice): { getEnabled(): Promise<boolean | null> };
   keyboardProfilesFor?: (device: BootedDevice) => Pick<AndroidCtrlProxy, "listKeyboardProfiles">;
+  dataReader?: MutationPriorReader;
 }
 
 export class DefaultMutationPriorReader implements MutationPriorReader {
   private readonly observationReaders: MutationObservationReaders;
+  private readonly dataReader: MutationPriorReader;
 
   constructor(
     private readonly settingsAccess: Pick<
@@ -124,6 +127,7 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
     ) => new Rotate(device),
     observationReaders: Partial<MutationObservationReaders> = {},
   ) {
+    this.dataReader = observationReaders.dataReader ?? new DataMutationPriorReader();
     this.observationReaders = {
       screenReaderFor:
         observationReaders.screenReaderFor ??
@@ -171,6 +175,7 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
         )
       : undefined;
     const keyboardProfile = await this.readKeyboardProfile(device, mutations, signal);
+    const dataPriors = await this.dataReader.read(device, mutations, signal);
     signal?.throwIfAborted();
     const priorsByKey: Readonly<Record<string, Readonly<Record<string, MutationValue>>>> = {
       device: {
@@ -183,7 +188,7 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
       },
       profile: { keyboard: keyboardProfile },
     };
-    return mutations.map((entry): MutationValue => {
+    return mutations.map((entry, index): MutationValue => {
       const setting = DEVICE_SETTING_KEYS.find(
         (key) => entry.kind === "device-setting" && entry.key === key,
       );
@@ -197,7 +202,7 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
       if (stateField(entry)) {
         return statePrior(entry, state);
       }
-      return priorsByKey[entry.key]?.[entry.kind] ?? { state: "unobservable" };
+      return priorsByKey[entry.key]?.[entry.kind] ?? dataPriors[index] ?? { state: "unobservable" };
     });
   }
 

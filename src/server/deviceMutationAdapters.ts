@@ -1,7 +1,10 @@
 import { DISPLAY_KEYS } from "../features/utility/DefaultDeviceSettingsAccess";
+import type { BootedDevice } from "../models";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
+import { dataToolMutations } from "./deviceMutationDataAdapters";
+import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
 import {
   DEVICE_MUTATION_TOOL_COVERAGE,
   DEVICE_MUTATION_CALL_EXEMPTIONS,
@@ -97,6 +100,8 @@ function mutationCallIsRead(name: string, args: Record<string, unknown>): boolea
       return typeof args.action === "string" && KEYBOARD_READ_ACTIONS.has(args.action);
     case "clipboard":
       return args.action === "get";
+    case "sqlQuery":
+      return typeof args.query === "string" && isReadOnlySqlQuery(args.query);
     case "displayConfig":
       return settingMutations(args).length === 0;
     case "network":
@@ -114,7 +119,11 @@ function rotationMutations(args: Record<string, unknown>): ToolMutation[] {
     : [mutation("rotation")];
 }
 
-export function deviceToolMutations(name: string, args: Record<string, unknown>): ToolMutation[] {
+export function deviceToolMutations(
+  name: string,
+  args: Record<string, unknown>,
+  platform?: BootedDevice["platform"],
+): ToolMutation[] {
   if (mutationCallIsRead(name, args) || mutationCallNotJournaled(name, args)) {
     return [];
   }
@@ -137,7 +146,7 @@ export function deviceToolMutations(name: string, args: Record<string, unknown>)
   if (Object.hasOwn(opaqueKinds, name)) {
     return [mutation(opaqueKinds[name], name === "accessibility" ? "device" : `tool:${name}`)];
   }
-  const mutations = directToolMutations(name, args) ?? stateToolMutations(name, args);
+  const mutations = directToolMutations(name, args, platform) ?? stateToolMutations(name, args);
   return mutations.length > 0 || DEVICE_MUTATION_TOOL_COVERAGE[name]?.status !== "journaled"
     ? mutations
     : [mutation("opaque", `tool:${name}`)];
@@ -153,6 +162,7 @@ export function mutationCallNotJournaled(name: string, args: Record<string, unkn
 function directToolMutations(
   name: string,
   args: Record<string, unknown>,
+  platform?: BootedDevice["platform"],
 ): ToolMutation[] | undefined {
   switch (name) {
     case "installApp":
@@ -176,7 +186,7 @@ function directToolMutations(
     case "openLink":
       return [mutation("opened-url", String(args.url))];
     default:
-      return undefined;
+      return dataToolMutations(name, args, platform);
   }
 }
 

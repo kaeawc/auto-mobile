@@ -130,7 +130,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     signal?: AbortSignal,
   ): Promise<UnifiedLogWindowResult> {
     this.requireSimulator(device, "collect the unified log");
-    const predicate = unifiedLogPredicate(appId);
+    const predicate = unifiedLogPredicate(appId, request.processName);
     const args = ["spawn", device.deviceId, "log", ...logShowArgs(request, predicate)];
     const startedAt = this.timer.now();
     const stdout = await this.runBounded(device, args, signal);

@@ -14,6 +14,7 @@ import {
 } from "../../../src/daemon/sessionBroker/hostConfig";
 import {
   openSessionBrokerService,
+  createAndroidResetStrategy,
   SessionBrokerService,
   type OpenSessionBrokerServiceOptions,
   type SessionBrokerHostLock,
@@ -34,6 +35,10 @@ import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import type { Session } from "../../../src/daemon/sessionManager/sessionTypes";
 import { brokerMutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/recorder";
 import { logger } from "../../../src/utils/logger";
+import { DEFAULT_ANDROID_RESET_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/androidBaselineReset";
+import { FakeAndroidKeepBootedResetPort } from "../../fakes/FakeAndroidKeepBootedResetPort";
+import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
+import { ANDROID_RESET_DEVICE } from "./fixtures/androidReset";
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
@@ -41,6 +46,88 @@ const OWNER: BindingProcessIdentity = {
   processGenerationToken: "process-a",
 };
 const BROKER_SCOPE_KEY = computeBindingScopeKey(SESSION_BROKER_SCOPE);
+
+describe("service Android reset strategy construction", () => {
+  test.each([undefined, 90_000])(
+    "snapshot fallback honors configured overall budget %s beyond 30 seconds",
+    async (configuredTimeout) => {
+      const timer = new FakeTimer();
+      const port = new FakeAndroidKeepBootedResetPort({
+        completeKinds: [],
+        // An empty capture is never persisted as a baseline, so keep one observation.
+        observations: [
+          {
+            kind: "installed-app",
+            key: "user:0:com.example.baseline",
+            value: { state: "present", value: true },
+          },
+        ],
+        unobservable: [],
+      });
+      const budget = configuredTimeout ?? DEFAULT_ANDROID_RESET_TIMEOUT_MS;
+      let receivedBudget: number | undefined;
+      let fallbackSignal: AbortSignal | undefined;
+      const strategy = createAndroidResetStrategy(
+        parseSessionBrokerHostConfig({
+          contractVersion: 1,
+          limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 0 },
+          defaults: { android: androidDefaults() },
+          reuseAndroidCleanDevices: true,
+          androidResetMode: "keep-booted",
+          androidKeepBootedFallback: "snapshot",
+          ...(configuredTimeout === undefined ? {} : { androidResetTimeoutMs: configuredTimeout }),
+        }),
+        {
+          timer,
+          journal: new FakeDeviceMutationJournal(timer),
+          port: () => port,
+          snapshot: {
+            reset: async (_device, _packages, fence, context) => {
+              receivedBudget = context.timeoutMs;
+              fallbackSignal = context.signal;
+              await timer.sleep(31_000);
+              context.signal?.throwIfAborted();
+              await fence();
+              return {
+                outcome: "fallback:wipe-data",
+                mode: "wipe-data",
+                phases: {},
+                fallbackReason: "load failed",
+              };
+            },
+          },
+        },
+      )!;
+      const session = { resourceId: "resource-a", sessionId: "session-a", incarnation: "boot-a" };
+      await strategy.capture!(ANDROID_RESET_DEVICE, {
+        ...session,
+        signal: new AbortController().signal,
+        timeoutMs: 5000,
+        assertOwned: async () => {},
+      });
+      port.beforeClean = async () => {
+        timer.advanceTime(12_000);
+        throw new Error("clean failed");
+      };
+      const result = strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+        ...session,
+        timeoutMs: budget,
+        deadlineMs: timer.now() + budget,
+      });
+      await drainUntil(() => receivedBudget !== undefined, {
+        description: "snapshot fallback started",
+      });
+      expect(receivedBudget).toBe(budget - 12_000 - 2001);
+      timer.advanceTime(31_000);
+      await expect(result).resolves.toMatchObject({
+        outcome: "fallback:wipe-data",
+        mode: "wipe-data",
+        fallbackReason: "clean failed; load failed",
+      });
+      expect(fallbackSignal?.aborted).toBe(false);
+    },
+  );
+});
 
 const unusedNativeCall = async (): Promise<never> => {
   throw new Error("native work must not run in this test");
@@ -210,6 +297,49 @@ describe("session broker service lifecycle", () => {
     expect(lock.events).toEqual(["lock:acquire", "lock:release"]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
+
+  test.each(["snapshot", "keep-booted"])(
+    "%s snapshot wiring refuses unavailable snapshot ports",
+    async (mode) => {
+      const timer = new FakeTimer();
+      const lock = new RecordingLock();
+      const options = openOptions(timer, lock);
+      options.config = parseSessionBrokerHostConfig({
+        contractVersion: 1,
+        limits: {},
+        defaults: { android: androidDefaults() },
+        reuseAndroidCleanDevices: true,
+        androidResetMode: mode,
+        ...(mode === "keep-booted" ? { androidKeepBootedFallback: "snapshot" } : {}),
+      });
+      options.androidReset = { inventory: async () => [], ctrlProxyReady: async () => true };
+      await expect(openSessionBrokerService(options)).rejects.toThrow(
+        "snapshot reset requires daemon readiness and identity ports",
+      );
+      expect(lock.events).toEqual(["lock:acquire", "lock:release"]);
+    },
+  );
+
+  test.each([undefined, "destroy"])(
+    "keep-booted fallback %s does not require snapshot ports",
+    async (fallback) => {
+      const timer = new FakeTimer();
+      const lock = new RecordingLock();
+      const options = openOptions(timer, lock);
+      options.config = parseSessionBrokerHostConfig({
+        contractVersion: 1,
+        limits: {},
+        defaults: { android: androidDefaults() },
+        reuseAndroidCleanDevices: true,
+        androidResetMode: "keep-booted",
+        androidKeepBootedFallback: fallback,
+      });
+      options.androidReset = { inventory: async () => [], ctrlProxyReady: async () => true };
+      const service = await openSessionBrokerService(options);
+      await service.close();
+      expect(lock.events).toEqual(["lock:acquire", "lock:release"]);
+    },
+  );
 
   test("Android reset inventory honors its timeout and abort signal", async () => {
     const timer = new FakeTimer();

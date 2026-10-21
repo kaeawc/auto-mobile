@@ -332,6 +332,18 @@ export class DeviceReadiness implements DeviceReadinessContract {
     return options?.signal ? runWithAbortSignal(options.signal, verify) : verify();
   }
 
+  public async readAndroidCtrlProxySnapshotIdentity(
+    device: BootedDevice,
+    signal: AbortSignal,
+  ): Promise<string> {
+    signal.throwIfAborted();
+    const manager = this.provider.getAndroidCtrlProxyManager(device);
+    if (!manager.readSnapshotIdentity) {
+      throw new ActionableError("Android snapshot CtrlProxy identity provider is unavailable");
+    }
+    return manager.readSnapshotIdentity(signal);
+  }
+
   private readonly checkedAndroidOwnership = new AsyncLocalStorage<Set<string>>();
   private readonly androidCtrlProxyReadiness: AndroidCtrlProxyReadiness;
 

@@ -1,10 +1,10 @@
 package dev.jasonpearson.automobile.protocol
 
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.pagerErrors
-import dev.jasonpearson.automobile.protocol.PrototypeMotionRules.motionErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.stackErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.swipeActionsErrors
 import dev.jasonpearson.automobile.protocol.PrototypeDataRules.dataActionErrors
+import dev.jasonpearson.automobile.protocol.PrototypeMotionRules.motionErrors
 import dev.jasonpearson.automobile.protocol.PrototypeRequestRules.requestActionErrors
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.definitions
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.json

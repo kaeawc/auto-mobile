@@ -633,8 +633,7 @@ data class PrototypeImageNode(
 ) : PrototypeNode()
 
 /** A node's style animation (#14208): [durationMs] 0..2000 (default 300) and [easing]. */
-@Serializable
-data class PrototypeAnimate(val durationMs: Int? = null, val easing: String? = null)
+@Serializable data class PrototypeAnimate(val durationMs: Int? = null, val easing: String? = null)
 
 /** An image's zoom range: 1 up to [maxScale] (1..8). */
 @Serializable data class PrototypeZoomable(val maxScale: Double)

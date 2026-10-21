@@ -16,6 +16,7 @@ object AutoMobilePrototype {
       "prototype_flow_grid_v1",
       "prototype_gestures_v1",
       "prototype_menus_v1",
+      "prototype_motion_v2",
       "prototype_network_device_v1",
       "prototype_network_v1",
       "prototype_pager_options_v1",

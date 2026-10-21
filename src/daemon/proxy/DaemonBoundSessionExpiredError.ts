@@ -1,6 +1,6 @@
 import { ActionableError } from "../../models";
 import { DEVICE_SESSION_RECOVERY_PROMPT } from "./sessionRecoveryPrompt";
-import type { SessionReleaseSnapshot } from "../sessionManager";
+import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 
 /**
  * Raised after a daemon release proves that this transport's device-session

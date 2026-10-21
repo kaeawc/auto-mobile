@@ -25,6 +25,12 @@ import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
+/** iOS hardware buttons that only some devices have, pressed via XCUIDevice.Button (#14100). */
+const IOS_OPTIONAL_HARDWARE_BUTTONS: ReadonlySet<string> = new Set(["action", "camera"]);
+
+/** Wording GesturePerformer.GestureError.notSupported puts on the wire. */
+const IOS_RUNNER_NOT_SUPPORTED_PREFIX = "Feature not supported";
+
 export function unsupportedIosButtonResult(button: string, error: string): PressButtonResult {
   return {
     success: false,
@@ -227,6 +233,7 @@ export class PressButton extends BaseVisualChange {
     "volume_up",
     "volume_down",
     "power",
+    ...IOS_OPTIONAL_HARDWARE_BUTTONS,
   ]);
 
   /**
@@ -246,6 +253,12 @@ export class PressButton extends BaseVisualChange {
     onDispatch?: () => void,
   ): Promise<PressButtonResult> {
     const normalized = button.toLowerCase();
+    if (IOS_OPTIONAL_HARDWARE_BUTTONS.has(normalized)) {
+      return unsupportedIosButtonResult(
+        button,
+        `"${normalized}" is an iOS-only hardware button (Action button / Camera Control); Android has no equivalent in pressButton.`,
+      );
+    }
     const keyCode = resolveAndroidKeyCode(normalized);
     if (keyCode === undefined) {
       return {
@@ -536,31 +549,9 @@ export class PressButton extends BaseVisualChange {
             onDispatch,
           );
       this.assertHeldRequestLive(signal);
-      if (!result.success) {
-        if (normalizedButton !== "home" && result.dispatched && result.acknowledged === false) {
-          return {
-            success: false,
-            button,
-            keyCode: -1,
-            code: "indeterminate_outcome",
-            retryable: false,
-            error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
-          };
-        }
-        return {
-          success: false,
-          button,
-          keyCode: -1,
-          code: "press_failed",
-          retryable: false,
-          error:
-            result.error ??
-            (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)
-              ? `iOS hardware button "${button}" is not supported on this device`
-              : `Failed to press iOS ${normalizedButton} button`),
-        };
-      }
-      return { success: true, button, keyCode: -1 };
+      return result.success
+        ? { success: true, button, keyCode: -1 }
+        : iosPressFailureResult(button, normalizedButton, result);
     }
 
     if (normalizedButton === "menu") {
@@ -656,4 +647,43 @@ export class PressButton extends BaseVisualChange {
         return { success: false, error: `Unsupported iOS button: ${button}` };
     }
   }
+}
+
+/** Map a failed iOS runner press to a typed result: unsupported, indeterminate, or failed. */
+function iosPressFailureResult(
+  button: string,
+  normalizedButton: string,
+  result: { error?: string; dispatched?: boolean; acknowledged?: boolean },
+): PressButtonResult {
+  if (
+    IOS_OPTIONAL_HARDWARE_BUTTONS.has(normalizedButton) &&
+    result.error?.startsWith(IOS_RUNNER_NOT_SUPPORTED_PREFIX)
+  ) {
+    return unsupportedIosButtonResult(
+      button,
+      `${result.error}. The ${normalizedButton} button needs a device that has it (hasHardwareButton) and a CtrlProxy runner built with Xcode 16.3 or later.`,
+    );
+  }
+  if (normalizedButton !== "home" && result.dispatched && result.acknowledged === false) {
+    return {
+      success: false,
+      button,
+      keyCode: -1,
+      code: "indeterminate_outcome",
+      retryable: false,
+      error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
+    };
+  }
+  return {
+    success: false,
+    button,
+    keyCode: -1,
+    code: "press_failed",
+    retryable: false,
+    error:
+      result.error ??
+      (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)
+        ? `iOS hardware button "${button}" is not supported on this device`
+        : `Failed to press iOS ${normalizedButton} button`),
+  };
 }

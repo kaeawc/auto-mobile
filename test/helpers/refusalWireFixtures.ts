@@ -140,6 +140,7 @@ import {
 } from "../../src/devices/exactDeviceProvisioning";
 import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
+import { DirectSessionNotActiveError } from "../../src/models/DirectSessionNotActiveError";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { deviceLossOutcomeFromError } from "../../src/utils/deviceLossOutcome";
 import { logger } from "../../src/utils/logger";
@@ -495,6 +496,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "app_not_running",
     "AppNotRunningError via shapeToolCallError",
     () => shaped(new AppNotRunningError("com.example.app", DEVICE)),
+  ],
+  [
+    "direct_session_not_active",
+    "DirectSessionNotActiveError via shapeToolCallError",
+    () => shaped(new DirectSessionNotActiveError(SESSION)),
   ],
   [
     "device_owned_by_other_daemon",

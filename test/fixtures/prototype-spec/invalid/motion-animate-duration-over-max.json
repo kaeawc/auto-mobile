@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "animate": {
+        "durationMs": 2500
+      }
+    }
+  },
+  "expectedPath": "root.animate.durationMs",
+  "expectedMessage": "Invalid number value"
+}

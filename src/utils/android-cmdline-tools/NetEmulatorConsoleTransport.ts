@@ -16,6 +16,7 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
     authToken: string | null,
     commands: string[],
     signal?: AbortSignal,
+    timeoutMs: number = this.timeoutMs,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
@@ -48,10 +49,10 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
         () =>
           finish(
             new ActionableError(
-              `Emulator console connection to ${host}:${port} timed out after ${this.timeoutMs}ms`,
+              `Emulator console connection to ${host}:${port} timed out after ${timeoutMs}ms`,
             ),
           ),
-        this.timeoutMs,
+        timeoutMs,
       );
       const onAbort = () => finish(new ActionableError("Emulator console command cancelled"));
       signal?.addEventListener("abort", onAbort, { once: true });

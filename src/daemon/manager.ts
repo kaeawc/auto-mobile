@@ -107,11 +107,9 @@ export { parseDaemonArgs } from "./cli/daemonArgs";
 export {
   daemonBuildIdentityStatusLines,
   daemonCommandOptions,
-  parseAcceptanceSessionRestartScope,
   parseDaemonHeartbeatCommandArgs,
-  parseRestartAdmittedMaintenanceToken,
 } from "./cli/runDaemonCommand";
-export type { DaemonHeartbeatCommandArgs, RunDaemonCommandOptions } from "./cli/runDaemonCommand";
+export type { RunDaemonCommandOptions } from "./cli/runDaemonCommand";
 export type { DaemonRestartResult };
 export { relayDaemonStderr } from "./manager/DaemonLaunch";
 

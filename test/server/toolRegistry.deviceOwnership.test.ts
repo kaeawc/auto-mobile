@@ -235,7 +235,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       expect(ran).toEqual([{ name: "observe", deviceId: held.deviceId }]);
       // #10830: watching never readies the holder's device.
       expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
     },
   );
 
@@ -248,7 +248,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       const error = await refusal("rotate", { orientation: "landscape", platform: "android" });
       expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
       expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
       expect(ran).toEqual([]);
     },
   );
@@ -260,7 +260,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       const error = await refusal("rotate", { orientation: "landscape", platform: "android" });
       expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
       expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(devices.getExplicitDevicePin()).toEqual(held);
     },
   );
 
@@ -297,7 +297,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
           delete interactionDeps.hitTestDeviceReadFactory;
         }
         expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-        expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+        expect(devices.getExplicitDevicePin()).toBeUndefined();
         // identifyInteractions reads through observe's screen seam, which records "observe".
         expect(ran).toEqual([
           { name: name === "hitTest" ? "hitTest" : "observe", deviceId: held.deviceId },
@@ -446,7 +446,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
 
         expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
         expect((error as Error).message).toContain("acquired it while this call was in flight");
-        expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+        expect(devices.getExplicitDevicePin()).toBeUndefined();
         expect(ran).toEqual([]);
       },
     );
@@ -469,7 +469,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
         expect(call.ambientSignal?.aborted).toBe(true);
         expect(callerSignal?.aborted).toBe(false);
 
-        expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+        expect(devices.getExplicitDevicePin()).toBeUndefined();
         expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
         expect(watchContexts).toEqual([{ signal: callerSignal, readPath: true }]);
         expect(watchContexts[0].signal?.aborted).toBe(false);
@@ -483,7 +483,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       await call("observe", { platform: "android", sessionUuid: agent, deviceId: free.deviceId });
       expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
       expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
-      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
     },
   );
 

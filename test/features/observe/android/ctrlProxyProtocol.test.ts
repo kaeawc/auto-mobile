@@ -496,6 +496,34 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"request_action","requestId":"a-3","action":"long_click","resourceId":"com.example:id/row","selector":{"resourceId":"com.example:id/row","testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}',
     },
     {
+      builder: "requestAction",
+      name: "custom action label and progress are carried for semantic actions (#14077)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestAction({
+          requestId: "a-4",
+          action: "set_progress",
+          resourceId: "com.example:id/slider",
+          progress: 0.25,
+        }),
+      ),
+      expected:
+        '{"type":"request_action","requestId":"a-4","action":"set_progress","resourceId":"com.example:id/slider","progress":0.25}',
+    },
+    {
+      builder: "requestAction",
+      name: "custom action label is carried",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestAction({
+          requestId: "a-5",
+          action: "custom",
+          resourceId: "com.example:id/row",
+          customAction: "Archive",
+        }),
+      ),
+      expected:
+        '{"type":"request_action","requestId":"a-5","action":"custom","resourceId":"com.example:id/row","customAction":"Archive"}',
+    },
+    {
       builder: "requestActivateAccessibilityLink",
       name: "semantic link activation retains exact text, occurrence, and stable owner selector",
       actual: serializeCtrlProxyRequest(

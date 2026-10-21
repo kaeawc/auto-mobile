@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<trace-query-result>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[2]'>
+<schema name="hitches"><col><mnemonic>start</mnemonic></col><col><mnemonic>duration</mnemonic></col></schema>
+<row><start-time id="1" fmt="00:00.500.000">500000000</start-time><duration id="2" fmt="33.33 ms">33333333</duration></row>
+<row><start-time id="3" fmt="00:01.000.000">1000000000</start-time><duration id="4" fmt="50.00 ms">50000000</duration></row>
+<row><start-time id="5" fmt="00:01.100.000">1100000000</start-time><duration ref="2"/></row>
+</node></trace-query-result>

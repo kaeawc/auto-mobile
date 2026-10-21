@@ -58,6 +58,7 @@ function harness() {
   const window = new FakeWindow();
   window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
   const configKeys: Array<string | undefined> = [];
+  const selectedSessions: Array<string | undefined> = [];
   const manager = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), {
       window,
@@ -86,14 +87,16 @@ function harness() {
   );
   const production = createDeviceGestureRecordingDeviceResolution(() => ({
     getPlatformDeviceManager: () => manager.getPlatformDeviceManager(),
-    getCurrentDevice: () => manager.getCurrentDevice(),
     // Runner setup is not what this pins: readiness stops at "booted", then makes the same
     // selection and device writes.
     ensureDeviceReady: (platform, deviceId, options) =>
       manager.ensureDeviceReady(platform, deviceId, { ...options, readiness: "booted" }),
   }));
   const resolution: DeviceGestureRecordingDeviceResolution = {
-    selectDevice: async () => held,
+    selectDevice: async (_deviceId, _platform, sessionUuid) => {
+      selectedSessions.push(sessionUuid);
+      return held;
+    },
     readyDevice: async (device, sessionUuid) => {
       await production.readyDevice(device, sessionUuid);
       // Stops before a real recorder is built on the readied device.
@@ -110,12 +113,12 @@ function harness() {
   );
   const nightModeWrites = () =>
     adb.getExecutedCommands().filter((command) => command.includes("cmd uimode night"));
-  return { server, configKeys, nightModeWrites };
+  return { server, configKeys, nightModeWrites, selectedSessions };
 }
 
 describe("device-gesture-recording start readies the device for the session that asked", () => {
   test("a holder that chose light keeps a light device when it starts a recording on a dark host", async () => {
-    const { server, configKeys, nightModeWrites } = harness();
+    const { server, configKeys, nightModeWrites, selectedSessions } = harness();
 
     await expect(
       server.invoke({
@@ -127,6 +130,7 @@ describe("device-gesture-recording start readies the device for the session that
     ).rejects.toThrow("stop after readiness");
 
     expect(configKeys).toEqual([HOLDER]);
+    expect(selectedSessions).toEqual([HOLDER]);
     expect(nightModeWrites()).toEqual(["shell cmd uimode night no"]);
   });
 

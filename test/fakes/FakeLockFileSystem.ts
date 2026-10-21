@@ -1,12 +1,14 @@
 import { basename, dirname } from "node:path";
 import { compareCodeUnits } from "../../src/utils/io";
-import type { LockFileSystem } from "../../src/utils/lockFileSystem";
+import type { LockFileStat, LockFileSystem } from "../../src/utils/lockFileSystem";
 
 interface FileNode {
   ino: number;
   mtimeMs: number;
   raw: string;
 }
+
+type Operation = keyof LockFileSystem | "copyExclusive";
 
 /** In-memory POSIX namespace, including inode-preserving links, renames and descriptors. */
 export class FakeLockFileSystem implements LockFileSystem {
@@ -17,8 +19,8 @@ export class FakeLockFileSystem implements LockFileSystem {
   /** Test-only: simulate filesystem inode reuse on the next created file. */
   nextInodeOverride?: number;
   private nextDescriptor = 1;
-  readonly operations: { op: keyof LockFileSystem; path: string }[] = [];
-  failure?: (op: keyof LockFileSystem, path: string) => string | undefined;
+  readonly operations: { op: Operation; path: string }[] = [];
+  failure?: (op: Operation, path: string) => string | undefined;
   linkError?: string;
   openError?: string;
   writeError?: string;
@@ -27,7 +29,7 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   constructor(private readonly now: () => number = () => 0) {}
 
-  private record(op: keyof LockFileSystem, path: string): void {
+  private record(op: Operation, path: string): void {
     this.operations.push({ op, path });
     const failure = this.failure?.(op, path);
     if (failure) {
@@ -185,10 +187,10 @@ export class FakeLockFileSystem implements LockFileSystem {
     return this.file(path).raw;
   }
 
-  stat(path: string): { ino: number; mtimeMs: number } {
+  stat(path: string): LockFileStat {
     this.record("stat", path);
     const { ino, mtimeMs } = this.file(path);
-    return { ino, mtimeMs };
+    return { ino: BigInt(ino), mtimeMs };
   }
 
   rename(from: string, to: string): void {
@@ -217,6 +219,11 @@ export class FakeLockFileSystem implements LockFileSystem {
       throw this.error("ENOENT", to);
     }
     this.files.set(to, node);
+  }
+
+  copyExclusive(from: string, to: string): void {
+    this.record("copyExclusive", to);
+    this.create(to, this.file(from).raw);
   }
 
   unlink(path: string): void {

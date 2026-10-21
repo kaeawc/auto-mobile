@@ -14,10 +14,12 @@ import dev.jasonpearson.automobile.protocol.*
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
 @Immutable
+@InternalAutoMobilePrototypeApi
 data class PrototypeRenderStyle(
   val source: PrototypeStyle,
   val background: Color?,
@@ -39,6 +41,7 @@ data class PrototypeRenderStyle(
 )
 
 @Immutable
+@InternalAutoMobilePrototypeApi
 data class PrototypeRenderNode(
   val role: String,
   val text: String,
@@ -73,9 +76,12 @@ data class PrototypeRenderNode(
   val spans: List<PrototypeRenderSpan>? = null,
   val enabled: Boolean = true,
   val errorMessage: String? = null,
+  /** A `chart`'s points and summary read against the current `/data`; null for other roles. */
+  val chart: PrototypeChartModel? = null,
 )
 
 @Immutable
+@InternalAutoMobilePrototypeApi
 data class PrototypeRenderModel(
   val placement: PrototypePlacement,
   val opacityPercent: Int,
@@ -91,6 +97,7 @@ data class PrototypeRenderModel(
  * Window format is chosen at show time and is not re-evaluated for state-driven root changes. A
  * visible, static root is the safe subset; metadata still accounts for a static fullscreen scrim.
  */
+@InternalAutoMobilePrototypeApi
 fun prototypeOpaqueSurface(model: PrototypeRenderModel): Boolean =
   model.root.visible &&
     model.root.source?.styleWhen.isNullOrEmpty() &&
@@ -101,6 +108,7 @@ fun prototypeOpaqueSurface(model: PrototypeRenderModel): Boolean =
  * Path spelling and traversal order match the protocol validator, including unsupported nodes.
  * `repeat` templates count once per instance, so an expanded list cannot exceed the node limit.
  */
+@InternalAutoMobilePrototypeApi
 fun guardPrototypeTree(root: PrototypeNode) {
   var count = 0
   fun visit(node: PrototypeNode, path: String, depth: Int) {
@@ -113,6 +121,7 @@ fun guardPrototypeTree(root: PrototypeNode) {
   visit(root, "root", 1)
 }
 
+@InternalAutoMobilePrototypeApi
 fun mapPrototypeSpec(
   spec: PrototypeSpec,
   pages: Map<String, Int> = emptyMap(),
@@ -131,6 +140,7 @@ fun mapPrototypeSpec(
           validity =
             prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
           shownErrors = shownErrors,
+          data = resolved.data,
         )
         .map(resolved.root, "root"),
     )
@@ -157,6 +167,7 @@ internal class PrototypeNodeMapping(
   private val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   private val validity: Map<String, Boolean> = emptyMap(),
   private val shownErrors: Set<String> = emptySet(),
+  private val data: JsonObject? = null,
 ) {
   val nodes = mutableMapOf<String, PrototypeRenderNode>()
 
@@ -183,7 +194,9 @@ internal class PrototypeNodeMapping(
         allEntries.filter { it.path == screenPath }
       } else allEntries
     val role = prototypeNodeRole(node)
-    val text = prototypeNodeText(node, state, localState, inPager)
+    val chart = (node as? PrototypeChartNode)?.let { PrototypeChart.model(it, data) }
+    // A chart's label is its summary, so `observe` reports what it draws (#14209).
+    val text = chart?.summary ?: prototypeNodeText(node, state, localState, inPager)
     val visibleEntries =
       if (
         node is PrototypeSearchBarNode &&
@@ -258,6 +271,7 @@ internal class PrototypeNodeMapping(
           node.contentDescription?.let { interpolatePrototypeText(it, localState, inPager) },
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
+        chart = chart,
       )
     val shared = intern(mapped, old)
     nodes[path] = shared
@@ -316,6 +330,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeDividerNode -> "divider"
     is PrototypeBadgeNode -> "badge"
     is PrototypeProgressNode -> "progress"
+    is PrototypeChartNode -> "chart"
     is PrototypeDialogNode -> "dialog"
     is PrototypeSnackbarNode -> "snackbar"
     is PrototypeTimePickerNode -> "timePicker"
@@ -404,7 +419,7 @@ private fun prototypeStateInt(state: Map<String, PrototypeScalar>, key: String?)
  * regex: Android's ICU regex engine rejects a lone `}` that the desktop JVM accepts, which broke
  * every prototype `show` on a device (#9947) while the JVM unit tests stayed green.
  */
-fun interpolatePrototypeText(
+internal fun interpolatePrototypeText(
   text: String,
   state: Map<String, PrototypeScalar>,
   inPager: Boolean = false,
@@ -466,7 +481,7 @@ private fun resolveInterpolation(
 private val PROTOTYPE_COLOR_PATTERN = Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
 
 /** The settled design specifies AARRGGBB (alpha first), not CSS RRGGBBAA. */
-fun prototypeColor(value: String): Color {
+internal fun prototypeColor(value: String): Color {
   require(value.matches(PROTOTYPE_COLOR_PATTERN)) { "Invalid color: $value" }
   val argb = value.drop(1).toLong(16)
   return Color(if (value.length == 7) argb or 0xff000000L else argb)
@@ -492,7 +507,7 @@ internal fun prototypeModeValue(value: PrototypeModeValue, dark: Boolean): Strin
 internal fun prototypeHexColor(value: PrototypeModeValue?): Color? =
   (value as? PrototypeModeValue.Single)?.value?.takeIf { it.startsWith("#") }?.let(::prototypeColor)
 
-fun mapPrototypeStyle(style: PrototypeStyle): PrototypeRenderStyle =
+internal fun mapPrototypeStyle(style: PrototypeStyle): PrototypeRenderStyle =
   PrototypeRenderStyle(
     style,
     prototypeHexColor(style.background),
@@ -523,6 +538,7 @@ fun mapPrototypeStyle(style: PrototypeStyle): PrototypeRenderStyle =
 
 /** A span's authored-only style: absent fields inherit the surrounding Text. */
 @Immutable
+@InternalAutoMobilePrototypeApi
 data class PrototypeRenderSpan(
   val text: String,
   val style: PrototypeRenderStyle,
@@ -530,30 +546,65 @@ data class PrototypeRenderSpan(
 )
 
 /** Device-free mapping; text uses the same interpolation and styles as a plain text node. */
-fun mapPrototypeTextSpans(
+internal fun mapPrototypeTextSpans(
   node: PrototypeTextNode,
   state: Map<String, PrototypeScalar>,
   inPager: Boolean = false,
 ): List<PrototypeRenderSpan>? =
   node.spans?.map { span ->
-    val authored = span.style
-    val style =
-      PrototypeStyle(
-        color = authored?.color,
-        fontWeight = authored?.fontWeight,
-        fontStyle = authored?.fontStyle,
-        textDecoration = authored?.textDecoration,
-        textSize = authored?.textSize,
-        letterSpacing = authored?.letterSpacing,
-        fontFamily = authored?.fontFamily,
-        background = authored?.background,
-      )
     PrototypeRenderSpan(
       interpolatePrototypeText(span.text, state, inPager),
-      mapPrototypeStyle(style),
+      mapPrototypeSpanStyle(span.style),
       span.onTap,
     )
+  } ?: node.linkify?.let { linkify -> linkifiedSpans(node.text.orEmpty(), linkify, state, inPager) }
+
+private fun mapPrototypeSpanStyle(authored: PrototypeTextSpanStyle?): PrototypeRenderStyle =
+  mapPrototypeStyle(
+    PrototypeStyle(
+      color = authored?.color,
+      fontWeight = authored?.fontWeight,
+      fontStyle = authored?.fontStyle,
+      textDecoration = authored?.textDecoration,
+      textSize = authored?.textSize,
+      letterSpacing = authored?.letterSpacing,
+      fontFamily = authored?.fontFamily,
+      background = authored?.background,
+    ),
+  )
+
+/**
+ * `linkify` (#14233): the resolved text split into plain runs and one run per match, each match a
+ * link running `onTap` with its `{match}` bindings bound. Null without a match, so the text keeps
+ * the plain path.
+ */
+private fun linkifiedSpans(
+  text: String,
+  linkify: PrototypeLinkifyOptions,
+  state: Map<String, PrototypeScalar>,
+  inPager: Boolean,
+): List<PrototypeRenderSpan>? {
+  val resolved = interpolatePrototypeText(text, state, inPager)
+  val matches = PrototypeLinkify.matches(resolved, linkify.kinds)
+  if (matches.isEmpty()) return null
+  val plain = mapPrototypeSpanStyle(null)
+  val linked = mapPrototypeSpanStyle(linkify.style)
+  val spans = mutableListOf<PrototypeRenderSpan>()
+  var cursor = 0
+  for (match in matches) {
+    if (match.start > cursor) {
+      spans.add(PrototypeRenderSpan(resolved.substring(cursor, match.start), plain, null))
+    }
+    spans.add(
+      PrototypeRenderSpan(match.text, linked, PrototypeLinkify.actions(linkify.onTap, match)),
+    )
+    cursor = match.end
   }
+  if (cursor < resolved.length) {
+    spans.add(PrototypeRenderSpan(resolved.substring(cursor), plain, null))
+  }
+  return spans
+}
 
 private fun prototypeTextDecoration(value: String?): TextDecoration =
   when (value) {
@@ -612,7 +663,11 @@ private fun prototypeVerticalAlignment(value: String?): Alignment.Vertical =
  * clockwise from "toward the end edge": 0 runs left to right, 90 top to bottom. The line passes
  * through the center and is long enough that the corners take the first and last stop colors.
  */
-fun prototypeLinearGradientLine(angle: Double, width: Float, height: Float): Pair<Offset, Offset> {
+internal fun prototypeLinearGradientLine(
+  angle: Double,
+  width: Float,
+  height: Float,
+): Pair<Offset, Offset> {
   val radians = Math.toRadians(angle)
   val dx = cos(radians).toFloat()
   val dy = sin(radians).toFloat()
@@ -690,7 +745,7 @@ private fun requirePrototypeRenderSizes(style: PrototypeStyle?, path: String) {
  * hoisted and rendered by [modalPrototypeSheets], so their fields count and their closed twins do
  * not. The window may take input focus only while this holds.
  */
-fun hasVisibleTextField(root: PrototypeRenderNode): Boolean =
+internal fun hasVisibleTextField(root: PrototypeRenderNode): Boolean =
   inlineTextFieldVisible(root) ||
     modalPrototypeSheets(root).any { sheet -> sheet.children.any(::inlineTextFieldVisible) }
 
@@ -711,7 +766,7 @@ internal val PROTOTYPE_MODAL_ROLES = setOf("bottomSheet", "dialog", "snackbar", 
  * Open sheets, dialogs and snackbars are rendered last, in tree order, so a modal scrim covers the
  * entire prototype window.
  */
-fun modalPrototypeSheets(node: PrototypeRenderNode): List<PrototypeRenderNode> {
+internal fun modalPrototypeSheets(node: PrototypeRenderNode): List<PrototypeRenderNode> {
   if (!node.visible) return emptyList()
   val modal = node.role in PROTOTYPE_MODAL_ROLES
   if (modal && !node.sheetOpen) return emptyList()
@@ -746,7 +801,7 @@ internal fun isLayeredPrototypeAnchor(node: PrototypeRenderNode): Boolean =
  * them instead of vanishing when they hide (#10803).
  */
 @Immutable
-data class LayeredPrototypeAnchor(
+internal data class LayeredPrototypeAnchor(
   val node: PrototypeRenderNode,
   val ancestors: List<PrototypeRenderNode> = emptyList(),
 ) {
@@ -776,12 +831,13 @@ data class LayeredPrototypeAnchor(
  * visibility is left to the renderer, so its `visibleWhen` transition still runs. [node] itself is
  * never listed: a window root keeps its own anchored placement.
  */
-fun layeredPrototypeAnchors(node: PrototypeRenderNode): List<LayeredPrototypeAnchor> =
+internal fun layeredPrototypeAnchors(node: PrototypeRenderNode): List<LayeredPrototypeAnchor> =
   anchorsBelow(node, listOf(node))
 
 /** [layeredPrototypeAnchors] for content drawn as [children], such as a modal's body. */
-fun layeredPrototypeAnchorsIn(children: List<PrototypeRenderNode>): List<LayeredPrototypeAnchor> =
-  anchorsAmong(children, emptyList())
+internal fun layeredPrototypeAnchorsIn(
+  children: List<PrototypeRenderNode>,
+): List<LayeredPrototypeAnchor> = anchorsAmong(children, emptyList())
 
 private fun anchorsBelow(parent: PrototypeRenderNode, ancestors: List<PrototypeRenderNode>) =
   if (parent.role !in PROTOTYPE_INLINE_CONTAINER_ROLES) emptyList()

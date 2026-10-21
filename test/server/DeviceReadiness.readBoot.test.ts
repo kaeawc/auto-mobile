@@ -234,9 +234,7 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
     expect(instrumentation.requests).toEqual([]);
   }
   function assertNoReadWrites() {
-    expect(manager.getCurrentDevice()).toBeUndefined();
-    expect(manager.getCurrentPlatform()).toBeUndefined();
-    expect(manager.getExplicitDevicePin()).toBeUndefined();
+    expect("getCurrentDevice" in manager).toBe(false);
     expect(getConfig).not.toHaveBeenCalled();
     expect(apply).not.toHaveBeenCalled();
     expect(
@@ -329,7 +327,7 @@ describe("read boots only an explicitly named stopped device", () => {
           if (selection === "pin") {
             h.manager.setExplicitDevicePin(h.device);
           } else {
-            h.manager.setCurrentDevice(h.device, platform);
+            h.manager.setExplicitDevicePin(h.device);
           }
           await expect(h.manager.ensureDeviceReady(platform, undefined, h.options)).rejects.toThrow(
             noDeviceMessage(platform),
@@ -348,7 +346,7 @@ describe("read boots only an explicitly named stopped device", () => {
         h.assertNoBoot();
         h.assertNoReadWrites();
       });
-      test(`${lane}: multiple running devices keep the existing selection order`, async () => {
+      test(`${lane}: multiple running devices require an explicit target`, async () => {
         const h = harness(platform, daemon);
         const other = {
           ...h.device,
@@ -360,9 +358,9 @@ describe("read boots only an explicitly named stopped device", () => {
           { ...h.image, isRunning: true },
           { ...other, isRunning: true },
         ]);
-        expect(await h.manager.ensureDeviceReady(platform, undefined, h.options)).toEqual(
-          platform === "android" ? h.device : other,
-        );
+        await expect(
+          h.manager.ensureDeviceReady(platform, undefined, h.options),
+        ).rejects.toMatchObject({ code: "ambiguous_device_target" });
         h.assertNoBoot();
         h.assertNoReadWrites();
       });
@@ -508,7 +506,7 @@ describe("read boots only an explicitly named stopped device", () => {
       test(`${lane}: a running current device's verification error surfaces without booting`, async () => {
         const h = harness(platform, daemon);
         h.setRunning([h.device]);
-        h.manager.setCurrentDevice(h.device, platform);
+        h.manager.setExplicitDevicePin(h.device);
         const error = new ActionableError("CtrlProxy is not enabled");
         const verifiedIds: string[] = [];
         h.manager.verifyDevice = async () => {
@@ -610,7 +608,7 @@ describe("read boots only an explicitly named stopped device", () => {
         expect(h.simctl.getMethodCalls("bootSimulator")).toEqual(
           platform === "ios" ? [{ udid: h.firstImage.deviceId }] : [],
         );
-        expect(h.manager.getCurrentDevice()).toEqual(result);
+        expect(h.manager.getExplicitDevicePin()).toBeUndefined();
       });
       test(`${lane}: control with a stopped id still fails without image lookup`, async () => {
         const h = harness(platform, daemon);
@@ -715,19 +713,18 @@ describe("read boots only an explicitly named stopped device", () => {
             "ios-simulator": true,
             "ios-physical": false,
           };
-          h.manager.setCurrentDevice(physical, "ios");
+          h.manager.setExplicitDevicePin(physical);
           const verifiedIds: string[] = [];
           h.manager.verifyDevice = async (deviceId) => {
             verifiedIds.push(deviceId);
           };
           expect(await h.manager.ensureDeviceReady("ios", undefined, h.options)).toEqual(h.device);
-          expect(h.manager.getCurrentDevice()).toEqual(physical);
-          expect(h.manager.getCurrentPlatform()).toBe("ios");
+          expect(h.manager.getExplicitDevicePin()).toEqual(physical);
           expect(verifiedIds).toEqual([h.device.deviceId]);
           h.assertNoBoot();
           expect(h.getConfig).not.toHaveBeenCalled();
           expect(h.apply).not.toHaveBeenCalled();
-          expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+          expect(h.manager.getExplicitDevicePin()).toEqual(physical);
         });
         if (daemon) {
           test(`${lane}: an authoritative physical scan clears an absent current device`, async () => {
@@ -738,10 +735,11 @@ describe("read boots only an explicitly named stopped device", () => {
               "ios-simulator": true,
               "ios-physical": true,
             };
-            h.manager.setCurrentDevice(
-              { platform: "ios", name: "Physical iPhone", deviceId: "00008110-001A2B3C4D5E001E" },
-              "ios",
-            );
+            h.manager.setExplicitDevicePin({
+              platform: "ios",
+              name: "Physical iPhone",
+              deviceId: "00008110-001A2B3C4D5E001E",
+            });
             expect(await h.manager.ensureDeviceReady("ios", undefined, h.options)).toEqual(
               h.device,
             );

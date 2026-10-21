@@ -76,8 +76,9 @@ class CapturingTelemetryRecorder implements IosTelemetryRecorder {
   async recordStorageEvent(event: EventOf<"recordStorageEvent">): Promise<void> {
     this.capture(this.storage, event);
   }
-  async recordLayoutEvent(event: EventOf<"recordLayoutEvent">): Promise<void> {
+  async recordLayoutEvent(event: EventOf<"recordLayoutEvent">): Promise<boolean> {
     this.capture(this.layout, event);
+    return true;
   }
 }
 
@@ -937,6 +938,33 @@ describe("DefaultIosSdkEventIngestor", () => {
       expect(recorder.layout).toHaveLength(2);
     });
 
+    test.each(["text", "addition", "removal"])(
+      "records a %s change beyond the stored tree cutoff",
+      (change) => {
+        const root = { node: Array.from({ length: 101 }, () => ({ $: { text: "leaf" } })) };
+        const capture = { ...hierarchy(), hierarchy: { node: root } };
+        ingestor.recordLayoutTelemetryEvent(capture);
+        if (change === "text") {
+          root.node[100].$.text = "changed";
+        }
+        if (change === "addition") {
+          root.node.push({ $: { text: "leaf" } });
+        }
+        if (change === "removal") {
+          root.node.pop();
+        }
+        ingestor.recordLayoutTelemetryEvent({ ...capture, updatedAt: 124 });
+        expect(recorder.layout).toHaveLength(2);
+        const first = JSON.parse(recorder.layout[0].event.detailsJson!);
+        const second = JSON.parse(recorder.layout[1].event.detailsJson!);
+        expect(first.truncated).toBe(true);
+        expect(second.hierarchy).toEqual(first.hierarchy);
+        expect(second.nodeCount).toBe(
+          change === "addition" ? 103 : change === "removal" ? 101 : 102,
+        );
+      },
+    );
+
     test("also skips a repeated defined updatedAt even if display properties differ", () => {
       ingestor.recordLayoutTelemetryEvent(hierarchy());
       const changed = hierarchy();
@@ -1026,7 +1054,22 @@ describe("DefaultIosSdkEventIngestor", () => {
       }
     });
 
-    test("deduplicates after a write fulfills and restores context on the skipped path", async () => {
+    test("retries identical captures after a fulfilled but unconfirmed write", async () => {
+      const record = spyOn(recorder, "recordLayoutEvent").mockResolvedValueOnce(false);
+      try {
+        ingestor.recordLayoutTelemetryEvent(hierarchy());
+        await Promise.resolve();
+        ingestor.recordLayoutTelemetryEvent(hierarchy());
+        expect(record).toHaveBeenCalledTimes(2);
+        await Promise.resolve();
+        ingestor.recordLayoutTelemetryEvent({ ...hierarchy(), updatedAt: 124 });
+        expect(record).toHaveBeenCalledTimes(2);
+      } finally {
+        record.mockRestore();
+      }
+    });
+
+    test("deduplicates after a confirmed write and restores context on the skipped path", async () => {
       ingestor.recordLayoutTelemetryEvent(hierarchy());
       await Promise.resolve();
       ingestor.recordLayoutTelemetryEvent({ ...hierarchy(), updatedAt: 124 });
@@ -1035,7 +1078,7 @@ describe("DefaultIosSdkEventIngestor", () => {
     });
 
     test("an older write completing late cannot replace the latest successful capture", async () => {
-      const pending = Promise.withResolvers<void>();
+      const pending = Promise.withResolvers<boolean>();
       const record = spyOn(recorder, "recordLayoutEvent").mockImplementationOnce(
         () => pending.promise,
       );
@@ -1046,12 +1089,12 @@ describe("DefaultIosSdkEventIngestor", () => {
         changed.hierarchy.node!.node![0].$!.text = "changed";
         ingestor.recordLayoutTelemetryEvent(changed);
         await Promise.resolve();
-        pending.resolve();
+        pending.resolve(true);
         await Promise.resolve();
         ingestor.recordLayoutTelemetryEvent({ ...changed, updatedAt: 125 });
         expect(record).toHaveBeenCalledTimes(2);
       } finally {
-        pending.resolve();
+        pending.resolve(true);
         record.mockRestore();
       }
     });

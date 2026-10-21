@@ -602,6 +602,91 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("owner-session");
     });
 
+    test("keeps an unconfirmed live entry and its session when the AVD-name probe timed out", async () => {
+      const cancellations: string[] = [];
+      devicePool = makePool({
+        cancelDeviceSessionExecutions: async (sessionId) => {
+          cancellations.push(sessionId);
+          return 1;
+        },
+      });
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
+      expect(pooled.avdName).toBeUndefined();
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...unresolved(device.deviceId), nameProbeTimedOut: true }],
+        "test:timed-out-probe",
+      );
+
+      expect(devicePool.getDevice(device.deviceId)).toBe(pooled);
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+      expect(cancellations).toEqual([]);
+      expect(pooled.sessionId).toBe("owner-session");
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+    });
+
+    test("retains a confirmed identity when rediscovery probes time out during bounded retries", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: androidImage,
+      });
+      fakeDeviceManager.bootedDevices = [
+        { ...unresolved(device.deviceId), nameProbeTimedOut: true },
+      ];
+      const getBootedDevicesDetailed =
+        fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
+      let retryCalls = 0;
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
+        retryCalls++;
+        return await getBootedDevicesDetailed(platform);
+      };
+
+      await devicePool.reconcileDiscoveryObservation(
+        [unresolved(device.deviceId)],
+        "test:retry-probe-timed-out",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+      expect(retryCalls).toBe(1);
+      expect(devicePool.getDevice(device.deviceId)?.identityReconcileAttempts).toBeUndefined();
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+
+      await devicePool.reconcileDiscoveryObservation(
+        fakeDeviceManager.bootedDevices,
+        "test:initial-probe-timed-out",
+      );
+      expect(retryCalls).toBe(1);
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+    });
+
+    test("retains an existing quarantine when a later AVD-name probe timed out", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation(
+        [unresolved(device.deviceId)],
+        "test:fast-failed-probe",
+      );
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(true);
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...unresolved(device.deviceId), nameProbeTimedOut: true }],
+        "test:timed-out-probe",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(true);
+    });
+
     test("quarantines a failed AVD-name probe that recorded the console idle", async () => {
       const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
       devicePool = makePool({ consoleBusyRegistry: consoleBusy });

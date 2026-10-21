@@ -1,4 +1,4 @@
-import { type LockFileSystem, nodeLockFileSystem } from "../lockFileSystem";
+import { type LockFileStat, type LockFileSystem, nodeLockFileSystem } from "../lockFileSystem";
 import {
   type Steps,
   OWN_TMP_SWEEP_INTERVAL_MS,
@@ -237,7 +237,7 @@ export function* sampleRetainedLock(
   path: string,
   fileSystem: LockFileSystem,
 ): Steps<LockSample | "absent" | "unreadable"> {
-  let identity: { ino: number; mtimeMs: number };
+  let identity: LockFileStat;
   try {
     yield { op: "stat", path };
     identity = fileSystem.stat(path);

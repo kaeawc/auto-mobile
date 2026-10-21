@@ -2,6 +2,10 @@ import { lazySessionReleasePool } from "./releaseSessionAndDevice";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { registerLocationRouteSessionCleanup } from "../features/utility/LocationRoutePlayer";
+import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
+import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
+import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
+import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -22,6 +26,8 @@ import {
   registerNetworkStateSessionCleanup,
 } from "./networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
+import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
+import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   createRecorderTeardownRecoveryMarker,
@@ -36,7 +42,7 @@ import {
   type NavigationGraphService,
 } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceReadiness } from "./readiness/DeviceReadiness";
+import type { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { syncAppearanceForDevice } from "./AppearanceSyncScheduler";
 import type { Timer } from "../utils/SystemTimer";
 import type { SessionManager } from "./sessionManager";
@@ -51,6 +57,7 @@ import type { ActiveSessionExecutionQuery } from "./sessionManager";
  * construction (servers, per-shutdown sets) are accessors so each callback sees the current value.
  */
 export interface DaemonSessionLifecycleHost {
+  deviceReadiness(): Pick<DeviceReadiness, "clearExplicitDevicePin">;
   deviceDataStreamServer(): {
     invalidateDeviceFrames(deviceId: string): void;
     invalidateInitialDeviceFrames(deviceId: string): void;
@@ -91,7 +98,13 @@ export function wireSessionLifecycle(
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
   registerNetworkStateSessionCleanup(sessionManager);
+  registerAppLinksSessionCleanup(sessionManager);
+  registerKillProfileSessionCleanup(sessionManager);
+  registerEmulatorSensorSessionCleanup(sessionManager);
+  registerDisplayProfileSessionCleanup(sessionManager);
+  registerDeviceConditionSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
+  registerScreenLockSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),
@@ -181,7 +194,7 @@ export function wireSessionLifecycle(
     if (options?.upgradeOnly) {
       return;
     }
-    DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
+    host.deviceReadiness().clearExplicitDevicePin(deviceId);
     // Only this session's own manager: the lookup with fallback returns the global manager for
     // an already-released session, and dropping it would silence its listeners (#10825).
     const navigationManager = NavigationGraphManager.findInstanceForSession(sessionId);
@@ -210,7 +223,7 @@ export function wireSessionLifecycle(
   // the old device and must not follow it to the new one.
   sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
     host.socketServer()?.liftStrokesHeldByOn(sessionId, deviceId);
-    DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
+    host.deviceReadiness().clearExplicitDevicePin(deviceId);
     const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
     NavigationGraphManager.resetSession(sessionId);
     host.navigationGraphListenerManagers.delete(previousNavigationManager);

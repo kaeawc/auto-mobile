@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "q": ""
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "shimmer": true
+      }
+    }
+  },
+  "expectedPath": "root.style.shimmer",
+  "expectedMessage": "shimmer applies only to box, row, column and card"
+}

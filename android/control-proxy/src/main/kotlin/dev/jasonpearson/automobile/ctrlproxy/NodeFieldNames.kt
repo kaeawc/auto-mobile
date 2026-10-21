@@ -5,6 +5,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 
 /** Wire names for Android action and input-type constants. */
 internal object NodeFieldNames {
+  // Mirrors BASELINE_ACCESSIBILITY_ACTIONS in src/features/observe/audits/accessibilityActions.ts.
+  val baselineAccessibilityActions =
+    setOf("select", "clear_selection", "accessibility_focus", "clear_accessibility_focus")
+
   val actions =
     mapOf(
       AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS to "accessibility_focus",

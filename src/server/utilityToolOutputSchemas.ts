@@ -38,8 +38,19 @@ const displayConfigValuesOutputSchema = z
     fontScale: z.union([z.number(), z.literal("default")]).optional(),
     density: z.union([z.number(), z.enum(["smaller", "default", "larger"])]).optional(),
     theme: displayThemeOutputSchema.optional(),
+    contentSize: z.string().optional(),
+    increaseContrast: z.boolean().optional(),
+    reduceMotion: z.boolean().optional(),
+    boldText: z.boolean().optional(),
+    colorInversion: z.boolean().optional(),
+    colorCorrection: z.string().optional(),
+    magnification: z.boolean().optional(),
+    magnificationScale: z.number().optional(),
+    extraDim: z.boolean().optional(),
   })
   .passthrough();
+
+const accessibilityDisplaySupportOutputSchema = z.union([z.boolean(), z.literal("partial")]);
 
 /** `message` is optional because the DisplayConfig result's own `message` is spread over it. */
 export const displayConfigResultSchema = z
@@ -53,8 +64,29 @@ export const displayConfigResultSchema = z
         fontScale: z.boolean(),
         density: z.union([z.boolean(), z.literal("partial")]),
         theme: z.boolean(),
+        increaseContrast: accessibilityDisplaySupportOutputSchema.optional(),
+        reduceMotion: accessibilityDisplaySupportOutputSchema.optional(),
+        boldText: accessibilityDisplaySupportOutputSchema.optional(),
+        colorInversion: accessibilityDisplaySupportOutputSchema.optional(),
+        colorCorrection: accessibilityDisplaySupportOutputSchema.optional(),
+        magnification: accessibilityDisplaySupportOutputSchema.optional(),
+        magnificationScale: accessibilityDisplaySupportOutputSchema.optional(),
+        extraDim: accessibilityDisplaySupportOutputSchema.optional(),
       })
       .passthrough(),
+    supportNotes: z
+      .object({
+        increaseContrast: z.string().optional(),
+        reduceMotion: z.string().optional(),
+        boldText: z.string().optional(),
+        colorInversion: z.string().optional(),
+        colorCorrection: z.string().optional(),
+        magnification: z.string().optional(),
+        magnificationScale: z.string().optional(),
+        extraDim: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
     current: displayConfigValuesOutputSchema.optional(),
     applied: displayConfigValuesOutputSchema.optional(),
     previous: displayConfigValuesOutputSchema.optional(),

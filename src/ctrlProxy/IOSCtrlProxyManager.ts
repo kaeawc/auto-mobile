@@ -22,7 +22,6 @@ import { XcodebuildClient } from "../utils/ios-cmdline-tools/XcodebuildClient";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { ForcedRestartBudget } from "./ForcedRestartBudget";
 import type { ExistingIosManager } from "./ios/ExistingIosManager";
-import { type HostPortAvailabilityChecker } from "./ios/IOSHostPortAvailabilityChecker";
 import { type CtrlProxyHealthCheckResult } from "./ios/IosCtrlProxyHealthClient";
 import { IosCtrlProxyProcessClient } from "./ios/IosCtrlProxyProcessClient";
 import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
@@ -55,7 +54,6 @@ import { IosCtrlProxyShutdown, type IosCtrlProxyShutdownHost } from "./ios/IosCt
 import { IosCtrlProxyOrphanReaper } from "./ios/IosCtrlProxyOrphanReaper";
 export {
   MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES,
-  DIRECT_RUNNER_DISCOVERY_DEADLINE_MS,
   STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS,
 } from "./ios/IosCtrlProxyContracts";
 export type {
@@ -65,7 +63,6 @@ export type {
   RemoteCtrlProxyIOSRunner,
   IosCtrlProxyManagerTestOptions,
 } from "./ios/IosCtrlProxyContracts";
-export type { HostPortAvailabilityChecker };
 
 /** Public iOS CtrlProxy facade; collaborators share explicit state and lifecycle capabilities. */
 export class IOSCtrlProxyManager implements CtrlProxyIosManager {

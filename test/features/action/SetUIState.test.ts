@@ -1,5 +1,6 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { getTextRequestDeadlineMs } from "../../../src/features/action/textTransportTimeout";
+import type { InputTextOptions } from "../../../src/features/action/InputText";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -75,8 +76,8 @@ describe("SetUIState", () => {
       keyboard,
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -105,7 +106,7 @@ describe("SetUIState", () => {
     fakeTimer.enableAutoAdvance();
   });
 
-  test("skips effect settling for focus, toggle, dropdown open and selection", async () => {
+  test("settles toggle and dropdown open but skips settling for focus and selection", async () => {
     const elements: Partial<Element>[] = [
       { "resource-id": "name", text: "Name", class: "android.widget.EditText", editable: true },
       {
@@ -160,9 +161,14 @@ describe("SetUIState", () => {
         { text: "Choice", action: "tap" },
       ]);
       expect(calls).toHaveLength(4);
-      expect(calls.every((call) => call.settlePostTapEffect === false)).toBe(true);
+      expect(calls.map((call) => call.settlePostTapEffect)).toEqual([
+        false,
+        undefined,
+        undefined,
+        false,
+      ]);
       expect(calls[0]?.recovery).toEqual({ throwOnKeyboardOcclusion: true });
-      // The dropdown's own opening delay remains; no tap effect delay is charged.
+      // Fake taps do not charge settling time; the dropdown animation delay remains.
       expect(fakeTimer.now()).toBe(200);
     } finally {
       tap.mockRestore();
@@ -350,8 +356,8 @@ describe("SetUIState", () => {
         return result;
       });
       const executeInput = fakeInput.execute.bind(fakeInput);
-      spyOn(fakeInput, "execute").mockImplementation(async (text, imeAction) => {
-        const result = await executeInput(text, imeAction);
+      spyOn(fakeInput, "execute").mockImplementation(async (text, options) => {
+        const result = await executeInput(text, options);
         if (result.success) {
           fakeFieldTypeDetector.setTextValue(focusedKey, text);
         }
@@ -678,9 +684,9 @@ describe("SetUIState", () => {
           },
         },
         inputText: {
-          execute: async (text, _imeAction, _dismissKeyboard, _mode, signal) => {
+          execute: async (text, _options, call) => {
             const result = await fakeInput.execute(text);
-            onInput(text, signal);
+            onInput(text, call?.signal);
             return result;
           },
         },
@@ -1005,6 +1011,55 @@ describe("SetUIState", () => {
   });
 
   describe("toggle handling", () => {
+    test("settles delayed accessibility state so a toggle is tapped only once", async () => {
+      const hierarchy = createHierarchyWithElement({
+        "resource-id": "enabled",
+        class: "android.widget.Switch",
+        checkable: true,
+        checked: false,
+      });
+      fakeFieldTypeDetector.setFieldType("enabled", "toggle");
+      let checked = false;
+      let pendingToggle = false;
+      fakeObserve.setResultFactory(() => {
+        if (pendingToggle) {
+          checked = !checked;
+          pendingToggle = false;
+        }
+        // A non-settling observe can reuse the unchanged cached hierarchy even
+        // after the delayed physical state changes; retrying would flip it back.
+        return createObserveResult(hierarchy);
+      });
+      const calls: TapOnCall[] = [];
+      const execute = fakeTap.execute.bind(fakeTap);
+      const tap = spyOn(fakeTap, "execute").mockImplementation(
+        async (options, call?: TapOnCall) => {
+          calls.push(call ?? {});
+          if (call?.settlePostTapEffect !== false) {
+            checked = !checked;
+            fakeFieldTypeDetector.setChecked("enabled", checked);
+          } else {
+            pendingToggle = true;
+          }
+          return execute(options, call);
+        },
+      );
+      try {
+        const result = await createSetUIState().execute({
+          fields: [{ selector: { elementId: "enabled" }, selected: true }],
+        });
+        expect(fakeTap.getCalls().map((call) => call.options)).toEqual([
+          { elementId: "enabled", action: "tap" },
+        ]);
+        expect(result.success).toBe(true);
+        expect(result.fields[0]).toMatchObject({ success: true, verified: true, attempts: 1 });
+        expect(checked).toBe(true);
+        expect(calls[0]?.settlePostTapEffect).toBeUndefined();
+      } finally {
+        tap.mockRestore();
+      }
+    });
+
     test.each(["elementId", "text"])(
       "taps toggle when state needs to change selected by %s",
       async (kind) => {
@@ -1050,6 +1105,54 @@ describe("SetUIState", () => {
   });
 
   describe("dropdown handling", () => {
+    test("settles a slow dropdown menu before the animation delay and option tap", async () => {
+      fakeObserve.setViewHierarchy(
+        createHierarchyWithElement({
+          "resource-id": "country",
+          text: "Country",
+          class: "android.widget.Spinner",
+        }),
+      );
+      fakeFieldTypeDetector.setFieldType("country", "dropdown");
+      let menuReady = false;
+      const calls: TapOnCall[] = [];
+      const execute = fakeTap.execute.bind(fakeTap);
+      const tap = spyOn(fakeTap, "execute").mockImplementation(
+        async (options, call?: TapOnCall) => {
+          calls.push(call ?? {});
+          const result = await execute(options, call);
+          if (options.elementId === "country" && call?.settlePostTapEffect !== false) {
+            await fakeTimer.sleep(2300);
+            menuReady = true;
+          }
+          if (options.text === "Choice") {
+            if (!menuReady) {
+              return { ...result, success: false, error: "Element not found" };
+            }
+            fakeFieldTypeDetector.setTextValue("country", "Choice");
+          }
+          return result;
+        },
+      );
+      try {
+        const result = await createSetUIState().execute({
+          fields: [{ selector: { elementId: "country" }, value: "Choice" }],
+        });
+        expect(result.success).toBe(true);
+        expect(result.fields[0]).toMatchObject({ success: true, verified: true, attempts: 1 });
+        expect(fakeTap.getCalls().map((call) => call.options)).toEqual([
+          { elementId: "country", action: "tap" },
+          { text: "Choice", action: "tap" },
+        ]);
+        expect(calls[0]?.settlePostTapEffect).toBeUndefined();
+        expect(calls[1]?.settlePostTapEffect).toBe(false);
+        expect(fakeTimer.getSleepHistory()).toEqual([2300, 200]);
+        expect(fakeTimer.now()).toBe(2500);
+      } finally {
+        tap.mockRestore();
+      }
+    });
+
     test.each(["elementId", "text"])(
       "opens dropdown and selects value selected by %s",
       async (kind) => {
@@ -2082,8 +2185,8 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -2248,8 +2351,8 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -2346,8 +2449,8 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -2532,8 +2635,8 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     const setUIState = new SetUIState(device, null, {
       tapOnElement: tapReportingFullCompletion,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -2710,8 +2813,8 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;

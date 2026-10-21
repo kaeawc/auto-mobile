@@ -164,6 +164,26 @@ describe("read-only connection-keyed AVD name memo", () => {
     expect(f.probeCount()).toBe(2);
   });
 
+  test("timed-out name probes are never memoized", async () => {
+    const f = fixture();
+    const execute = f.adb.executeCommand.bind(f.adb);
+    f.adb.executeCommand = async (command, ...args) => {
+      if (command === "emu avd name") {
+        f.timer.advanceTime(2_001);
+        throw new Error("Command timed out after 2000ms");
+      }
+      return await execute(command, ...args);
+    };
+    expect((await f.scan())[0]).toMatchObject({
+      name: "Unknown (emulator-5554)",
+      nameProbeTimedOut: true,
+    });
+
+    f.adb.executeCommand = execute;
+    expect((await f.scan())[0].name).toBe("Pixel_A");
+    expect(f.probeCount()).toBe(1);
+  });
+
   test("console-busy results are never memoized", async () => {
     const f = fixture();
     await f.busy.runExclusive("emulator-5554", async () => {

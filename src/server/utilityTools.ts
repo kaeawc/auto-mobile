@@ -370,9 +370,9 @@ const networkConditionInputSchema = z
 // Display configuration (issue #6096): font scale, effective density, and
 // light/dark theme. A call with no set field is a getter; any set field (or
 // `reset`) makes it a setter that returns applied + previous values so the
-// client can restore. Android supports all three fields; the iOS Simulator
-// supports theme only (via `simctl ui appearance`); physical iOS has no
-// automatable per-device control for any field.
+// client can restore. Android supports all three fields; iOS supports theme only:
+// `simctl ui appearance` on the Simulator, the CtrlProxy runner's
+// `XCUIDevice.appearance` on a physical device (#14092).
 export const displayConfigSchema = addDeviceTargetingToSchema(
   z
     .object({
@@ -1022,7 +1022,7 @@ export function registerUtilityTools(
 
   ToolRegistry.registerDeviceAware(
     "displayConfig",
-    "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance.",
+    "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme only (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner). On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance; physical iOS reset restores the appearance displayConfig first replaced there (light if none).",
     displayConfigSchema,
     displayConfigHandler,
     displayConfigToolOptions,

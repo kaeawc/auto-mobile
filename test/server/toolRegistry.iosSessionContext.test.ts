@@ -1,3 +1,7 @@
+import {
+  registerDirectSessionDevice,
+  unregisterDirectSession,
+} from "../../src/utils/directSessionDeviceRegistry";
 import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
@@ -5,10 +9,6 @@ import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { BootedDevice } from "../../src/models";
 import { z } from "zod/v4";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import {
-  clearDirectSessionDevices,
-  registerDirectSessionDevice,
-} from "../../src/utils/directSessionDeviceRegistry";
 
 describe("ToolRegistry iOS session context", () => {
   const iosDeviceA: BootedDevice = {
@@ -37,7 +37,7 @@ describe("ToolRegistry iOS session context", () => {
   });
 
   afterEach(() => {
-    clearDirectSessionDevices();
+    unregisterDirectSession("session-123");
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
@@ -78,8 +78,8 @@ describe("ToolRegistry iOS session context", () => {
   });
 
   test("allows sessionUuid when multiple iOS simulators are booted", async () => {
-    fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
     registerDirectSessionDevice("session-123", iosDeviceA);
+    fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
 
     ToolRegistry.registerDeviceAware(
       "iosSessionAllowedTool",
@@ -124,7 +124,7 @@ describe("ToolRegistry iOS session context", () => {
   test("allows operation when setActiveDevice was called with an iOS device and platform is ios", async () => {
     fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
     // Simulate setActiveDevice having been called
-    fakeDeviceReadiness.setCurrentDevice(iosDeviceA, "ios");
+    fakeDeviceReadiness.setExplicitDevicePin(iosDeviceA);
     fakeDeviceReadiness.setExplicitDevicePin(iosDeviceA);
 
     ToolRegistry.registerDeviceAware(
@@ -149,7 +149,7 @@ describe("ToolRegistry iOS session context", () => {
   test("still requires sessionUuid when setActiveDevice was called but platform is not ios", async () => {
     fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
     // Simulate setActiveDevice having been called
-    fakeDeviceReadiness.setCurrentDevice(iosDeviceA, "ios");
+    fakeDeviceReadiness.setExplicitDevicePin(iosDeviceA);
     fakeDeviceReadiness.setExplicitDevicePin(iosDeviceA);
 
     ToolRegistry.registerDeviceAware(

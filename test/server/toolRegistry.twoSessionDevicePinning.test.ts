@@ -116,13 +116,13 @@ describe("ToolRegistry two-session device pinning (#11810)", () => {
       { name: "rotate", deviceId: deviceB.deviceId },
     ]);
     expect(fakeReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
-    expect(fakeReadiness.getSetCurrentDeviceCalls()).toEqual([]);
-    expect(fakeReadiness.getCurrentDevice()).toBeUndefined();
+    expect("getCurrentDevice" in fakeReadiness).toBe(false);
   });
 
   test("a sessionless call naming no device after session B's call is refused, not resolved to B's device", async () => {
     await arrangeHarness([deviceA, deviceB]);
     await rotate({ sessionUuid: "session-b" });
+    await fakeReadiness.ensureDeviceReady("android", deviceB.deviceId);
 
     await expect(rotate({ platform: "android" })).rejects.toBeInstanceOf(
       AmbiguousDeviceTargetError,

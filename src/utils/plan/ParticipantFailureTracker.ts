@@ -1,7 +1,7 @@
 import {
   deviceLostErrorFromAbortSignal,
   rememberDeviceLossAbort,
-} from "../../models/DeviceLostError";
+} from "../deviceLossAbortRegistry";
 import type { Plan } from "../../models/Plan";
 import { logger } from "../logger";
 import { findArrivalsBlockedByFailedTrack, type BlockedArrival } from "./BarrierResumeGuard";

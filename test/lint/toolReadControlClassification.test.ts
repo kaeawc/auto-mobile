@@ -41,10 +41,12 @@ const PROTOTYPE_ARGS = {
 
 const CLASSIFICATION: Classification = {
   read: [
+    "compareScreenshot",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -88,10 +90,18 @@ const CLASSIFICATION: Classification = {
       reads: [{ action: "list" }],
       controls: [{ action: "apply" }, { action: "reset" }],
     },
+    persona: {
+      reads: [{ action: "list" }, { action: "describe", persona: "samsung-oneui" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],
       controls: [{ query: "DELETE FROM t" }, { query: "SELECT 1; DELETE FROM t" }],
+    },
+    statusBar: {
+      reads: [{ action: "get" }],
+      controls: [{ action: "override", time: "9:41" }, { action: "clear" }],
     },
   },
   control: [
@@ -140,6 +150,7 @@ const CLASSIFICATION: Classification = {
     "resetKeychain",
     "rotate",
     "selectAllText",
+    "sendBroadcast",
     "sendKeys",
     "sendSms",
     "setAppLinks",

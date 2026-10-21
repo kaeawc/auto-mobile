@@ -13,6 +13,9 @@ import { ActionableError } from "../../models/ActionableError";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+import { DefaultElementParser } from "../utility/ElementParser";
+import { toSearchable } from "../utility/SearchableNode";
+import type { ViewHierarchyNode } from "../../models/ViewHierarchyResult";
 import {
   CONTAINS_IGNORE_CASE,
   FOCUS_INPUT_INSPECT_INTENT,
@@ -570,7 +573,7 @@ export class SetUIStateFields {
 
       case "dropdown":
         if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
+          const currentValue = this.readDropdownValue(element);
           return currentValue === fieldSpec.value;
         }
         return false;
@@ -578,6 +581,31 @@ export class SetUIStateFields {
       default:
         return false;
     }
+  }
+
+  private readDropdownValue(element: Element): string | undefined {
+    const ownValue = this.fieldTypeDetector.getTextValue(element);
+    if (ownValue) {
+      return ownValue;
+    }
+    const source = getHierarchyNodeSource(element);
+    if (!source) {
+      return undefined;
+    }
+
+    // Resolved elements are flat; framework Spinners keep the selection in a child TextView.
+    const parser = new DefaultElementParser();
+    let textValue: string | undefined;
+    let descriptionValue: string | undefined;
+    parser.traverseNode(source, (node: ViewHierarchyNode, depth) => {
+      if (depth === 0) {
+        return;
+      }
+      const searchable = toSearchable(parser.extractNodeProperties(node));
+      textValue ??= searchable.textSources.text;
+      descriptionValue ??= searchable.textSources["content-desc"];
+    });
+    return textValue ?? descriptionValue;
   }
 
   /**
@@ -959,8 +987,11 @@ export class SetUIStateFields {
 
       case "dropdown":
         if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return { verified: currentValue === fieldSpec.value, observation };
+          const observedValue = this.readDropdownValue(element);
+          if (observedValue === undefined) {
+            return { verified: false, observation, unverifiable: true };
+          }
+          return { verified: observedValue === fieldSpec.value, observation, observedValue };
         }
         return { verified: true, observation };
 

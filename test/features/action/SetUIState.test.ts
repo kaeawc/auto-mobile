@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { logger } from "../../../src/utils/logger";
 import { SetUIState } from "../../../src/features/action/SetUIState";
+import { FieldTypeDetector } from "../../../src/features/action/FieldTypeDetector";
+import { readCapturedHierarchy } from "../../fixtures/capturedFixtures";
 import { resolveSwipeDirection } from "../../../src/features/action/swipeon/swipeOnUtils";
 import type { SwipeDirection, SwipeOnOptions } from "../../../src/models/SwipeOnOptions";
 import type { Keyboard } from "../../../src/features/action/Keyboard";
@@ -1105,6 +1107,99 @@ describe("SetUIState", () => {
   });
 
   describe("dropdown handling", () => {
+    const spinnerId = "com.android.settings:id/security";
+    const capturedSpinner = readCapturedHierarchy(
+      "android-settings/add-network-security-spinner.viewHierarchy.json",
+    );
+
+    const withSpinnerValue = (value: string | undefined): ViewHierarchyResult => {
+      // Derived variant: change only the selected text1 text, including its window copy.
+      const hierarchy = structuredClone(capturedSpinner);
+      const nodes = new SearchableHierarchy().project(hierarchy);
+      const selectedValues = nodes.filter(
+        (node) =>
+          node.nativeId === "android:id/text1" &&
+          nodes[node.parentIndex ?? -1]?.nativeId === spinnerId,
+      );
+      expect(selectedValues.length).toBeGreaterThan(0);
+      for (const node of selectedValues) {
+        const properties = nodeAttributes(node.source);
+        if (value === undefined) {
+          delete properties.text;
+        } else {
+          properties.text = value;
+        }
+      }
+      return hierarchy;
+    };
+
+    const createCapturedSpinnerAction = (postSelection = capturedSpinner) => {
+      fakeObserve.setResultFactory(() =>
+        createObserveResult(fakeTap.getCallCount() >= 2 ? postSelection : capturedSpinner),
+      );
+      return new SetUIState(device, null, {
+        tapOnElement: fakeTap,
+        inputText: fakeInput,
+        clearText: fakeClear,
+        swipeOn: fakeSwipe,
+        observeScreen: fakeObserve,
+        fieldTypeDetector: new FieldTypeDetector(),
+        timer: fakeTimer,
+      });
+    };
+
+    test("captured Spinner skips taps when child text already matches None", async () => {
+      const result = await createCapturedSpinnerAction().execute({
+        fields: [{ selector: { elementId: spinnerId }, value: "None" }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fields[0]).toMatchObject({
+        success: true,
+        verified: true,
+        skipped: true,
+        attempts: 1,
+        fieldType: "dropdown",
+      });
+      expect(fakeTap.getCallCount()).toBe(0);
+    });
+
+    test("captured Spinner verifies selected child text on the first attempt", async () => {
+      const value = "WPA/WPA2-Personal";
+      const result = await createCapturedSpinnerAction(withSpinnerValue(value)).execute({
+        fields: [{ selector: { elementId: spinnerId }, value }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fields[0]).toMatchObject({ success: true, verified: true, attempts: 1 });
+      expect(fakeTap.getCalls().map((call) => call.options)).toEqual([
+        { elementId: spinnerId, action: "tap" },
+        { text: value, action: "tap" },
+      ]);
+    });
+
+    test("captured Spinner accepts unreadable selection without retrying", async () => {
+      const result = await createCapturedSpinnerAction(withSpinnerValue(undefined)).execute({
+        fields: [{ selector: { elementId: spinnerId }, value: "WPA/WPA2-Personal" }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fields[0]).toMatchObject({ success: true, attempts: 1 });
+      expect(result.fields[0].verified).toBeUndefined();
+      expect(fakeTap.getCallCount()).toBe(2);
+    });
+
+    test("captured Spinner retries a readable mismatch and reports observed None", async () => {
+      const result = await createCapturedSpinnerAction().execute({
+        fields: [{ selector: { elementId: spinnerId }, value: "WPA/WPA2-Personal" }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fields[0]).toMatchObject({ success: false, attempts: 3 });
+      expect(result.fields[0].error).toContain('observed "None"');
+      expect(fakeTap.getCallCount()).toBe(6);
+    });
+
     test("settles a slow dropdown menu before the animation delay and option tap", async () => {
       fakeObserve.setViewHierarchy(
         createHierarchyWithElement({

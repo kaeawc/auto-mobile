@@ -209,7 +209,7 @@ class CtrlProxyGestureOverloadParityTest {
 
   @Test
   fun `tap requests reject stale context before clearing caret or dispatching`() = runTest {
-    assertStaleRejected("tap coordinates") { context, displayId ->
+    assertStaleRejected("tap_coordinates_result") { context, displayId ->
       actions.requestTapCoordinates(
         RequestTapCoordinates("stale", 100.0, 100.0, 10L, context, displayId),
       )
@@ -218,7 +218,7 @@ class CtrlProxyGestureOverloadParityTest {
 
   @Test
   fun `swipe requests reject stale context before clearing caret or dispatching`() = runTest {
-    assertStaleRejected("swipe") { context, displayId ->
+    assertStaleRejected("swipe_result") { context, displayId ->
       actions.requestSwipe(
         RequestSwipe("stale", 100.0, 100.0, 200.0, 200.0, 50L, context, displayId),
       )
@@ -227,7 +227,7 @@ class CtrlProxyGestureOverloadParityTest {
 
   @Test
   fun `drag requests reject stale context before clearing caret or dispatching`() = runTest {
-    assertStaleRejected("drag") { context, displayId ->
+    assertStaleRejected("drag_result") { context, displayId ->
       actions.requestDrag(
         RequestDrag(
           requestId = "stale",
@@ -288,7 +288,7 @@ class CtrlProxyGestureOverloadParityTest {
       // prove these same requests can dispatch.
       assertTrue(
         ShadowLog.getLogs().drop(logsBefore).any {
-          it.msg == "WebSocket server not running, skipping $resultName result broadcast"
+          it.msg == "WebSocket server not running, skipping $resultName"
         },
       )
     }

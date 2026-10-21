@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "heart": [
+        {
+          "t": "6:00",
+          "bpm": 58
+        },
+        {
+          "t": "9:00",
+          "bpm": 96
+        },
+        {
+          "t": "12:00",
+          "bpm": 141
+        },
+        {
+          "t": "15:00",
+          "bpm": 88
+        },
+        {
+          "t": "18:00",
+          "bpm": 72
+        }
+      ]
+    },
+    "root": {
+      "type": "chart",
+      "variant": "line",
+      "series": [
+        {
+          "path": "/missing",
+          "y": "bpm",
+          "label": "Heart rate"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.series[0].path",
+  "expectedMessage": "Chart series path does not resolve to an array"
+}

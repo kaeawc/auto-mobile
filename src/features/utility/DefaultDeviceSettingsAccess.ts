@@ -17,9 +17,24 @@ import {
   type ThemeBaselineStore,
 } from "./DisplayConfig";
 import { SystemConfigurationManager } from "./SystemConfigurationManager";
+import {
+  ACCESSIBILITY_DISPLAY_FIELDS,
+  type AccessibilityDisplayField,
+  type AccessibilityDisplaySnapshot,
+} from "./AccessibilityDisplayPreferences";
 import type { DeviceSettingsAccess } from "./DeviceSettingDefaults";
 
 export const DISPLAY_KEYS = ["fontScale", "density", "nightMode"] as const;
+
+/** Keys read and written through DisplayConfig (display fields and accessibility preferences). */
+const DISPLAY_CONFIG_KEYS: readonly DeviceSettingKey[] = [
+  ...DISPLAY_KEYS,
+  ...ACCESSIBILITY_DISPLAY_FIELDS,
+];
+
+function accessibilityKeys(keys: readonly DeviceSettingKey[]): AccessibilityDisplayField[] {
+  return ACCESSIBILITY_DISPLAY_FIELDS.filter((field) => keys.includes(field));
+}
 
 export function pick(
   values: DeviceSettingValues,
@@ -56,7 +71,16 @@ export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
         ...(display.theme !== undefined ? { nightMode: display.theme } : {}),
       });
     }
-    if (keys.some((key) => !(DISPLAY_KEYS as readonly string[]).includes(key))) {
+    const accessibility = accessibilityKeys(keys);
+    if (accessibility.length > 0) {
+      Object.assign(
+        values,
+        await new DisplayConfig(device, { adbFactory: this.adbFactory })
+          .accessibility()
+          .readSnapshot(accessibility),
+      );
+    }
+    if (keys.some((key) => !DISPLAY_CONFIG_KEYS.includes(key))) {
       const settings = await new SystemConfigurationManager(
         device,
         this.adbFactory,
@@ -88,6 +112,7 @@ export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
         logger.warn(`Failed to reset display settings on ${device.deviceId}: ${result.error}`);
       }
     }
+    written.push(...(await this.writeAccessibility(device, values)));
     const manager = new SystemConfigurationManager(device, this.adbFactory);
     if (typeof values.locale === "string") {
       const result = await manager.setLocale(values.locale, { broadcast: false });
@@ -103,6 +128,24 @@ export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
       this.collect(result, "calendarSystem", device, written);
     }
     return written;
+  }
+
+  /** Restore recorded accessibility preferences without recording a displayConfig baseline. */
+  private async writeAccessibility(
+    device: BootedDevice,
+    values: DeviceSettingValues,
+  ): Promise<DeviceSettingKey[]> {
+    const snapshot: AccessibilityDisplaySnapshot = Object.fromEntries(
+      ACCESSIBILITY_DISPLAY_FIELDS.filter(
+        (field) => typeof values[field] === "string" || values[field] === null,
+      ).map((field) => [field, values[field]]),
+    );
+    if (Object.keys(snapshot).length === 0) {
+      return [];
+    }
+    return new DisplayConfig(device, { adbFactory: this.adbFactory })
+      .accessibility()
+      .restoreSnapshot(snapshot);
   }
 
   private collect(

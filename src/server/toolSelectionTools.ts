@@ -16,6 +16,7 @@ import { ActionableError } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse } from "../utils/toolUtils";
+import { setToolEnabledResultSchema } from "./toolSelectionToolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
 
 export { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
@@ -334,7 +335,7 @@ export function registerToolSelectionTools(): void {
         ...(await getEnabledToolsResponse(sessionUuid, context)),
       });
     },
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: setToolEnabledResultSchema },
   );
 }
 

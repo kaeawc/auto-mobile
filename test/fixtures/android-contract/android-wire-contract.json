@@ -576,6 +576,18 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "customAction",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "progress",
+          "type": "double",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -6781,6 +6793,26 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions": [
+      {
+        "name": "kinds",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeTextSpanStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeOffset": [
       {
         "name": "x",
@@ -9547,10 +9579,54 @@
         "hasDefault": true
       },
       {
+        "name": "reverse",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stickToEnd",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "atEndKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onStartReached",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "child",
         "type": "polymorphic",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "scrollTo": [
+      {
+        "name": "scroll",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "to",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "animated",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "searchBar": [
@@ -10435,6 +10511,12 @@
       {
         "name": "spans",
         "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "linkify",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions",
         "nullable": true,
         "hasDefault": true
       }

@@ -15,7 +15,6 @@ import {
 import { z } from "zod/v4";
 import {
   changeLocalizationResultSchema,
-  displayConfigResultSchema,
   setActiveDeviceResultSchema,
 } from "./utilityToolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
@@ -23,7 +22,6 @@ import { ActionableError } from "../models/ActionableError";
 import { isIosSimulatorDevice } from "../features/action/IosSimulatorPermissions";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
-import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import {
   DeviceState,
   biometricEnrollmentSchema,
@@ -39,12 +37,11 @@ import {
   type SetDeviceStateInput,
 } from "../features/utility/DeviceState";
 import {
-  DisplayConfig,
-  MAX_ANDROID_DENSITY_DPI,
-  MIN_ANDROID_DENSITY_DPI,
-  type DisplayConfigResult,
-  type SetDisplayConfigInput,
-} from "../features/utility/DisplayConfig";
+  DISPLAY_CONFIG_DESCRIPTION,
+  displayConfigHandler,
+  displayConfigSchema,
+  displayConfigToolOptions,
+} from "./displayConfigTool";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { BootedDevice, Platform } from "../models";
 import {
@@ -372,65 +369,6 @@ const networkConditionInputSchema = z
     }
   });
 
-// Display configuration (issue #6096): font scale, effective density, and
-// light/dark theme. A call with no set field is a getter; any set field (or
-// `reset`) makes it a setter that returns applied + previous values so the
-// client can restore. Android supports all three fields; iOS supports theme only:
-// `simctl ui appearance` on the Simulator, the CtrlProxy runner's
-// `XCUIDevice.appearance` on a physical device (#14092).
-export const displayConfigSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      fontScale: z
-        .union([z.number().min(0.1).max(10), z.literal("default")])
-        .optional()
-        .describe(
-          "System text scale, or 'default' to remove Android's explicit override and restore " +
-            "its inherited default. Android only. Omit to leave unchanged.",
-        ),
-      density: z
-        .union([
-          z.number().min(MIN_ANDROID_DENSITY_DPI).max(MAX_ANDROID_DENSITY_DPI),
-          z.enum(["smaller", "default", "larger"]),
-        ])
-        .optional()
-        .describe(
-          "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
-            `(smaller/default/larger). Numeric values must be ${MIN_ANDROID_DENSITY_DPI}-${MAX_ANDROID_DENSITY_DPI} dpi. ` +
-            "Android only; best-effort on physical devices. Omit to leave unchanged.",
-        ),
-      theme: z
-        .enum(["light", "dark", "system", "custom"])
-        .optional()
-        .describe(
-          "Light, dark, system (follow-device), or custom (Android user-defined night-mode " +
-            "schedule) theme / night mode. Supported on Android; the iOS Simulator supports only " +
-            "'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom " +
-            "schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
-        ),
-      reset: z
-        .boolean()
-        .optional()
-        .describe(
-          "On Android, restore font scale and density to device defaults. Restore night mode only " +
-            "to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. " +
-            "Android reset never forces light mode. On the iOS Simulator, reset restores light appearance.",
-        ),
-    })
-    .strict(),
-).superRefine((values, ctx) => {
-  if (
-    values.reset === true &&
-    (values.fontScale !== undefined || values.density !== undefined || values.theme !== undefined)
-  ) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["reset"],
-      message: "reset cannot be combined with fontScale, density, or theme; send reset on its own.",
-    });
-  }
-});
-
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z
     .object({
@@ -440,7 +378,7 @@ export const getDeviceStateSchema = addDeviceTargetingToSchema(
         .optional()
         .describe(
           "State fields to read; supports doNotDisturb, connectivity, biometrics, " +
-            "networkCondition, clock, and screenLock. Defaults to doNotDisturb + connectivity, so a bare call answers " +
+            "networkCondition, clock, sensors (Android emulator only), and screenLock. Defaults to doNotDisturb + connectivity, so a bare call answers " +
             "whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
         ),
     })
@@ -557,35 +495,6 @@ export function assertChangeLocalizationPlatformConstraints(
   if (platform === "android" && args.locale && !args.appId) {
     throw new ActionableError("appId is required for Android locale changes.");
   }
-}
-
-export type DisplayConfigArgs = z.infer<typeof displayConfigSchema>;
-
-/** A displayConfig call is a setter when it carries reset or any display field. */
-function displayConfigArgsAreSet(args: DisplayConfigArgs): boolean {
-  return (
-    args.reset === true ||
-    args.fontScale !== undefined ||
-    args.density !== undefined ||
-    args.theme !== undefined
-  );
-}
-
-/** Project the wire args onto the feature's set-input shape, dropping absent fields. */
-function displayConfigSetInput(args: DisplayConfigArgs): SetDisplayConfigInput {
-  return {
-    ...(args.fontScale !== undefined ? { fontScale: args.fontScale } : {}),
-    ...(args.density !== undefined ? { density: args.density } : {}),
-    ...(args.theme !== undefined ? { theme: args.theme } : {}),
-    ...(args.reset !== undefined ? { reset: args.reset } : {}),
-  };
-}
-
-function displayConfigMessage(result: DisplayConfigResult): string {
-  if (result.success) {
-    return result.applied ? "Applied display configuration" : "Read display configuration";
-  }
-  return result.error ?? "Failed to apply display configuration";
 }
 
 export type GetDeviceStateArgs = z.infer<typeof getDeviceStateSchema>;
@@ -792,46 +701,6 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
   );
 };
 
-/** A call with no set field reads (#10965); fontScale, density, theme or reset is control. */
-function isDisplayConfigRead(args: DisplayConfigArgs): boolean {
-  return !displayConfigArgsAreSet(args);
-}
-
-const displayConfigToolOptions = {
-  ...PLAN_RELEVANT,
-  defaultEnabled: false,
-  deviceReadOnly: isDisplayConfigRead,
-  deviceReadOnlyArgs: [{ absentArguments: ["reset", "fontScale", "density", "theme"] }],
-  outputSchema: displayConfigResultSchema,
-};
-
-/** The device settings a displayConfig call may change (#11145). */
-function displayConfigChangedSettings(args: DisplayConfigArgs): DeviceSettingKey[] {
-  if (args.reset === true) {
-    return ["fontScale", "density", "nightMode"];
-  }
-  return [
-    ...(args.fontScale !== undefined ? (["fontScale"] as const) : []),
-    ...(args.density !== undefined ? (["density"] as const) : []),
-    ...(args.theme !== undefined ? (["nightMode"] as const) : []),
-  ];
-}
-
-const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {
-  const displayConfig = new DisplayConfig(device);
-  if (displayConfigArgsAreSet(args)) {
-    await recordDeviceSettingDefaultsBeforeChange(device, displayConfigChangedSettings(args));
-  }
-  const result = displayConfigArgsAreSet(args)
-    ? await displayConfig.setConfig(displayConfigSetInput(args))
-    : await displayConfig.getConfig();
-  const response = createStructuredToolResponse({
-    message: displayConfigMessage(result),
-    ...result,
-  });
-  return result.success ? response : { ...response, isError: true as const };
-};
-
 /**
  * The setter `setDeviceState` drives, wired to the session for clock, location
  * and iOS per-app network rules. `useIosAppNetworkRule` hands it the ownership
@@ -1026,7 +895,8 @@ export function registerUtilityTools(
 
   ToolRegistry.registerDeviceAware(
     "displayConfig",
-    "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme only (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner). On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance; physical iOS reset restores the appearance displayConfig first replaced there (light if none).",
+    DISPLAY_CONFIG_DESCRIPTION,
+
     displayConfigSchema,
     displayConfigHandler,
     displayConfigToolOptions,
@@ -1034,7 +904,7 @@ export function registerUtilityTools(
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential." +
+    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential." +
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
     createGetDeviceStateHandler(options.networkFilterBridge),

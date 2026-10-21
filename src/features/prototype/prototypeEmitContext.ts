@@ -33,9 +33,15 @@ export interface ResolvedEmitContext {
   context: Record<string, PrototypeJson>;
   contextTruncated?: true;
 }
-type RuntimeBinding = Exclude<PrototypeEmitContextBinding, { item: string } | { index: true }>;
+type RuntimeBinding = Exclude<
+  PrototypeEmitContextBinding,
+  { item: string } | { index: true } | { match: string }
+>;
 
-/** Executable reference for device runtimes. Repeat bindings must first be expanded. */
+/**
+ * Executable reference for device runtimes. Repeat bindings must first be expanded, and a
+ * linkify `{match}` bound to its match (`bindPrototypeLinkifyActions`).
+ */
 export function resolveEmitContext(
   bindings: Readonly<Record<string, RuntimeBinding>>,
   inputs: PrototypeEmitContextInputs,

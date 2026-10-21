@@ -314,6 +314,17 @@ export class DeviceReadiness implements DeviceReadinessContract {
     return this.readinessSelection.detectConnectedPlatformsWithStatus(signal, options);
   }
 
+  public listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]> {
+    return this.readinessSelection.listBootedAndroidDevicesForSelection({
+      bypassAndroidDeviceListCache: true,
+      signal: options?.signal,
+    });
+  }
+
+  public verifyAndroidCtrlProxyServiceReady(device: BootedDevice): Promise<boolean> {
+    return this.provider.getAndroidCtrlProxyClient(device).verifyServiceReady(2, 200, 2000);
+  }
+
   private readonly checkedAndroidOwnership = new AsyncLocalStorage<Set<string>>();
   private readonly androidCtrlProxyReadiness: AndroidCtrlProxyReadiness;
 

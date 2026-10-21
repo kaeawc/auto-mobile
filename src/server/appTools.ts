@@ -18,6 +18,7 @@ import {
   type UninstallGuardOptions,
 } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
+import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
 import {
   ActionableError,
@@ -29,7 +30,10 @@ import {
   type TerminateAppResult,
 } from "../models";
 import { toActionableError } from "../models/ActionableError";
-import type { PackageSigningInspection } from "../models/PackageSigningInspection";
+import type {
+  IosPackageSigningInspection,
+  PackageSigningInspection,
+} from "../models/PackageSigningInspection";
 import type { UninstallAppResult } from "../models/UninstallAppResult";
 import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import { logger } from "../utils/logger";
@@ -220,7 +224,7 @@ export interface InspectPackageSigningExecutor {
   execute(
     appId: string,
     options?: { userId?: number; signal?: AbortSignal },
-  ): Promise<PackageSigningInspection>;
+  ): Promise<PackageSigningInspection | IosPackageSigningInspection>;
 }
 
 export interface InspectPackageSigningToolDependencies {
@@ -228,7 +232,10 @@ export interface InspectPackageSigningToolDependencies {
 }
 
 const defaultInspectPackageSigningToolDependencies: InspectPackageSigningToolDependencies = {
-  createInspectPackageSigning: (device) => new InspectPackageSigning(device),
+  createInspectPackageSigning: (device) =>
+    device.platform === "ios"
+      ? new IosPackageSigningInspector(device)
+      : new InspectPackageSigning(device),
 };
 
 const defaultInstallAppToolDependencies: InstallAppToolDependencies = {
@@ -891,8 +898,9 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "inspectPackageSigning",
-    "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its " +
-      "SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "Fresh read of one app's presence (installed/absent/unknown) and signing. Android: a user's " +
+      "SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing " +
+      "identity, CDHash, entitlements and embedded provisioning profile (expiry, UUID). Never cached.",
     inspectPackageSigningSchema,
     inspectPackageSigningHandler,
     {

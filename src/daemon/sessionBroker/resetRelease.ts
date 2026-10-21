@@ -1,9 +1,10 @@
 import type { SessionBrokerOptions } from "./broker";
+import { cleanDeviceReuseEnabled } from "./brokerOptions";
+import { nativeProfile } from "./profile";
 import { drainFailureOutcome } from "./brokerSupport";
 import { ResetFailureError } from "./ResetFailureError";
 import type { BrokerTimingRecorder } from "./timingRecorder";
 import { ResetBootQueue } from "./resetBootQueue";
-import { nativeProfile } from "./profile";
 import type { BrokerRequestRecord, BrokerResourceRecord, DestructionTicket } from "./store";
 import type {
   SessionBrokerResetTiming,
@@ -34,7 +35,13 @@ export class BrokerResetRelease {
   constructor(
     private readonly options: Pick<
       SessionBrokerOptions,
-      "store" | "devices" | "owner" | "limits" | "reuseCleanDevices" | "timer"
+      | "store"
+      | "devices"
+      | "owner"
+      | "limits"
+      | "reuseCleanDevices"
+      | "reuseAndroidCleanDevices"
+      | "timer"
     >,
     private readonly timing: BrokerTimingRecorder,
     private readonly now: () => number,
@@ -65,7 +72,7 @@ export class BrokerResetRelease {
       timing.phases.drain = this.now() - drainStarted;
       signal?.throwIfAborted();
       if (
-        !this.options.reuseCleanDevices ||
+        !cleanDeviceReuseEnabled(nativeProfile(resource).platform, this.options) ||
         !this.options.devices.reset ||
         resource.state !== "resetting"
       ) {

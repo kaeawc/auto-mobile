@@ -1,0 +1,279 @@
+[
+  {
+    "text": "Hi @ana, see #launch at https://example.com/a?b=1.",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@ana",
+        "start": 3,
+        "end": 7
+      },
+      {
+        "kind": "hashtag",
+        "text": "#launch",
+        "start": 13,
+        "end": 20
+      },
+      {
+        "kind": "url",
+        "text": "https://example.com/a?b=1",
+        "start": 24,
+        "end": 49
+      }
+    ]
+  },
+  {
+    "text": "@ana",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@ana",
+        "start": 0,
+        "end": 4
+      }
+    ]
+  },
+  {
+    "text": "mail ana@example.com now",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": []
+  },
+  {
+    "text": "@",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": []
+  },
+  {
+    "text": "@a_1 @b-2",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@a_1",
+        "start": 0,
+        "end": 4
+      },
+      {
+        "kind": "mention",
+        "text": "@b",
+        "start": 5,
+        "end": 7
+      }
+    ]
+  },
+  {
+    "text": "@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "start": 0,
+        "end": 31
+      }
+    ]
+  },
+  {
+    "text": "@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": []
+  },
+  {
+    "text": "#2024 #2024a #_ok",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "hashtag",
+        "text": "#2024a",
+        "start": 6,
+        "end": 12
+      },
+      {
+        "kind": "hashtag",
+        "text": "#_ok",
+        "start": 13,
+        "end": 17
+      }
+    ]
+  },
+  {
+    "text": "#tag! #tag, (#notag)",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "hashtag",
+        "text": "#tag",
+        "start": 0,
+        "end": 4
+      },
+      {
+        "kind": "hashtag",
+        "text": "#tag",
+        "start": 6,
+        "end": 10
+      }
+    ]
+  },
+  {
+    "text": "مرحبا @ana #مرحبا",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@ana",
+        "start": 6,
+        "end": 10
+      },
+      {
+        "kind": "hashtag",
+        "text": "#مرحبا",
+        "start": 11,
+        "end": 17
+      }
+    ]
+  },
+  {
+    "text": "#éte #日本語 #नमस्ते",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "hashtag",
+        "text": "#éte",
+        "start": 0,
+        "end": 4
+      },
+      {
+        "kind": "hashtag",
+        "text": "#日本語",
+        "start": 5,
+        "end": 9
+      },
+      {
+        "kind": "hashtag",
+        "text": "#नमस्ते",
+        "start": 10,
+        "end": 17
+      }
+    ]
+  },
+  {
+    "text": "go https://ex.com/path). and http://x.y",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "url",
+        "text": "https://ex.com/path",
+        "start": 3,
+        "end": 22
+      },
+      {
+        "kind": "url",
+        "text": "http://x.y",
+        "start": 29,
+        "end": 39
+      }
+    ]
+  },
+  {
+    "text": "https:// x https://a",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "url",
+        "text": "https://a",
+        "start": 11,
+        "end": 20
+      }
+    ]
+  },
+  {
+    "text": "see (https://ex.com) ok",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": []
+  },
+  {
+    "text": "a#b x@y",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": []
+  },
+  {
+    "text": "tabs\t@ana\n#tag",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@ana",
+        "start": 5,
+        "end": 9
+      },
+      {
+        "kind": "hashtag",
+        "text": "#tag",
+        "start": 10,
+        "end": 14
+      }
+    ]
+  },
+  {
+    "text": " @nbsp 　#ideo",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@nbsp",
+        "start": 1,
+        "end": 6
+      },
+      {
+        "kind": "hashtag",
+        "text": "#ideo",
+        "start": 8,
+        "end": 13
+      }
+    ]
+  },
+  {
+    "text": "@ana #tag https://ex.com",
+    "kinds": ["mention"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@ana",
+        "start": 0,
+        "end": 4
+      }
+    ]
+  },
+  {
+    "text": "@ana #tag https://ex.com",
+    "kinds": ["hashtag", "url"],
+    "matches": [
+      {
+        "kind": "hashtag",
+        "text": "#tag",
+        "start": 5,
+        "end": 9
+      },
+      {
+        "kind": "url",
+        "text": "https://ex.com",
+        "start": 10,
+        "end": 24
+      }
+    ]
+  },
+  {
+    "text": "emoji 😀 @ana",
+    "kinds": ["mention", "hashtag", "url"],
+    "matches": [
+      {
+        "kind": "mention",
+        "text": "@ana",
+        "start": 9,
+        "end": 13
+      }
+    ]
+  }
+]

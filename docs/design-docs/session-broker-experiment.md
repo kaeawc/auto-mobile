@@ -119,8 +119,28 @@ drains the execution, stops the device through the ordinary lifecycle handler,
 erases it, and boots that same simulator. Fresh inventory must confirm the exact
 type, runtime, availability, and expected state; durable ownership and native
 binding checks fence every mutation. Any failure falls back to journaled
-destruction. Android still uses zero pooling. Fake reset tests are not evidence
-of native isolation.
+destruction. `reuseCleanDevices` continues to opt in only to iOS reuse. Android
+has its own `reuseAndroidCleanDevices` flag, defaulting to false. Even when that
+flag and Android defaults are configured, the production reset always falls back
+to destruction: package equality cannot prove restoration of settings, files,
+accounts, permissions, existing app data, system updates, or other users.
+Any observed package-list difference is evidence of untracked changes and also
+requires destruction, never uninstall-and-pool. Optional baseline capture failure
+logs a warning without failing acquisition; release then destroys the device.
+Baselines and activity subscriptions are scoped to the broker resource, not its
+recyclable adb serial.
+
+The native activity guard is deliberately conservative: the existing execution
+end event does not identify the tool, so any admitted non-read session use
+(including package-install tools) disables minimal reset. Read-only sessions can
+not reuse either, since adb and Gradle activity are unobservable. The narrow
+`AndroidResetStrategy.reset(device, baselinePackages, assertOwned)` hook remains
+injectable for a qualified wipe/snapshot implementation in #14364 and #14365.
+Strategies must restore all unobservable state and fence native work using
+`assertOwned`; package, target, and CtrlProxy checks are additional safeguards,
+not isolation proof. No production strategy is configured. Android reuse must
+remain disabled until native two-session contamination qualification passes.
+Fake strategy tests are not evidence of native isolation.
 
 Native zero-pooling qualification passed on October 12, 2026, using broker
 commit `6fb70c201` on this macOS host with iPhone 17 Pro / iOS 26.5:
@@ -299,7 +319,8 @@ CoreSimulator device type and runtime:
       }
     }
   },
-  "reuseCleanDevices": false
+  "reuseCleanDevices": false,
+  "reuseAndroidCleanDevices": false
 }
 ```
 

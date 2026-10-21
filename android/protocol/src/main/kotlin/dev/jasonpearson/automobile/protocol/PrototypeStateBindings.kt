@@ -52,12 +52,28 @@ internal object PrototypeStateBindings {
     else null
   }
 
+  /** A chat scroll's `atEndKey` (#14232) must name a declared boolean state key. */
+  fun atEndKeyErrors(
+    value: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    if (value.text("type") != "scroll") return null
+    val key = value.text("atEndKey") ?: return null
+    return if (!isBooleanState(state[key] as? JsonPrimitive))
+      fail("$path.atEndKey", "atEndKey must name a declared boolean state key")
+    else null
+  }
+
   fun sheetBindingErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.nodes) {
-      (openWhenErrors(value, path, state) ?: refreshErrors(value, path, state))?.let {
-        return it.forItem(item)
-      }
+      (openWhenErrors(value, path, state)
+          ?: refreshErrors(value, path, state)
+          ?: atEndKeyErrors(value, path, state))
+        ?.let {
+          return it.forItem(item)
+        }
     }
     return null
   }
@@ -72,6 +88,7 @@ internal object PrototypeStateBindings {
       ?: trailingErrors(value, path, state)
       ?: openWhenErrors(value, path, state)
       ?: refreshErrors(value, path, state)
+      ?: atEndKeyErrors(value, path, state)
 
   /** Every state key a node binds: `stateKey`, time picker keys, a trailing control, `openWhen`. */
   fun boundKeys(value: JsonObject): List<String> =
@@ -85,6 +102,7 @@ internal object PrototypeStateBindings {
       else null,
       if (value.text("type") == "scroll") (value["refresh"] as? JsonObject)?.text("stateKey")
       else null,
+      if (value.text("type") == "scroll") value.text("atEndKey") else null,
     )
 
   /**
@@ -98,7 +116,10 @@ internal object PrototypeStateBindings {
     state: JsonObject,
   ): PrototypeSpecError? {
     val key = action.value.text("key") ?: return null
-    val written = action.value["value"] as? JsonPrimitive
+    val raw = action.value["value"]
+    // A linkify `{match}` (#14233) writes the matched text, so it is checked as a string.
+    val written =
+      if (PrototypeLinkify.isMatchBinding(raw)) JsonPrimitive("") else raw as? JsonPrimitive
     if (written == null || action.operandTemplated) return null
     val controls = context.controlsByKey[key].orEmpty()
     if (controls.map { it.value.text("type") }.toSet().size != 1) return null

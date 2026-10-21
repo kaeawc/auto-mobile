@@ -30,7 +30,22 @@ run_with_timeout() {
   local secs="$1"
   local status=0
   local pgid_file="${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}"
+  # Hide the variable from the timed command (so a nested call does not reuse
+  # it), but put it back before returning: this function runs in the caller's
+  # shell, so a bare `unset` would drop it for every later call (#14497).
+  local pgid_was_set=0 pgid_was_exported=0
+  if [ -n "${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE+x}" ]; then
+    pgid_was_set=1
+    case "$(declare -p AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE 2> /dev/null)" in
+      "declare -x"*) pgid_was_exported=1 ;;
+    esac
+  fi
   unset AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE
+  _run_with_timeout_restore_pgid_env() {
+    [ "$pgid_was_set" -eq 1 ] || return 0
+    AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$pgid_file"
+    if [ "$pgid_was_exported" -eq 1 ]; then export AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE; fi
+  }
   shift
   if [ -z "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}$pgid_file" ] && command -v timeout > /dev/null 2>&1; then
     timeout -k 2 "${secs}" "$@" || status=$?
@@ -44,7 +59,10 @@ run_with_timeout() {
     # requires a trailing XXXXXX and hard-errors on a bare prefix, which made
     # every fallback call return 125 on Ubuntu.
     local fired_marker
-    fired_marker="$(mktemp "${TMPDIR:-/tmp}/run_with_timeout.XXXXXX")" || return 125
+    fired_marker="$(mktemp "${TMPDIR:-/tmp}/run_with_timeout.XXXXXX")" || {
+      _run_with_timeout_restore_pgid_env
+      return 125
+    }
 
     # Monitor mode puts the child in its own process group (pgid == its pid),
     # which is what lets the group-directed kill below reach descendants.
@@ -62,7 +80,7 @@ run_with_timeout() {
 
     (
       if [[ "$secs" =~ ^[0-9]+$ ]]; then
-        local deadline=$((SECONDS + secs))
+        local deadline=$((SECONDS + 10#$secs))
         while ((SECONDS < deadline)); do
           if ! kill -0 "$caller_pid" 2>/dev/null; then
             kill -TERM -"${cmd_pid}" 2>/dev/null || true
@@ -166,5 +184,6 @@ run_with_timeout() {
     printf 'WATCHDOG: %s exceeded %ss; last started-but-not-ended file: %s\n' \
       "${AUTOMOBILE_WATCHDOG_LABEL:-command}" "$secs" "${active_file:-<none>}" >&2
   fi
+  _run_with_timeout_restore_pgid_env
   return "${status}"
 }

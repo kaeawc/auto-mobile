@@ -1,5 +1,4 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { DeviceOutsideBoundSessionError } from "../daemon/DeviceOutsideBoundSessionError";
 import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
@@ -500,19 +499,6 @@ function currentDisplayPinResult(
   return pin !== undefined || input.reportClearedPin ? { displayPin: pin ?? null } : {};
 }
 
-/** Direct sessions keep the device they acquired; refuse before readiness or pin changes. */
-function refuseDirectSessionDeviceMismatch(args: HandlerArgs, sessionScoped: boolean): void {
-  const directSession =
-    args.sessionUuid && !sessionScoped ? resolveDirectSessionDevice(args.sessionUuid) : undefined;
-  if (directSession && args.deviceId !== directSession.device.deviceId) {
-    throw new DeviceOutsideBoundSessionError(
-      args.sessionUuid,
-      { deviceId: directSession.device.deviceId, platform: directSession.device.platform },
-      { deviceId: args.deviceId, platform: args.platform },
-    );
-  }
-}
-
 /** Existing device selection with a session-only, side-effect-free display selection slot. */
 export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDependencies) {
   const legacyDeviceSelection =
@@ -534,7 +520,6 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       if (sessionUuid && !sessionScoped && !resolveDirectSessionDevice(sessionUuid)) {
         throw new DirectSessionNotActiveError(sessionUuid);
       }
-      refuseDirectSessionDeviceMismatch(args, sessionScoped);
       if (args.display !== undefined && !sessionScoped) {
         throw new DisplayPinNeedsSessionError();
       }

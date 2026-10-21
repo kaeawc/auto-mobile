@@ -309,9 +309,7 @@ class PrototypeSpecContentScreenshotTest {
     )
 
   /** Dark mode with a seed colour scheme. */
-  @Test
-  fun themeSeed() =
-    prototypeScreenshotTest("theme_seed", validPrototypeFixture("theme-seed"))
+  @Test fun themeSeed() = prototypeScreenshotTest("theme_seed", validPrototypeFixture("theme-seed"))
 
   /** Light mode with scaled serif typography and custom shapes. */
   @Test

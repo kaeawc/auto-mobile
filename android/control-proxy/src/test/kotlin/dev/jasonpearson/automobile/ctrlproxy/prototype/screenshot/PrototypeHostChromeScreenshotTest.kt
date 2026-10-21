@@ -39,8 +39,7 @@ class PrototypeHostChromeScreenshotTest {
 
   /** Fullscreen: the translucent dismiss bar above the spec, dark. */
   @Test
-  fun dismissBarDark() =
-    chromeTest("host_chrome_dismiss_bar_dark", dark = true, fullscreen = true)
+  fun dismissBarDark() = chromeTest("host_chrome_dismiss_bar_dark", dark = true, fullscreen = true)
 
   /** Floating and persistent: the Close control over the spec, light. */
   @Test

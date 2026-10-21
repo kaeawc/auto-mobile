@@ -6,6 +6,11 @@ export type { SetActiveDeviceArgs } from "./setActiveDevice";
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
 import { deviceStateMessage } from "./deviceStateMessage";
 import { deviceClockInputSchema, validateDeviceClockInput } from "../features/utility/DeviceClock";
+import {
+  applyDeviceConditionJsonSchema,
+  DEVICE_CONDITION_FIELD_DESCRIPTION,
+} from "./deviceConditionSchema";
+import { handleDeviceConditionCall } from "./deviceConditionTool";
 import { runSessionClockMutation } from "./sessionClock";
 import {
   createSessionLocationWriteAdmission,
@@ -504,6 +509,7 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
               "virtualscene (see startDevice cameraPosterPath/cameraPosterQr). The console cannot confirm the " +
               "poster is visible; the default camera pose may not face it.",
           ),
+        deviceCondition: z.unknown().optional().describe(DEVICE_CONDITION_FIELD_DESCRIPTION),
       })
       .strict(),
   ).refine(
@@ -514,7 +520,8 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
       values.networkCondition !== undefined ||
       values.location !== undefined ||
       values.clock !== undefined ||
-      values.cameraPoster !== undefined,
+      values.cameraPoster !== undefined ||
+      values.deviceCondition !== undefined,
     {
       message: "At least one device state field must be provided",
     },
@@ -525,6 +532,7 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
     if (networkCondition) {
       networkCondition.anyOf = NETWORK_CONDITION_REQUIRED_ANY_OF;
     }
+    applyDeviceConditionJsonSchema(properties);
   },
 );
 
@@ -892,6 +900,9 @@ export function registerUtilityTools(
   });
 
   const setDeviceStateHandler = async (device: BootedDevice, args: SetDeviceStateArgs) => {
+    if (args.deviceCondition !== undefined) {
+      return handleDeviceConditionCall(device, args);
+    }
     if (args.clock !== undefined) {
       validateDeviceClockInput(args.clock);
     }

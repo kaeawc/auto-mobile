@@ -108,7 +108,7 @@ internal object PrototypeSpecInput {
     }
   }
 
-  private fun nodeVocabularyErrors(value: JsonElement, context: Context): String? =
+  private fun nodeVocabularyErrors(value: JsonElement, context: Context): PrototypeSpecError? =
     platformErrors(value, context)
       ?: chartErrors(value, context)
       ?: linkifyErrors(value, context)

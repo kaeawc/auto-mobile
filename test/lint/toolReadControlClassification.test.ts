@@ -41,10 +41,12 @@ const PROTOTYPE_ARGS = {
 
 const CLASSIFICATION: Classification = {
   read: [
+    "compareScreenshot",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -77,14 +79,38 @@ const CLASSIFICATION: Classification = {
         { action: "tapImeKey" },
       ],
     },
+    mediaSession: {
+      reads: [{ action: "get" }, { action: "get", waitFor: { mediaState: "playing" } }],
+      controls: [
+        { action: { dispatch: "pause" } },
+        { action: { volume: { stream: "music", level: 3 } } },
+      ],
+    },
+    killProfile: {
+      reads: [{ action: "list" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
+    persona: {
+      reads: [{ action: "list" }, { action: "describe", persona: "samsung-oneui" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],
       controls: [{ query: "DELETE FROM t" }, { query: "SELECT 1; DELETE FROM t" }],
     },
+    statusBar: {
+      reads: [{ action: "get" }],
+      controls: [{ action: "override", time: "9:41" }, { action: "clear" }],
+    },
   },
   control: [
+    "accessibilityAction",
     "accessibilityFocus",
+    // Drives an XCUITest audit of the app under test, so it is held to the owner.
+    "accessibilityAudit",
+    // The performance and memory audits drive the app, and a baseline record writes state.
+    "audit",
     "appLifecycle",
     "barrier",
     "biometricAuth",
@@ -94,6 +120,7 @@ const CLASSIFICATION: Classification = {
     "crashApp",
     "criticalSection",
     "deviceSnapshot",
+    "displayProfile",
     "dragAndDrop",
     "dragPath",
     "executePlan",
@@ -102,10 +129,13 @@ const CLASSIFICATION: Classification = {
     "homeScreen",
     "installApp",
     "launchApp",
+    "measureStartup",
     "mockNetwork",
     "navigateTo",
     "network",
     "openLink",
+    // Starts and stops an on-device tracer (perfetto) or a device-attached xctrace.
+    "performanceTrace",
     "phoneCall",
     "pinchOn",
     "multiTouch",
@@ -123,6 +153,7 @@ const CLASSIFICATION: Classification = {
     "sendBroadcast",
     "sendKeys",
     "sendSms",
+    "setAppLinks",
     "setAppPermissions",
     "setDeviceResources",
     "setDeviceState",
@@ -130,6 +161,7 @@ const CLASSIFICATION: Classification = {
     "setNotificationPolicy",
     "setPosture",
     "setPreference",
+    "setSensor",
     "setUIState",
     "shake",
     "stageSessionDownloads",
@@ -145,6 +177,8 @@ const CLASSIFICATION: Classification = {
     // Starts a device-side recorder.
     "videoRecording",
     "wakeAndUnlock",
+    // Moves an app's task between window modes; may turn on freeform settings.
+    "windowMode",
   ],
 };
 

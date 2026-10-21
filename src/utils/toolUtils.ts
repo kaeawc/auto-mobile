@@ -2,7 +2,7 @@
  * Utility functions for tool handlers
  */
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
-import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
+import { deviceLostErrorFromAbortSignal } from "./deviceLossAbortRegistry";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { markToolFailure } from "./toolFailureSignal";
 

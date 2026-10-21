@@ -32,6 +32,8 @@ import type {
   CtrlProxySdkTriggerResult,
   CtrlProxyVoiceOverResult,
   CtrlProxyHingeAngleResult,
+  CtrlProxyAppearance,
+  CtrlProxyAppearanceResult,
   CtrlProxyActionResult,
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
@@ -1176,6 +1178,27 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     await this.applyDelay("setHingeAngle");
     this.checkFailure("setHingeAngle");
     return this.hingeAngleResult ?? { success: true, angle, totalTimeMs: 0 };
+  }
+
+  /** Appearance requests seen (`undefined` = read only) and the simulated system appearance. */
+  readonly appearanceHistory: Array<"light" | "dark" | undefined> = [];
+  appearance: CtrlProxyAppearance = "light";
+  appearanceResult?: CtrlProxyAppearanceResult;
+
+  async requestAppearance(
+    appearance?: "light" | "dark",
+    _timeoutMs: number = 5000,
+  ): Promise<CtrlProxyAppearanceResult> {
+    this.appearanceHistory.push(appearance);
+    await this.applyDelay("requestAppearance");
+    this.checkFailure("requestAppearance");
+    if (this.appearanceResult) {
+      return this.appearanceResult;
+    }
+    if (appearance) {
+      this.appearance = appearance;
+    }
+    return { success: true, appearance: this.appearance, totalTimeMs: 0 };
   }
 
   async requestLaunchApp(

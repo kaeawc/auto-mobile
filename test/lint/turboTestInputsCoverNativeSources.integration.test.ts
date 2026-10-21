@@ -69,6 +69,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpStdioClient.kt",
+    // androidLauncherRegistry.test.ts checks the desktop's ANDROID_LAUNCHERS list (#14056).
+    "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/AutoMobileContent.kt",
     // coordinateMappingGoldenVectorParity.test.ts parses the inline golden
     // tables out of CoordinateMappingGoldenVectorTest.kt (issue #4547).
     "android/desktop-core/src/test/kotlin/**",

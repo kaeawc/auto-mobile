@@ -73,7 +73,7 @@ export interface InFlightBootMemory {
 }
 
 /**
- * Size from settled emulators only, charging each in-flight boot at least the policy default.
+ * Size from settled emulators and in-flight boots, charging each boot at least the policy default.
  * Match every row by pid or parent pid. For handed-off boots whose process cannot be identified,
  * discard the smallest remaining rows, retaining the largest and flooring at the default when
  * all remaining rows could belong to those boots. An unavailable table keeps the default.
@@ -86,6 +86,17 @@ export function estimateSettledPerDeviceBytes(
   if (rows === undefined) {
     return policy.defaultBytes;
   }
+  const inFlightBytes = inFlight.map((boot) => {
+    const measured =
+      boot.processId === undefined
+        ? 0
+        : rows.reduce(
+            (sum, row) =>
+              row.pid === boot.processId || row.ppid === boot.processId ? sum + row.rssBytes : sum,
+            0,
+          );
+    return Math.max(measured, policy.defaultBytes);
+  });
   const processIds = new Set(inFlight.map((boot) => boot.processId));
   processIds.delete(undefined);
   const remaining = rows
@@ -93,7 +104,7 @@ export function estimateSettledPerDeviceBytes(
     .map((row) => row.rssBytes)
     .sort((a, b) => a - b);
   if (remaining.length === 0) {
-    return policy.defaultBytes;
+    return estimatePerDeviceBytes(inFlightBytes, policy);
   }
   const hasProcessIds = rows.some((row) => row.pid !== undefined || row.ppid !== undefined);
   const unmatchable = inFlight.filter(
@@ -103,7 +114,8 @@ export function estimateSettledPerDeviceBytes(
   const sum = settled.reduce((total, bytes) => total + bytes, 0);
   const average = sum / settled.length;
   const charged =
-    (sum + inFlight.length * policy.defaultBytes) / (settled.length + inFlight.length);
+    (sum + inFlightBytes.reduce((total, bytes) => total + bytes, 0)) /
+    (settled.length + inFlight.length);
   const floor = unmatchable >= remaining.length ? policy.defaultBytes : policy.minBytes;
   return Math.min(policy.maxBytes, Math.max(policy.minBytes, floor, average, charged));
 }

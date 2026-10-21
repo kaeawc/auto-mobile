@@ -12,6 +12,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
 import dev.jasonpearson.automobile.protocol.PrototypeCarouselNode
+import dev.jasonpearson.automobile.protocol.PrototypeChartNode
 import dev.jasonpearson.automobile.protocol.PrototypeCheck
 import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
@@ -389,6 +390,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeListItemNode ->
       copy(
+        headline = instance.interpolate(headline),
+        supporting = supporting?.let(instance::interpolate),
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
@@ -448,6 +451,13 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
+      )
+    is PrototypeChartNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        series = series.map { it.copy(path = instance.interpolate(it.path)) },
       )
     is PrototypeSnackbarNode ->
       copy(

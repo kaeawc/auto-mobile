@@ -678,10 +678,13 @@ export function preferenceWriteWarning(
   return undefined;
 }
 
-export function unsupportedPhysicalIosUserDefaultsError(): ActionableError {
+/**
+ * Physical iOS UserDefaults need the app's embedded SDK (#14093): the runner process cannot reach
+ * another app's sandbox, and devices expose no container plist to fall back to.
+ */
+export function physicalIosUserDefaultsRequireSdkError(detail: string): ActionableError {
   return new ActionableError(
-    "iOS physical devices are not supported for UserDefaults preferences yet. " +
-      "The available CtrlProxy storage APIs run in the runner process and cannot safely read or write another app's UserDefaults sandbox. " +
-      "Use an iOS Simulator for UserDefaults automation.",
+    `${detail} On physical iOS devices, getPreference and setPreference require the app to embed the AutoMobile SDK with storage inspection enabled and to be connected. ` +
+      "Launch the app's DEBUG build with the SDK, or use an iOS Simulator.",
   );
 }

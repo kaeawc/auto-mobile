@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "q": ""
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "styleWhen": [
+        {
+          "when": {
+            "key": "q",
+            "equals": ""
+          },
+          "style": {
+            "shimmer": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.styleWhen[0].style.shimmer",
+  "expectedMessage": "shimmer applies only to box, row, column and card"
+}

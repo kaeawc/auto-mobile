@@ -1,6 +1,4 @@
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../models";
-import { defaultDaemonContext } from "./daemonContext";
-import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { logger } from "../utils/logger";
 import { getAppearanceConfig, resolveAppearanceMode } from "./appearanceManager";
@@ -309,39 +307,9 @@ export class AppearanceSyncScheduler {
     );
   }
 
-  /** The targets of a scheduler nothing has scoped: the injected ones, else the pool's. */
+  /** An unscoped scheduler acts only on explicitly injected targets. */
   private ownTargets(): AppearanceSyncTarget[] {
-    return this.dependencies.getTargets?.() ?? this.getSyncTargets();
-  }
-
-  private getSyncTargets(): AppearanceSyncTarget[] {
-    const pool = defaultDaemonContext.devicePool();
-    if (pool) {
-      const pooledDevices = pool.getAllDevices();
-      const sessionManager =
-        pooledDevices.length > 0 ? defaultDaemonContext.sessionManager() : undefined;
-      if (sessionManager) {
-        const sessions = sessionManager.getAllSessions();
-        return pooledDevices.flatMap((device) => {
-          const holder = sessions.find((session) => session.assignedDevice === device.id);
-          return device.platform === "android" && holder
-            ? [
-                {
-                  deviceId: device.id,
-                  name: device.id,
-                  platform: device.platform,
-                  incarnation: device.incarnation,
-                  sessionKey: holder.sessionId,
-                },
-              ]
-            : [];
-        });
-      }
-    }
-
-    const current = DeviceReadiness.getInstance().getCurrentDevice();
-    // Only return if it's an Android device
-    return current && current.platform === "android" ? [current] : [];
+    return this.dependencies.getTargets?.() ?? [];
   }
 }
 

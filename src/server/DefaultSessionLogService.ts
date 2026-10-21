@@ -1,5 +1,6 @@
 import { ActionableError, type BootedDevice, type ExecResult, type Platform } from "../models";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import type { HostCommandExecutor } from "../utils/HostCommandExecutor";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -21,6 +22,7 @@ import type {
   UnifiedLogWindowRequest,
   UnifiedLogWindowResult,
 } from "./sessionLogContract";
+import { SessionLogSourceError } from "./SessionLogSourceError";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
 
 /** The narrow simctl surface the iOS provider needs: one argv exec and one shell-string exec. */
@@ -94,6 +96,14 @@ export interface SessionLogServiceDependencies {
   timer?: Timer;
   /** Hard ceiling on one `log show` invocation; the window itself is bounded by the contract. */
   unifiedLogTimeoutMs?: number;
+  /** Physical iOS unified-log seams (`log collect --device-udid` on the host). */
+  physicalIos?: {
+    host?: HostCommandExecutor;
+    /** Ceiling on `log collect` plus `log show`; defaults to 60 s. */
+    timeoutMs?: number;
+    hostPlatform?: NodeJS.Platform;
+    tempRoot?: string;
+  };
   providers?: SessionLogProvider[];
 }
 
@@ -188,6 +198,9 @@ async function runSource<T extends object>(
   } catch (error) {
     const reason = errorMessage(error);
     logger.warn(`[SessionLogService] ${label} source failed: ${reason}`, error);
+    if (error instanceof SessionLogSourceError) {
+      return { status: error.status, reason, code: error.code };
+    }
     if (error instanceof SessionLogTimeoutError) {
       return { status: "timedOut", reason };
     }

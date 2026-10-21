@@ -2,6 +2,22 @@ import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
 import type { BrokerResourceRecord } from "./store";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
+import type { SessionBrokerResetMode } from "../../devices/sessionBrokerResult";
+
+export interface ResetOutcome {
+  outcome: "clean" | "pending" | `fallback:${Exclude<SessionBrokerResetMode, "none">}`;
+  mode: SessionBrokerResetMode;
+  phases: Record<string, number>;
+  fallbackReason?: string;
+}
+
+export type ResetResult = "clean" | "pending" | ResetOutcome;
+
+export interface SessionPreparationTiming {
+  createMs?: number;
+  bootMs?: number;
+  automationReadyMs?: number;
+}
 
 export class SessionBrokerFailureError extends ActionableError {
   constructor(readonly failure: SessionBrokerFailure) {
@@ -26,7 +42,11 @@ export interface SessionBrokerDevicePort {
   prepare(
     resource: BrokerResourceRecord,
     options: SessionDevicePreparationOptions,
-  ): Promise<{ sessionId: string; profile: SessionDeviceProfile }>;
+  ): Promise<{
+    sessionId: string;
+    profile: SessionDeviceProfile;
+    timing?: SessionPreparationTiming;
+  }>;
   /** True only when all prior session work and restoration have settled. */
   release(sessionId: string): Promise<{ settled: boolean }>;
   /**
@@ -36,5 +56,5 @@ export interface SessionBrokerDevicePort {
    */
   destroy(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<"absent" | "pending">;
   /** Optional until the clean baseline is qualified; absence means zero pooling. */
-  reset?(resource: BrokerResourceRecord): Promise<"clean" | "pending">;
+  reset?(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<ResetResult>;
 }

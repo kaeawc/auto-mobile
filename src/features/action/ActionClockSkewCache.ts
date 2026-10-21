@@ -1,4 +1,5 @@
 import { logger } from "../../utils/logger";
+import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { DeviceTimestampResult } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 
@@ -18,6 +19,7 @@ interface ClockSample {
 }
 
 interface ClockEntry {
+  incarnation: string | undefined;
   sample?: ClockSample;
   inFlight?: Promise<number | null>;
 }
@@ -29,19 +31,25 @@ export class ActionClockSkewCache implements ActionClockSkewProvider {
   constructor(
     private readonly timer: Timer = defaultTimer,
     private readonly refreshIntervalMs = ACTION_CLOCK_REFRESH_INTERVAL_MS,
+    private readonly incarnationToken: typeof deviceIncarnationToken = deviceIncarnationToken,
   ) {}
 
   getSkewMs(deviceId: string, measure: DeviceClockMeasurement): Promise<number | null> {
-    const current = this.entries.get(deviceId);
+    const incarnation = this.incarnationToken(deviceId);
+    const cached = this.entries.get(deviceId);
+    const current = cached?.incarnation === incarnation ? cached : undefined;
     const sample = current?.sample;
-    if (sample && this.timer.now() - sample.measuredAt < this.refreshIntervalMs) {
-      return Promise.resolve(sample.skewMs);
+    if (sample) {
+      const age = this.timer.now() - sample.measuredAt;
+      if (age >= 0 && age < this.refreshIntervalMs) {
+        return Promise.resolve(sample.skewMs);
+      }
     }
     if (current?.inFlight) {
       return current.inFlight;
     }
     // A failed refresh must not keep using the expired offset.
-    const entry: ClockEntry = {};
+    const entry: ClockEntry = { incarnation };
     this.entries.set(deviceId, entry);
     entry.inFlight = this.measureSkew(deviceId, entry, measure);
     return entry.inFlight;

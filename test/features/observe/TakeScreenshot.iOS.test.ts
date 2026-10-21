@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
@@ -18,7 +18,16 @@ import {
 } from "../../../src/daemon/deviceDataStreamSocketServer";
 import { loadSharp } from "../../../src/utils/image/loadSharp";
 
+const defaultGetInstance = IOSCtrlProxyClient.getInstance;
+
 describe("TakeScreenshot iOS cancellation", function () {
+  // Backstop registered before any test body: a failure before a test's own try/finally still
+  // restores the process-wide singleton accessor and stream server for later shared files.
+  afterEach(() => {
+    IOSCtrlProxyClient.getInstance = defaultGetInstance;
+    installDeviceDataStreamSocketServerForTesting(null);
+  });
+
   let encodedScreenshots: { jpeg: Buffer; webp: Buffer };
 
   beforeAll(async () => {

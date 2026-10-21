@@ -123,6 +123,7 @@ nav:
       - "Agent Examples": using/agent-examples.md
       - "UI tests": using/ui-tests.md
       - "Test prep tools": using/test-prep-tools.md
+      - "OEM personas": using/oem-personas.md
       - "Session execution logs": using/session-logs.md
       - "Session Downloads fixtures": using/session-downloads.md
       - "Storage capabilities": using/storage-capabilities.md
@@ -142,6 +143,7 @@ nav:
       - "Device resources": design-docs/device-resources.md
       - "Host toolchain resource": design-docs/host-toolchain-resource.md
       - "Session broker experiment": design-docs/session-broker-experiment.md
+      - "Session broker device mutation journal": design-docs/session-broker-device-mutation-journal.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
@@ -169,6 +171,8 @@ nav:
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
+      - "Android windowing": design-docs/plat/android/windowing.md
+      - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
       - "Pressure, hover and stylus input": design-docs/plat/pressure-hover-stylus-input.md
   - "Contributing": contributing.md

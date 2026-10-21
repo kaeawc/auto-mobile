@@ -8,11 +8,8 @@ import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory"
 import type { Plan } from "../../src/models/Plan";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
-import {
-  DeviceLostError,
-  isDeviceLostError,
-  rememberDeviceLossAbort,
-} from "../../src/models/DeviceLostError";
+import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
+import { rememberDeviceLossAbort } from "../../src/utils/deviceLossAbortRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();

@@ -12,10 +12,15 @@ import { logger } from "../../utils/logger";
 import { SOCKET_PATH } from "../constants";
 import { ENV, readEnvRaw } from "../../config/env";
 import { PidFileData, type AuxiliaryDaemonSocketName } from "../types";
-import { statSync } from "node:fs";
+import { statFileIdentity, type SocketFileIdentity } from "../socketFileIdentity";
 import { mkdir } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
-import { PID_FILE_PATH, DAEMON_VERSION } from "../constants";
+import {
+  PID_FILE_PATH,
+  DAEMON_VERSION,
+  resolveDaemonVersion,
+  syncSettledDaemonVersion,
+} from "../constants";
 import { getCurrentBuildIdentity } from "../buildIdentity";
 import {
   cleanupDaemonFiles,
@@ -51,10 +56,10 @@ export interface DaemonIdentityHost {
 
 /** Publishes PID identity and records precisely which socket paths this daemon owns. */
 export class DaemonIdentity {
-  private readonly boundSocketIdentities = new Map<string, { dev: number; ino: number }>();
+  private readonly boundSocketIdentities = new Map<string, SocketFileIdentity>();
   constructor(
     private readonly host: DaemonIdentityHost,
-    private readonly files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statSync },
+    private readonly files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statFileIdentity },
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly databasePath: () => string = getDatabasePath,
     private readonly reportStartupFailure: (message: string) => void = (message) => {
@@ -99,6 +104,9 @@ export class DaemonIdentity {
    * ready early. {@link writePidFile} overwrites it with the complete record.
    */
   async writeEarlyOwnerRecord(): Promise<void> {
+    if (!syncSettledDaemonVersion()) {
+      await resolveDaemonVersion();
+    }
     // Snapshot any live incumbent BEFORE this overwrite clobbers its PID record,
     // so the lock-less bind guard can still see the live sibling and restore its
     // record on refusal instead of unlinking/orphaning it (issue #6232).
@@ -134,6 +142,9 @@ export class DaemonIdentity {
    * Write PID file with daemon metadata
    */
   async writePidFile(signal?: AbortSignal): Promise<void> {
+    if (!syncSettledDaemonVersion()) {
+      await resolveDaemonVersion();
+    }
     signal?.throwIfAborted();
     const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {
@@ -256,7 +267,7 @@ export class DaemonIdentity {
     expectedPid?: number;
     socketBindCommitted: boolean;
     socketPaths: string[];
-    socketFileIdentities: ReadonlyMap<string, { dev: number; ino: number }>;
+    socketFileIdentities: ReadonlyMap<string, SocketFileIdentity>;
   } {
     // Gate destructive cleanup on actually holding the socket bind. A lock-less
     // contender refused over a live sibling (issue #6232) has written its early

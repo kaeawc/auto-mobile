@@ -52,7 +52,7 @@ describe("androidIntentArgs (#14081)", () => {
   });
 
   test("shell metacharacters stay literal inside single quotes", () => {
-    const [, , , value] = androidIntentArgs(APP, {
+    const [, , value] = androidIntentArgs(APP, {
       extras: [{ key: "q", type: "string", value: `$(reboot); echo 'hi' && rm -rf /` }],
     }).slice(2);
     expect(value).toBe(`'$(reboot); echo '\\''hi'\\'' && rm -rf /'`);

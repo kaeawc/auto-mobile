@@ -27,12 +27,10 @@ internal object PrototypeObjectRules {
     textConstraint(data, rule, path)?.let {
       return it
     }
+    pairingConstraint(data, path)?.let {
+      return it
+    }
     val fields = rule.getValue("fields").jsonObject
-    if (data.text("type") == "searchBar" && "child" in data && "activeKey" !in data)
-      return fail("$path.child", "Search bar child requires activeKey")
-    // `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness.
-    if ("empty" in data && ("key" in data || "platform" in data))
-      return fail("$path.empty", "empty applies only to data conditions")
     for (key in (data.keys + fields.keys).sorted()) {
       val childPath = keyPath(path, key)
       val field = fields[key] as? JsonObject ?: return fail(childPath, "Unknown property")
@@ -45,6 +43,16 @@ internal object PrototypeObjectRules {
       if (error != null) return error
     }
     return objectConstraint(data, rule, path)
+  }
+
+  /** Properties that are only valid alongside another one, checked before the field walk. */
+  private fun pairingConstraint(data: JsonObject, path: String): PrototypeSpecError? {
+    if (data.text("type") == "searchBar" && "child" in data && "activeKey" !in data)
+      return fail("$path.child", "Search bar child requires activeKey")
+    // `empty` tests a `/data` value (#14207); key and `/platform` conditions have no emptiness.
+    if ("empty" in data && ("key" in data || "platform" in data))
+      return fail("$path.empty", "empty applies only to data conditions")
+    return null
   }
 
   fun textConstraint(data: JsonObject, rule: JsonObject, path: String): PrototypeSpecError? {

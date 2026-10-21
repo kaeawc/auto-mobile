@@ -50,7 +50,7 @@ export interface XctraceRecorderDependencies {
 }
 
 const DEFAULT_START_TIMEOUT_MS = 60_000;
-const DEFAULT_STOP_TIMEOUT_MS = 90_000;
+const DEFAULT_STOP_TIMEOUT_MS = 20_000;
 const EXPORT_TIMEOUT_MS = 120_000;
 const EXPORT_MAX_BUFFER = 64 * 1024 * 1024;
 /** `xctrace record` prints this once the recorder is capturing. */
@@ -145,9 +145,11 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         }
         const finished = await raceExit(exited, timer, stopTimeoutMs);
         if (!finished) {
+          // A killed xctrace leaves a trace without run data (#14737); fail fast and typed
+          // rather than reporting a stopped recording whose artifact cannot be opened.
           child.kill("SIGKILL");
-          warnings.push(
-            `xctrace did not finish within ${stopTimeoutMs}ms after SIGINT; the trace may be incomplete.`,
+          throw new ActionableError(
+            `xctrace did not finish within ${stopTimeoutMs}ms after SIGINT; the trace at ${artifactPath} is incomplete and cannot be summarised.`,
           );
         }
       },
@@ -203,7 +205,13 @@ export async function summarizeXctrace(
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(`[performanceTrace] xctrace export --toc failed: ${errorMessage(error)}`, error);
-    return { summary: {}, warnings: [`xctrace export --toc failed: ${errorMessage(error)}`] };
+    const unreadable = /malformed|missing/i.test(errorMessage(error))
+      ? " The trace is unreadable (xctrace did not finalize it); do not rely on the artifact."
+      : "";
+    return {
+      summary: {},
+      warnings: [`xctrace export --toc failed: ${errorMessage(error)}.${unreadable}`],
+    };
   }
   const summary: PerformanceTraceSummary = {
     ...(toc.durationMs !== undefined ? { durationMs: toc.durationMs } : {}),

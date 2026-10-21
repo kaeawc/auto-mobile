@@ -39,6 +39,8 @@ function execResult(stdout: string, stderr = ""): ExecResult {
 class RecordingAdb {
   readonly calls: string[][] = [];
   probesUntilStopped = 1;
+  /** Successive `wc -c` answers; the last repeats. */
+  sizes = [4096, 4096];
 
   async execute(args: string[], _options?: AdbExecuteOptions): Promise<ExecResult> {
     this.calls.push(args);
@@ -49,6 +51,10 @@ class RecordingAdb {
     if (command.includes("kill -0")) {
       this.probesUntilStopped -= 1;
       return execResult(this.probesUntilStopped <= 0 ? "stopped\n" : "running\n");
+    }
+    if (command.includes("wc -c")) {
+      const size = this.sizes.length > 1 ? this.sizes.shift()! : this.sizes[0]!;
+      return execResult(`${size}\n`);
     }
     return execResult("");
   }
@@ -64,6 +70,7 @@ function perfetto(adb: RecordingAdb, processor?: PerfettoTraceProcessor) {
       traceProcessor: async () => processor,
       timer,
       stopPollAttempts: 3,
+      flushPollAttempts: 4,
     }),
   };
 }
@@ -104,11 +111,35 @@ describe("Perfetto recorder (#14102)", () => {
       "shell kill -TERM 31337 2>/dev/null; true",
       "shell kill -0 31337 2>/dev/null && echo running || echo stopped",
       "shell kill -0 31337 2>/dev/null && echo running || echo stopped",
+      "shell wc -c < /data/misc/perfetto-traces/automobile-trace-1.perfetto-trace 2>/dev/null || echo 0",
+      "shell wc -c < /data/misc/perfetto-traces/automobile-trace-1.perfetto-trace 2>/dev/null || echo 0",
       `pull /data/misc/perfetto-traces/automobile-trace-1.perfetto-trace ${recording.artifactPath}`,
       "shell rm -f /data/misc/perfetto-traces/automobile-trace-1.perfetto-trace",
     ]);
-    expect(timer.getSleepHistory()).toEqual([250]);
+    expect(timer.getSleepHistory()).toEqual([250, 250]);
     expect(recording.warnings).toEqual([]);
+  });
+
+  test("waits for the trace file to fill before pulling, even though perfetto already exited (#14737)", async () => {
+    const adb = new RecordingAdb();
+    adb.sizes = [0, 0, 369_000, 369_000];
+    const recording = await perfetto(adb).recorder.start(androidRequest);
+
+    await recording.stop();
+
+    const calls = adb.calls.map((call) => call.join(" "));
+    const lastProbe = calls.map((call) => call.includes("wc -c")).lastIndexOf(true);
+    expect(calls.filter((call) => call.includes("wc -c"))).toHaveLength(4);
+    expect(calls.findIndex((call) => call.startsWith("pull"))).toBeGreaterThan(lastProbe);
+  });
+
+  test("fails with a typed error instead of pulling an empty trace (#14737)", async () => {
+    const adb = new RecordingAdb();
+    adb.sizes = [0];
+    const recording = await perfetto(adb).recorder.start(androidRequest);
+
+    await expect(recording.stop()).rejects.toThrow("trace is empty");
+    expect(adb.calls.some((call) => call[0] === "pull")).toBe(false);
   });
 
   test("warns when perfetto never exits after SIGTERM", async () => {
@@ -208,6 +239,40 @@ describe("xctrace recorder (#14102)", () => {
     await recording.stop();
     expect(host.spawned[0]!.child.signalCode).toBe("SIGINT");
     expect(recording.warnings).toEqual([]);
+  });
+
+  test("does not signal an xctrace that already ended at its time limit (#14737)", async () => {
+    const { host, recorder } = xctrace();
+    const recording = await recorder.start(iosRequest);
+    host.spawned[0]!.child.emit("exit", 0, null);
+
+    await recording.stop();
+
+    expect(host.spawned[0]!.child.signalCode).toBeNull();
+  });
+
+  test("fails typed and kills xctrace when it will not finalize after SIGINT (#14737)", async () => {
+    const { host, recorder } = xctrace();
+    const recording = await recorder.start(iosRequest);
+    const child = host.spawned[0]!.child;
+    const signals: Array<string | number | undefined> = [];
+    child.kill = (signal) => (signals.push(signal), true);
+
+    await expect(recording.stop()).rejects.toThrow("did not finish within 5000ms");
+    expect(signals).toEqual(["SIGINT", "SIGKILL"]);
+  });
+
+  test("flags a malformed trace as unreadable (#14737)", async () => {
+    const { host, recorder } = xctrace();
+    const recording = await recorder.start(iosRequest);
+    await recording.stop();
+    host.executeCommand = async () => {
+      throw new Error("Trace is malformed - run data is missing");
+    };
+
+    const { warnings } = await recording.summarize();
+
+    expect(warnings[0]).toContain("unreadable");
   });
 
   test("summarises the template table from xctrace export", async () => {

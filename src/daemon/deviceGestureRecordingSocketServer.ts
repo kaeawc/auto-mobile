@@ -1,7 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import { DeviceReadiness } from "./readiness/DeviceReadiness";
+import type { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {
@@ -146,7 +146,7 @@ const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
  * with readiness and the session-device ID lookup injectable so tests can use fakes.
  */
 export function createDeviceGestureRecordingDeviceResolution(
-  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () => DeviceReadiness.getInstance(),
+  deviceSessions: () => DeviceGestureRecordingDeviceSessions,
   sessionDeviceId: (sessionUuid: string | undefined) => string | undefined = (sessionUuid) => {
     if (!sessionUuid) {
       return undefined;
@@ -209,7 +209,11 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
       "deviceGestureRecording",
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
-    deviceResolution: DeviceGestureRecordingDeviceResolution = createDeviceGestureRecordingDeviceResolution(),
+    deviceResolution: DeviceGestureRecordingDeviceResolution = createDeviceGestureRecordingDeviceResolution(
+      () => {
+        throw new ActionableError("Inject device readiness before recording gestures.");
+      },
+    ),
     bindingGate: DeviceGestureRecordingBindingGate = defaultBindingGate,
   ) {
     super(socketPath, timer, "DeviceGestureRecording");
@@ -440,8 +444,19 @@ export function getDeviceGestureRecordingSocketPath(): string {
   );
 }
 
-export async function startDeviceGestureRecordingSocketServer(): Promise<void> {
-  await socketServer.start(() => new DeviceGestureRecordingSocketServer());
+export async function startDeviceGestureRecordingSocketServer(
+  readiness: DeviceGestureRecordingDeviceSessions,
+): Promise<void> {
+  await socketServer.start(
+    () =>
+      new DeviceGestureRecordingSocketServer(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        createDeviceGestureRecordingDeviceResolution(() => readiness),
+      ),
+  );
 }
 
 export async function stopDeviceGestureRecordingSocketServer(): Promise<void> {

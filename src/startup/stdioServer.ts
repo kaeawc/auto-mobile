@@ -1,3 +1,4 @@
+import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import {
   installStdinShutdownHandlers,
   installStdoutShutdownHandler,
@@ -33,13 +34,14 @@ export async function runStdioServer(
 ): Promise<void> {
   const { logger } = modules;
   const useProxyMode = !args.noProxy;
+  const deviceReadiness = useProxyMode ? undefined : DeviceReadiness.createInstance();
   state.directModeActive = !useProxyMode;
 
   if (useProxyMode) {
     logger.info("Starting MCP server in proxy mode (connecting to daemon)");
   } else {
     logger.info("Starting MCP server in direct mode (--no-proxy flag)");
-    await startDirectModeServices(modules);
+    await startDirectModeServices(modules, deviceReadiness!);
   }
 
   // Run as MCP server with STDIO transport.
@@ -59,6 +61,7 @@ export async function runStdioServer(
     state,
     launch,
     useProxyMode,
+    deviceReadiness,
   );
   try {
     logger.info("Connecting MCP server to stdio transport");
@@ -92,9 +95,10 @@ export async function startDirectModeServices(
     | "startAppearanceSocketServer"
     | "startWebRtcStreamSocketServer"
   >,
+  deviceReadiness: DeviceReadiness,
 ): Promise<void> {
   await modules.startVideoRecordingSocketServer();
-  await modules.startDeviceGestureRecordingSocketServer();
+  await modules.startDeviceGestureRecordingSocketServer(deviceReadiness);
   await modules.startDeviceSnapshotSocketServer();
   await modules.startAppearanceSocketServer();
   await modules.startWebRtcStreamSocketServer();
@@ -130,6 +134,7 @@ async function createStdioMcpServer(
   state: StdioRuntimeState,
   launch: StdioLaunchContext,
   useProxyMode: boolean,
+  deviceReadiness?: DeviceReadiness,
 ): Promise<{
   server: ConnectableServer;
   proxyToClaimInitialSession: { claimInitialSession(): Promise<void> } | undefined;
@@ -137,7 +142,7 @@ async function createStdioMcpServer(
   try {
     if (!useProxyMode) {
       return {
-        server: modules.createMcpServer({ debug: args.debug }),
+        server: modules.createMcpServer({ debug: args.debug, deviceReadiness }),
         proxyToClaimInitialSession: undefined,
       };
     }

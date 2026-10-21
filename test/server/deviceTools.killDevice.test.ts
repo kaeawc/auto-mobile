@@ -84,12 +84,6 @@ import {
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { createRegistryWiredDevicePool } from "../helpers/createRegistryWiredDevicePool";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { DirectSessionNotActiveError } from "../../src/models/DirectSessionNotActiveError";
-import {
-  clearDirectSessionDevices,
-  registerDirectSessionDevice,
-  resolveDirectSessionDevice,
-} from "../../src/utils/directSessionDeviceRegistry";
 
 const toolResponseSchema = z.object({
   isError: z.boolean().optional(),
@@ -869,7 +863,6 @@ describe("killDevice handler", () => {
   };
 
   const cleanup = () => {
-    clearDirectSessionDevices();
     AndroidCtrlProxyClient.resetInstances();
     IOSCtrlProxyClient.resetInstances();
     resetDeviceToolsDependencies();
@@ -3819,9 +3812,8 @@ describe("killDevice handler", () => {
     }
   });
 
-  test("a tool call after iOS kill cannot revive a pending screenshot client", async () => {
+  test("a tool call after iOS kill refuses its stale session and cannot revive a pending screenshot client", async () => {
     const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "ios-killed" };
-    registerDirectSessionDevice("session-1", device);
     const timer = new FakeTimer();
     const successfulManager = new SuccessfulKillDeviceManager();
     manager = successfulManager;
@@ -3865,10 +3857,9 @@ describe("killDevice handler", () => {
 
       await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).resolves.toBeDefined();
       expect(successfulManager.killedDeviceIds).toEqual([device.deviceId]);
-      expect(resolveDirectSessionDevice("session-1")).toBeUndefined();
 
       // The next resolver still sees the caller's selected device, without a
-      // fresh boot observation. The killed session must be refused before readiness.
+      // fresh boot observation. Binding the session must preserve its tombstone.
       const fakeSessionManager = new FakeDeviceReadiness();
       fakeSessionManager.setConnectedDevices([device]);
       registry.setCollaboratorsForTesting({ deviceReadiness: fakeSessionManager });
@@ -3889,8 +3880,7 @@ describe("killDevice handler", () => {
           platform: "ios",
           sessionUuid: "session-1",
         }),
-      ).rejects.toBeInstanceOf(DirectSessionNotActiveError);
-      expect(fakeSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      ).rejects.toMatchObject({ code: "direct_session_not_active" });
 
       expect(String(await screenshotResult)).toContain("WebSocket connection closed");
       const postKillClient = IOSCtrlProxyClient.getInstance(device);

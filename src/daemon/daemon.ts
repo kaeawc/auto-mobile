@@ -1,4 +1,5 @@
 import { registerPrototypeDaemonPort } from "../features/prototype/prototypeDaemonPorts";
+import { daemonToolRegistry } from "./toolRegistryPort";
 import {} from "./networkStateSessionCleanup";
 import {} from "./recordingSessionCleanup";
 import {} from "./observationRequestBatch";
@@ -158,6 +159,8 @@ export class Daemon {
 
   private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
 
+  private readonly deviceReadiness: DeviceReadiness;
+
   private readonly iosDeviceVerifier: () => Pick<DeviceReadiness, "verifyIosDevice">;
 
   private readonly bindingExclusionFactory: (timer: Timer) => BindingExclusion;
@@ -193,6 +196,7 @@ export class Daemon {
   private rejectStartupCompletion!: (reason: unknown) => void;
 
   private readonly mcpServices = new DaemonMcpServices({
+    deviceReadiness: () => this.deviceReadiness,
     httpToken: () => this.httpToken,
     iosDoctorDependencies: this.iosDoctorDependencies,
     debug: () => this.debug,
@@ -350,6 +354,7 @@ export class Daemon {
       recoverFromDatabaseHealthFailure,
       ...retained
     } = resolveDaemonDependencies(dependencies);
+    this.deviceReadiness = retained.deviceReadiness;
     this.daemonState = retained.daemonState;
     this.httpServerFactory = retained.httpServerFactory;
     this.httpToken = new DaemonHttpTokenLifecycle(
@@ -676,6 +681,10 @@ export class Daemon {
     return this.sessionManager;
   }
 
+  getDeviceReadiness(): DeviceReadiness {
+    return this.deviceReadiness;
+  }
+
   /**
    * Get the DevicePool instance
    */
@@ -931,6 +940,7 @@ export class Daemon {
   private createDaemonCoreServices(): DaemonCoreServices {
     const daemon = this;
     return {
+      deviceReadiness: () => daemon.deviceReadiness,
       iosDeviceVerifier: () => daemon.iosDeviceVerifier,
       httpIngress: () => daemon.httpIngress,
       mcpDispatcher: () => daemon.mcpDispatcher,
@@ -1074,5 +1084,6 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
   const daemon = new Daemon(options, {
     foreignCtrlProxyForwardEvidence: createForeignCtrlProxyForwardEvidence(),
   });
+  daemonToolRegistry().setDeviceReadiness(daemon.getDeviceReadiness());
   await daemon.start();
 }

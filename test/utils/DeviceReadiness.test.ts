@@ -266,7 +266,7 @@ describe("DeviceReadiness", () => {
 
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
     expect(accessibilityManager.wasMethodCalled("enable")).toBe(false);
-    expect(manager.getCurrentDevice()).toBeUndefined();
+    expect(manager.getExplicitDevicePin()).toBeUndefined();
   });
 
   test("verifyAndroidDevice rejects a failed CtrlProxy setup result", async () => {
@@ -1085,7 +1085,7 @@ describe("DeviceReadiness legacy iOS auto-start readiness", () => {
     const iosClient = new FakeIOSCtrlProxy();
     iosClient.setConnected(false);
     const manager = createManager(iosManager, iosClient);
-    manager.setCurrentDevice(iosDevice, "ios");
+    manager.setExplicitDevicePin(iosDevice);
 
     await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-setup/);
     expect(iosManager.getCallCount("setup")).toBe(1);
@@ -1285,7 +1285,7 @@ describe("DeviceReadiness dual-platform resolution", () => {
   test("should throw when both platforms connected and no active device or deviceId", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
-    expect(manager.getCurrentDevice()).toBeUndefined();
+    expect(manager.getExplicitDevicePin()).toBeUndefined();
     const readiness = manager.ensureDeviceReady("either", undefined, {
       skipCtrlProxyDownload: true,
     });
@@ -1295,21 +1295,18 @@ describe("DeviceReadiness dual-platform resolution", () => {
     );
   });
 
-  test("session-scoped readiness leaks the shared current device into sessionless resolution: current behaviour (#11810)", async () => {
+  test("session-scoped readiness leaves sessionless mixed-platform selection ambiguous (#11810)", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     await manager.ensureDeviceReady("ios", iosDevice.deviceId, {
       sessionId: "session-b",
       skipCtrlProxyDownload: true,
     });
-    expect(manager.getCurrentDevice()?.deviceId).toBe("ios-sim-1");
-
-    // The baseline above throws with no prior readiness. The #11810 removal slice will flip
-    // this characterization: session-scoped readiness must no longer choose a sessionless target.
-    const result = await manager.ensureDeviceReady("either", undefined, {
+    const result = manager.ensureDeviceReady("either", undefined, {
       skipCtrlProxyDownload: true,
     });
-    expect(result.deviceId).toBe("ios-sim-1");
+    await expect(result).rejects.toBeInstanceOf(ActionableError);
+    await expect(result).rejects.toThrow("Both Android and iOS devices are connected");
   });
 
   test("fails closed when an unusable iOS runner override is set (#4221)", async () => {
@@ -1357,7 +1354,7 @@ describe("DeviceReadiness dual-platform resolution", () => {
   test("should resolve to ios when setActiveDevice was called with ios", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
-    manager.setCurrentDevice(iosDevice, "ios");
+    manager.setExplicitDevicePin(iosDevice);
 
     const result = await manager.ensureDeviceReady("either", iosDevice.deviceId);
     expect(result.platform).toBe("ios");
@@ -1370,7 +1367,7 @@ describe("DeviceReadiness dual-platform resolution", () => {
     // Ambient platform is Android (a prior setActiveDevice), but the caller now
     // targets the iOS device by id with no explicit platform — switching must
     // honor the named device over the ambient platform, not throw.
-    manager.setCurrentDevice(androidDevice, "android");
+    manager.setExplicitDevicePin(androidDevice);
 
     const result = await manager.ensureDeviceReady("either", iosDevice.deviceId);
     expect(result.platform).toBe("ios");
@@ -1380,7 +1377,7 @@ describe("DeviceReadiness dual-platform resolution", () => {
   test("should resolve to active platform without deviceId when setActiveDevice was called", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
-    manager.setCurrentDevice(iosDevice, "ios");
+    manager.setExplicitDevicePin(iosDevice);
 
     const result = await manager.ensureDeviceReady("either");
     expect(result.platform).toBe("ios");
@@ -1430,13 +1427,12 @@ describe("DeviceReadiness dual-platform resolution", () => {
 
   test("explicit pin wins over a later ambient device resolution", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
-    manager.setCurrentDevice(iosDevice, "ios");
     manager.setExplicitDevicePin(iosDevice);
-    manager.setCurrentDevice(androidDevice, "android");
+    await manager.ensureDeviceReady("android", androidDevice.deviceId, { sessionId: "other" });
 
     const result = await manager.ensureDeviceReady("either");
     expect(result.deviceId).toBe(iosDevice.deviceId);
-    expect(manager.getCurrentDevice()?.deviceId).toBe(iosDevice.deviceId);
+    expect(manager.getExplicitDevicePin()?.deviceId).toBe(iosDevice.deviceId);
   });
 
   test("should resolve ios device by providedDeviceId when no active device set", async () => {
@@ -1476,21 +1472,21 @@ describe("DeviceReadiness dual-platform resolution", () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     // Set current device to Android (simulating a prior setActiveDevice call)
-    manager.setCurrentDevice(androidDevice, "android");
+    manager.setExplicitDevicePin(androidDevice);
 
     // Call ensureDeviceReady with "either" - should use the current Android device
     const result = await manager.ensureDeviceReady("either");
     expect(result.platform).toBe("android");
     expect(result.deviceId).toBe("emulator-5554");
     // The device should still be set (not cleared by a failed iOS verification)
-    expect(manager.getCurrentPlatform()).toBe("android");
-    expect(manager.getCurrentDevice()?.deviceId).toBe("emulator-5554");
+    expect(manager.getExplicitDevicePin()?.platform).toBe("android");
+    expect(manager.getExplicitDevicePin()?.deviceId).toBe("emulator-5554");
   });
 
   test("request cancellation preserves the current device selection", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
     const controller = new AbortController();
-    manager.setCurrentDevice(androidDevice, "android");
+    manager.setExplicitDevicePin(androidDevice);
     controller.abort(new Error("request cancelled"));
 
     await expect(
@@ -1500,8 +1496,8 @@ describe("DeviceReadiness dual-platform resolution", () => {
       }),
     ).rejects.toThrow("request cancelled");
 
-    expect(manager.getCurrentPlatform()).toBe("android");
-    expect(manager.getCurrentDevice()?.deviceId).toBe(androidDevice.deviceId);
+    expect(manager.getExplicitDevicePin()?.platform).toBe("android");
+    expect(manager.getExplicitDevicePin()?.deviceId).toBe(androidDevice.deviceId);
   });
 
   test("reserves the current simulator through readiness verification", async () => {
@@ -1509,7 +1505,7 @@ describe("DeviceReadiness dual-platform resolution", () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory, {
       lifecycleCoordinator,
     });
-    manager.setCurrentDevice(iosDevice, "ios");
+    manager.setExplicitDevicePin(iosDevice);
 
     await manager.ensureDeviceReady("either");
 
@@ -1523,14 +1519,13 @@ describe("DeviceReadiness dual-platform resolution", () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     // Set current device to iOS (simulating a prior setActiveDevice call to iOS)
-    manager.setCurrentDevice(iosDevice, "ios");
+    manager.setExplicitDevicePin(iosDevice);
 
     // Call ensureDeviceReady with explicit "android" platform
     const result = await manager.ensureDeviceReady("android", "emulator-5554");
     expect(result.platform).toBe("android");
     expect(result.deviceId).toBe("emulator-5554");
-    // Current device should now be updated to Android
-    expect(manager.getCurrentPlatform()).toBe("android");
+    expect(manager.getExplicitDevicePin()?.platform).toBe("ios");
   });
 
   test("should resolve correct platform when explicitly requesting android with both devices booted", async () => {
@@ -1542,14 +1537,13 @@ describe("DeviceReadiness dual-platform resolution", () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     // Set current device to iOS first
-    manager.setCurrentDevice(iosDevice, "ios");
+    manager.setExplicitDevicePin(iosDevice);
 
     // Explicitly request Android without deviceId — should still resolve to Android
     const result = await manager.ensureDeviceReady("android");
     expect(result.platform).toBe("android");
     expect(result.deviceId).toBe("emulator-5554");
-    // Current device should now be updated to Android
-    expect(manager.getCurrentPlatform()).toBe("android");
+    expect(manager.getExplicitDevicePin()?.platform).toBe("ios");
   });
 
   test("passes spawned Android emulator process into auto-start readiness wait", async () => {
@@ -1977,7 +1971,7 @@ describe("DeviceReadiness dual-platform resolution", () => {
     const windowProvider = createDefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
     const manager = createTestSessionManager(provider, fakeAdbFactory);
-    manager.setCurrentDevice(raw(first), "android");
+    manager.setExplicitDevicePin(raw(first));
 
     fakeDeviceUtils.setBootedDevices("android", [first]);
     fakeAdb.setDevices([raw(first)]);
@@ -1989,7 +1983,7 @@ describe("DeviceReadiness dual-platform resolution", () => {
     expect(createdFor).toEqual([first.name, second.name]);
     expect(readyFirst.name).toBe(first.name);
     expect(readySecond.name).toBe(second.name);
-    expect(manager.getCurrentDevice()?.name).toBe(second.name);
+    expect(manager.getExplicitDevicePin()?.deviceId).toBe(second.deviceId);
   });
 
   // Readiness calls for two AVDs can overlap on a reused serial and finish out

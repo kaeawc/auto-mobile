@@ -76,6 +76,7 @@ ${PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "opt-in")
   .join("\n")}
 Android inventory reads the local ADB server socket without launching adb; it can neither start nor restart a server.
 Other derived env: MT_BATCH, MT_DAEMON, MT_SERVER, MT_PORT; AUTOMOBILE_APPEARANCE_SYNC=off; AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS=0 unless configured.
+With --protect, AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS excludes 5554 and protected emulator serial ports for every daemon; --env/--daemon-env overrides it (blank opts out).
 Broker init renders broker/host-config.json and broker/clients.json (0600). AUTOMOBILE_SESSION_BROKER_CONFIG is set only for daemon 1 start; client/wrapper env stays scrubbed. --env/--daemon-env cannot set broker/session configuration variables.
 Devices and teardown:
   batch-booted: positive MT_BATCH evidence for this batch; bootedBy daemon<N> comes from MT_DAEMON=P<digits>.

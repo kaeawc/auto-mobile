@@ -535,23 +535,65 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
           { resource, scope: this.mutationScope(resource, assignment), runResetBoot },
         );
       }
-      const acquired = this.androidDevices.get(resource.resourceId);
-      const device = acquired?.device;
-      if (
-        !device ||
-        !acquired ||
-        !this.sameReleasedBinding(assignment, acquired) ||
-        device.name !== name ||
-        expected.stableDeviceId !== name ||
-        !android ||
-        profile.platform !== "android"
-      ) {
-        throw new ActionableError("Android reset lacks its original acquired transport identity");
+      if (!android || profile.platform !== "android") {
+        throw new ActionableError(
+          "Android reset dispatch requires an Android reset implementation and profile",
+        );
       }
+      if (!android.canCapture) {
+        throw new ActionableError(
+          "Android reset is destruction-only: no androidResetMode reset strategy is configured",
+        );
+      }
+      const device = this.androidResetTarget(resource, assignment, name);
       return android.reset(resource.resourceId, device, profile, assertOwned);
     });
     await assertOwned();
     return result;
+  }
+
+  private androidResetTarget(
+    resource: BrokerResourceRecord,
+    assignment: BindingAssignmentRecord,
+    name: string,
+  ): BootedDevice {
+    const acquired = this.androidDevices.get(resource.resourceId);
+    if (!acquired) {
+      throw new ActionableError("Android reset baseline was not captured at acquisition");
+    }
+    const fields: string[] = [];
+    if (!this.sameReleasedBinding(assignment, acquired)) {
+      fields.push("generation");
+    }
+    if (acquired.stableDeviceId !== assignment.stableDeviceId) {
+      fields.push("stableDeviceId");
+    }
+    if (acquired.device.name !== name) {
+      fields.push("deviceName");
+    }
+    if (assignment.stableDeviceId !== name) {
+      fields.push("avdName");
+    }
+    if (fields.length > 0) {
+      logger.warn(`Android reset acquired transport identity mismatch: ${fields.join(", ")}`, {
+        resourceId: resource.resourceId,
+        fields,
+        acquired: {
+          generation: acquired.generation,
+          stableDeviceId: acquired.stableDeviceId,
+          deviceName: acquired.device.name,
+        },
+        expected: {
+          generation: assignment.generation,
+          stableDeviceId: assignment.stableDeviceId,
+          deviceName: name,
+        },
+      });
+      throw new ActionableError(
+        `Android reset lacks its original acquired transport identity (mismatched: ${fields.join(", ")})`,
+      );
+    }
+    return acquired.device;
   }
 
   private mutationScope(

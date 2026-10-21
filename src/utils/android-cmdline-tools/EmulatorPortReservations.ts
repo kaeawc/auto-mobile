@@ -5,11 +5,45 @@ import { PortManager, type PortAvailabilityChecker } from "../PortManager";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { Timer } from "../SystemTimer";
 import type { AdbClientFactory } from "./AdbClientFactory";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../../config/env";
+import { EmulatorConsolePortExcludedError } from "./EmulatorConsolePortExcludedError";
 
 const MIN_EMULATOR_CONSOLE_PORT = 5554;
 const MAX_EMULATOR_CONSOLE_PORT = 5682;
 const EMULATOR_CONSOLE_PORT_STEP = 2;
 const TERMINAL_RESERVATION_TTL_MS = 30_000;
+
+function isValidEmulatorConsolePort(port: number): boolean {
+  return (
+    Number.isInteger(port) &&
+    port >= MIN_EMULATOR_CONSOLE_PORT &&
+    port <= MAX_EMULATOR_CONSOLE_PORT &&
+    port % EMULATOR_CONSOLE_PORT_STEP === 0
+  );
+}
+
+/** Resolve at launch time so invalid configuration never fails during module loading. */
+export function resolveExcludedEmulatorConsolePorts(env: NodeJS.ProcessEnv): ReadonlySet<number> {
+  const raw = readEnvRaw(ENV.EMULATOR_EXCLUDED_CONSOLE_PORTS, env);
+  if (raw === undefined) {
+    return new Set(
+      readEnvTrimmed(ENV.SESSION_BROKER_CONFIG, env) ? [MIN_EMULATOR_CONSOLE_PORT] : [],
+    );
+  }
+  const ports = new Set<number>();
+  for (const entry of raw.split(/[,\s]+/).filter(Boolean)) {
+    const digits = /^(?:emulator-)?(\d+)$/.exec(entry)?.[1];
+    const port = Number(digits);
+    if (!digits || !isValidEmulatorConsolePort(port)) {
+      throw new ActionableError(
+        `${ENV.EMULATOR_EXCLUDED_CONSOLE_PORTS.name} has invalid entry '${entry}'; ` +
+          `use even console ports from ${MIN_EMULATOR_CONSOLE_PORT} through ${MAX_EMULATOR_CONSOLE_PORT} or emulator-<port> serials.`,
+      );
+    }
+    ports.add(port);
+  }
+  return ports;
+}
 
 export type EmulatorPortPair = {
   readonly consolePort: number;
@@ -49,13 +83,7 @@ function parseEmulatorConsolePort(
   option: EmulatorConsolePortArgument["option"],
 ): number {
   const consolePort = Number(consolePortText);
-  if (
-    !consolePortText ||
-    !Number.isInteger(consolePort) ||
-    consolePort < MIN_EMULATOR_CONSOLE_PORT ||
-    consolePort > MAX_EMULATOR_CONSOLE_PORT ||
-    consolePort % EMULATOR_CONSOLE_PORT_STEP !== 0
-  ) {
+  if (!consolePortText || !isValidEmulatorConsolePort(consolePort)) {
     throw new ActionableError(
       `Emulator ${option} must specify an even console port from ` +
         `${MIN_EMULATOR_CONSOLE_PORT} through ${MAX_EMULATOR_CONSOLE_PORT}`,
@@ -100,12 +128,7 @@ function emulatorPortsForDeviceId(deviceId: string | undefined): EmulatorPortPai
     return undefined;
   }
   const consolePort = Number(deviceId.slice("emulator-".length));
-  if (
-    !Number.isInteger(consolePort) ||
-    consolePort < MIN_EMULATOR_CONSOLE_PORT ||
-    consolePort > MAX_EMULATOR_CONSOLE_PORT ||
-    consolePort % EMULATOR_CONSOLE_PORT_STEP !== 0
-  ) {
+  if (!isValidEmulatorConsolePort(consolePort)) {
     throw new ActionableError(
       `Expected emulator device ID '${deviceId}' must use an even console port from ` +
         `${MIN_EMULATOR_CONSOLE_PORT} through ${MAX_EMULATOR_CONSOLE_PORT}`,
@@ -233,6 +256,7 @@ export interface EmulatorPortReservationDeps {
   timer: () => Timer;
   adbFactory: () => AdbClientFactory;
   hostPortAvailabilityChecker: () => PortAvailabilityChecker;
+  excludedConsolePorts?: () => ReadonlySet<number>;
 }
 
 /**
@@ -277,6 +301,10 @@ export interface EmulatorPortReservations {
 
 export class DefaultEmulatorPortReservations implements EmulatorPortReservations {
   constructor(private readonly deps: EmulatorPortReservationDeps) {}
+
+  private excludedConsolePorts(): ReadonlySet<number> {
+    return this.deps.excludedConsolePorts?.() ?? resolveExcludedEmulatorConsolePorts(process.env);
+  }
 
   hasInFlightLaunch(avdName: string): boolean {
     return state.inFlightAvdLaunches.has(avdName);
@@ -361,6 +389,7 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
     this.pruneExpiredTerminalReservations(preLaunchSnapshot);
     const preexistingDeviceIds = preLaunchSnapshot.deviceIds;
     const unavailablePorts = this.unavailableEmulatorPorts(preexistingDeviceIds);
+    const excludedPorts = this.excludedConsolePorts();
     for (
       let port = MIN_EMULATOR_CONSOLE_PORT;
       port <= MAX_EMULATOR_CONSOLE_PORT;
@@ -368,6 +397,7 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
     ) {
       const ports = { consolePort: port, adbPort: port + 1 };
       if (
+        !excludedPorts.has(port) &&
         !unavailablePorts.has(ports.consolePort) &&
         !unavailablePorts.has(ports.adbPort) &&
         (await this.areEmulatorPortsAvailableOnHost(ports, signal))
@@ -384,7 +414,9 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
     }
     throw new ActionableError(
       `Cannot safely launch an Android emulator: all console ports from ` +
-        `${MIN_EMULATOR_CONSOLE_PORT} through ${MAX_EMULATOR_CONSOLE_PORT} are in use`,
+        `${MIN_EMULATOR_CONSOLE_PORT} through ${MAX_EMULATOR_CONSOLE_PORT} are in use; ` +
+        `excluded console ports: ${[...excludedPorts].sort((a, b) => a - b).join(", ") || "none"} ` +
+        `(${ENV.EMULATOR_EXCLUDED_CONSOLE_PORTS.name})`,
     );
   }
 
@@ -467,6 +499,9 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
     signal?: AbortSignal,
     preLaunchSnapshot?: EmulatorDeviceIdSnapshot,
   ): Promise<void> {
+    if (this.excludedConsolePorts().has(ports.consolePort)) {
+      throw new EmulatorConsolePortExcludedError(ports.consolePort);
+    }
     this.assertEmulatorPortsNotReserved(ports, preexistingDeviceIds, preLaunchSnapshot);
     if (!(await this.areEmulatorPortsAvailableOnHost(ports, signal))) {
       throw new ActionableError(
@@ -525,10 +560,25 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
       );
       return this.reservePendingEmulatorDeviceId(avdName, ports, configuredPorts === undefined);
     }
-    if (!preLaunchSnapshot?.isComplete) {
-      return undefined;
+    return this.reserveAutomaticEmulatorDeviceId(avdName, preLaunchSnapshot, signal);
+  }
+
+  private reserveAutomaticEmulatorDeviceId(
+    avdName: string,
+    snapshot: EmulatorDeviceIdSnapshot | undefined,
+    signal?: AbortSignal,
+  ): Promise<EmulatorDeviceIdReservation | undefined> {
+    if (snapshot?.isComplete) {
+      return this.allocateReservedEmulatorPorts(avdName, snapshot, signal);
     }
-    return this.allocateReservedEmulatorPorts(avdName, preLaunchSnapshot, signal);
+    const exclusions = this.excludedConsolePorts();
+    if (exclusions.size > 0) {
+      throw new ActionableError(
+        `Cannot safely enforce ${ENV.EMULATOR_EXCLUDED_CONSOLE_PORTS.name} without a complete ` +
+          `emulator device snapshot; restore device discovery or specify an allowed -port.`,
+      );
+    }
+    return Promise.resolve(undefined);
   }
 
   async addReservedEmulatorPort(

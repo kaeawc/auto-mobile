@@ -137,6 +137,13 @@ test("pooling requires explicit reuse permission", () => {
   }
 });
 
+test("Android reuse flag requires explicit reuse permission and renders to host config", () => {
+  const input = { ...brokerBatchInput(), reuseAndroidCleanDevices: true };
+  expect(() => parseBrokerBatch(input)).toThrow("reuseAndroidCleanDevices false");
+  const host = renderHostConfig(parseBrokerBatch(input, { allowReuse: true }));
+  expect(host.reuseAndroidCleanDevices).toBe(true);
+});
+
 test("planning retains excess clients and marks capacity refusals by order", () => {
   const input = brokerBatchInput();
   expect(planExpectations(parseBrokerBatch(input))).toEqual([

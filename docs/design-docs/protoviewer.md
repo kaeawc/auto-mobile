@@ -246,8 +246,9 @@ consent is later work. MCP-direct `show` keeps today's behaviour. When on:
   server name for SNI and certificate validation, and a small HTTP/1.1 client with the existing
   size, time and header limits). The checked address is the only one dialled. The path monitor and
   connection state callbacks are used to refuse a connection whose remote endpoint differs from the
-  checked address. Until that transport exists, iOS library builds keep the network switch
-  unavailable (requests fail with the typed error); `URLSession` stays in use only for MCP-direct
+  checked address. The transport is `PrototypePinnedHttpClient`, selected through
+  `PrototypeNetworkConfiguration.pinned`. The ProtoViewer network switch stays unavailable on iOS
+  until the app (#13619) wires it to that configuration; `URLSession` stays in use only for MCP-direct
   `show` flows, which keep today's behaviour, and it is never described as enforcing this policy.
   The egress check and resolver are an injected interface with a fake in tests.
 - Redirects are not followed automatically; each redirect is evaluated as a new request, and an
@@ -351,7 +352,7 @@ request allowed with the switch on.
 | Network for imported specs | One global switch, default off; per-host consent in Phase 2; MCP-direct `show` keeps today's behaviour. |
 | Stores                     | GitHub releases only.                                                                                   |
 | LAN egress                 | RFC1918 LAN is allowed; loopback, link-local, `10.0.2.2` and the daemon ports stay blocked.             |
-| iOS egress transport       | Recommended default, pending owner decision: Network.framework (`NWConnection`) pinned transport.       |
+| iOS egress transport       | Network.framework (NWConnection) pinned transport (owner, 2026-10-21, #14540).                          |
 | Missing referenced assets  | Recommended default, pending owner decision: reject the import on every platform.                       |
 | Android LAN permission     | Recommended default, pending owner decision: declare `ACCESS_LOCAL_NETWORK`, request on switch-on.      |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |

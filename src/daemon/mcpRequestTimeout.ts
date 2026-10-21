@@ -307,7 +307,10 @@ function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {
   return typeof toolName === "string" ? TOOL_TIMEOUT_FLOORS.get(toolName) : undefined;
 }
 
-function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
+function resolveToolTimeoutFloorMs(
+  toolName: string | undefined,
+  env?: NodeJS.ProcessEnv,
+): number | undefined {
   switch (toolName) {
     case "executePlan":
       return MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS;
@@ -330,12 +333,14 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
         OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
         LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
         DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
+        env,
       );
     case "observe":
       return resolveEnvTimeoutFloorMs(
         OBSERVE_MCP_TIMEOUT_ENV_VAR,
         LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
         DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
+        env,
       );
     default:
       return resolveFixedToolTimeoutFloorMs(toolName);
@@ -904,10 +909,15 @@ function resolveExecutePlanBudgetMs(request: DaemonRequest): number {
   return resolveExecutePlanStepsBudgetMs(asRecord(request.params?.arguments)?.planContent);
 }
 
-export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
+export function resolveMcpRequestTimeoutMs(
+  request: DaemonRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
   const base = clampCallerMcpRequestTimeoutMs(request.timeoutMs) ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS;
   const floor =
-    request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
+    request.method === "tools/call"
+      ? resolveToolTimeoutFloorMs(request.params?.name, env)
+      : undefined;
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
   const tapOnLongPressBudget = resolveTapOnLongPressBudgetMs(request);
   const tapAnyLongPressBudget = resolveTapAnyLongPressBudgetMs(request);

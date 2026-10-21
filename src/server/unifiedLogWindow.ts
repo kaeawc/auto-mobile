@@ -5,8 +5,14 @@ import type {
 } from "./sessionLogContract";
 
 /** The app's own `os_log` subsystem and any child subsystem (`<appId>.network`). */
-export function unifiedLogPredicate(appId: string): string {
-  return `subsystem == "${appId}" OR subsystem BEGINSWITH "${appId}."`;
+export function unifiedLogPredicate(appId: string, processName?: string): string {
+  const subsystem = `subsystem == "${appId}" OR subsystem BEGINSWITH "${appId}."`;
+  if (!processName) {
+    return subsystem;
+  }
+  // Most apps, system apps included, log under other subsystems; their process still names them.
+  const quoted = processName.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  return `${subsystem} OR process == "${quoted}"`;
 }
 
 /**

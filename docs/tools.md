@@ -1909,6 +1909,16 @@ the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 `removeKeyValue.fileName` are deprecated aliases for the store selector `name`.
 `setAppPermissions.action` selects `grant`, `revoke`, or `reset`.
 
+On iOS, `getDeepLinks` reads custom URL schemes (`CFBundleURLTypes`) and document
+types from the installed bundle's `Info.plist`, and universal-link hosts from the
+`com.apple.developer.associated-domains` entitlement (`applinks:` entries). The
+Simulator reads its host bundle directly. A physical device (#14094) copies the
+installed bundle to the host with `devicectl device copy from` and reads it the
+same way, so both report the same links for the same build. A failed copy returns
+`success: false` with devicectl's stderr. Physical-device results are cached per
+device, bundle ID and installed version, so repeat calls skip the copy until the
+app is updated.
+
 On iOS Simulator, a stored TCC Photos grant is not proof of effective full
 read/write authorization. `getAppPermissions` reports it as `unknown` with
 `verified: false`; by default `setAppPermissions` returns a non-fatal unverified

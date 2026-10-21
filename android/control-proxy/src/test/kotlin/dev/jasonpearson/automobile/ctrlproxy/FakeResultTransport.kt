@@ -27,7 +27,7 @@ internal open class FakeResultTransport : GuardedResultSender.Transport {
   override fun connectionCount() = 1
 }
 
-/** A [GuardedResultSender] over [transport] whose correlated errors go to [onError]. */
+/** A [GuardedResultSender] over [transport] with debug logging turned off. */
 internal fun guardedResultSender(
   transport: GuardedResultSender.Transport,
   resultBroadcaster: ResultBroadcaster,

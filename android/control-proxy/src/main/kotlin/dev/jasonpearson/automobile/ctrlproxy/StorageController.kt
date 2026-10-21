@@ -17,11 +17,14 @@ import kotlinx.coroutines.CancellationException
 internal class StorageController(
   manager: () -> StorageSubscriptionManager,
   asyncActionRunner: AsyncActionRunner,
-  resultBroadcaster: ResultBroadcaster,
+  resultSender: ResultSender,
   private val timeProvider: TimeProvider,
   private val responseSender: ResponseSender,
-) : StorageRequests(manager, asyncActionRunner, resultBroadcaster, timeProvider, responseSender) {
-  /** Keeps the service's late-bound WebSocket server behind one seam. */
+) : StorageRequests(manager, asyncActionRunner, resultSender, timeProvider) {
+  /**
+   * Carries `storage_changed` push events, which answer no request, to the late-bound WebSocket
+   * server. Request results go through [ResultSender].
+   */
   interface ResponseSender {
     fun isRunning(): Boolean
 
@@ -63,10 +66,9 @@ internal class StorageController(
 internal open class StorageRequests(
   private val manager: () -> StorageSubscriptionManager,
   private val asyncActionRunner: AsyncActionRunner,
-  resultBroadcaster: ResultBroadcaster,
+  resultSender: ResultSender,
   timeProvider: TimeProvider,
-  responseSender: StorageController.ResponseSender,
-) : StorageResponses(resultBroadcaster, timeProvider, responseSender) {
+) : StorageResponses(resultSender, timeProvider) {
   private companion object {
     const val TAG = "CtrlProxy"
   }
@@ -276,9 +278,8 @@ internal open class StorageRequests(
 
 /** Encodes and broadcasts correlated storage request results. */
 internal open class StorageResponses(
-  private val resultBroadcaster: ResultBroadcaster,
+  private val resultSender: ResultSender,
   private val timeProvider: TimeProvider,
-  private val responseSender: StorageController.ResponseSender,
 ) {
   private companion object {
     const val TAG = "CtrlProxy"
@@ -290,22 +291,14 @@ internal open class StorageResponses(
     files: List<PreferenceFileInfo>?,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping preference files broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "preference_files") {
-      responseSender.broadcast(
-        preferenceFilesResultFrame(
-          timeProvider.currentTimeMillis(),
-          requestId,
-          packageName,
-          files,
-          error,
-        ),
+    resultSender.sendFrame(requestId, "preference_files", attachPerf = false) { _ ->
+      preferenceFilesResultFrame(
+        timeProvider.currentTimeMillis(),
+        requestId,
+        packageName,
+        files,
+        error,
       )
-      Log.d(TAG, "Broadcasted preference files to ${responseSender.connectionCount()} clients")
     }
   }
 
@@ -316,21 +309,13 @@ internal open class StorageResponses(
     entries: List<PreferenceEntry>?,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping preferences broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "preferences") {
-      responseSender.broadcast(
-        preferencesResultFrame(
-          timeProvider.currentTimeMillis(),
-          StorageTarget(requestId, packageName, fileName),
-          entries,
-          error,
-        ),
+    resultSender.sendFrame(requestId, "preferences", attachPerf = false) { _ ->
+      preferencesResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        entries,
+        error,
       )
-      Log.d(TAG, "Broadcasted preferences to ${responseSender.connectionCount()} clients")
     }
   }
 
@@ -341,23 +326,12 @@ internal open class StorageResponses(
     subscriptionId: String?,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping subscribe storage broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "subscribe_storage_result") {
-      responseSender.broadcast(
-        subscribeStorageResultFrame(
-          timeProvider.currentTimeMillis(),
-          StorageTarget(requestId, packageName, fileName),
-          subscriptionId,
-          error,
-        ),
-      )
-      Log.d(
-        TAG,
-        "Broadcasted subscribe storage result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "subscribe_storage_result", attachPerf = false) { _ ->
+      subscribeStorageResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        subscriptionId,
+        error,
       )
     }
   }
@@ -368,40 +342,18 @@ internal open class StorageResponses(
     fileName: String,
     success: Boolean,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping unsubscribe storage broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "unsubscribe_storage_result") {
-      responseSender.broadcast(
-        unsubscribeStorageResultFrame(
-          timeProvider.currentTimeMillis(),
-          StorageTarget(requestId, packageName, fileName),
-          success,
-        ),
-      )
-      Log.d(
-        TAG,
-        "Broadcasted unsubscribe storage result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "unsubscribe_storage_result", attachPerf = false) { _ ->
+      unsubscribeStorageResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        success,
       )
     }
   }
 
   protected suspend fun broadcastGetPreferenceResult(outcome: GetPreferenceOutcome) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping get preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(outcome.requestId, "get_preference_result") {
-      responseSender.broadcast(
-        getPreferenceResultFrame(timeProvider.currentTimeMillis(), outcome),
-      )
-      Log.d(
-        TAG,
-        "Broadcasted get preference result to ${responseSender.connectionCount()} clients",
-      )
+    resultSender.sendFrame(outcome.requestId, "get_preference_result", attachPerf = false) { _ ->
+      getPreferenceResultFrame(timeProvider.currentTimeMillis(), outcome)
     }
   }
 
@@ -412,23 +364,12 @@ internal open class StorageResponses(
     key: String,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping set preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_preference_result") {
-      responseSender.broadcast(
-        setPreferenceResultFrame(
-          timeProvider.currentTimeMillis(),
-          StorageTarget(requestId, packageName, fileName),
-          key,
-          error,
-        ),
-      )
-      Log.d(
-        TAG,
-        "Broadcasted set preference result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "set_preference_result", attachPerf = false) { _ ->
+      setPreferenceResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        key,
+        error,
       )
     }
   }
@@ -440,23 +381,12 @@ internal open class StorageResponses(
     key: String,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping remove preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "remove_preference_result") {
-      responseSender.broadcast(
-        removePreferenceResultFrame(
-          timeProvider.currentTimeMillis(),
-          StorageTarget(requestId, packageName, fileName),
-          key,
-          error,
-        ),
-      )
-      Log.d(
-        TAG,
-        "Broadcasted remove preference result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "remove_preference_result", attachPerf = false) { _ ->
+      removePreferenceResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        key,
+        error,
       )
     }
   }
@@ -467,22 +397,11 @@ internal open class StorageResponses(
     fileName: String,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping clear preferences broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "clear_preferences_result") {
-      responseSender.broadcast(
-        clearPreferencesResultFrame(
-          timeProvider.currentTimeMillis(),
-          StorageTarget(requestId, packageName, fileName),
-          error,
-        ),
-      )
-      Log.d(
-        TAG,
-        "Broadcasted clear preferences result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "clear_preferences_result", attachPerf = false) { _ ->
+      clearPreferencesResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        error,
       )
     }
   }

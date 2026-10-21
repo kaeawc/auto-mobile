@@ -117,7 +117,6 @@ import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreensh
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
-import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
@@ -902,6 +901,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
       logError = { message, error -> Log.e(TAG, message, error) },
     )
+  /**
+   * The one path every request result takes to the wire (#11877): running check, broadcast guard,
+   * perf flush and routing. Declared ahead of the eagerly built [textInputController].
+   */
+  private val resultSender: ResultSender =
+    GuardedResultSender(
+      transport =
+        object : GuardedResultSender.Transport {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override fun flushPerfTiming() = perfProvider.flush()
+
+          override suspend fun sendFrame(frame: String) = webSocketServer.broadcast(frame)
+
+          override suspend fun send(response: WebSocketResponse) =
+            webSocketServer.broadcast(response)
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+      resultBroadcaster = resultBroadcaster,
+    )
   private val recompositionStore = RecompositionStore()
   private val frameMetricsStore = FrameMetricsStore()
   internal val workStats = CtrlProxyWorkStats()
@@ -1099,19 +1119,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         ),
       perfProvider = perfProvider,
       timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
-      responseSender =
-        object : CaCertificateController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-          override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) {
-            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
-          }
-
-          override fun getConnectionCount() = webSocketServer.getConnectionCount()
-        },
+      resultSender = resultSender,
     )
   }
   private val settingsController by lazy {
@@ -1119,15 +1127,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       contentResolver = { contentResolver },
       perfProvider = perfProvider,
       timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
-      responseSender =
-        object : SettingsController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-          override suspend fun broadcast(response: WebSocketResponse) {
-            webSocketServer.broadcast(response)
-          }
-        },
+      resultSender = resultSender,
     )
   }
   private val packageController by lazy {
@@ -1135,22 +1135,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       packageManager = { packageManager },
       currentUserId = CurrentUserId::current,
       timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
-      responseSender =
-        object : PackageController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-          override suspend fun broadcast(response: WebSocketResponse) {
-            webSocketServer.broadcast(response)
-          }
-        },
+      resultSender = resultSender,
     )
   }
   private val storageController by lazy {
     StorageController(
       manager = { storageSubscriptionManager },
       asyncActionRunner = asyncActionRunner,
-      resultBroadcaster = resultBroadcaster,
+      resultSender = resultSender,
       timeProvider = timeProvider,
       responseSender =
         object : StorageController.ResponseSender {
@@ -1170,19 +1162,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       activeWindowRoot = { rootInActiveWindow },
       perfProvider = perfProvider,
       timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
-      responseSender =
-        object : ClipboardController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-          override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) {
-            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
-          }
-
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-        },
+      resultSender = resultSender,
     )
   }
   private val displayController by lazy {
@@ -1414,24 +1394,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
       perfProvider = perfProvider,
       timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
       jsonCompact = jsonCompact,
-      responseSender =
-        object : FocusController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-          override suspend fun broadcast(message: String) {
-            webSocketServer.broadcast(message)
-          }
-
-          override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) {
-            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
-          }
-
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-        },
+      resultSender = resultSender,
     )
   }
   /**
@@ -1481,27 +1445,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       timeProvider = timeProvider,
       responses =
         TextInputResponseDependencies(
-          resultBroadcaster = resultBroadcaster,
           jsonCompact = jsonCompact,
-          responseSender =
-            object : TextInputController.ResponseSender {
-              override fun isRunning() =
-                ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-              override suspend fun broadcastWithPerf(
-                messageBuilder: (perfTiming: JsonElement?) -> String,
-              ) {
-                webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
-              }
-
-              override suspend fun broadcastWithPerfSync(
-                messageBuilder: (perfTiming: JsonElement?) -> String,
-              ) {
-                webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
-              }
-
-              override fun connectionCount() = webSocketServer.getConnectionCount()
-            },
+          resultSender = resultSender,
         ),
     )
   /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
@@ -1535,26 +1480,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
         },
       timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
       jsonCompact = jsonCompact,
-      responseSender =
-        object : ImeController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-          override suspend fun broadcastWithPerfSync(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) {
-            webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
-          }
-
-          override suspend fun broadcastSetKeyboardProfileResult(
-            build: (perfTiming: String?) -> SetKeyboardProfileResult,
-          ) {
-            webSocketServer.broadcastTypedWithPerf(build)
-          }
-
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-        },
+      resultSender = resultSender,
     )
   }
   /** Recomposition tracking, network mock rules and error simulation broadcasts to the app. */
@@ -1625,18 +1552,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         GestureReportingDependencies(
           perfProvider = perfProvider,
           timeProvider = timeProvider,
-          resultBroadcaster = resultBroadcaster,
-          responseSender =
-            object : GestureController.ResponseSender {
-              override fun isRunning() =
-                ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-              override suspend fun broadcastWithPerf(
-                messageBuilder: (perfTiming: JsonElement?) -> String,
-              ) = webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
-
-              override fun connectionCount() = webSocketServer.getConnectionCount()
-            },
+          resultSender = resultSender,
         ),
       gestureThreadFactory = { gestureThreadFactory() },
     )
@@ -2921,13 +2837,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     asyncActionRunner.launch(requestId, "discover_keystore") {
       val state =
         dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(this@CtrlProxy, packageName)
-      resultBroadcaster.guard(requestId, "keystore_discovery") {
-        webSocketServer.broadcast(
-          dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult(
-            timestamp = timeProvider.currentTimeMillis(),
-            requestId = requestId,
-            state = state,
-          ),
+      resultSender.send(requestId, "keystore_discovery", attachPerf = false) { _ ->
+        dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult(
+          timestamp = timeProvider.currentTimeMillis(),
+          requestId = requestId,
+          state = state,
         )
       }
     }
@@ -2941,13 +2855,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           packageName,
           userId,
         )
-      resultBroadcaster.guard(requestId, "sdk_capabilities") {
-        webSocketServer.broadcast(
-          dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult(
-            timestamp = timeProvider.currentTimeMillis(),
-            requestId = requestId,
-            state = state,
-          ),
+      resultSender.send(requestId, "sdk_capabilities", attachPerf = false) { _ ->
+        dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult(
+          timestamp = timeProvider.currentTimeMillis(),
+          requestId = requestId,
+          state = state,
         )
       }
     }
@@ -3596,25 +3508,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     totalTimeMs: Long,
     alreadySatisfied: Boolean = false,
   ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping action result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "action_result") {
-      webSocketServer.broadcastTypedWithPerf { perfTiming ->
-        ActionResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          action = action,
-          totalTimeMs = totalTimeMs,
-          error = error,
-          perfTiming = perfTiming,
-          alreadySatisfied = alreadySatisfied,
-        )
-      }
-      Log.d(TAG, "Broadcasted action result to ${webSocketServer.getConnectionCount()} clients")
+    resultSender.send(requestId, "action_result") { perfTiming ->
+      ActionResult(
+        timestamp = System.currentTimeMillis(),
+        requestId = requestId,
+        success = success,
+        action = action,
+        totalTimeMs = totalTimeMs,
+        error = error,
+        perfTiming = perfTiming,
+        alreadySatisfied = alreadySatisfied,
+      )
     }
   }
 
@@ -3624,31 +3528,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     result: PermissionManager.PermissionState,
     totalTimeMs: Long,
   ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping permission result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "permission_result") {
-      val success = result.error == null
-      webSocketServer.broadcastTypedWithPerf { perfTiming ->
-        PermissionResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          permission = result.permission,
-          granted = result.granted,
-          requestLaunched = result.requestLaunched,
-          canRequest = result.canRequest,
-          requiresSettings = result.requiresSettings,
-          instructions = result.instructions,
-          adbCommand = result.adbCommand,
-          totalTimeMs = totalTimeMs,
-          error = result.error,
-          perfTiming = perfTiming,
-        )
-      }
-      Log.d(TAG, "Broadcasted permission result to ${webSocketServer.getConnectionCount()} clients")
+    resultSender.send(requestId, "permission_result") { perfTiming ->
+      PermissionResult(
+        timestamp = System.currentTimeMillis(),
+        requestId = requestId,
+        success = result.error == null,
+        permission = result.permission,
+        granted = result.granted,
+        requestLaunched = result.requestLaunched,
+        canRequest = result.canRequest,
+        requiresSettings = result.requiresSettings,
+        instructions = result.instructions,
+        adbCommand = result.adbCommand,
+        totalTimeMs = totalTimeMs,
+        error = result.error,
+        perfTiming = perfTiming,
+      )
     }
   }
 

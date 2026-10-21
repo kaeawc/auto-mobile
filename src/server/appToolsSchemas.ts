@@ -61,6 +61,42 @@ export const appLifecycleSchema = withAppIdAliases(
   ),
 );
 
+const intentExtraKey = z.string().min(1).describe("Extra key");
+
+/** Typed `am start` extras; shared with sendBroadcast (#14081). */
+export const androidIntentExtraSchema = z.discriminatedUnion("type", [
+  z.object({ key: intentExtraKey, type: z.literal("string"), value: z.string() }).strict(),
+  z
+    .object({ key: intentExtraKey, type: z.enum(["int", "long", "float"]), value: z.number() })
+    .strict(),
+  z.object({ key: intentExtraKey, type: z.literal("boolean"), value: z.boolean() }).strict(),
+  z
+    .object({ key: intentExtraKey, type: z.literal("stringArray"), value: z.array(z.string()) })
+    .strict(),
+  z.object({ key: intentExtraKey, type: z.literal("uri"), value: z.string().min(1) }).strict(),
+]);
+
+/** Android launch intent (#14080); every value is shell-quoted, never passed as raw command text. */
+export const androidIntentSchema = z
+  .object({
+    component: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Activity of the launched app: ".DebugActivity", a fully qualified class, or "<appId>/<class>". Omitted: Android resolves action/data within the app (one of them is required). Other packages are refused',
+      ),
+    action: z.string().min(1).optional().describe("Intent action, e.g. android.intent.action.VIEW"),
+    data: z.string().min(1).optional().describe("Data URI"),
+    mimeType: z.string().min(1).optional(),
+    categories: z.array(z.string().min(1)).optional(),
+    extras: z.array(androidIntentExtraSchema).optional(),
+    flags: z
+      .array(z.enum(["clearTask", "newTask", "singleTop", "clearTop", "noHistory"]))
+      .optional(),
+  })
+  .strict();
+
 export const launchAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z
@@ -74,8 +110,11 @@ export const launchAppSchema = withAppIdAliases(
         launchArguments: z
           .array(z.string())
           .optional()
+          .describe("Arguments passed to the launched iOS app. On Android use intent instead."),
+        intent: androidIntentSchema
+          .optional()
           .describe(
-            "Arguments passed to the launched iOS app. Android does not support launch arguments.",
+            "Android only: start the app with this intent (component, action, data, categories, typed extras, flags) instead of the launcher intent. Always launches, even when the app is in front; am start refusals are typed (activity_not_exported, activity_not_found, intent_unresolved).",
           ),
         prototype: z
           .boolean()
@@ -108,8 +147,56 @@ const expectedSigningSha256Schema = z
   .min(1)
   .max(16);
 
+const bundleKeystoreSchema = z
+  .object({
+    path: z.string().min(1).describe("Keystore file path"),
+    alias: z.string().min(1).describe("Key alias"),
+    storePassword: z.string().min(1).describe("Keystore password (redacted from logs)"),
+    keyPassword: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Key password (redacted from logs; default storePassword)"),
+  })
+  .strict();
+
+const installBundleSchema = z
+  .object({
+    keystore: bundleKeystoreSchema
+      .optional()
+      .describe(".aab: signing key for the built APKs (default ~/.android/debug.keystore)"),
+    modules: z
+      .array(z.string().min(1))
+      .min(1)
+      .optional()
+      .describe("Dynamic feature modules to install, or ['_ALL_']"),
+    localTesting: z
+      .boolean()
+      .optional()
+      .describe(".aab: build with bundletool --local-testing for on-demand modules"),
+  })
+  .strict();
+
 const installAppInput = z.object({
-  artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
+  artifactPath: z
+    .string()
+    .describe(
+      "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
+    ),
+  splits: z
+    .array(z.string().min(1))
+    .min(1)
+    .optional()
+    .describe("Android: split APKs installed with the base .apk artifactPath (install-multiple)"),
+  bundle: installBundleSchema.optional().describe("Android .aab/.apks options"),
+  grantAllPermissions: z
+    .boolean()
+    .optional()
+    .describe("Android: grant all requested runtime permissions (install -g)"),
+  allowDowngrade: z
+    .boolean()
+    .optional()
+    .describe("Android: allow a lower versionCode (install -d; debuggable apps only)"),
   expectedSigningSha256: expectedSigningSha256Schema
     .optional()
     .describe(
@@ -128,7 +215,7 @@ const installAppInput = z.object({
 
 export const installAppTool = defineDeviceTool({
   name: "installApp",
-  description: "Install app on device (.apk, .app, or .ipa)",
+  description: "Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)",
   input: installAppInput,
   options: {
     defaultEnabled: true,

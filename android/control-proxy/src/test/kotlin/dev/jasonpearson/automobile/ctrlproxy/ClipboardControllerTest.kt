@@ -8,7 +8,6 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
@@ -28,14 +27,11 @@ class ClipboardControllerTest {
     override fun currentTimeMillis() = 3_000L
   }
 
-  private class FakeSender : ClipboardController.ResponseSender {
-    var running = true
+  private class FakeSender : FakeResultTransport() {
     val frames = mutableListOf<Triple<String, String?, JsonObject>>()
 
-    override fun isRunning() = running
-
-    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
-      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
+    override suspend fun sendFrame(frame: String) {
+      val frame = Json.parseToJsonElement(frame).jsonObject
       frames +=
         Triple(
           frame.getValue("type").jsonPrimitive.content,
@@ -43,8 +39,6 @@ class ClipboardControllerTest {
           JsonObject(frame - setOf("type", "timestamp", "requestId", "perfTiming")),
         )
     }
-
-    override fun connectionCount() = 1
   }
 
   private val timer = FakeTimer()
@@ -59,9 +53,11 @@ class ClipboardControllerTest {
       activeWindowRoot = { null as AccessibilityNodeInfo? },
       perfProvider = PerfProvider.createForTesting(timer),
       timeProvider = timer,
-      resultBroadcaster =
-        ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
-      responseSender = sender,
+      resultSender =
+        guardedResultSender(
+          sender,
+          ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+        ),
     )
 
   private fun lastFrame(): JsonObject = sender.frames.last().third

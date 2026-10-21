@@ -39,6 +39,7 @@ import type { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../../models/deviceSession
 import type { BrokerConnectionScopes } from "../sessionBroker/connectionScope";
 import type { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../sessionBroker/connectionRefusal";
 import type { DeviceLeaseRelinquishPort } from "../deviceLeaseActivitySources";
+import type { ScreenLockRegistry } from "../../features/utility/screenLock/ScreenLockRegistry";
 
 export interface DaemonStateAccess {
   isInitialized(): boolean;
@@ -50,6 +51,8 @@ export interface DaemonStateAccess {
   getDeviceLeaseActivitySources?(): DeviceLeaseActivitySources;
   /** Overrides the production lease-relinquish policy and release (tests). */
   getDeviceLeaseRelinquishPort?(): DeviceLeaseRelinquishPort;
+  /** Overrides the registry the release result reads `screenLockRestore` from (tests). */
+  getScreenLockRegistry?(): ScreenLockRegistry;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   /** Socket sessions bound to broker bindings (#11178). */
   getBrokerConnectionScopes?(): Pick<BrokerConnectionScopes, "bind" | "get" | "unbind">;

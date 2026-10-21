@@ -1,0 +1,56 @@
+import type {
+  UnifiedLogWindowRequest,
+  UnifiedLogWindowResult,
+  UnifiedLogMechanism,
+} from "./sessionLogContract";
+
+/** The app's own `os_log` subsystem and any child subsystem (`<appId>.network`). */
+export function unifiedLogPredicate(appId: string): string {
+  return `subsystem == "${appId}" OR subsystem BEGINSWITH "${appId}."`;
+}
+
+/**
+ * `log show` arguments (after the `log` binary) for one bounded window. Simulators
+ * read the live store via `simctl spawn … log`; physical devices append the
+ * collected archive path.
+ */
+export function logShowArgs(request: UnifiedLogWindowRequest, predicate: string): string[] {
+  return [
+    "show",
+    "--last",
+    `${request.lastSeconds}`,
+    "--style",
+    "compact",
+    "--predicate",
+    predicate,
+    ...(request.level === "info" ? ["--info"] : []),
+    ...(request.level === "debug" ? ["--info", "--debug"] : []),
+  ];
+}
+
+/** Bound `log show` output to `maxBytes`, reporting the full size and how it was collected. */
+export function unifiedLogWindowResult(
+  request: UnifiedLogWindowRequest,
+  stdout: string,
+  maxBytes: number,
+  details: {
+    predicate: string;
+    mechanism: UnifiedLogMechanism;
+    collectionMs: number;
+    timeoutMs: number;
+  },
+): UnifiedLogWindowResult {
+  const buffer = Buffer.from(stdout, "utf8");
+  const bounded = buffer.byteLength > maxBytes ? buffer.subarray(0, maxBytes) : buffer;
+  return {
+    lastSeconds: request.lastSeconds,
+    level: request.level,
+    predicate: details.predicate,
+    mechanism: details.mechanism,
+    collectionMs: details.collectionMs,
+    timeoutMs: details.timeoutMs,
+    byteCount: buffer.byteLength,
+    truncated: bounded.byteLength < buffer.byteLength,
+    text: bounded.toString("utf8"),
+  };
+}

@@ -23,9 +23,9 @@ bootstrapEnvironment();
 // runs first. ??= preserves a value inherited from DaemonManager-spawned daemons.
 process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 
-import { getGlobalVersionOutput } from "./cli/versionFlag";
+import { getGlobalVersionOutput, hasGlobalVersionFlag } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
-import { getMcpServerVersion } from "./utils/mcpVersion";
+import { getSettledMcpServerVersion } from "./utils/mcpVersion";
 import { installProcessLifecycleHandlers, setFatalProcessHandler } from "./processLifecycle";
 import { runEarlyEntrypoints } from "./startup/earlyEntrypoints";
 import { loadServerModules } from "./startup/serverModules";
@@ -56,8 +56,11 @@ function logFatal(label: string, error: unknown): void {
   }
 }
 
-const versionOutput = getGlobalVersionOutput(process.argv.slice(2), getMcpServerVersion());
-if (versionOutput !== undefined) {
+if (hasGlobalVersionFlag(process.argv.slice(2))) {
+  const versionOutput = getGlobalVersionOutput(
+    process.argv.slice(2),
+    await getSettledMcpServerVersion(),
+  );
   console.log(versionOutput);
   process.exit(0);
 }

@@ -9,6 +9,13 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuote } from "../../utils/shellQuote";
 import {
+  AndroidLaunchIntentError,
+  buildAmStartIntentArgs,
+  classifyAmStartFailure,
+  resolveIntentComponent,
+  type AndroidLaunchIntent,
+} from "./androidLaunchIntent";
+import {
   parseLauncherActivities,
   parseLauncherActivitiesFromPackageDump,
   resolveComponentActivity,
@@ -248,6 +255,45 @@ export class AndroidLaunchActivity {
     }
   }
 
+  /**
+   * An explicit intent (#14080) has no fallbacks: a monkey or launcher launch would open a
+   * different screen than the one asked for, so an `am start` refusal is a typed failure.
+   */
+  private async launchExplicitIntent(
+    packageName: string,
+    intent: AndroidLaunchIntent,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
+    const command = `shell am start --user ${userId} ${buildAmStartIntentArgs(packageName, intent)}`;
+    logger.info(`[LaunchApp] Explicit intent command: ${command}`);
+    let output: string;
+    try {
+      const result = await this.deps.adb.executeCommand(command);
+      output = `${result.stdout}\n${result.stderr}`;
+    } catch (error) {
+      rethrowDeviceTransportUnavailable(error);
+      this.assertLaunchNotAborted(signal);
+      const failed = adbFailureOutput(error);
+      output = `${failed.stdout}\n${failed.stderr}`;
+      const typed = classifyAmStartFailure(output);
+      throw typed ?? new AndroidLaunchIntentError("am_start_failed", errorMessage(error));
+    }
+    this.assertLaunchNotAborted(signal);
+    const failure = classifyAmStartFailure(output);
+    if (failure) {
+      throw failure;
+    }
+    return {
+      success: true,
+      packageName,
+      activityName: intent.component
+        ? resolveIntentComponent(packageName, intent.component)
+        : undefined,
+      userId,
+    };
+  }
+
   private async tryAndroidMonkeyLaunch(
     packageName: string,
     userId: number,
@@ -277,14 +323,42 @@ export class AndroidLaunchActivity {
     }
   }
 
+  /** Monkey cannot target a user, so it only runs for user 0. */
+  private async tryMonkeyFallback(
+    packageName: string,
+    userId: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (userId !== 0) {
+      logger.info(
+        `[LaunchApp] Skipping monkey for user ${userId}: monkey cannot target a user; continuing to activity discovery`,
+      );
+      return false;
+    }
+    const monkeyResult = await perf.track("monkeyLaunch", () =>
+      this.tryAndroidMonkeyLaunch(packageName, userId, signal),
+    );
+    this.assertLaunchNotAborted(signal);
+    return monkeyResult.success;
+  }
+
   async performLaunch(
     packageName: string,
     activityName: string | undefined,
     userId: number,
     perf: PerformanceTracker,
     signal?: AbortSignal,
+    intent?: AndroidLaunchIntent,
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
     this.assertLaunchNotAborted(signal);
+    if (intent) {
+      const launched = await perf.track("explicitIntentLaunch", () =>
+        this.launchExplicitIntent(packageName, intent, userId, signal),
+      );
+      perf.end();
+      return launched;
+    }
     let targetActivity = activityName;
 
     // Try am start with intent first (alternative to monkey)
@@ -309,27 +383,14 @@ export class AndroidLaunchActivity {
     }
 
     // Try monkey launch as fallback (fast but less reliable)
-    if (!targetActivity) {
-      if (userId !== 0) {
-        logger.info(
-          `[LaunchApp] Skipping monkey for user ${userId}: monkey cannot target a user; continuing to activity discovery`,
-        );
-      } else {
-        const monkeyResult = await perf.track("monkeyLaunch", () =>
-          this.tryAndroidMonkeyLaunch(packageName, userId, signal),
-        );
-        this.assertLaunchNotAborted(signal);
-
-        if (monkeyResult.success) {
-          perf.end();
-          return {
-            success: true,
-            packageName,
-            activityName: "monkey_launch",
-            userId,
-          };
-        }
-      }
+    if (!targetActivity && (await this.tryMonkeyFallback(packageName, userId, perf, signal))) {
+      perf.end();
+      return {
+        success: true,
+        packageName,
+        activityName: "monkey_launch",
+        userId,
+      };
     }
 
     // If no specific activity provided, get launcher activities from pm dump

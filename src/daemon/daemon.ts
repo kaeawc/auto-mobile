@@ -68,6 +68,7 @@ import { Timer } from "../utils/SystemTimer";
 import { IdGenerator } from "../utils/IdGenerator";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { DeviceLossState } from "./deviceLossState";
+import { DaemonShutdownState } from "./daemonShutdownState";
 import { errorMessage } from "../utils/describeUnknownError";
 import { type ObservationStreamHealth } from "./ObservationStreamHealth";
 import { type ToolSelectionProfileProvenanceLoader } from "./toolSelectionProfileRegistry";
@@ -204,7 +205,7 @@ export class Daemon {
     startupCompletion: () => this.startupCompletion,
     sessionManager: () => this.sessionManager,
     observerSessionRegistry: () => this.observerSessionRegistry,
-    isShutdownInProgress: () => this.shutdownInProgress,
+    isShutdownInProgress: () => this.shutdownState.inProgress,
   });
 
   private readonly httpIngress = this.mcpServices.httpIngress;
@@ -314,16 +315,10 @@ export class Daemon {
 
   private readonly acceptanceDiscoveryCapability = readEnvRaw(ENV.ACCEPTANCE_DISCOVERY_CAPABILITY);
 
-  private shutdownInProgress: boolean = false;
+  private readonly shutdownState = new DaemonShutdownState();
 
   /** Redrives retained startup recorder descriptors when a device incarnation is assigned. */
   private recorderDeviceIncarnationListener?: (deviceId: string) => void;
-
-  /** Session IDs whose normal callback emitted the daemon-shutdown reason. */
-  private shutdownReleaseNotifications: Set<string> | null = null;
-
-  /** Session IDs emitted by the shutdown fallback before their normal callback completed. */
-  private shutdownFallbackReleaseNotifications: Set<string> | null = null;
 
   private readonly daemonState: DaemonStateWrites;
 
@@ -997,16 +992,17 @@ export class Daemon {
       navigationGraphBridge: () => daemon.navigationGraphBridge,
       unsubscribeAdbMissingDevice: () => daemon.unsubscribeAdbMissingDevice,
       setUnsubscribeAdbMissingDevice: (value) => (daemon.unsubscribeAdbMissingDevice = value),
-      shutdownInProgress: () => daemon.shutdownInProgress,
-      setShutdownInProgress: (value) => (daemon.shutdownInProgress = value),
+      shutdownInProgress: () => daemon.shutdownState.inProgress,
+      setShutdownInProgress: (value) => (daemon.shutdownState.inProgress = value),
       recorderDeviceIncarnationListener: () => daemon.recorderDeviceIncarnationListener,
       setRecorderDeviceIncarnationListener: (value) =>
         (daemon.recorderDeviceIncarnationListener = value),
-      shutdownReleaseNotifications: () => daemon.shutdownReleaseNotifications,
-      setShutdownReleaseNotifications: (value) => (daemon.shutdownReleaseNotifications = value),
-      shutdownFallbackReleaseNotifications: () => daemon.shutdownFallbackReleaseNotifications,
+      shutdownReleaseNotifications: () => daemon.shutdownState.releaseNotifications,
+      setShutdownReleaseNotifications: (value) =>
+        (daemon.shutdownState.releaseNotifications = value),
+      shutdownFallbackReleaseNotifications: () => daemon.shutdownState.fallbackReleaseNotifications,
       setShutdownFallbackReleaseNotifications: (value) =>
-        (daemon.shutdownFallbackReleaseNotifications = value),
+        (daemon.shutdownState.fallbackReleaseNotifications = value),
       backgroundRegistryUpgrade: () => daemon.backgroundRegistryUpgrade,
       setBackgroundRegistryUpgrade: (value) => (daemon.backgroundRegistryUpgrade = value),
     };

@@ -12,6 +12,16 @@ export const DEVICE_SETTING_KEYS = [
   "locale",
   "timeFormat",
   "calendarSystem",
+  // Accessibility display preferences (#14088), recorded as their raw platform setting.
+  "increaseContrast",
+  "reduceMotion",
+  "boldText",
+  // Android accessibility display settings (#14076), recorded as their raw platform setting.
+  "colorInversion",
+  "colorCorrection",
+  "magnification",
+  "magnificationScale",
+  "extraDim",
 ] as const;
 
 export type DeviceSettingKey = (typeof DEVICE_SETTING_KEYS)[number];

@@ -13,6 +13,11 @@ import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispat
 
 import type { CtrlProxySdkTriggerResult } from "./types";
 import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
+import {
+  requestAccessibilityAudit,
+  type CtrlProxyAccessibilityAuditResult,
+  type IosAccessibilityAuditRequest,
+} from "./CtrlProxyAccessibilityAudit";
 
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
@@ -707,6 +712,13 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   /** Deliver a host trigger to a module in the foreground app's in-app SDK (#1580). */
   async requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult> {
     return requestSdkTrigger(this.createDelegateContext(), request);
+  }
+
+  /** Run XCUITest's own accessibility audit on the foreground app (#14086). */
+  async requestAccessibilityAudit(
+    request: IosAccessibilityAuditRequest,
+  ): Promise<CtrlProxyAccessibilityAuditResult> {
+    return requestAccessibilityAudit(this.createDelegateContext(), request);
   }
 
   /** Invoke Magic Tap directly through the foreground app's in-app SDK. */

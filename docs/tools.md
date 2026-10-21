@@ -13,7 +13,7 @@ the exact arguments supported by your connection.
 
 The following tools expose `sessionUuid` and `keepScreenAwake`:
 
-`accessibility`, `accessibilityAction`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
+`accessibility`, `accessibilityAction`, `accessibilityAudit`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
@@ -3242,6 +3242,7 @@ accept the recording `display` argument.
 | ♿ <code>accessibility</code>       | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
 | 🎯 <code>accessibilityFocus</code>  | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
 | 🧭 <code>accessibilityAction</code> | Performs an Android accessibility action (expand, collapse, dismiss, select, scroll or page in a direction, press and hold, set progress, or an app-defined custom action by label) on an element, the way TalkBack or Switch Access does.                                                                                                                                                                                                                  |
+| 🔍 <code>accessibilityAudit</code>  | Runs the platform's own accessibility audit on the current screen: XCUITest `performAccessibilityAudit` on iOS 17+ (Simulator and physical). Android returns `errorCode: unsupported_platform` for now.                                                                                                                                                                                                                                                     |
 | 🧪 <code>audit</code>               | Runs the accessibility (WCAG), performance or memory audit on the current Android screen on demand, with every audit feature flag off; supports container scoping, named baselines and `failOn` for plan assertions.                                                                                                                                                                                                                                        |
 | 🔀 <code>setToolEnabled</code>      | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
 
@@ -3286,6 +3287,29 @@ is set (WCAG AA otherwise).
 Accessibility violations carry the element from the same observation (`resource-id`,
 `bounds`). The output keeps the 50 most relevant (`totalViolations` and `truncated`
 report a clip). iOS reports every kind under `unsupported`; use `accessibilityAudit` there.
+
+### accessibilityAudit
+
+`accessibilityAudit` runs the platform's own accessibility engine (#14086). On iOS 17+
+(Simulator and physical device) the runner calls XCUITest's
+`performAccessibilityAudit` on `appId` or the foreground app, and collects every issue
+instead of failing on the first. `checks` selects `contrast`, `hitRegion`,
+`dynamicType`, `textClipped`, `sufficientDescription`, `trait` and
+`elementDetection` (default `all`). Each issue reports its `check`, a `summary` and
+`detail`, and, when XCUITest names the element, its accessibility identifier as
+`elementId` (accepted by `tapOn` and `highlight`), its `label` and its `bounds`.
+`maxIssues` (default 50) bounds the output; `totalIssues` and `truncated: true` report
+a clip. `unsupportedChecks` lists checks the target could not run.
+
+It differs from the host-side WCAG audit (`WcagAudit`, the `accessibility-audit`
+feature flag), which applies heuristics to the observed hierarchy and screenshot. The
+platform engine instead sees what the OS sees: real hit regions, Dynamic Type support,
+clipped text, trait misuse and elements it cannot detect.
+
+A runner built before this command returns `errorCode: unsupported_capability`
+rather than timing out; restart the daemon so it installs the current runner. On
+Android the Accessibility Test Framework audit is not available yet, so the tool
+returns `errorCode: unsupported_platform` and points to the WCAG audit.
 
 ### Accessibility focus selectors
 

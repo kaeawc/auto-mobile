@@ -30,12 +30,7 @@ export type ReadinessDevicePool = Pick<
 /** The session surface the runner-readiness path calls. */
 export type ReadinessSessionManager = Pick<
   SessionManager,
-  | "getSession"
-  | "findSession"
-  | "hasSession"
-  | "getDeviceLabels"
-  | "releaseSessionIfOwned"
-  | "releaseSession"
+  "getSession" | "findSession" | "hasSession" | "getDeviceLabels" | "releaseSession"
 >;
 
 /** The daemon-state members the runner-readiness path reads. */

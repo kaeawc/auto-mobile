@@ -41,9 +41,13 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         guard endpoint.scheme != nil else { throw MCPClientError.invalidEndpoint(endpoint.absoluteString) }
         self.endpoint = endpoint
         logger = options.logger
-        self.performer = AuthenticatedDaemonHTTPRequestPerformer(
-            performer: performer, tokenProvider: options.tokenProvider
-        )
+        self.performer = AuthenticatedDaemonHTTPRequestPerformer.isDaemonEndpoint(endpoint)
+            ? AuthenticatedDaemonHTTPRequestPerformer(
+                performer: performer,
+                tokenProvider: options.tokenProvider,
+                scheduler: options.scheduler
+            )
+            : performer
         scheduler = options.scheduler
     }
 

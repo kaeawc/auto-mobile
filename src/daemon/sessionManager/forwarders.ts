@@ -644,20 +644,6 @@ export abstract class SessionManagerForwarders {
     );
   }
 
-  releaseSessionIfOwned(
-    sessionId: string,
-    expectedSession: Session,
-    expectedDeviceId: string,
-    releaseReason: SessionReleaseReason = "explicit-release",
-  ): Promise<string | null> {
-    return this.forwardersHost.releaseRequests.releaseSessionIfOwned(
-      sessionId,
-      expectedSession,
-      expectedDeviceId,
-      releaseReason,
-    );
-  }
-
   trackSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void> {
     return this.forwardersHost.bookkeeping.trackSessionSetup(session, createSetup);
   }

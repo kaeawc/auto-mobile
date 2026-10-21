@@ -982,8 +982,8 @@ export class SessionBroker {
       retryable,
       // Eviction retains capacity for redrive; a new request may try again after cleanup.
       ...(retryable && request.errorCode === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
-      // The refusal is a stored terminal receipt: only a new request ID can observe freed capacity.
-      ...(retryable && request.errorCode === "capacity_exhausted"
+      // These stored terminal failures require a new request ID to retry preparation.
+      ...(retryable && ["capacity_exhausted", "cancelled"].includes(request.errorCode ?? "")
         ? { retryRequires: "new_request_id" as const }
         : {}),
     };

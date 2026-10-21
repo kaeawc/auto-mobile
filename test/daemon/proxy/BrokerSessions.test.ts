@@ -189,7 +189,7 @@ describe("BrokerSessions", () => {
 
       expect(attempts).toBe(58);
       const releases = calls.filter(({ method }) => method === "daemon/releaseBrokerSession");
-      expect(releases.at(-1)?.params.replyBudgetMs).toBe(250);
+      expect(releases.at(-1)?.params.replyBudgetMs).toBe(80);
       expect(timer.now() - started).toBe(6_840);
       expect(timer.getSleepHistory()).toEqual(Array<number>(57).fill(120));
       expect(result.cleanupPending).toBe(true);
@@ -428,6 +428,56 @@ describe("BrokerSessions", () => {
     expect(events).toContain("forget:session-1");
     expect(brokerSessions.sessions.size).toBe(0);
   });
+
+  for (const [remainingMs, replyBudgetMs] of [
+    [50, 25],
+    [101, 50],
+    [200, 100],
+    [749, 250],
+    [750, 250],
+  ] as const) {
+    test(`release retry leaves transport headroom with ${remainingMs}ms remaining`, async () => {
+      let attempts = 0;
+      const retryAfterMs = BROKER_EXECUTION_RELEASE_TIMEOUT_MS - remainingMs;
+      // The proxy's per-call timeout is whatever remains of the release budget at call time.
+      const releases: Array<{ replyBudgetMs: number; timeoutMs: number }> = [];
+      const { brokerSessions, timer } = rig(({ method, params }) => {
+        if (method !== "daemon/releaseBrokerSession") {
+          return ready;
+        }
+        releases.push({
+          replyBudgetMs: Number(params.replyBudgetMs),
+          timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS - timer.now(),
+        });
+        if (++attempts === 1) {
+          return { ...handoffPending, retryAfterMs };
+        }
+        return new Promise((resolve) => {
+          timer.setTimeout(
+            () => resolve({ sessionUuid: "session-1", outcome: "cleanup_pending" }),
+            Number(params.replyBudgetMs),
+          );
+        });
+      });
+      await brokerSessions.hold("request-1", "session-1");
+      expect(timer.now()).toBe(0);
+
+      await brokerSessions.releaseAll();
+
+      expect(releases).toHaveLength(2);
+      const [first, final] = releases;
+      expect(first!.timeoutMs).toBe(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
+      expect(first!.replyBudgetMs).toBe(first!.timeoutMs - 500);
+      expect(final!.timeoutMs).toBe(remainingMs);
+      expect(final!.replyBudgetMs).toBeGreaterThan(0);
+      expect(final!.replyBudgetMs).toBeLessThan(final!.timeoutMs);
+      expect(final!.replyBudgetMs).toBe(replyBudgetMs);
+      expect(timer.getSleepHistory()).toEqual([retryAfterMs]);
+      expect(timer.now()).toBe(retryAfterMs + replyBudgetMs);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(brokerSessions.sessions.size).toBe(0);
+    });
+  }
 
   test("releaseAll retries handoff with its reason inside the existing shutdown budget", async () => {
     let attempts = 0;

@@ -35,6 +35,12 @@ import { daemonProcessOptions } from "../daemonOptionScopes";
 import { type DaemonProcessRecord } from "../processTable";
 import { stderrLog } from "./DaemonLaunch";
 import type { DaemonStartResult } from "../manager";
+import { recordedProcessGenerationToken } from "../processGenerationFields";
+import {
+  takeoverDeferralBoundExceeded,
+  type TakeoverDeferralKind,
+  type TakeoverDeferralLedger,
+} from "./TakeoverDeferralLedger";
 
 /** Only the replaceable manager seams used by DaemonStart. */
 export interface DaemonStartHost {
@@ -54,6 +60,7 @@ export interface DaemonStartHost {
   readonly socketPath: string;
   readonly seams: DaemonManagerSeams;
   readonly timer: Timer;
+  readonly takeoverDeferrals: TakeoverDeferralLedger;
   lifecycleStatus(): Promise<DaemonStatus>;
   throwIfRecoveryCancelled(signal: AbortSignal | undefined): void;
   verifyDaemonGenerationBeforeSignal(
@@ -303,22 +310,10 @@ export class DaemonStart {
       }
     }
 
-    const preparation = await this.host.prepareDaemonForConditionalRestart(status);
-    if (!preparation.accepted) {
-      if (preparation.reason === "generation_changed" || preparation.reason === "restart_pending") {
-        stderrLog("Daemon restart is already in progress; joining its successor");
-        return { done: "joined" };
-      }
-      if (preparation.reason === "active_operations") {
-        throw new DaemonRestartDeferredError("a device operation is active");
-      }
-      if (preparation.reason === "shutdown_unavailable") {
-        throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
-      }
-      throw new DaemonRestartDeferredError(
-        "the daemon returned an unrecognized safe-restart admission result",
-      );
+    if (!(await this.prepareOlderDaemonRestart(status))) {
+      return { done: "joined" };
     }
+    this.host.takeoverDeferrals.clear();
 
     const requestedOptions = daemonProcessOptions(
       Object.fromEntries(
@@ -339,6 +334,60 @@ export class DaemonStart {
     await this.host.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
 
     return { options };
+  }
+
+  /** Admission failures only accumulate diagnostics; they never authorize stopping the incumbent. */
+  private async prepareOlderDaemonRestart(status: DaemonStatus): Promise<boolean> {
+    let preparation: DaemonRestartPreparation;
+    try {
+      preparation = await this.host.prepareDaemonForConditionalRestart(status);
+    } catch (error) {
+      if (error instanceof DaemonRestartDeferredError) {
+        this.deferOlderDaemonTakeover(status, "unavailable", error);
+      }
+      throw error;
+    }
+    if (preparation.accepted) {
+      return true;
+    }
+    if (preparation.reason === "generation_changed" || preparation.reason === "restart_pending") {
+      stderrLog("Daemon restart is already in progress; joining its successor");
+      return false;
+    }
+    const kind = preparation.reason === "active_operations" ? "active_operations" : "unavailable";
+    const reason =
+      preparation.reason === "active_operations"
+        ? "a device operation is active"
+        : preparation.reason === "shutdown_unavailable"
+          ? "the daemon could not initiate its own shutdown"
+          : "the daemon returned an unrecognized safe-restart admission result";
+    this.deferOlderDaemonTakeover(status, kind, new DaemonRestartDeferredError(reason));
+  }
+
+  private deferOlderDaemonTakeover(
+    status: DaemonStatus,
+    kind: TakeoverDeferralKind,
+    original: DaemonRestartDeferredError,
+  ): never {
+    const nowMs = this.host.timer.now();
+    const record = this.host.takeoverDeferrals.recordDeferral(
+      {
+        pid: status.pid,
+        startedAt: status.startedAt,
+        processGenerationToken: recordedProcessGenerationToken(status),
+      },
+      nowMs,
+    );
+    if (!takeoverDeferralBoundExceeded(kind, record, nowMs)) {
+      throw original;
+    }
+    const reason =
+      `older daemon pid ${status.pid} (version ${status.version ?? "unknown"}) has deferred this takeover ` +
+      `${record.attempts} times since ${new Date(record.firstDeferredAtMs).toISOString()} (${original.message}); ` +
+      `it is never stopped automatically — run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` ` +
+      "to replace it once no device operation is active";
+    logger.warn(reason);
+    throw new DaemonRestartDeferredError(reason);
   }
 
   /**

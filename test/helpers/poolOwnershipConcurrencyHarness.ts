@@ -1290,12 +1290,9 @@ class OwnershipWorld {
         this.discovery.setBootedDevices("android", this.onlineDevices());
         const session = reservation.session;
         if (session && session.assignedDevice === device.deviceId) {
-          await this.manager.releaseSessionIfOwned(
-            session.sessionId,
-            session,
-            device.deviceId,
-            "device-killed",
-          );
+          await this.manager.releaseSession(session.sessionId, "device-killed", {
+            expectedOwner: { session: session, deviceId: device.deviceId },
+          });
         }
         if (this.pool.getDevice(device.deviceId) === reservation.device) {
           await this.pool.retireDeviceForShutdown(reservation.device);

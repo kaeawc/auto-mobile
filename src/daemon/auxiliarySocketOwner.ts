@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { linkSync, lstatSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { z } from "zod";
 import { DAEMON_VERSION } from "./constants";
 import { writePrivateJsonFileAtomicSync } from "./atomicJsonFile";
@@ -13,6 +13,8 @@ import {
 } from "./processGenerationFields";
 import { AuxiliarySocketHeldError } from "./AuxiliarySocketHeldError";
 import { logger } from "../utils/logger";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { removeOwnedFileSync } from "./ownedFileRemoval";
 
 const ownerSchema = z.object({
   pid: z.number().int().positive(),
@@ -34,6 +36,8 @@ export interface AuxiliarySocketOwnerFiles {
   lstat(path: string): { isFile(): boolean; size: number };
   write(path: string, record: OwnerRecord): void;
   remove(path: string): void;
+  rename(from: string, to: string): void;
+  link(from: string, to: string): void;
   stat(path: string): { dev: number; ino: number };
 }
 const defaultFiles: AuxiliarySocketOwnerFiles = {
@@ -41,6 +45,8 @@ const defaultFiles: AuxiliarySocketOwnerFiles = {
   lstat: lstatSync,
   write: writePrivateJsonFileAtomicSync,
   remove: unlinkSync,
+  rename: renameSync,
+  link: linkSync,
   stat: statSync,
 };
 
@@ -55,6 +61,7 @@ export class AuxiliarySocketOwner {
       version: DAEMON_VERSION,
       ...processGenerationRecordFields(currentDaemonProcessGenerationToken()),
     }),
+    private readonly ids: IdGenerator = defaultIdGenerator,
   ) {}
 
   publish(socketPath: string, socketName: string, identity: { dev: number; ino: number }): void {
@@ -73,11 +80,21 @@ export class AuxiliarySocketOwner {
     try {
       const current = this.files.stat(socketPath);
       if (current.dev === published.dev && current.ino === published.ino) {
-        this.files.remove(`${socketPath}.owner.json`);
+        removeOwnedFileSync(
+          `${socketPath}.owner.json`,
+          (claimedPath) =>
+            JSON.stringify(this.read(socketPath, claimedPath)) === JSON.stringify(published),
+          this.files,
+          this.ids,
+        );
       }
     } catch (error) {
-      // Cleanup is best effort; a stale sidecar cannot authorize reclaiming a live socket.
-      logger.debug(`Unable to remove auxiliary socket owner record: ${error}`, error);
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        // The socket can disappear during close; absent paths need no further cleanup.
+        logger.debug("Auxiliary socket owner cleanup path already absent", error);
+        return;
+      }
+      logger.warn("Unable to remove auxiliary socket owner record", error);
     }
   }
 
@@ -105,19 +122,25 @@ export class AuxiliarySocketOwner {
     }
     const recorded = recordedProcessGenerationToken(record);
     const current = this.processes.readProcessGenerationToken?.(record.pid);
+    if (
+      recorded === undefined ||
+      current === undefined ||
+      compareProcessGenerationTokens(recorded, current) !== "same"
+    ) {
+      return new AuxiliarySocketHeldError(socketPath, socketName, { holderVerified: false });
+    }
     return new AuxiliarySocketHeldError(socketPath, socketName, {
       holderPid: record.pid,
       holderVersion: record.version,
-      holderVerified:
-        recorded !== undefined &&
-        current !== undefined &&
-        compareProcessGenerationTokens(recorded, current) === "same",
+      holderVerified: true,
     });
   }
 
-  private read(socketPath: string): OwnerRecord | undefined {
+  private read(
+    socketPath: string,
+    ownerPath = `${socketPath}.owner.json`,
+  ): OwnerRecord | undefined {
     try {
-      const ownerPath = `${socketPath}.owner.json`;
       const metadata = this.files.lstat(ownerPath);
       if (!metadata.isFile() || metadata.size > 4096) {
         return undefined;

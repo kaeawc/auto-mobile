@@ -88,12 +88,9 @@ describe("owner-disconnect release re-arm (#10663)", () => {
             reason,
             {
               release: () =>
-                sessionManager.releaseSessionIfOwned(
-                  session.sessionId,
-                  session,
-                  session.assignedDevice,
-                  reason,
-                ),
+                sessionManager.releaseSession(session.sessionId, reason, {
+                  expectedOwner: { session: session, deviceId: session.assignedDevice },
+                }),
             },
           );
         },

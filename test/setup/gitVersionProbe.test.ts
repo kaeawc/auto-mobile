@@ -4,7 +4,7 @@ import { FakeGitMetadataReader } from "../fakes/FakeFileSystem";
 import { isGitVersionProbe } from "./testPreload";
 
 describe("isGitVersionProbe", () => {
-  test("accepts fast-path status and fallback HEAD/status/diff probes", () => {
+  test("accepts async status/diff and synchronous fallback HEAD probes", async () => {
     for (const fallback of [false, true]) {
       const probes: string[][] = [];
       const client = new DefaultGitMetadataClient(
@@ -21,9 +21,15 @@ describe("isGitVersionProbe", () => {
             ? "unresolvable"
             : "1a2b3c4d5e6f7890123456789012345678901234",
         }),
+        async (command, args) => {
+          probes.push([command, ...args]);
+          return fallback ? "tracked edit" : "";
+        },
       );
 
       client.readVersion("/src/auto-mobile", () => "@kaeawc/auto-mobile");
+      expect(probes).toHaveLength(fallback ? 1 : 0);
+      await client.readDirtyState("/src/auto-mobile");
       expect(probes).toHaveLength(fallback ? 3 : 1);
       for (const argv of probes) {
         expect(isGitVersionProbe(argv)).toBe(true);

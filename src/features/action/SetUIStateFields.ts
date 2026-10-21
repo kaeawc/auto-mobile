@@ -6,7 +6,7 @@ import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../..
 import { FieldSpec, SetUIStateElementSelector } from "../../models/SetUIStateOptions";
 import { FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector, type FieldTypeDetection } from "./FieldTypeDetector";
-import type { InputTextMode } from "./InputText";
+import type { InputTextOptions } from "./InputText";
 import type { Keyboard } from "./Keyboard";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { ActionableError } from "../../models/ActionableError";
@@ -57,10 +57,8 @@ interface TapOnElementLike {
 interface InputTextLike {
   execute(
     text: string,
-    imeAction?: string,
-    dismissKeyboard?: boolean,
-    mode?: InputTextMode,
-    signal?: AbortSignal,
+    options?: InputTextOptions,
+    call?: ActionCall,
   ): Promise<{
     success: boolean;
     text: string;
@@ -793,13 +791,7 @@ export class SetUIStateFields {
     );
     const inputStart = Date.now();
     signal?.throwIfAborted();
-    const inputResult = await inputText.execute(
-      fieldSpec.value!,
-      undefined,
-      false,
-      undefined,
-      signal,
-    );
+    const inputResult = await inputText.execute(fieldSpec.value!, {}, { signal });
     if (inputResult.retryable !== false) {
       signal?.throwIfAborted();
     }

@@ -26,8 +26,8 @@ Neither `pending-adapter` nor `notJournaled` implies production journaling.
 The optional Android (#14364) and iOS (#14361) keep-booted strategies capture
 partial baselines and run best-effort cleaning. `persona` and `statusBar` remain
 `pending-adapter`: device-appearance intent and prior-value adapters are not yet
-wired. Their missing coverage limits baseline completeness, not tool execution or
-keep-booted reuse.
+wired. Their missing coverage limits journal intent coverage, not baseline capture,
+tool execution or keep-booted reuse.
 
 Owner decision: keep-booted resets run their cleaning operations unconditionally.
 The journal is not an admission gate or a prerequisite for cleaning. In this

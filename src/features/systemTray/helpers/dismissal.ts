@@ -464,7 +464,7 @@ export const clearMatchingSystemTrayNotifications = async (
     return { swipeCount: 0, dismissedCount: 0, stalled: false };
   }
   const { timer } = getSystemTrayDependencies();
-  const deadlineMs = timer.now() + awaitTimeoutMs;
+  let deadlineMs = timer.now() + awaitTimeoutMs;
   let current = await waitForReadableClearAllMatch(
     device,
     criteria,
@@ -480,7 +480,7 @@ export const clearMatchingSystemTrayNotifications = async (
   );
   let swipeCount = 0;
   let dismissedCount = 0;
-  // Share the reopen throttle across rows, just like the clearAll deadline.
+  // Keep reopen attempts throttled across consecutive rows.
   const reexpandState = { lastAttemptAtMs: Number.NEGATIVE_INFINITY };
   while (current.match && swipeCount < maxSwipes && timer.now() < deadlineMs) {
     const expanded = await expandAndRematchIfCollapsed(
@@ -517,6 +517,7 @@ export const clearMatchingSystemTrayNotifications = async (
       return { swipeCount, dismissedCount, stalled: true };
     }
     dismissedCount++;
+    deadlineMs = timer.now() + awaitTimeoutMs;
     current = {
       observation: verified.observation,
       match: findBestNotificationMatch(

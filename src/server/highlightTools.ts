@@ -2,6 +2,7 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import { SdkCapabilityQueryError } from "../features/observe/ios/SdkCapabilityQueryError";
 import { highlightResultSchema } from "./highlightToolOutputSchemas";
 import {
   ActionableError,
@@ -134,7 +135,11 @@ const toHighlightResponse = (result: HighlightOperationResult) =>
 const toHighlightErrorResponse = (error: unknown) => {
   const message = error instanceof ActionableError ? error.message : String(error);
   return withIsErrorOnFailure(
-    createStructuredToolResponse({ success: false, error: message }),
+    createStructuredToolResponse({
+      success: false,
+      error: message,
+      ...(error instanceof SdkCapabilityQueryError ? error.toPayload() : {}),
+    }),
     false,
   );
 };

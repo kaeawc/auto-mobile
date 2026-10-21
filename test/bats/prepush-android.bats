@@ -681,3 +681,12 @@ SCRIPT
   [ "$status" -eq 1 ]
   [[ "$output" == *'new baseline'* ]]
 }
+
+@test "staged cross-module resource rename lints both modules" {
+  lint_fixture
+  mkdir -p android/bar/src/main/res/values
+  git mv android/foo/src/main/res/values/strings.xml android/bar/src/main/res/values/strings.xml
+  run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$invocations_file")" = ':bar:lintDebug :foo:lintDebug --continue' ]
+}

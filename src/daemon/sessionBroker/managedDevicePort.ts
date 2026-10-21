@@ -1,4 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../../utils/deviceTimeouts";
@@ -26,9 +27,13 @@ import {
   SessionBrokerFailureError,
   type SessionBrokerDevicePort,
   type SessionDevicePreparationOptions,
+  type ResetResult,
+  type ResetOutcome,
+  type SessionPreparationTiming,
 } from "./devicePort";
 import { nativeProfile, type BrokerNativeProfile } from "./profile";
 import type { BrokerResourceRecord } from "./store";
+import { preparationTiming } from "./preparationTiming";
 
 import { BROKER_BINDING_ROLE } from "./persistedIdentity";
 
@@ -55,7 +60,7 @@ export interface ManagedDevicePortDependencies {
     device: BootedDevice,
     profile: Extract<BrokerNativeProfile, { platform: "ios" }>,
     assertOwned: () => Promise<void>,
-  ) => Promise<"clean">;
+  ) => Promise<"clean" | ResetOutcome>;
   /** Durable request/revision fence; a stale reset must not act on a later session's resource. */
   isCurrentReset?: (resource: BrokerResourceRecord) => Promise<boolean>;
 }
@@ -81,7 +86,11 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   async prepare(
     resource: BrokerResourceRecord,
     options: SessionDevicePreparationOptions,
-  ): Promise<{ sessionId: string; profile: BrokerNativeProfile }> {
+  ): Promise<{
+    sessionId: string;
+    profile: BrokerNativeProfile;
+    timing?: SessionPreparationTiming;
+  }> {
     this.assertResource(resource, "reserved");
     if (!resource.requestId) {
       throw new ActionableError("A broker device reservation must belong to a session request");
@@ -101,12 +110,25 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         ...(options.signal ? { signal: options.signal } : {}),
       });
     };
+    // Only an empty iOS binding can create a retained device for one warm readiness retry.
+    // Reserve one third (at most a runner provisioning window) for that retry; an occupied
+    // binding's reuse/adoption cannot produce retained creation evidence and gets the full budget.
+    let canCreate = true;
+    if (profile.platform === "ios") {
+      try {
+        const assignment = await this.dependencies.registry.getAssignment(this.key(resource));
+        canCreate = assignment === null || assignment.stableDeviceId === null;
+      } catch (error) {
+        // If the optional budget hint is unavailable, preserve the existing retry reserve.
+        logger.warn(
+          `Cannot read binding for iOS readiness retry budget: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
     const remainingMs = deadlineMs - timer.now();
-    // Reserve one third (at most a runner provisioning window) for one warm iOS retry.
-    // The first acquisition passes this shorter deadline through to provisionDevice readiness,
-    // so a cold create can exhaust its entire attempt budget without exhausting prepare itself.
     const retryReserveMs =
-      profile.platform === "ios"
+      profile.platform === "ios" && canCreate
         ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)
         : 0;
     let result = await acquire(remainingMs - retryReserveMs);
@@ -122,7 +144,10 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    return { sessionId, profile };
+    const binding = result.bindings.find(
+      (entry) => entry.bindingIndex === resource.allocationIndex,
+    );
+    return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
   }
 
   private preparationStopped(deadlineMs: number, signal?: AbortSignal): boolean {
@@ -244,7 +269,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     };
   }
 
-  async reset(resource: BrokerResourceRecord): Promise<"clean" | "pending"> {
+  async reset(resource: BrokerResourceRecord): Promise<ResetResult> {
     this.assertResource(resource, "resetting");
     const profile = nativeProfile(resource);
     const reset = this.dependencies.resetIosBaseline;

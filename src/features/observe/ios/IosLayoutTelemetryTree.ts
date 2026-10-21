@@ -65,13 +65,32 @@ function compactDisplayProperties(node: ViewHierarchyNode): IosLayoutTelemetryNo
   return compact;
 }
 
-/** Capture timestamps are deliberately excluded: each unchanged poll gets a new one. */
+/**
+ * Fingerprint the full display tree, independently of the stored payload cap.
+ * Stream projected nodes and child boundaries rather than serializing a second
+ * full tree. Capture timestamps are excluded: each unchanged poll gets a new one.
+ */
 export function hashIosLayoutTelemetryTree(
-  node: IosLayoutTelemetryNode,
+  root: ViewHierarchyNode | undefined,
   packageName: string | undefined,
   windowCount: number,
+  nodeCount: number,
 ): string {
-  return createHash("sha1")
-    .update(JSON.stringify([node, packageName ?? null, windowCount]))
-    .digest("hex");
+  const hash = createHash("sha1");
+  hash.update(JSON.stringify([packageName ?? null, windowCount, nodeCount]));
+  const visit = (node: ViewHierarchyNode): void => {
+    hash.update(JSON.stringify(compactDisplayProperties(node)));
+    if (node.node) {
+      hash.update("[");
+      const children = Array.isArray(node.node) ? node.node : [node.node];
+      for (const child of children) {
+        visit(child);
+      }
+      hash.update("]");
+    }
+  };
+  if (root) {
+    visit(root);
+  }
+  return hash.digest("hex");
 }

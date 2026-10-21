@@ -473,7 +473,7 @@ describe("real filesystem modes and own tmp cleanup", () => {
       if (route === "supersession") {
         const { ino, mtimeMs } = nodeLockFileSystem.stat(lock);
         const hash = createHash("sha256").update("99\nstale").digest("hex").slice(0, 32);
-        writeFileSync(`${lock}.reclaim.${ino}.${mtimeMs}.${hash}.0`, "98\ndead");
+        writeFileSync(`${lock}.reclaim.${Number(ino)}.${mtimeMs}.${hash}.0`, "98\ndead");
       }
       const racer = new Racer(
         acquireExclusiveLockSteps(lock, {

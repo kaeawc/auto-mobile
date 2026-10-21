@@ -183,6 +183,140 @@
     }
   },
   {
+    "name": "accessibilityAudit",
+    "description": "Run the platform's own accessibility audit engine on the current screen. iOS (iOS 17+, Simulator and physical) runs XCUITest performAccessibilityAudit and reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds. Unlike the host-side WCAG audit, the platform engine sees real hit regions, Dynamic Type support and clipped text. Android (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform; a runner that predates this command returns errorCode unsupported_capability.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Bundle id of the app to audit (default: the foreground app)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "checks": {
+          "description": "Checks to run (default: all)",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "contrast",
+              "hitRegion",
+              "dynamicType",
+              "textClipped",
+              "sufficientDescription",
+              "trait",
+              "elementDetection",
+              "all"
+            ]
+          }
+        },
+        "maxIssues": {
+          "description": "Most issues to return (default 50); truncated reports a clip",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "engine": {
+          "type": "string",
+          "enum": ["xcuitest", "atf"]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "check": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "elementId": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "left": {
+                    "type": "number"
+                  },
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  }
+                },
+                "required": ["left", "top", "right", "bottom"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["check", "summary"],
+            "additionalProperties": {}
+          }
+        },
+        "totalIssues": {
+          "type": "number"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "unsupportedChecks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": ["unsupported_capability", "unsupported_platform"]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "engine", "issues", "totalIssues", "truncated", "unsupportedChecks"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "accessibilityFocus",
     "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
     "inputSchema": {
@@ -3323,6 +3457,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -3462,6 +3597,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -22795,6 +22931,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -29845,6 +29982,7 @@
           "enum": [
             "accessibility",
             "accessibilityAction",
+            "accessibilityAudit",
             "accessibilityFocus",
             "appLifecycle",
             "audit",
@@ -29950,6 +30088,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",

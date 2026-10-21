@@ -94,6 +94,8 @@ const CLASSIFICATION: Classification = {
   control: [
     "accessibilityAction",
     "accessibilityFocus",
+    // Drives an XCUITest audit of the app under test, so it is held to the owner.
+    "accessibilityAudit",
     // The performance and memory audits drive the app, and a baseline record writes state.
     "audit",
     "appLifecycle",

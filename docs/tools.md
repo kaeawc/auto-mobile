@@ -24,7 +24,8 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
-`setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
+`setActiveDevice`, `setAppLinks`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`,
+`setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setSensor`, `setUIState`, `shake`, `snapshotOf`,
 `sqlQuery`,
 `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
@@ -1873,7 +1874,7 @@ subtree, or the whole active-window tree when owner-less.
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 🔏 <code>inspectPackageSigning</code>                                                            | Fresh read of an app's presence (`installed`, `absent`, `unknown`) and signing. Android: one user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and the embedded provisioning profile. Never cached.                                                                                                                                                                                                                                                                                                                               |
-| 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links. On Android 12+ it also returns `appLinks`: per-domain App Links verification state and user selection (see [App Links verification](#android-app-links-verification)).                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                           |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 📁 <code>stageSessionDownloads</code>                                                            | Deprecated session-bound alias of putAppFile target.domain user_files (Android Downloads); retains session ownership checks and remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1882,6 +1883,7 @@ subtree, or the whole active-window tree when owner-less.
 | 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ✅ <code>setAppLinks</code>                                                                      | Android 12+: approves, resets, or re-verifies an app's App Links domains, or changes a user's domain selection, so https links open the app without a chooser. Returns what changed and a restore receipt; a daemon session restores the original state on release.                                                                                                                                                                                                                                                                                                                                      |
 
 <details class="note" markdown="1">
 <summary>State-preserving app lifecycle contract</summary>
@@ -2357,6 +2359,59 @@ for several users. A sole user-0 installation keeps the existing query-free URI.
 This rule also applies to <code>externalFiles</code>. iOS URIs have no user query.
 
 </details>
+
+### Android App Links verification
+
+On Android 12 (API 31) and newer, an https link opens an app directly only when
+the app is approved for the link's domain. Debug builds and CI emulators usually
+fail verification (no network path to `assetlinks.json`, debug signing keys), so
+`openLink` lands in the browser instead.
+
+`getDeepLinks` reports this state for Android apps as `appLinks`, read with
+`pm get-app-links --user <id> <appId>` for the current user (`appLinksUserId`).
+Each entry has `domain`, `state` (`none`, `verified`, `approved`, `denied`,
+`migrated`, `restored`, `legacy_failure`, `system_configured`, `pre_verified`, or
+a numeric verifier error code), `autoVerify`, `userSelected`, and
+`approvedForLinks`: whether the app may open the domain without a chooser (a
+verified-equivalent state or a user selection, with link handling allowed).
+`state` is absent for a domain declared without `android:autoVerify`.
+`appLinkHandlingAllowed: false` means the user turned off "Open supported links".
+On a pre-Android 12 device, or when the state cannot be read, `appLinks` is
+omitted and `appLinksUnavailable` gives the reason; the rest of the result is
+unchanged.
+
+`setAppLinks` changes that state for `appId`. `action` selects the change:
+
+| `action`        | Command                                                         | Arguments                                  |
+| --------------- | --------------------------------------------------------------- | ------------------------------------------ |
+| `approve`       | `pm set-app-links --package <appId> 2 <domains or all>`         | `domains` (optional, autoVerify domains)   |
+| `reset`         | `pm set-app-links --package <appId> 0 <domains or all>`         | `domains` (optional, autoVerify domains)   |
+| `reverify`      | `pm verify-app-links --re-verify <appId>`                       | none; the verifier answers asynchronously  |
+| `userSelection` | `pm set-app-links-user-selection --user <id> --package <appId>` | `enabled` (required), `domains` (optional) |
+| `restore`       | writes back the recorded original state                         | none                                       |
+
+`userId` selects the Android user for `userSelection` and for the read-back; it
+defaults to the current user. Verification states are per package, not per user.
+`domains` omitted means every declared domain. A domain the app does not declare
+is refused before any write; `approve` and `reset` accept only autoVerify domains
+(use `userSelection` for the others). `pm` reports no per-domain failure, so the
+result reads the state back: `changed` lists each domain whose state or selection
+changed (`before`/`after`), `unapplied` lists requested domains that did not take,
+and `appLinks` is the state after the call.
+
+The state before the first `setAppLinks` change is recorded once per device and
+package, and returned as `restore`: `verification` lists each domain's `original`
+state and the state it is restored as (`restoreAs`), and `userSelections` lists
+each changed user's originally enabled domains. Within a daemon session
+(`sessionUuid`), release or rebind writes it back before the device is handed on;
+otherwise `action: "restore"` does. The shell can set only `none`, `verified`,
+`approved` and `denied`, so a restore is not always exact (`exact: false`):
+`migrated`, `restored`, `system_configured` and `pre_verified` come back as
+`verified`, which opens links the same way but lets the verifier overwrite it, and
+`legacy_failure` or a numeric error code comes back as `none`. A `reverify` still
+in flight can overwrite a restored `none` or `verified` state. The record lives in
+daemon memory: a daemon restart loses it, and the device keeps the last state.
+iOS universal links are not covered; `setAppLinks` refuses iOS devices.
 
 ## Devices & system state
 

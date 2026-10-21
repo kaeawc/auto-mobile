@@ -3389,6 +3389,7 @@
               "sendKeys",
               "sendSms",
               "setActiveDevice",
+              "setAppLinks",
               "setAppPermissions",
               "setDeviceResources",
               "setDeviceState",
@@ -3525,6 +3526,7 @@
               "sendKeys",
               "sendSms",
               "setActiveDevice",
+              "setAppLinks",
               "setAppPermissions",
               "setDeviceResources",
               "setDeviceState",
@@ -3759,7 +3761,7 @@
   },
   {
     "name": "getDeepLinks",
-    "description": "Query app deep links",
+    "description": "Query app deep links. On Android 12+ also reports appLinks: each web domain's App Links verification state, user selection, and whether the app may open it without a chooser.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3868,6 +3870,42 @@
           "items": {
             "type": "string"
           }
+        },
+        "appLinks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "autoVerify": {
+                "type": "boolean"
+              },
+              "userSelected": {
+                "type": "boolean"
+              },
+              "approvedForLinks": {
+                "type": "boolean"
+              }
+            },
+            "required": ["domain", "autoVerify", "userSelected", "approvedForLinks"],
+            "additionalProperties": {}
+          }
+        },
+        "appLinksUserId": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "appLinkHandlingAllowed": {
+          "type": "boolean"
+        },
+        "appLinksUnavailable": {
+          "type": "string"
         },
         "note": {
           "type": "string"
@@ -22215,6 +22253,7 @@
               "sendKeys",
               "sendSms",
               "setActiveDevice",
+              "setAppLinks",
               "setAppPermissions",
               "setDeviceResources",
               "setDeviceState",
@@ -26568,6 +26607,213 @@
     }
   },
   {
+    "name": "setAppLinks",
+    "description": "Android 12+: change an app's App Links state so https links open the app directly (or not). approve force-verifies autoVerify domains, reset clears them to none, reverify re-runs verification, userSelection enables/disables domains for a user, restore writes back the state recorded before the first change. Returns what changed, the per-domain state after, and a restore receipt; in a daemon session, release or rebind restores it. Read state with getDeepLinks.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Android package name.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "userId": {
+          "description": "Android user for userSelection and the read-back; defaults to the current user.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "action": {
+          "description": "approve: force-approve autoVerify domains (pm set-app-links 2). reset: clear verification to none (pm set-app-links 0). reverify: ask the verifier again (asynchronous). userSelection: enable or disable domains for the user. restore: write back the state recorded before the first setAppLinks change.",
+          "type": "string",
+          "enum": ["approve", "reset", "reverify", "userSelection", "restore"]
+        },
+        "domains": {
+          "description": "approve, reset, userSelection: domains to change; omit for every declared domain.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*$"
+          }
+        },
+        "enabled": {
+          "description": "userSelection only: true enables the domains for the user, false disables them.",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "action": {
+          "type": "string"
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string"
+              },
+              "before": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "after": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": ["domain", "before", "after"],
+            "additionalProperties": {}
+          }
+        },
+        "unapplied": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "appLinks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "autoVerify": {
+                "type": "boolean"
+              },
+              "userSelected": {
+                "type": "boolean"
+              },
+              "approvedForLinks": {
+                "type": "boolean"
+              }
+            },
+            "required": ["domain", "autoVerify", "userSelected", "approvedForLinks"],
+            "additionalProperties": {}
+          }
+        },
+        "appLinkHandlingAllowed": {
+          "type": "boolean"
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "onSessionRelease": {
+              "type": "boolean"
+            },
+            "verification": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "domain": {
+                    "type": "string"
+                  },
+                  "original": {
+                    "type": "string"
+                  },
+                  "restoreAs": {
+                    "type": "string"
+                  },
+                  "exact": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["domain", "original", "restoreAs", "exact"],
+                "additionalProperties": {}
+              }
+            },
+            "userSelections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "enabled": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["userId", "enabled"],
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": ["onSessionRelease"],
+          "additionalProperties": {}
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "userId", "action", "changed", "appLinks"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string"
+            },
+            "userSelected": {
+              "type": "boolean"
+            }
+          },
+          "required": ["userSelected"],
+          "additionalProperties": {}
+        }
+      }
+    }
+  },
+  {
     "name": "setAppPermissions",
     "description": "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     "inputSchema": {
@@ -29055,6 +29301,7 @@
             "sendKeys",
             "sendSms",
             "setActiveDevice",
+            "setAppLinks",
             "setAppPermissions",
             "setDeviceResources",
             "setDeviceState",
@@ -29157,6 +29404,7 @@
               "sendKeys",
               "sendSms",
               "setActiveDevice",
+              "setAppLinks",
               "setAppPermissions",
               "setDeviceResources",
               "setDeviceState",

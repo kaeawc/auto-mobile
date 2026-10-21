@@ -4,7 +4,7 @@ internal const val DEFAULT_PROTOTYPE_IDLE_TTL_MILLIS = 300_000L
 
 /** Delay before retrying an expiry whose window removal failed, and how many retries are made. */
 @InternalAutoMobilePrototypeApi const val PROTOTYPE_DISMISS_RETRY_MILLIS = 5_000L
-const val PROTOTYPE_DISMISS_MAX_RETRIES = 3
+@InternalAutoMobilePrototypeApi const val PROTOTYPE_DISMISS_MAX_RETRIES = 3
 
 /** A cancellable one-shot task. Unlike PrototypeSettleTimer, it does not block a gesture caller. */
 @InternalAutoMobilePrototypeApi

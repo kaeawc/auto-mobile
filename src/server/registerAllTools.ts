@@ -18,6 +18,7 @@ import { registerSnapshotTools } from "./snapshotTools";
 import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
+import { registerMediaSessionTools } from "./mediaSessionTools";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
@@ -31,6 +32,7 @@ import { registerStorageTools } from "./storageTools";
 import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerSessionLogTools } from "./sessionLogTools";
+import { registerPerformanceTraceTools } from "./performanceTraceTools";
 import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
@@ -89,6 +91,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSnapshotOfTools();
   registerBiometricTools();
   registerTelephonyTools();
+  registerMediaSessionTools();
   registerWindowModeTools();
   registerHighlightTools();
   registerPrototypeTools({
@@ -102,6 +105,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerPreferenceTools();
   registerAppFileTools();
   registerSessionLogTools();
+  registerPerformanceTraceTools();
   registerDownloadsFixtureTools();
   registerFormTools();
   registerAccessibilityTools();

@@ -58,6 +58,8 @@ data class PrototypeCondition(
   val any: List<PrototypeCondition>? = null,
   val not: PrototypeCondition? = null,
   val data: String? = null,
+  /** A `/platform` pointer (#14294); platform state is device-owned and read-only. */
+  val platform: String? = null,
   val valid: PrototypeValidityKeys? = null,
 )
 
@@ -375,6 +377,25 @@ data class PrototypeRequestAction(
   val into: String? = null,
   val statusKey: String? = null,
   val via: String? = null,
+  val timeoutMs: Int? = null,
+  val onSuccess: List<PrototypeAction>? = null,
+  val onError: List<PrototypeAction>? = null,
+) : PrototypeAction()
+
+/**
+ * A platform call (`prototype_platform_v1`, #14294): [call] is `<module>.<op>` from the contract's
+ * `platformModules` table, each [args] entry a value binding (`{value}`, `{state}`, `{data}`,
+ * `{platform}`, `{item}` / `{index}` in a repeat and `{event}` inside a handler) kept as JSON. The
+ * result goes to [into] (and `<into>__meta`), [statusKey] follows `loading`, `success` and `error`,
+ * and [onSuccess] or [onError] runs afterwards. Dispatch is the module registry's (#14295).
+ */
+@SerialName("platform")
+@Serializable
+data class PrototypePlatformAction(
+  val call: String,
+  val args: Map<String, JsonElement>? = null,
+  val into: String? = null,
+  val statusKey: String? = null,
   val timeoutMs: Int? = null,
   val onSuccess: List<PrototypeAction>? = null,
   val onError: List<PrototypeAction>? = null,
@@ -1142,6 +1163,45 @@ data class PrototypeProgressNode(
 ) : PrototypeNode()
 
 /**
+ * A `chart` (#14209): a [variant] line, area, bar or ring over 1–4 [series], each the objects of a
+ * `/data` array read through its `y` (and optional `x`) member. A ring draws its one series' latest
+ * value against [goal]; other variants draw [goal] as a reference line.
+ */
+@SerialName("chart")
+@Serializable
+data class PrototypeChartNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val variant: String,
+  val series: List<PrototypeChartSeries>,
+  val yRange: PrototypeChartRange? = null,
+  val xLabels: String = "none",
+  val goal: Double? = null,
+) : PrototypeNode()
+
+/** One chart series: the `/data` array at [path], its points' [y] and optional [x] members. */
+@Serializable
+data class PrototypeChartSeries(
+  val path: String,
+  val x: String? = null,
+  val y: String,
+  val label: String,
+  val color: PrototypeModeValue? = null,
+)
+
+/** A fixed y axis for a chart; [max] is above [min]. */
+@Serializable data class PrototypeChartRange(val min: Double, val max: Double)
+
+/**
  * A Material alert dialog, open while [openWhen] holds. Its buttons and scrim close it by writing
  * the opposite boolean; [child] is optional custom content between the text and the buttons.
  */
@@ -1500,7 +1560,25 @@ data class PrototypeSpec(
   val data: JsonObject? = null,
   /** The state keys and `/data` pointers the device keeps across shows (#12522). */
   val storage: PrototypeStorageBlock? = null,
+  /** What the spec needs from the platform before show (#14294). */
+  val requires: PrototypeRequires? = null,
+  /** `platform.on`: action lists run when a platform event is delivered (#14294). */
+  val platform: PrototypePlatformHandlers? = null,
 )
+
+/** The root `requires` block (#14294): platform modules, permissions and background needs. */
+@Serializable
+data class PrototypeRequires(
+  val platform: List<String>? = null,
+  val permissions: List<PrototypePermissionRequirement>? = null,
+  val background: List<String>? = null,
+)
+
+/** One declared permission: a canonical [name] and the [purpose] shown to the user. */
+@Serializable data class PrototypePermissionRequirement(val name: String, val purpose: String)
+
+/** Root `platform`: action lists keyed by `<module>.<event>`. */
+@Serializable data class PrototypePlatformHandlers(val on: Map<String, List<PrototypeAction>>)
 
 @Serializable
 enum class PrototypeValidateOn {

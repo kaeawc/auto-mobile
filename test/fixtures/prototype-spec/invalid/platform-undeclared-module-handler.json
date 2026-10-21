@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "platform": {
+      "on": {
+        "test.tick": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "platform.on[\"test.tick\"]",
+  "expectedMessage": "Platform module test is not declared in requires.platform"
+}

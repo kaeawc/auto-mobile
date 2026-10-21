@@ -13,14 +13,15 @@ the exact arguments supported by your connection.
 
 The following tools expose `sessionUuid` and `keepScreenAwake`:
 
-`accessibility`, `accessibilityAction`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
+`accessibility`, `accessibilityAction`, `accessibilityAudit`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
+`mediaSession`, `mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`,
+`performanceTrace`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
@@ -2443,6 +2444,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator; duration must be an integer from 1 to 1,798,000 ms, and Android intensity must be from 1 to 1,000.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 🎚️ <code>setSensor</code>                                                      | Sets or resets one Android emulator virtual sensor (`acceleration`, `gyroscope`, `magnetic-field`, `orientation`, `temperature`, `proximity`, `light`, `pressure`, `humidity`) through the emulator console, returning `applied`, `previous` and a `restore` receipt. Pass `sensor` plus exactly one of `value` or `reset: true`. A daemon session (`sessionUuid`) restores every sensor it changed on release or rebind. Physical devices and iOS are refused.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📞 <code>phoneCall</code> / 💬 <code>sendSms</code>                            | Simulates an incoming call or SMS: Android emulator console, or CallKit and a notification through the app's AutoMobile iOS SDK.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 🎵 <code>mediaSession</code>                                                   | Android: reads media sessions (playback state, position, speed, metadata, actions), dispatches a transport key to the media button session like a headset, or sets a music/ring/alarm stream volume; mutations return a restore receipt. Omitted from discovery by default: select it with `setToolEnabled` or `--enable-tool mediaSession`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🔔 <code>postNotification</code>                                               | Posts a notification through Android SDK hooks or iOS Simulator push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -2468,6 +2470,7 @@ Location route playback uses `setDeviceState` with `location: { mode: "route", w
 
 One route runs per device. A static fix, new route, `location: { mode: "stop" }`, session release, unbind, or device removal cancels it. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged. A sessionless fix written while a session marker remains on that device is cleared by that session's release; markers are per device and session, not per write. Stop reports `stopped: false` when idle and `previousRoute` when a route ended, including its `endedReason` (`completed`, `failed`, `replaced`, or `stopped`) and any `lastError`.
 
+Device-condition fixtures use `setDeviceState` with `deviceCondition: { ... }`, behind the `device-condition` feature flag (off by default). It is the session-scoped surface for the root/integrity/fault test fixtures of epic #14047: a versioned object with `rootState`, `integrityState`, a `faults` map, an optional `expiresInSeconds` lease, and `reset`. Each applied condition registers a reset that runs — newest first, verified against a clean read-back — on session release, rebind, or lease expiry, so a device never returns to the pool holding a fixture; the `expiresInSeconds` lease needs a session to enforce it. The `rootState`/`integrityState` fields accept only `"unset"` until their injectors land, and `deviceCondition` must be sent in its own call rather than combined with the other `setDeviceState` fields. The `faults` sub-object carries the power-domain fault injectors (Android only, root-free): `battery` (`unplug` / `low` / `full` via `dumpsys battery`, reset with `dumpsys battery reset`), `lowPower` (`settings global low_power`, restored to its prior value), `doze` (`dumpsys deviceidle force-idle`, reset with `unforce`), and `thermal` (`cmd thermalservice override-status`, reset with `reset`). Each fault clears with `"unset"`. The version-sensitive verbs (`deviceidle`, `thermalservice`) probe their capability first and return an "unsupported on this image" result instead of half-applying.
 Lock-screen credentials use `setDeviceState` with `screenLock: { type: "pin", credential: "1357" }`, `screenLock: { type: "password", credential: "s3cret" }`, `screenLock: { type: "pattern", credential: "14789" }` (cells of the 3x3 grid as digits 1-9, row by row, each used once), or `screenLock: { type: "none", currentCredential: "1357" }` to clear one. It runs `adb shell locksettings set-pin|set-password|set-pattern|clear` for user 0 on an Android emulator or physical device, so `KeyguardManager.isDeviceSecure()` becomes true and Keystore keys that need user authentication can be generated; iOS returns unsupported. A PIN is 4-16 digits; a password or `currentCredential` is 4-16 printable ASCII characters, not starting with `-` and without a single quote. `getDeviceState` with `include: ["screenLock"]` reads the credential type (`none`, `pin`, `password`, `pattern`, or `unknown`) from `dumpsys lock_settings`, falling back to the keyguard's `secure` flag.
 
 The result reports only the type and outcome, such as `screenLock: { type: "pin", set: true, outcome: "set", verified: true, restoreOnRelease: true }`; the credential is never returned. Within a session, AutoMobile keeps the credential in daemon memory (never on disk) so that session can replace it (`--old`) and its release or rebind clears it. A leaked lock blocks every later session on the device, so the outcome of that clear is returned in the session-release result as `screenLockRestore` (`cleared`, `failed` with the leftover and how to remove it, `skipped` for a replaced device, or `pending` if still running at the teardown cap); a refused credential is not retried, because each refusal counts toward the device's failed-attempt lockout. A daemon restart loses the in-memory credential, leaving the lock until it is cleared by hand. A sessionless set is never cleared automatically and carries a `warning`. An existing credential this session did not set is never overwritten: the call fails with `errorCode: "lock_credential_preexisting"` and no write; a wrong `currentCredential` fails with `lock_credential_mismatch`. Any change also drops the PIN `wakeAndUnlock` remembered for the device.
@@ -2825,6 +2828,56 @@ before, or together with, the SDK in the app.
 `fingerprintId` defaults to 1 for match/error and 2 for fail/cancel.
 `ttlMs` sets the SDK override lifetime in milliseconds (default 5000).
 
+### Media session options
+
+`mediaSession` is Android-only and runs plain adb: it reads
+`dumpsys media_session` and drives `cmd media_session` (falling back to the
+`media` shell tool on releases without that command). It needs no CtrlProxy, so
+it uses booted-only readiness.
+
+`action: "get"` returns `sessions` and `mediaButtonSession`. Each session has
+`package`, `tag`, `userId`, `active`, `state` (`PlaybackState` lower-cased:
+`playing`, `paused`, `stopped`, `buffering`, `none`, ...), `stateCode`,
+`positionMs`, `positionUpdatedAtMs`, `speed`, `actions` (decoded
+`PlaybackState.ACTION_*` names) and `metadata`. These are what the app last
+reported to the system: `positionMs` is the position at `positionUpdatedAtMs`
+(device `elapsedRealtime`), not a live playhead. The platform dump exposes only
+the metadata key count (`size`) and its `MediaDescription`, so `title`, `artist`
+and `album` are the description's three fields, split only when exactly three
+are present; `description` keeps the raw text. Track duration is not in the dump
+and is not reported. `appId` limits `sessions` to that package.
+
+`waitFor: { mediaState, timeoutMs }` (only with `action: "get"`) polls until a
+session (of `appId`, if given) reports `mediaState`, for up to `timeoutMs`
+(default 5000). A timeout reports `awaitTimeout: true`, which fails the step in a
+plan, so a plan can wait for playback to start:
+
+```yaml
+- tool: mediaSession
+  params:
+    appId: com.example.player
+    action: get
+    waitFor: { mediaState: playing, timeoutMs: 10000 }
+- tool: mediaSession
+  params:
+    action: { dispatch: pause }
+```
+
+`action: { dispatch: key }` sends `play`, `pause`, `play-pause`, `next`,
+`previous`, `stop`, `fast-forward` or `rewind` the way a headset or Bluetooth key
+does: to the current media button session. The result names that session
+(`dispatch.handledBy`) and its `previousState` and `state`, re-read for up to two
+seconds until the state changes. With `appId`, the call is refused before
+anything is sent unless `appId` owns the media button session. When the state
+changed, `restore.dispatch` is the key that puts it back (`play`, `pause` or
+`stop`); a track change from `next` or `previous` has no restore key.
+
+`action: { volume: { stream, level } }` sets the `music`, `ring` or `alarm`
+stream index. The current level and range are read first; a level outside the
+range is refused without a change. The level is read back after the write
+(`volume.verified`; a mismatch is `success: false`), and
+`restore.volume` holds the previous level to pass back to restore it.
+
 ### Window mode options
 
 `windowMode` is Android-only and runs plain adb, so it uses booted-only readiness.
@@ -3076,6 +3129,7 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 | ⏺️ <code>recordDeviceGestures</code>                           | Records on-device user input (not tool calls) for <code>exportPlan</code>.                |
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                                       |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                                   |
+| ⏱️ <code>performanceTrace</code>                               | Records a native trace (xctrace on iOS, Perfetto on Android) and returns a summary.       |
 
 ### Network options
 
@@ -3153,6 +3207,36 @@ A stop or `exportPlan` with no captured input fails with
 `reason: "no_user_input_captured"` and the same explanation; touch-track or
 recorder-stop failures retain their own errors.
 
+### Performance traces
+
+`performanceTrace` is disabled by default; enable it with `setToolEnabled`.
+`action: "start"` takes a `template` (`appLaunch`, `hitches`, `hangs`,
+`timeProfiler`, or `allocations`), an optional `appId`, and an optional
+`timeLimitMs` (1000–300000, default 30000). The recorder stops itself at the
+time limit. `action: "stop"` takes the `traceId` that start returned and returns
+the `artifactPath` with a bounded `summary`: `durationMs`, plus `launch`,
+`hitches`, `hangs`, `topFunctions`, or `allocations` depending on the template.
+The summary never includes raw tables. Anything that limited the summary is
+reported in `warnings`.
+
+- **iOS** (Simulator and device) runs `xcrun xctrace record` with the matching
+  Instruments template (App Launch, Animation Hitches, Hangs, Time Profiler,
+  Allocations). `appLaunch` launches `appId` under the recorder. Other templates
+  attach to the running app, or record all processes when it is not running;
+  `allocations` requires it to be running. Stop sends SIGINT so xctrace
+  finalizes the `.trace`. The summary is read with `xctrace export`.
+- **Android** runs `perfetto --background` with a template-mapped config
+  (atrace categories, FrameTimeline, `linux.perf` sampling, or heapprofd), then
+  pulls the `.perfetto-trace` to the host. The summary needs Perfetto's
+  `trace_processor_shell` on the host `PATH` (or `AUTOMOBILE_TRACE_PROCESSOR`);
+  without it, only the artifact is returned, with a warning.
+
+Only one trace records per device at a time. Releasing the owning session (the
+call's `sessionUuid`), or losing the device (its `deviceId`, or the device chosen
+by `platform`), stops the recorder, so no `xctrace` or `perfetto` process
+outlives the session. Artifacts are stored under the AutoMobile data directory
+in `performance-traces/`, next to `video-archive/`.
+
 ### Video recording quality and limits
 
 `videoRecording.resolution` sets positive integer `width` and `height`;
@@ -3210,6 +3294,7 @@ accept the recording `display` argument.
 | ♿ <code>accessibility</code>       | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
 | 🎯 <code>accessibilityFocus</code>  | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
 | 🧭 <code>accessibilityAction</code> | Performs an Android accessibility action (expand, collapse, dismiss, select, scroll or page in a direction, press and hold, set progress, or an app-defined custom action by label) on an element, the way TalkBack or Switch Access does.                                                                                                                                                                                                                  |
+| 🔍 <code>accessibilityAudit</code>  | Runs the platform's own accessibility audit on the current screen: XCUITest `performAccessibilityAudit` on iOS 17+ (Simulator and physical). Android returns `errorCode: unsupported_platform` for now.                                                                                                                                                                                                                                                     |
 | 🧪 <code>audit</code>               | Runs the accessibility (WCAG), performance or memory audit on the current Android screen on demand, with every audit feature flag off; supports container scoping, named baselines and `failOn` for plan assertions.                                                                                                                                                                                                                                        |
 | 🔀 <code>setToolEnabled</code>      | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
 
@@ -3254,6 +3339,29 @@ is set (WCAG AA otherwise).
 Accessibility violations carry the element from the same observation (`resource-id`,
 `bounds`). The output keeps the 50 most relevant (`totalViolations` and `truncated`
 report a clip). iOS reports every kind under `unsupported`; use `accessibilityAudit` there.
+
+### accessibilityAudit
+
+`accessibilityAudit` runs the platform's own accessibility engine (#14086). On iOS 17+
+(Simulator and physical device) the runner calls XCUITest's
+`performAccessibilityAudit` on `appId` or the foreground app, and collects every issue
+instead of failing on the first. `checks` selects `contrast`, `hitRegion`,
+`dynamicType`, `textClipped`, `sufficientDescription`, `trait` and
+`elementDetection` (default `all`). Each issue reports its `check`, a `summary` and
+`detail`, and, when XCUITest names the element, its accessibility identifier as
+`elementId` (accepted by `tapOn` and `highlight`), its `label` and its `bounds`.
+`maxIssues` (default 50) bounds the output; `totalIssues` and `truncated: true` report
+a clip. `unsupportedChecks` lists checks the target could not run.
+
+It differs from the host-side WCAG audit (`WcagAudit`, the `accessibility-audit`
+feature flag), which applies heuristics to the observed hierarchy and screenshot. The
+platform engine instead sees what the OS sees: real hit regions, Dynamic Type support,
+clipped text, trait misuse and elements it cannot detect.
+
+A runner built before this command returns `errorCode: unsupported_capability`
+rather than timing out; restart the daemon so it installs the current runner. On
+Android the Accessibility Test Framework audit is not available yet, so the tool
+returns `errorCode: unsupported_platform` and points to the WCAG audit.
 
 ### Accessibility focus selectors
 
@@ -3617,6 +3725,17 @@ may throw.
 `pressButton` reports `success`, `button`, and `keyCode`, with optional `error`,
 `warnings`, `staleDisplay`, `effect`, and finalized `observation`/`observationDiff`.
 Returned failures retain their structured payload and set MCP `isError`.
+
+`pressButton` `action` and `camera` press the iOS Action button and Camera Control
+through XCUITest's `XCUIDevice.Button.action` and `.camera` (#14100). Apple
+documents both cases, and `XCUIDevice.hasHardwareButton(_:)` (iOS 16+), in
+XCUIAutomation for Xcode 16.3 and later; the runner presses only when
+`hasHardwareButton` reports the button. Devices without the hardware (Action
+button: iPhone 15 Pro and later; Camera Control: iPhone 16 and later) and
+simulators whose runtime does not report it return `code: "unsupported_button"`
+with `retryable: false`. Android has no equivalent and refuses both with the same
+code. A press can launch the app or shortcut the user bound to the button, so
+both count as navigation buttons.
 
 `launchApp` reports `success` and `packageName`, with optional `activityName`,
 `userId`, `pid`, `alreadyForeground`, `foregroundActivityPackage`, `verifiedBy`,

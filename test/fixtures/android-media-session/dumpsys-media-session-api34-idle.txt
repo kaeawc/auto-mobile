@@ -1,0 +1,17 @@
+MEDIA SESSION SERVICE (dumpsys media_session)
+
+  1 sessions listeners.
+  Global priority session is null
+  User Records:
+Record for full_user=0
+  Volume key long-press listener: null
+  Volume key long-press listener package:
+  Media key event listener: null
+  Media key event listener package:
+  Callback: null
+  Last MediaButtonReceiver: null
+  Restored MediaButtonReceiver: null
+  Restored MediaButtonReceiver componentType: 0
+  Media button session is null
+  Sessions Stack - have 0 sessions:
+Audio playback (lastly played comes first)

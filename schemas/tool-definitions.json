@@ -183,6 +183,140 @@
     }
   },
   {
+    "name": "accessibilityAudit",
+    "description": "Run the platform's own accessibility audit engine on the current screen. iOS (iOS 17+, Simulator and physical) runs XCUITest performAccessibilityAudit and reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds. Unlike the host-side WCAG audit, the platform engine sees real hit regions, Dynamic Type support and clipped text. Android (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform; a runner that predates this command returns errorCode unsupported_capability.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Bundle id of the app to audit (default: the foreground app)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "checks": {
+          "description": "Checks to run (default: all)",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "contrast",
+              "hitRegion",
+              "dynamicType",
+              "textClipped",
+              "sufficientDescription",
+              "trait",
+              "elementDetection",
+              "all"
+            ]
+          }
+        },
+        "maxIssues": {
+          "description": "Most issues to return (default 50); truncated reports a clip",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "engine": {
+          "type": "string",
+          "enum": ["xcuitest", "atf"]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "check": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "elementId": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "left": {
+                    "type": "number"
+                  },
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  }
+                },
+                "required": ["left", "top", "right", "bottom"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["check", "summary"],
+            "additionalProperties": {}
+          }
+        },
+        "totalIssues": {
+          "type": "number"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "unsupportedChecks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": ["unsupported_capability", "unsupported_platform"]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "engine", "issues", "totalIssues", "truncated", "unsupportedChecks"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "accessibilityFocus",
     "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
     "inputSchema": {
@@ -3323,6 +3457,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -3364,12 +3499,14 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
               "network",
               "observe",
               "openLink",
+              "performanceTrace",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -3460,6 +3597,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -3501,12 +3639,14 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
               "network",
               "observe",
               "openLink",
+              "performanceTrace",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -9911,6 +10051,413 @@
     }
   },
   {
+    "name": "mediaSession",
+    "description": "Android media sessions: read playback state, position, speed, metadata and actions (dumpsys media_session); dispatch a transport key to the media button session like a headset, reporting which session handled it; or set a music/ring/alarm stream volume. Mutations return a restore receipt. waitFor polls get until a session reports a state.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Package. get: only its sessions. dispatch: refuse unless it is the media button session",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "action": {
+          "description": "\"get\" reads sessions; {dispatch} sends a media key like a headset; {volume} sets a stream index",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "get"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "dispatch": {
+                  "type": "string",
+                  "enum": [
+                    "play",
+                    "pause",
+                    "play-pause",
+                    "next",
+                    "previous",
+                    "stop",
+                    "fast-forward",
+                    "rewind"
+                  ]
+                }
+              },
+              "required": ["dispatch"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "volume": {
+                  "type": "object",
+                  "properties": {
+                    "stream": {
+                      "type": "string",
+                      "enum": ["music", "ring", "alarm"]
+                    },
+                    "level": {
+                      "description": "Volume index within the stream's range",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["stream", "level"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["volume"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "waitFor": {
+          "description": "get only: poll until a session (of appId, if given) reports this state",
+          "type": "object",
+          "properties": {
+            "mediaState": {
+              "type": "string",
+              "enum": [
+                "none",
+                "stopped",
+                "paused",
+                "playing",
+                "fast_forwarding",
+                "rewinding",
+                "buffering",
+                "error",
+                "connecting",
+                "skipping_to_previous",
+                "skipping_to_next",
+                "skipping_to_queue_item"
+              ]
+            },
+            "timeoutMs": {
+              "description": "Wait timeout ms (default: 5000)",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1770000
+            }
+          },
+          "required": ["mediaState"],
+          "additionalProperties": false
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["get", "dispatch", "volume"]
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "package": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "tag": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "userId": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "state": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "stateCode": {
+                "type": "number"
+              },
+              "positionMs": {
+                "type": "number"
+              },
+              "positionUpdatedAtMs": {
+                "type": "number"
+              },
+              "speed": {
+                "type": "number"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "artist": {
+                    "type": "string"
+                  },
+                  "album": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "isMediaButtonSession": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "package",
+              "tag",
+              "userId",
+              "active",
+              "state",
+              "actions",
+              "isMediaButtonSession"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "mediaButtonSession": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wait": {
+          "type": "object",
+          "properties": {
+            "mediaState": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "matched": {
+              "type": "boolean"
+            },
+            "waitMs": {
+              "type": "number"
+            },
+            "polls": {
+              "type": "number"
+            }
+          },
+          "required": ["mediaState", "matched", "waitMs", "polls"],
+          "additionalProperties": false
+        },
+        "awaitTimeout": {
+          "type": "boolean"
+        },
+        "awaitDuration": {
+          "type": "number"
+        },
+        "dispatch": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "handledBy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "previousState": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "state": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "stateChanged": {
+              "type": "boolean"
+            }
+          },
+          "required": ["key", "handledBy", "stateChanged"],
+          "additionalProperties": false
+        },
+        "volume": {
+          "type": "object",
+          "properties": {
+            "stream": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "previousLevel": {
+              "type": "number"
+            },
+            "level": {
+              "type": "number"
+            },
+            "requestedLevel": {
+              "type": "number"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "verified": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "stream",
+            "previousLevel",
+            "level",
+            "requestedLevel",
+            "min",
+            "max",
+            "changed",
+            "verified"
+          ],
+          "additionalProperties": false
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "dispatch": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "volume": {
+              "type": "object",
+              "properties": {
+                "stream": {
+                  "$ref": "#/$defs/__schema6"
+                },
+                "level": {
+                  "type": "number"
+                }
+              },
+              "required": ["stream", "level"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["success", "message", "action"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "string"
+        },
+        "__schema1": {
+          "type": "string"
+        },
+        "__schema2": {
+          "type": "number"
+        },
+        "__schema3": {
+          "type": "string",
+          "enum": [
+            "none",
+            "stopped",
+            "paused",
+            "playing",
+            "fast_forwarding",
+            "rewinding",
+            "buffering",
+            "error",
+            "connecting",
+            "skipping_to_previous",
+            "skipping_to_next",
+            "skipping_to_queue_item",
+            "unknown"
+          ]
+        },
+        "__schema4": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "tag": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "userId": {
+              "$ref": "#/$defs/__schema2"
+            }
+          },
+          "required": ["package", "tag", "userId"],
+          "additionalProperties": false
+        },
+        "__schema5": {
+          "type": "string",
+          "enum": [
+            "play",
+            "pause",
+            "play-pause",
+            "next",
+            "previous",
+            "stop",
+            "fast-forward",
+            "rewind"
+          ]
+        },
+        "__schema6": {
+          "type": "string",
+          "enum": ["music", "ring", "alarm"]
+        }
+      }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["get"]
+        }
+      ]
+    }
+  },
+  {
     "name": "mockNetwork",
     "description": "Add mock network response rule.",
     "inputSchema": {
@@ -13624,6 +14171,257 @@
     }
   },
   {
+    "name": "performanceTrace",
+    "description": "Record a native performance trace (xctrace on iOS, Perfetto on Android): start with a template, drive the flow, then stop for the artifact path and a bounded summary.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "start a recorder, or stop one by traceId",
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "appId": {
+          "description": "App to trace (required for appLaunch and allocations)",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "template": {
+          "description": "start: what to record",
+          "type": "string",
+          "enum": ["appLaunch", "hitches", "hangs", "timeProfiler", "allocations"]
+        },
+        "timeLimitMs": {
+          "description": "start: recorder stops itself after this (default 30000)",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000
+        },
+        "traceId": {
+          "description": "stop: the id start returned",
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["recording", "stopped"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "template": {
+          "type": "string",
+          "enum": ["appLaunch", "hitches", "hangs", "timeProfiler", "allocations"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "timeLimitMs": {
+          "type": "number"
+        },
+        "artifactPath": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "durationMs": {
+              "type": "number"
+            },
+            "endReason": {
+              "type": "string"
+            },
+            "launch": {
+              "type": "object",
+              "properties": {
+                "durationMs": {
+                  "type": "number"
+                },
+                "phases": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "durationMs": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["name", "durationMs"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["durationMs", "phases"],
+              "additionalProperties": false
+            },
+            "hitches": {
+              "type": "object",
+              "properties": {
+                "count": {
+                  "type": "number"
+                },
+                "totalDurationMs": {
+                  "type": "number"
+                },
+                "maxDurationMs": {
+                  "type": "number"
+                }
+              },
+              "required": ["count", "totalDurationMs", "maxDurationMs"],
+              "additionalProperties": false
+            },
+            "hangs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "durationMs": {
+                    "type": "number"
+                  },
+                  "startMs": {
+                    "type": "number"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": ["durationMs"],
+                "additionalProperties": false
+              }
+            },
+            "topFunctions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "samples": {
+                    "type": "number"
+                  }
+                },
+                "required": ["name", "samples"],
+                "additionalProperties": false
+              }
+            },
+            "allocations": {
+              "type": "object",
+              "properties": {
+                "bytes": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["bytes", "count"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "success",
+        "action",
+        "traceId",
+        "state",
+        "deviceId",
+        "platform",
+        "template",
+        "startedAt",
+        "timeLimitMs",
+        "artifactPath",
+        "warnings"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "phoneCall",
     "description": "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
     "inputSchema": {
@@ -13948,14 +14746,24 @@
   },
   {
     "name": "pressButton",
-    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
+    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "button": {
           "type": "string",
-          "enum": ["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]
+          "enum": [
+            "home",
+            "back",
+            "menu",
+            "power",
+            "volume_up",
+            "volume_down",
+            "recent",
+            "action",
+            "camera"
+          ]
         },
         "platform": {
           "type": "string",
@@ -15867,7 +16675,7 @@
   },
   {
     "name": "prototype",
-    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing); deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. searchBar requires prototype_search_bar_v1 for show and patch. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them.",
+    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing); deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/chart/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. searchBar requires prototype_search_bar_v1 for show and patch. chart (line/area/bar/ring over /data arrays) requires prototype_chart_v1; observe reports its summary. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -15888,7 +16696,7 @@
           ]
         },
         "spec": {
-          "description": "Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.",
+          "description": "Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.",
           "type": "object",
           "properties": {
             "id": {
@@ -16410,6 +17218,685 @@
               "required": ["version", "keys"],
               "additionalProperties": false
             },
+            "requires": {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                },
+                "permissions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "enum": [
+                          "camera",
+                          "microphone",
+                          "location",
+                          "locationBackground",
+                          "notifications",
+                          "photos",
+                          "photosAdd",
+                          "contacts",
+                          "calendar",
+                          "bluetooth",
+                          "nearbyWifi",
+                          "motion",
+                          "speech"
+                        ]
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "maxLength": 512
+                      }
+                    },
+                    "required": ["name", "purpose"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 16
+                },
+                "background": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "location",
+                      "call",
+                      "connectedDevice",
+                      "transfer",
+                      "camera",
+                      "microphone",
+                      "remoteNotification"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 8
+                }
+              },
+              "additionalProperties": false
+            },
+            "platform": {
+              "type": "object",
+              "properties": {
+                "on": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["emit"]
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "payload": {},
+                            "context": {
+                              "allOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "state": {
+                                            "type": "string",
+                                            "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
+                                          }
+                                        },
+                                        "required": ["state"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "item": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                          }
+                                        },
+                                        "required": ["item"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "index": {
+                                            "type": "boolean",
+                                            "const": true
+                                          }
+                                        },
+                                        "required": ["index"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "data": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 256,
+                                            "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
+                                          }
+                                        },
+                                        "required": ["data"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/payload"
+                                          }
+                                        },
+                                        "required": ["value"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "page": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": ["page"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "match": {
+                                            "type": "string",
+                                            "enum": ["text", "kind"]
+                                          }
+                                        },
+                                        "required": ["match"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "propertyNames": {
+                                    "minLength": 1
+                                  }
+                                }
+                              ]
+                            },
+                            "requireValid": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                              },
+                              "minItems": 1,
+                              "maxItems": 8
+                            }
+                          },
+                          "required": ["type", "name"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["setPage"]
+                            },
+                            "pager": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "page": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": ["next", "prev"]
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2147483647
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["type", "pager", "page"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["setState"]
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["type", "key", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["toggle"]
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            }
+                          },
+                          "required": ["type", "key"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["increment"]
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "by": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["type", "key"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["decrement"]
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "by": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["type", "key"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["dismiss"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["setData"]
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 261
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["type", "path", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["appendData"]
+                            },
+                            "path": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/path"
+                            },
+                            "value": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/value"
+                            }
+                          },
+                          "required": ["type", "path", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["removeData"]
+                            },
+                            "path": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/path"
+                            }
+                          },
+                          "required": ["type", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["request"]
+                            },
+                            "method": {
+                              "type": "string",
+                              "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+                            },
+                            "url": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "headers": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "maxLength": 4096
+                                  },
+                                  {
+                                    "anyOf": [
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              "propertyNames": {
+                                "minLength": 1
+                              }
+                            },
+                            "query": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/headers/additionalProperties"
+                              },
+                              "propertyNames": {
+                                "minLength": 1
+                              }
+                            },
+                            "body": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/headers/additionalProperties/anyOf/1"
+                            },
+                            "into": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 261
+                            },
+                            "statusKey": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "via": {
+                              "type": "string",
+                              "enum": ["host", "device"]
+                            },
+                            "timeoutMs": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 30000
+                            },
+                            "onSuccess": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                              },
+                              "minItems": 1,
+                              "maxItems": 32
+                            },
+                            "onError": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/onSuccess"
+                            }
+                          },
+                          "required": ["type", "url"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["platform"]
+                            },
+                            "call": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "args": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "platform": {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                      }
+                                    },
+                                    "required": ["platform"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "event": {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                      }
+                                    },
+                                    "required": ["event"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "propertyNames": {
+                                "minLength": 1
+                              }
+                            },
+                            "into": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 261
+                            },
+                            "statusKey": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "timeoutMs": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 300000
+                            },
+                            "onSuccess": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties"
+                            },
+                            "onError": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties"
+                            }
+                          },
+                          "required": ["type", "call"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["push"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "screen": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "stack", "screen"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["pop"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "stack"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["popToRoot"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "stack"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["scrollTo"]
+                            },
+                            "scroll": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "to": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": ["start", "end"]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["key"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "animated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["type", "scroll", "to"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["replace"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "screen": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "stack", "screen"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 32
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": ["on"],
+              "additionalProperties": false
+            },
             "root": {
               "anyOf": [
                 {
@@ -16434,517 +17921,7 @@
                     "onTap": {
                       "type": "array",
                       "items": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["emit"]
-                              },
-                              "name": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "payload": {},
-                              "context": {
-                                "allOf": [
-                                  {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "anyOf": [
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "state": {
-                                              "type": "string",
-                                              "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
-                                            }
-                                          },
-                                          "required": ["state"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "item": {
-                                              "type": "string",
-                                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                                            }
-                                          },
-                                          "required": ["item"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "index": {
-                                              "type": "boolean",
-                                              "const": true
-                                            }
-                                          },
-                                          "required": ["index"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "data": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 256,
-                                              "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
-                                            }
-                                          },
-                                          "required": ["data"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "value": {
-                                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/payload"
-                                            }
-                                          },
-                                          "required": ["value"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "page": {
-                                              "type": "string",
-                                              "minLength": 1
-                                            }
-                                          },
-                                          "required": ["page"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "match": {
-                                              "type": "string",
-                                              "enum": ["text", "kind"]
-                                            }
-                                          },
-                                          "required": ["match"],
-                                          "additionalProperties": false
-                                        }
-                                      ]
-                                    },
-                                    "propertyNames": {
-                                      "minLength": 1
-                                    }
-                                  }
-                                ]
-                              },
-                              "requireValid": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                                },
-                                "minItems": 1,
-                                "maxItems": 8
-                              }
-                            },
-                            "required": ["type", "name"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["setPage"]
-                              },
-                              "pager": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "page": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["next", "prev"]
-                                  },
-                                  {
-                                    "type": "integer",
-                                    "minimum": 0,
-                                    "maximum": 2147483647
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["type", "pager", "page"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["setState"]
-                              },
-                              "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              },
-                              "value": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["type", "key", "value"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["toggle"]
-                              },
-                              "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              }
-                            },
-                            "required": ["type", "key"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["increment"]
-                              },
-                              "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              },
-                              "by": {
-                                "type": "number"
-                              }
-                            },
-                            "required": ["type", "key"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["decrement"]
-                              },
-                              "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              },
-                              "by": {
-                                "type": "number"
-                              }
-                            },
-                            "required": ["type", "key"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["dismiss"]
-                              }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["setData"]
-                              },
-                              "path": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 261
-                              },
-                              "value": {
-                                "anyOf": [
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["type", "path", "value"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["appendData"]
-                              },
-                              "path": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/path"
-                              },
-                              "value": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/value"
-                              }
-                            },
-                            "required": ["type", "path", "value"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["removeData"]
-                              },
-                              "path": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/path"
-                              }
-                            },
-                            "required": ["type", "path"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["request"]
-                              },
-                              "method": {
-                                "type": "string",
-                                "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
-                              },
-                              "url": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 2048
-                              },
-                              "headers": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "maxLength": 4096
-                                    },
-                                    {
-                                      "anyOf": [
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
-                                        },
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
-                                        },
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
-                                        },
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
-                                        },
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
-                                        }
-                                      ]
-                                    }
-                                  ]
-                                },
-                                "propertyNames": {
-                                  "minLength": 1
-                                }
-                              },
-                              "query": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/headers/additionalProperties"
-                                },
-                                "propertyNames": {
-                                  "minLength": 1
-                                }
-                              },
-                              "body": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/headers/additionalProperties/anyOf/1"
-                              },
-                              "into": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 261
-                              },
-                              "statusKey": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              },
-                              "via": {
-                                "type": "string",
-                                "enum": ["host", "device"]
-                              },
-                              "timeoutMs": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "maximum": 30000
-                              },
-                              "onSuccess": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
-                                },
-                                "minItems": 1,
-                                "maxItems": 32
-                              },
-                              "onError": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/onSuccess"
-                              }
-                            },
-                            "required": ["type", "url"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["push"]
-                              },
-                              "stack": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "screen": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "stack", "screen"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["pop"]
-                              },
-                              "stack": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "stack"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["popToRoot"]
-                              },
-                              "stack": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "stack"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["scrollTo"]
-                              },
-                              "scroll": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "to": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["start", "end"]
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "key": {
-                                        "anyOf": [
-                                          {
-                                            "type": "string"
-                                          },
-                                          {
-                                            "type": "number"
-                                          },
-                                          {
-                                            "type": "boolean"
-                                          }
-                                        ]
-                                      }
-                                    },
-                                    "required": ["key"],
-                                    "additionalProperties": false
-                                  }
-                                ]
-                              },
-                              "animated": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["type", "scroll", "to"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["replace"]
-                              },
-                              "stack": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "screen": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "stack", "screen"],
-                            "additionalProperties": false
-                          }
-                        ]
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                       },
                       "minItems": 1,
                       "maxItems": 32
@@ -17308,12 +18285,12 @@
                                   "valid": {
                                     "anyOf": [
                                       {
-                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                       },
                                       {
                                         "type": "array",
                                         "items": {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                         },
                                         "minItems": 1,
                                         "maxItems": 8
@@ -17328,7 +18305,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "equals": {
                                     "anyOf": [
@@ -17351,7 +18328,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
@@ -17364,7 +18341,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -17377,7 +18354,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -17389,8 +18366,60 @@
                               {
                                 "type": "object",
                                 "properties": {
+                                  "platform": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "equals": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
+                                  }
+                                },
+                                "required": ["platform", "equals"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "platform": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "notEquals": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
+                                  }
+                                },
+                                "required": ["platform", "notEquals"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "platform": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "gt": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["platform", "gt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "platform": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "lt": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["platform", "lt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "equals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
@@ -17403,7 +18432,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
@@ -17416,7 +18445,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -17429,7 +18458,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -17634,7 +18663,7 @@
                     "onLongPress": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                       },
                       "minItems": 1,
                       "maxItems": 32
@@ -17642,7 +18671,7 @@
                     "onDoubleTap": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                       },
                       "minItems": 1,
                       "maxItems": 32
@@ -17680,7 +18709,7 @@
                               "type": "object",
                               "properties": {
                                 "path": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                 }
                               },
                               "required": ["path"],
@@ -17689,10 +18718,10 @@
                           ]
                         },
                         "as": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         },
                         "key": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         }
                       },
                       "required": ["items", "as"],
@@ -17780,7 +18809,7 @@
                               "onTap": {
                                 "type": "array",
                                 "items": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                                 },
                                 "minItems": 1,
                                 "maxItems": 32
@@ -18195,7 +19224,7 @@
                         "onTap": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                           },
                           "minItems": 1,
                           "maxItems": 32
@@ -18546,7 +19575,7 @@
                       "enum": ["textField"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "placeholder": {
                       "type": "string"
@@ -18604,7 +19633,7 @@
                         "onTap": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                           },
                           "minItems": 1,
                           "maxItems": 32
@@ -18665,7 +19694,7 @@
                       "enum": ["searchBar"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "placeholder": {
                       "$ref": "#/properties/spec/properties/root/anyOf/10/properties/placeholder"
@@ -18682,7 +19711,7 @@
                       "maxItems": 2
                     },
                     "activeKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "variant": {
                       "type": "string",
@@ -18748,7 +19777,7 @@
                       "enum": ["switch"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -18808,7 +19837,7 @@
                       "enum": ["checkbox"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -18926,7 +19955,7 @@
                       "enum": ["radioGroup"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "options": {
                       "type": "array",
@@ -18993,7 +20022,7 @@
                       "enum": ["select"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -19090,7 +20119,7 @@
                               "enum": ["switch"]
                             },
                             "stateKey": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -19104,7 +20133,7 @@
                               "enum": ["checkbox"]
                             },
                             "stateKey": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -19180,7 +20209,7 @@
                       "enum": ["slider"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -19251,7 +20280,7 @@
                       "enum": ["assist", "filter", "input", "suggestion"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "label"],
@@ -19471,7 +20500,7 @@
                       "enum": ["segmentedButton"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "options": {
                       "type": "array",
@@ -19701,7 +20730,7 @@
                       "enum": ["linear", "circular"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "max": {
                       "type": "number"
@@ -19748,13 +20777,108 @@
                     },
                     "type": {
                       "type": "string",
+                      "enum": ["chart"]
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["line", "area", "bar", "ring"]
+                    },
+                    "series": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                          },
+                          "x": {
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          },
+                          "y": {
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "color": {
+                            "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
+                          }
+                        },
+                        "required": ["path", "y", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 4
+                    },
+                    "yRange": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "number"
+                        },
+                        "max": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["min", "max"],
+                      "additionalProperties": false
+                    },
+                    "xLabels": {
+                      "type": "string",
+                      "enum": ["none", "ends", "all"]
+                    },
+                    "goal": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["type", "variant", "series"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
                       "enum": ["dialog"]
                     },
                     "openWhen": {
                       "type": "object",
                       "properties": {
                         "key": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                         },
                         "equals": {
                           "type": "boolean"
@@ -19789,7 +20913,7 @@
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -19839,7 +20963,7 @@
                       "enum": ["menu"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
                     },
                     "items": {
                       "type": "array",
@@ -19849,10 +20973,10 @@
                             "type": "object",
                             "properties": {
                               "label": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm/properties/label"
+                                "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm/properties/label"
                               },
                               "onTap": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm/properties/onTap"
+                                "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm/properties/onTap"
                               },
                               "icon": {
                                 "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
@@ -19929,14 +21053,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -19997,10 +21121,10 @@
                       "enum": ["timePicker"]
                     },
                     "hourKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "minuteKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "is24Hour": {
                       "type": "boolean"
@@ -20059,7 +21183,7 @@
                       "enum": ["datePicker"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "stateKey"],
@@ -20114,12 +21238,12 @@
                       "type": "object",
                       "properties": {
                         "stateKey": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                         },
                         "onRefresh": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                           },
                           "minItems": 1,
                           "maxItems": 32
@@ -20135,12 +21259,12 @@
                       "type": "boolean"
                     },
                     "atEndKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "onStartReached": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                       },
                       "minItems": 1,
                       "maxItems": 32
@@ -20364,7 +21488,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "scrollable": {
                       "type": "boolean"
@@ -20416,7 +21540,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/36/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/37/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -20426,7 +21550,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "items"],
@@ -20473,7 +21597,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -22187,6 +23311,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -22228,12 +23353,14 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
               "network",
               "observe",
               "openLink",
+              "performanceTrace",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -27866,6 +28993,66 @@
             }
           ]
         },
+        "deviceCondition": {
+          "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Every applied condition restores to a clean state on release, rebind or lease expiry. Send it in its own call, not combined with other setDeviceState fields.",
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1,
+              "description": "Request shape version; only 1 exists."
+            },
+            "rootState": {
+              "type": "string",
+              "const": "unset",
+              "description": "Root fixture state. Only 'unset' (clear) is available until a root injector lands."
+            },
+            "integrityState": {
+              "type": "string",
+              "const": "unset",
+              "description": "Integrity-signal state. Only 'unset' (clear) is available until an integrity injector lands."
+            },
+            "faults": {
+              "type": "object",
+              "properties": {
+                "battery": {
+                  "type": "string",
+                  "enum": ["unplug", "low", "full", "unset"],
+                  "description": "Battery fault via `dumpsys battery` (unplug / low 15% / full), or unset."
+                },
+                "lowPower": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Toggle `settings global low_power`, restored to its prior value, or unset."
+                },
+                "doze": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Force deep Doze via `dumpsys deviceidle force-idle`, or unset."
+                },
+                "thermal": {
+                  "type": "string",
+                  "enum": ["throttling", "critical", "unset"],
+                  "description": "Override thermal status via `cmd thermalservice override-status`, or unset."
+                }
+              },
+              "additionalProperties": false,
+              "description": "Power-domain fault injectors (Android only, behind the feature flag)."
+            },
+            "expiresInSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400,
+              "description": "Lease: restore every applied condition after this many seconds unless a later deviceCondition call renews it. Session-bound calls only."
+            },
+            "reset": {
+              "type": "boolean",
+              "const": true,
+              "description": "Restore every condition applied on this device and verify a clean read."
+            }
+          },
+          "additionalProperties": false
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -29235,6 +30422,7 @@
           "enum": [
             "accessibility",
             "accessibilityAction",
+            "accessibilityAudit",
             "accessibilityFocus",
             "appLifecycle",
             "audit",
@@ -29276,12 +30464,14 @@
             "listDataStores",
             "listDeviceImages",
             "listDevices",
+            "mediaSession",
             "mockNetwork",
             "multiTouch",
             "navigateTo",
             "network",
             "observe",
             "openLink",
+            "performanceTrace",
             "phoneCall",
             "pinchOn",
             "postNotification",
@@ -29338,6 +30528,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -29379,12 +30570,14 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
               "network",
               "observe",
               "openLink",
+              "performanceTrace",
               "phoneCall",
               "pinchOn",
               "postNotification",

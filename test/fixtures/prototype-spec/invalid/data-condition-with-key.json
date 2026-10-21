@@ -20,5 +20,5 @@
     }
   },
   "expectedPath": "root.visibleWhen.key",
-  "expectedMessage": "Exactly one of key, data, all, any, not, valid is required"
+  "expectedMessage": "Exactly one of key, data, platform, all, any, not, valid is required"
 }

@@ -14,7 +14,7 @@ import {
   defaultGitMetadataClient,
 } from "../../src/utils/GitMetadataClient";
 import type { GitDirtyState, GitMetadataClient } from "../../src/utils/GitMetadataClient";
-import { compareVersions } from "../../src/server/deviceMatcher";
+import { compareVersions } from "../../src/utils/deviceMatcher";
 import { testOverrides } from "../../src/utils/testOverrides";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";

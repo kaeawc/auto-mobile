@@ -11,6 +11,7 @@ import {
   PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY,
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
+  PROTOTYPE_CHART_CAPABILITY,
   PROTOTYPE_CHAT_SCROLL_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_LINKIFY_CAPABILITY,
@@ -21,7 +22,13 @@ import {
   PROTOTYPE_STORAGE_CAPABILITY,
   PROTOTYPE_NETWORK_CAPABILITY,
   PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
+  PROTOTYPE_PLATFORM_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PLATFORM_MODULE_GATES,
+  prototypePlatformFields,
+  prototypePlatformUnsupportedMessage,
+} from "./prototypePlatform";
 import {
   prototypeDataActionFields,
   prototypeDataActionsUnsupportedMessage,
@@ -64,6 +71,7 @@ import {
   prototypeSearchBarFields,
   prototypeSearchBarUnsupportedMessage,
 } from "./prototypeSearchBar";
+import { prototypeChartFields, prototypeChartUnsupportedMessage } from "./prototypeChart";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
 import { prototypeLinkifyFields, prototypeLinkifyUnsupportedMessage } from "./prototypeLinkify";
 import {
@@ -149,6 +157,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeSearchBarUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_CHART_CAPABILITY,
+    fields: prototypeChartFields,
+    unsupportedMessage: prototypeChartUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_CHAT_SCROLL_CAPABILITY,
     fields: prototypeChatScrollFields,
     unsupportedMessage: prototypeChatScrollUnsupportedMessage,
@@ -203,6 +216,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: prototypeDeviceRequestFields,
     unsupportedMessage: prototypeNetworkDeviceUnsupportedMessage,
   },
+  {
+    capability: PROTOTYPE_PLATFORM_CAPABILITY,
+    fields: prototypePlatformFields,
+    unsupportedMessage: prototypePlatformUnsupportedMessage,
+  },
+  ...PROTOTYPE_PLATFORM_MODULE_GATES,
 ];
 
 export function prototypeRequiredCapabilities(spec: unknown): {

@@ -148,6 +148,23 @@ before device requests when it is absent. The Android and iOS implementations sh
 iOS uses a drawn field with SF Symbol icons, not SwiftUI \`.searchable\`; these differences
 are reported in \`platformNotes\`.
 
+## Charts
+
+\`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
+\`ring\` chart (needs \`prototype_chart_v1\`). \`series\` holds 1-4 \`{path, x?, y, label, color?}\`
+entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most 500 items as
+for any data array), \`y\` names each point's numeric member and \`x\` its optional label member;
+\`color\` is a hex or theme role, or a \`{light, dark}\` pair. Points are drawn in array order, so
+\`appendData\`, a \`request\` \`into\` or a \`/data\` patch re-renders the chart. \`yRange {min, max}\`
+fixes the axis (max above min); otherwise it spans the values and the goal, and bars rise from zero.
+\`xLabels\` is \`none\` (default), \`ends\` or \`all\` of the first series' x labels. \`goal\` draws a
+dashed reference line; a \`ring\` takes exactly one series and a positive \`goal\`, and draws that
+series' latest value against it. The chart is one accessible node labelled with its summary, such as
+"Line chart, Heart rate, 24 points, min 58, max 141, latest 72" or "Ring chart, Steps, 6500 of
+10000"; \`observe\` reports it, and an authored \`contentDescription\` replaces it. A literal path that
+does not resolve to an array, a point that is not an object, or a point whose \`y\` is not a number
+fails at \`<path>.series[i].path\` or \`.y\`. The iOS agent does not draw charts yet (#14679).
+
 ## Rich text
 
 A text node has exactly one of \`text\` or \`spans\`; plain \`text: ""\` remains valid.
@@ -771,7 +788,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
 | \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
-| \`Requires key or data\` | Supply one condition source with exactly one comparison. |
+| \`Requires key or data or platform\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
 | \`Substituted text total limit exceeded\` | Reduce bindable fields, replacement lengths or repeat items; see \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\`. |
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |

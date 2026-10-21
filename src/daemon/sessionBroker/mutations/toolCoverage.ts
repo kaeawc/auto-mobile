@@ -39,6 +39,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "setNotificationPolicy",
       "setPosture",
       "setUIState",
+      "statusBar",
       "uninstallApp",
     ],
     "Pending platform prior-value capture and broker tool-surface wiring (#14359); never evidence of a clean reset.",
@@ -64,6 +65,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
     [
       "accessibilityFocus",
       "appLifecycle",
+      "audit",
       "crashApp",
       "dragAndDrop",
       "dragPath",

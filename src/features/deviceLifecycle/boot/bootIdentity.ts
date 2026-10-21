@@ -20,7 +20,7 @@ import {
   deviceListRefreshFailureMessage,
 } from "../../../daemon/devicePoolRefresh";
 import { type StartDeviceArgs } from "../core/contracts";
-import { describeStartDeviceRequest } from "../core/provisioning";
+import { describeStartDeviceRequest } from "../provisioning/provisioning";
 import { runWithinShutdownDeadline, type StableDeviceTarget } from "../core/deadlines";
 import {
   isUnknownAndroidRuntimeName,

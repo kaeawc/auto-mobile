@@ -19,9 +19,9 @@ import {
   type StartDeviceArgs,
   type ProvisionDeviceArgs,
   type InternalProvisionDeviceArgs,
-} from "./contracts";
+} from "../core/contracts";
 import { type TeardownToolResponse } from "../teardown/teardownContracts";
-import { provisionDeviceSchema } from "./schemas";
+import { provisionDeviceSchema } from "../core/schemas";
 
 export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undefined {
   if (error instanceof ProvisionDeviceError) {

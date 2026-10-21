@@ -6,7 +6,7 @@ export {
   resourceNotificationDependencyOverrides,
 } from "./deviceLifecycleDependencyOverrides";
 export { PooledAvdIdentityError } from "./PooledAvdIdentityError";
-export * from "./core/provisioning";
+export * from "./provisioning/provisioning";
 export * from "./core/schemas";
 export * from "./core/deadlines";
 export * from "./core/contracts";

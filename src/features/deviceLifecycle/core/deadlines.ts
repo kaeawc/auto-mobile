@@ -11,7 +11,7 @@ import {
 import { runWithAbortSignal, runOutsideRequestContext } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import { provisionDeviceTimeoutError } from "./provisioning";
+import { provisionDeviceTimeoutError } from "../provisioning/provisioning";
 
 export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 

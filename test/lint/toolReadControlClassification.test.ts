@@ -77,6 +77,13 @@ const CLASSIFICATION: Classification = {
         { action: "tapImeKey" },
       ],
     },
+    mediaSession: {
+      reads: [{ action: "get" }, { action: "get", waitFor: { mediaState: "playing" } }],
+      controls: [
+        { action: { dispatch: "pause" } },
+        { action: { volume: { stream: "music", level: 3 } } },
+      ],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],

@@ -394,6 +394,18 @@ function resolveObserveWaitBudgetMs(args: Record<string, unknown>): number {
   );
 }
 
+/**
+ * `mediaSession` polls dumpsys: `waitFor` for up to its timeout, a dispatch for its settle
+ * window (#14117). Every call gets the wait budget, so the default floor is one value.
+ */
+function resolveMediaSessionWaitBudgetMs(args: Record<string, unknown>): number {
+  return resolveArgumentTimeoutBudgetMs(
+    asRecord(args.waitFor)?.timeoutMs,
+    DEFAULT_WAIT_FOR_TIMEOUT_MS,
+    WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+  );
+}
+
 function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: number): number {
   // Canonical putAppFile uses files[]; its legacy flat
   // single-file shape, missing/invalid arrays, and empty arrays get one push.
@@ -490,6 +502,7 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
         ),
     ],
     ["observe", resolveObserveWaitBudgetMs],
+    ["mediaSession", resolveMediaSessionWaitBudgetMs],
     [
       "barrier",
       (args) =>

@@ -181,6 +181,28 @@ function harness() {
 }
 
 describe("iOS mutation reset adapter", () => {
+  test.each([
+    { kind: "clipboard", key: "device" },
+    { kind: "device-setting", key: "appearance" },
+    { kind: "device-setting", key: "locale" },
+    { kind: "preference", key: "probe.app:secret" },
+  ])("$kind:$key cannot revert an unobservable prior", async ({ kind, key }) => {
+    const rig = harness();
+    const mutation: DeviceMutationInput = {
+      kind,
+      key,
+      priorValue: { state: "unobservable" },
+      toolName: "test",
+    };
+    expect(rig.port.canRevert(mutation)).toBe(false);
+    await expect(rig.port.revert(mutation, rig.context)).rejects.toThrow(
+      "Unsupported iOS reset mutation",
+    );
+    expect(rig.state.commands).toEqual([]);
+    expect(rig.state.clipboard).toEqual([]);
+    expect(rig.state.removed).toEqual([]);
+  });
+
   test("installed session apps terminate, clear exact app-group containers, then uninstall", async () => {
     const rig = harness();
     await rig.revert("installed-app", "probe.app");
@@ -385,81 +407,84 @@ describe("iOS mutation reset adapter", () => {
     ).toBe(true);
   });
 
-  test("native partial baseline plus an unsupported Photos entry reaches keep-booted clean", async () => {
-    const rig = harness();
-    rig.state.appInventory = { "baseline.app": { ApplicationType: "User" } };
-    const journal = new FakeDeviceMutationJournal(new FakeTimer());
-    await journal.captureBaseline(rig.context.scope, await rig.port.capture(rig.context));
-    await journal.record(rig.context.scope, {
-      kind: "media",
-      key: "photo",
-      priorValue: { state: "absent" },
-      toolName: "media",
-    });
-    rig.state.appInventory = {
-      "baseline.app": { ApplicationType: "User" },
-      "probe.app": { ApplicationType: "User" },
-    };
-    rig.state.ui.appearance = "dark";
-    let eraseCalls = 0;
-    const profile = {
-      platform: "ios",
-      metadataState: "current",
-      simulatorDeviceTypeIdentifier: "iphone",
-      archetype: "phone",
-      modelType: { family: "iphone", variant: "pro" },
-      runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
-      osVersion: "27",
-      compatibility: "supported",
-    } as const;
-    const reset = new IosKeepBootedReset({
-      journal,
-      mutations: rig.port,
-      timer: new FakeTimer(),
-      maxUses: 20,
-      simctl: {
-        readSimulatorTarget: async () => ({
-          udid: UDID,
-          name: "phone",
-          state: "Booted",
-          isAvailable: true,
-          deviceTypeIdentifier: profile.simulatorDeviceTypeIdentifier,
-          runtime: profile.runtimeId,
-          os_version: "27.0",
-        }),
-      },
-      health: { probe: async () => true },
-      erase: {
-        resetWithTiming: async () => {
-          eraseCalls++;
-          return { outcome: "clean", mode: "erase", phases: {} };
+  test.each(["absent", "unobservable"] as const)(
+    "native partial baseline plus an unsupported Photos entry with %s prior reaches keep-booted clean",
+    async (state) => {
+      const rig = harness();
+      rig.state.appInventory = { "baseline.app": { ApplicationType: "User" } };
+      const journal = new FakeDeviceMutationJournal(new FakeTimer());
+      await journal.captureBaseline(rig.context.scope, await rig.port.capture(rig.context));
+      await journal.record(rig.context.scope, {
+        kind: "media",
+        key: "photo",
+        priorValue: { state },
+        toolName: "media",
+      });
+      rig.state.appInventory = {
+        "baseline.app": { ApplicationType: "User" },
+        "probe.app": { ApplicationType: "User" },
+      };
+      rig.state.ui.appearance = "dark";
+      let eraseCalls = 0;
+      const profile = {
+        platform: "ios",
+        metadataState: "current",
+        simulatorDeviceTypeIdentifier: "iphone",
+        archetype: "phone",
+        modelType: { family: "iphone", variant: "pro" },
+        runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
+        osVersion: "27",
+        compatibility: "supported",
+      } as const;
+      const reset = new IosKeepBootedReset({
+        journal,
+        mutations: rig.port,
+        timer: new FakeTimer(),
+        maxUses: 20,
+        simctl: {
+          readSimulatorTarget: async () => ({
+            udid: UDID,
+            name: "phone",
+            state: "Booted",
+            isAvailable: true,
+            deviceTypeIdentifier: profile.simulatorDeviceTypeIdentifier,
+            runtime: profile.runtimeId,
+            os_version: "27.0",
+          }),
         },
-      },
-    });
-    expect(
-      await reset.resetWithTiming(
-        { deviceId: UDID, platform: "ios", name: "phone" },
-        profile,
-        rig.context.assertOwned,
-        rig.context.scope,
-        0,
-      ),
-    ).toMatchObject({
-      outcome: "clean",
-      mode: "keep-booted",
-      phases: {
-        "app-inventory": 0,
-        "simctl:keychain": 1,
-        "simctl:ui:appearance": 1,
-        "health-probe": 0,
-      },
-    });
-    expect(eraseCalls).toBe(0);
-    expect(rig.state.commands).toContainEqual(["uninstall", UDID, "probe.app"]);
-    expect(rig.state.removed).toEqual([GROUP]);
-    expect(rig.state.ui.appearance).toBe("light");
-    expect(await journal.list(rig.context.scope)).toEqual([]);
-  });
+        health: { probe: async () => true },
+        erase: {
+          resetWithTiming: async () => {
+            eraseCalls++;
+            return { outcome: "clean", mode: "erase", phases: {} };
+          },
+        },
+      });
+      expect(
+        await reset.resetWithTiming(
+          { deviceId: UDID, platform: "ios", name: "phone" },
+          profile,
+          rig.context.assertOwned,
+          rig.context.scope,
+          0,
+        ),
+      ).toMatchObject({
+        outcome: "clean",
+        mode: "keep-booted",
+        phases: {
+          "app-inventory": 0,
+          "simctl:keychain": 1,
+          "simctl:ui:appearance": 1,
+          "health-probe": 0,
+        },
+      });
+      expect(eraseCalls).toBe(0);
+      expect(rig.state.commands).toContainEqual(["uninstall", UDID, "probe.app"]);
+      expect(rig.state.removed).toEqual([GROUP]);
+      expect(rig.state.ui.appearance).toBe("light");
+      expect(await journal.list(rig.context.scope)).toEqual([]);
+    },
+  );
 
   test("old incomplete baselines do not acquire destructive default certification", async () => {
     const rig = harness();

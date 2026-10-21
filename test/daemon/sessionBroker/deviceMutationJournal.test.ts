@@ -102,6 +102,11 @@ describe("durable device mutation journal", () => {
     }
   });
 
+  test("unobservable prior values persist without becoming absent", async () => {
+    await journal.record(SCOPE, { ...MUTATION, priorValue: { state: "unobservable" } });
+    expect(await journal.list(SCOPE)).toMatchObject([{ priorValue: { state: "unobservable" } }]);
+  });
+
   test("a replacement incarnation and another device or session never inherit entries", async () => {
     await journal.record(SCOPE, MUTATION);
     await journal.captureBaseline(SCOPE, BASELINE);

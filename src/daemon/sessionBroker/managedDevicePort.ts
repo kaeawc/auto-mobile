@@ -10,6 +10,8 @@ import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import type { BindingJournal } from "./registry/bindingJournal";
 import { defaultBindingExecOwnerLiveness } from "./registry/ownerLiveness";
 import { runAsBindingReconciler } from "./provisioning/exclusion";
+import { brokerMutationIncarnation } from "./mutations/recorder";
+import type { DeviceMutationScope } from "./mutations/types";
 import {
   computeBindingScopeKey,
   journalOwnersEqual,
@@ -51,6 +53,7 @@ type BrokerDeviceAcquisitionEntry = BrokerDeviceAcquisitionResult["bindings"][nu
 type DestructionProgress = "absent" | "pending";
 
 export interface ManagedDevicePortDependencies {
+  bindMutationRecorder?: (scope: DeviceMutationScope) => void;
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
@@ -395,6 +398,23 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       result.bindings.length === 1,
     ].every(Boolean);
     if (resultReady && this.isReadyBinding(binding, profile)) {
+      if (this.dependencies.bindMutationRecorder) {
+        try {
+          this.dependencies.bindMutationRecorder({
+            sessionUuid: binding.sessionUuid,
+            deviceId: binding.device!.transportId ?? binding.device!.stableId,
+            incarnation: brokerMutationIncarnation(
+              resource.resourceId,
+              binding.assignmentGeneration,
+            ),
+          });
+        } catch (error) {
+          logger.warn(
+            "Failed to bind broker device mutation recorder; acquiring without recording",
+            error,
+          );
+        }
+      }
       return binding.sessionUuid;
     }
     const sessionId = binding === undefined ? null : binding.sessionUuid;

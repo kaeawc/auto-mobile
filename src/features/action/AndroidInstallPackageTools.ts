@@ -57,7 +57,9 @@ export class AndroidInstallPackageTools {
       };
     }
 
-    const result = await this.hostExecutor.executeCommand(tool.path, ["dump", "badging", apkPath]);
+    const result = await this.hostExecutor.executeCommand(tool.path, ["dump", "badging", apkPath], {
+      signal,
+    });
     const output = `${result.stdout}\n${result.stderr}`;
     const match = output.match(/^package:\s+name='([^']+)'(?:\s|$)/m);
     if (!match) {

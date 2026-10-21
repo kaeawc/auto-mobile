@@ -50,7 +50,14 @@ describe("service Android reset strategy construction", () => {
       const timer = new FakeTimer();
       const port = new FakeAndroidKeepBootedResetPort({
         completeKinds: [],
-        observations: [],
+        // An empty capture is never persisted as a baseline, so keep one observation.
+        observations: [
+          {
+            kind: "installed-app",
+            key: "user:0:com.example.baseline",
+            value: { state: "present", value: true },
+          },
+        ],
         unobservable: [],
       });
       const budget = configuredTimeout ?? DEFAULT_ANDROID_RESET_TIMEOUT_MS;

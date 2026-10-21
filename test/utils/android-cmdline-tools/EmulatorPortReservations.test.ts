@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   DefaultEmulatorPortReservations,
+  resolveExcludedEmulatorConsolePorts,
   resetEmulatorLaunchReservations,
   type EmulatorDeviceIdSnapshot,
 } from "../../../src/utils/android-cmdline-tools/EmulatorPortReservations";
@@ -8,6 +9,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakePortAvailabilityChecker } from "../../fakes/FakePortAvailabilityChecker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import { EmulatorConsolePortExcludedError } from "../../../src/utils/android-cmdline-tools/EmulatorConsolePortExcludedError";
 
 const fakeChild = (exitCode: number | null = null): FakeChildProcess => {
   const child = new FakeChildProcess();
@@ -24,17 +26,105 @@ describe("DefaultEmulatorPortReservations", () => {
   let timer: FakeTimer;
   let hostPorts: FakePortAvailabilityChecker;
   let reservations: DefaultEmulatorPortReservations;
+  let excludedPorts: Set<number>;
 
   beforeEach(() => {
     resetEmulatorLaunchReservations();
     timer = new FakeTimer();
     hostPorts = new FakePortAvailabilityChecker();
+    excludedPorts = new Set();
     reservations = new DefaultEmulatorPortReservations({
       timer: () => timer,
       adbFactory: () => new FakeAdbClientFactory(),
       hostPortAvailabilityChecker: () => hostPorts,
+      excludedConsolePorts: () => new Set(excludedPorts),
     });
   });
+
+  test("skips excluded console ports without probing their port pair", async () => {
+    excludedPorts.add(5554);
+    const args: string[] = [];
+    const reservation = await reservations.addReservedEmulatorPort(args, "A", completeSnapshot());
+    expect(reservation?.deviceId).toBe("emulator-5556");
+    expect(args).toEqual(["-port", "5556"]);
+    expect(hostPorts.checkedPorts).toEqual([5556, 5557]);
+  });
+
+  test.each([
+    { args: ["-port", "5554"], expectedDeviceId: undefined },
+    { args: ["-ports", "5554,6000"], expectedDeviceId: undefined },
+    { args: ["-port=5554"], expectedDeviceId: undefined },
+    { args: ["-ports=5554,6000"], expectedDeviceId: undefined },
+    { args: [], expectedDeviceId: "emulator-5554" },
+  ])(
+    "rejects excluded explicit ports before host probes: %j",
+    async ({ args, expectedDeviceId }) => {
+      excludedPorts.add(5554);
+      const launch = reservations.addReservedEmulatorPort(
+        [...args],
+        "A",
+        undefined,
+        expectedDeviceId,
+      );
+      await expect(launch).rejects.toBeInstanceOf(EmulatorConsolePortExcludedError);
+      await expect(launch).rejects.toMatchObject({
+        code: "emulator_console_port_excluded",
+        consolePort: 5554,
+        message: expect.stringContaining("AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS"),
+      });
+      expect(hostPorts.checkedPorts).toEqual([]);
+    },
+  );
+
+  test("reports excluded ports when no console port can be allocated", async () => {
+    for (let port = 5554; port <= 5682; port += 2) {
+      excludedPorts.add(port);
+    }
+    await expect(reservations.addReservedEmulatorPort([], "A", completeSnapshot())).rejects.toThrow(
+      /all console ports.*excluded.*5554.*5682.*AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS/,
+    );
+    expect(hostPorts.checkedPorts).toEqual([]);
+  });
+
+  test("resolves exclusions lazily for each allocation and assertion", async () => {
+    await reservations.addReservedEmulatorPort([], "A", completeSnapshot());
+    excludedPorts.add(5556);
+    const next = await reservations.addReservedEmulatorPort([], "B", completeSnapshot());
+    expect(next?.deviceId).toBe("emulator-5558");
+    await expect(
+      reservations.addReservedEmulatorPort(["-port", "5556"], "C", undefined),
+    ).rejects.toMatchObject({ code: "emulator_console_port_excluded", consolePort: 5556 });
+  });
+
+  test.each([{ args: [] }, { args: ["-port", "5556"] }])(
+    "invalid configuration fails at launch resolution rather than construction: %j",
+    async ({ args }) => {
+      const configured = new DefaultEmulatorPortReservations({
+        timer: () => timer,
+        adbFactory: () => new FakeAdbClientFactory(),
+        hostPortAvailabilityChecker: () => hostPorts,
+        excludedConsolePorts: () =>
+          resolveExcludedEmulatorConsolePorts({
+            AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS: "bad-entry",
+          }),
+      });
+      await expect(
+        configured.addReservedEmulatorPort([...args], "A", completeSnapshot()),
+      ).rejects.toThrow("AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS has invalid entry 'bad-entry'");
+      expect(hostPorts.checkedPorts).toEqual([]);
+    },
+  );
+
+  test.each([undefined, { deviceIds: new Set<string>(), isComplete: false }])(
+    "refuses unpinned launches with exclusions when the device snapshot is incomplete: %j",
+    async (snapshot) => {
+      excludedPorts.add(5554);
+      await expect(reservations.addReservedEmulatorPort([], "A", snapshot)).rejects.toThrow(
+        "AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS",
+      );
+      expect(hostPorts.checkedPorts).toEqual([]);
+    },
+  );
 
   test("allocates the first free console port and appends it to the launch arguments", async () => {
     const args: string[] = [];

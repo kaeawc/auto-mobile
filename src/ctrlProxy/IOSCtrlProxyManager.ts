@@ -3,6 +3,7 @@ import { type IosTunnelClient } from "./ios/IosTunnelClient";
 import type { IosCtrlProxyManagerDiagnostics } from "./ios/IosCtrlProxyManagerDiagnostics";
 import type {
   IosCtrlProxyRunnerSnapshot,
+  RunnerLaunchProvenance,
   SharedCtrlProxyStart,
 } from "./ios/IosCtrlProxyLifecycleSteps";
 import type { DoctorProbeOptions } from "../utils/doctorTypes";
@@ -807,7 +808,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   ensureRemoteServicePortAvailable(options: { allowReallocation?: boolean } = {}): Promise<void> {
     return this.ports.ensureRemoteServicePortAvailable(options);
   }
-  startOnSimulator(): Promise<void> {
+  startOnSimulator(): Promise<RunnerLaunchProvenance> {
     return this.launch.startOnSimulator();
   }
 

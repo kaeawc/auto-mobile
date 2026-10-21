@@ -490,6 +490,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       });
       const restart = mock<IosCtrlProxyLifecycleSteps["startOnDevice"]>(async () => {
         events.push("restart");
+        return "spawned";
       });
       const remote = remoteRunner();
       const manager = makeManager(physical, remote, {

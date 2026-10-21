@@ -1,5 +1,5 @@
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
-import type { SharedCtrlProxyStart } from "./IosCtrlProxyLifecycleSteps";
+import type { RunnerStartupProvenance, SharedCtrlProxyStart } from "./IosCtrlProxyLifecycleSteps";
 import { logger } from "../../utils/logger";
 import { type PerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer } from "../../utils/SystemTimer";
@@ -22,8 +22,8 @@ interface IosCtrlProxyReadinessHost {
   clearCaches(): void;
   startProcessSupervision(): Promise<void>;
   assertDeviceNotRetired(): void;
-  prepareSimulatorRunner(perf: PerformanceTracker): Promise<boolean>;
-  prepareDeviceRunner(perf: PerformanceTracker): Promise<boolean>;
+  prepareSimulatorRunner(perf: PerformanceTracker): Promise<RunnerStartupProvenance>;
+  prepareDeviceRunner(perf: PerformanceTracker): Promise<RunnerStartupProvenance>;
   checkHealthEndpoint(): Promise<boolean>;
   resolveHealthPollMaxAttempts(env?: NodeJS.ProcessEnv): number;
 }

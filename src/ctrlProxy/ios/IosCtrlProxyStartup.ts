@@ -1,7 +1,11 @@
 import { CtrlProxyLaunchTimeoutError } from "./CtrlProxyLaunchTimeoutError";
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
 import { RemoteServicePortUnavailableError } from "./RemoteServicePortUnavailableError";
-import type { SharedCtrlProxyStart } from "./IosCtrlProxyLifecycleSteps";
+import type {
+  RunnerLaunchProvenance,
+  RunnerStartupProvenance,
+  SharedCtrlProxyStart,
+} from "./IosCtrlProxyLifecycleSteps";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
@@ -68,13 +72,18 @@ interface IosCtrlProxyStartupHost {
   findListeningProcessesOnPort(port: number): Promise<ListeningProcess[]>;
   formatListeningProcesses(processes: ListeningProcess[]): string;
   startIproxyTunnel(options?: IproxyTunnelStartOptions): Promise<void>;
-  restartDeviceProcessAfterHostPortCollision(): Promise<void>;
+  restartDeviceProcessAfterHostPortCollision(): Promise<RunnerLaunchProvenance>;
   useRemoteRunner(): boolean;
   findExternalCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null>;
   ensureServicePortReadyForLaunch(): Promise<void>;
   forceStopCancelledStartup(): Promise<void>;
   awaitGlobalStartupOrphanRunnerReap(): Promise<void>;
 }
+
+/** Whether a usable runner was already up, or how this start obtained the one it must wait for. */
+type RunnerStartupPreparation =
+  | { ready: true }
+  | { ready: false; provenance: RunnerStartupProvenance };
 
 /** Coordinates shared startup, runner reuse, and recovery after a failed health window. */
 export class IosCtrlProxyStartup {
@@ -247,10 +256,11 @@ export class IosCtrlProxyStartup {
     this.state.isStopping = false;
     const perf = createGlobalPerformanceTracker();
 
-    const { ready, waitedForStartingRunner } = await this.prepareRunnerForStartup(perf);
-    if (ready) {
+    const preparation = await this.prepareRunnerForStartup(perf);
+    if (preparation.ready) {
       return;
     }
+    const { provenance } = preparation;
 
     // Wait for HTTP health endpoint to be ready. XCUITest can take well over 15s to
     // fully initialize after xcodebuild starts on a loaded CI machine, so the budget
@@ -264,13 +274,16 @@ export class IosCtrlProxyStartup {
     sharedStart.defaultHealthPollDeadlineMs = healthPollStartedAt + defaultHealthPollDurationMs;
     this.host.refreshHealthPollDeadline(sharedStart);
 
+    // Only a cold launch this start spawned is owed the first-launch window. A runner
+    // it adopted from host control or deferred to, and a supervisor restart, keep the
+    // default budget (#14509).
     if (
       await this.host.waitForHealthRestartingUnresponsiveRunner(
         sharedStart,
         perf,
         delayMs,
         defaultHealthPollDurationMs,
-        !waitedForStartingRunner && !this.state.isProcessSupervisorRestarting,
+        provenance === "spawned" && !this.state.isProcessSupervisorRestarting,
       )
     ) {
       return;
@@ -280,15 +293,7 @@ export class IosCtrlProxyStartup {
     const timeoutSeconds = Math.round(
       ((sharedStart.healthPollDeadlineMs ?? 0) - healthPollStartedAt) / 1000,
     );
-    if (
-      await this.recoverDeferredRunner(
-        sharedStart,
-        perf,
-        delayMs,
-        timeoutSeconds,
-        waitedForStartingRunner,
-      )
-    ) {
+    if (await this.recoverDeferredRunner(sharedStart, perf, delayMs, timeoutSeconds, provenance)) {
       return;
     }
 
@@ -308,53 +313,49 @@ export class IosCtrlProxyStartup {
     );
   }
 
+  /**
+   * Reports how this start obtained its runner, explicitly rather than inferred from
+   * whether it waited: a `deferred` runner drives hung-runner recovery after the
+   * health wait (#2834 review), and only a `spawned` one gets the first-launch
+   * window (#14509).
+   */
   private async prepareRunnerForStartup(
     perf: PerformanceTracker,
-  ): Promise<{ ready: boolean; waitedForStartingRunner: boolean }> {
+  ): Promise<RunnerStartupPreparation> {
     // Prefer process liveness check over health endpoint: a busy-but-alive CtrlProxy
     // would fail the HTTP health check and incorrectly trigger a restart.
     perf.startOperation("processAliveCheck");
     const isAlive = await this.host.isCtrlProxyProcessAlive();
     perf.endOperation("processAliveCheck");
-    let restartedAliveProcess = false;
-    // True when we deferred to an already-starting own runner instead of respawning;
-    // drives hung-runner recovery after the health wait below (#2834 review).
-    let waitedForStartingRunner = false;
     if (isAlive) {
       logger.info("[IOSCtrlProxy] CtrlProxy process is alive, skipping start");
       // On physical devices the iproxy tunnel may have been stopped independently
       // (e.g. by a temporary disconnect) while the XCTest process kept running.
       // Re-establishing it here is a no-op when the tunnel is already up, and
       // self-heals the connection when it is not.
-      if (!this.host.isSimulator()) {
-        restartedAliveProcess = await this.resumeAliveDeviceRunner(perf);
+      const restarted = this.host.isSimulator() ? null : await this.resumeAliveDeviceRunner(perf);
+      if (restarted !== null) {
+        return { ready: false, provenance: restarted };
       }
-      if (!restartedAliveProcess) {
-        await this.host.startProcessSupervision();
-        return { ready: true, waitedForStartingRunner };
-      }
+      await this.host.startProcessSupervision();
+      return { ready: true };
     }
 
-    if (!restartedAliveProcess) {
-      perf.startOperation("runningCheck");
-      const alreadyRunning = await this.host.isRunning();
-      perf.endOperation("runningCheck");
-      if (alreadyRunning) {
-        logger.info("[IOSCtrlProxy] Service is already running");
-        await this.host.startProcessSupervision();
-        return { ready: true, waitedForStartingRunner };
-      }
-
-      // Check for externally-managed xcodebuild processes (e.g. hot-reload script)
-      // before spawning our own to avoid conflicting xcodebuild instances.
-      if (this.host.isSimulator()) {
-        waitedForStartingRunner = await this.prepareSimulatorRunner(perf);
-      } else {
-        waitedForStartingRunner = await this.prepareDeviceRunner(perf);
-      }
+    perf.startOperation("runningCheck");
+    const alreadyRunning = await this.host.isRunning();
+    perf.endOperation("runningCheck");
+    if (alreadyRunning) {
+      logger.info("[IOSCtrlProxy] Service is already running");
+      await this.host.startProcessSupervision();
+      return { ready: true };
     }
 
-    return { ready: false, waitedForStartingRunner };
+    // Check for externally-managed xcodebuild processes (e.g. hot-reload script)
+    // before spawning our own to avoid conflicting xcodebuild instances.
+    const provenance = this.host.isSimulator()
+      ? await this.prepareSimulatorRunner(perf)
+      : await this.prepareDeviceRunner(perf);
+    return { ready: false, provenance };
   }
 
   private async recoverDeferredRunner(
@@ -362,9 +363,9 @@ export class IosCtrlProxyStartup {
     perf: PerformanceTracker,
     delayMs: number,
     timeoutSeconds: number,
-    waitedForStartingRunner: boolean,
+    provenance: RunnerStartupProvenance,
   ): Promise<boolean> {
-    if (!waitedForStartingRunner || this.state.xcTestProcessId === null) {
+    if (provenance !== "deferred" || this.state.xcTestProcessId === null) {
       return false;
     }
     // Before giving up, adopt the runner if it actually came up healthy on CtrlProxy's
@@ -457,8 +458,14 @@ export class IosCtrlProxyStartup {
     return false;
   }
 
-  private async resumeAliveDeviceRunner(perf: PerformanceTracker): Promise<boolean> {
-    let restartedAliveProcess = false;
+  /**
+   * Re-establishes an alive device runner's tunnel. Returns null when the runner was
+   * kept, or the provenance of the replacement launched after a host-port collision.
+   */
+  private async resumeAliveDeviceRunner(
+    perf: PerformanceTracker,
+  ): Promise<RunnerLaunchProvenance | null> {
+    let restarted: RunnerLaunchProvenance | null = null;
     perf.startOperation("iproxyTunnel");
     try {
       await this.host.startIproxyTunnel({ allowServicePortReallocation: false });
@@ -471,15 +478,14 @@ export class IosCtrlProxyStartup {
         "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available; restarting",
       );
       perf.startOperation("spawnRunner");
-      await this.host.restartDeviceProcessAfterHostPortCollision();
+      restarted = await this.host.restartDeviceProcessAfterHostPortCollision();
       perf.endOperation("spawnRunner");
-      restartedAliveProcess = true;
     }
-    if (!restartedAliveProcess) {
+    if (restarted === null) {
       perf.endOperation("iproxyTunnel");
       await this.state.tunnelClient.supervise();
     }
-    return restartedAliveProcess;
+    return restarted;
   }
 
   /**
@@ -488,10 +494,10 @@ export class IosCtrlProxyStartup {
    * `isCtrlProxyProcessAlive()` needs a health answer, and on a local device that
    * only reaches the runner through `iproxy`, so a missing tunnel hides a live
    * runner from it. Repair the tunnel here, then let the health wait (and, if it
-   * never answers, the hung-runner termination) take over. Returns true when an own
-   * runner was deferred to; false after spawning one.
+   * never answers, the hung-runner termination) take over. Returns `deferred` when an
+   * own runner was deferred to, otherwise the launch step's provenance.
    */
-  async prepareDeviceRunner(perf: PerformanceTracker): Promise<boolean> {
+  async prepareDeviceRunner(perf: PerformanceTracker): Promise<RunnerStartupProvenance> {
     if (
       !this.host.useRemoteRunner() &&
       this.state.xcTestProcessId !== null &&
@@ -508,15 +514,15 @@ export class IosCtrlProxyStartup {
       } finally {
         perf.endOperation("iproxyTunnel");
       }
-      return true;
+      return "deferred";
     }
     perf.startOperation("spawnRunner");
-    await this.state.steps.startOnDevice();
+    const provenance = await this.state.steps.startOnDevice();
     perf.endOperation("spawnRunner");
-    return false;
+    return provenance;
   }
 
-  async prepareSimulatorRunner(perf: PerformanceTracker): Promise<boolean> {
+  async prepareSimulatorRunner(perf: PerformanceTracker): Promise<RunnerStartupProvenance> {
     // Decide about OUR OWN tracked runner first. A runner WE already spawned may
     // still be mid-startup: on a loaded CI machine XCUITest can take well past the
     // health-poll budget to answer, so an earlier setup() gave up and this call is a
@@ -534,7 +540,7 @@ export class IosCtrlProxyStartup {
         `[IOSCtrlProxy] Own CtrlProxy runner (PID ${this.state.xcTestProcessId}) is still starting; ` +
           `waiting for its health endpoint instead of respawning`,
       );
-      return true;
+      return "deferred";
     }
 
     perf.startOperation("externalProcessCheck");
@@ -561,14 +567,14 @@ export class IosCtrlProxyStartup {
       if (externalPort !== this.state.servicePort) {
         this.host.adoptServicePort(externalPort);
       }
-      // Fall through to health polling below instead of spawning
-    } else {
-      await this.host.ensureServicePortReadyForLaunch();
-      perf.startOperation("spawnRunner");
-      await this.state.steps.startOnSimulator();
-      perf.endOperation("spawnRunner");
+      // Health polling follows instead of spawning.
+      return "adopted";
     }
-    return false;
+    await this.host.ensureServicePortReadyForLaunch();
+    perf.startOperation("spawnRunner");
+    const provenance = await this.state.steps.startOnSimulator();
+    perf.endOperation("spawnRunner");
+    return provenance;
   }
 
   async awaitStartupOrphanRunnerReap(): Promise<void> {

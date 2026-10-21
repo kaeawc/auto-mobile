@@ -1,6 +1,19 @@
 import type { HostChildProcess } from "../../utils/HostCommandExecutor";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 
+/**
+ * How a launch step obtained the device's runner: `spawned` when it started one,
+ * `adopted` when host control already had one running for the device (#14509).
+ */
+export type RunnerLaunchProvenance = "spawned" | "adopted";
+
+/**
+ * How a startup obtained its runner. Adds `deferred` for an own runner that was
+ * still starting and was waited for instead of respawned. Only a `spawned` runner
+ * is a cold launch owned by this start, so only it is owed the first-launch window.
+ */
+export type RunnerStartupProvenance = RunnerLaunchProvenance | "deferred";
+
 /** The startup a concurrent `start()` caller can join, and the stop path can cancel. */
 export interface SharedCtrlProxyStart {
   controller: AbortController;
@@ -28,9 +41,9 @@ export interface IosCtrlProxyLifecycleSteps {
   /** Retires the runner a startup published once its last waiting caller cancelled. */
   retireRunnerAfterFinalSharedStartCancellation(sharedStart: SharedCtrlProxyStart): Promise<void>;
   /** Launches the runner on a simulator (xcodebuild test-without-building, or the host runner). */
-  startOnSimulator(): Promise<void>;
+  startOnSimulator(): Promise<RunnerLaunchProvenance>;
   /** Launches the runner on a physical device (iproxy tunnel plus xcodebuild). */
-  startOnDevice(): Promise<void>;
+  startOnDevice(): Promise<RunnerLaunchProvenance>;
   /** Polls the runner's health endpoint; resolves true once it answers. */
   waitForHealthEndpoint(
     sharedStart: SharedCtrlProxyStart,

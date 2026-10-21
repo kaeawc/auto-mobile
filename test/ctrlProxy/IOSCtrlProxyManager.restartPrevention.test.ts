@@ -252,6 +252,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
               process: runner,
               abortController: runnerController,
             });
+            return "spawned";
           },
           waitForHealthEndpoint: async (start) => {
             start.controller.signal.throwIfAborted();
@@ -930,6 +931,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
             fakeExecutor.setNextSpawnProcess(iproxy);
             tunnel(manager).setStateForTesting({ processId: iproxy.pid! });
             tunnel(manager).setStateForTesting({ process: fakeExecutor.spawn("iproxy", []) });
+            return "spawned";
           },
           waitForHealthEndpoint: async (start) => {
             healthPollingEntered.resolve();

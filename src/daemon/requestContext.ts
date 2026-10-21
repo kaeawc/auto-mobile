@@ -22,19 +22,36 @@ export interface RequestContext {
   readonly deadline: ProgressExtendableDeadline;
   /** Aborts when the request is cancelled; the same signal the session's cancel route aborts. */
   readonly signal: AbortSignal;
-  /**
-   * The controller behind {@link signal}. Registered with the session's cancel route today; the
-   * remaining cancellation routes fold onto the context in later slices.
-   */
+  /** The controller behind {@link signal}, registered with the session's cancel route. */
   readonly cancellation: AbortController;
+  /** The signal the request's work runs under now; its failure reply is classified against it. */
+  readonly owner: RequestOwnerSignal;
+}
+
+/**
+ * The signal a request's work currently runs under: unset until dispatch adopts the request's
+ * cancellation signal, then narrowed to an owner-scoped signal (an MCP forward's, an IDE
+ * route's). One per request, so admission and dispatch read the same answer (#11817).
+ */
+export class RequestOwnerSignal {
+  #current: AbortSignal | undefined;
+
+  get signal(): AbortSignal | undefined {
+    return this.#current;
+  }
+
+  adopt(signal: AbortSignal): void {
+    this.#current = signal;
+  }
 }
 
 export function createRequestContext(
   request: DaemonRequest,
   socketSessionId: string,
   receivedAtMs: number,
+  env: NodeJS.ProcessEnv = process.env,
 ): RequestContext {
-  const totalTimeoutMs = resolveMcpRequestTimeoutMsOnce(request);
+  const totalTimeoutMs = resolveMcpRequestTimeoutMsOnce(request, env);
   const cancellation = new AbortController();
   return {
     id: request.id,
@@ -45,5 +62,6 @@ export function createRequestContext(
     deadline: new ProgressExtendableDeadline(receivedAtMs, totalTimeoutMs),
     signal: cancellation.signal,
     cancellation,
+    owner: new RequestOwnerSignal(),
   };
 }

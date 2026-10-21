@@ -1,3 +1,7 @@
+import {
+  registerDirectSessionDevice,
+  unregisterDirectSession,
+} from "../../src/utils/directSessionDeviceRegistry";
 import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -62,6 +66,7 @@ describe("ToolRegistry Android session context", () => {
   });
 
   afterEach(() => {
+    unregisterDirectSession("session-123");
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
@@ -103,6 +108,7 @@ describe("ToolRegistry Android session context", () => {
   test("allows sessionUuid when multiple Android devices are booted", async () => {
     fakeDeviceReadiness.setConnectedDevices([androidDeviceA, androidDeviceB]);
     const tool = registerTool("androidSessionAllowedTool");
+    registerDirectSessionDevice("session-123", androidDeviceA);
 
     const response = await tool.handler({ platform: "android", sessionUuid: "session-123" });
 
@@ -125,7 +131,7 @@ describe("ToolRegistry Android session context", () => {
 
   test("allows an explicitly pinned Android device for a named platform", async () => {
     fakeDeviceReadiness.setConnectedDevices([androidDeviceA, androidDeviceB]);
-    fakeDeviceReadiness.setCurrentDevice(androidDeviceB, "android");
+    fakeDeviceReadiness.setExplicitDevicePin(androidDeviceB);
     fakeDeviceReadiness.setExplicitDevicePin(androidDeviceB);
     const tool = registerTool("androidActiveDeviceTool");
 
@@ -137,7 +143,7 @@ describe("ToolRegistry Android session context", () => {
 
   test("keeps an Android pin when its scan fails", async () => {
     fakeDeviceReadiness.setConnectedDevices([androidDeviceA, androidDeviceB, iosDeviceA]);
-    fakeDeviceReadiness.setCurrentDevice(androidDeviceB, "android");
+    fakeDeviceReadiness.setExplicitDevicePin(androidDeviceB);
     fakeDeviceReadiness.setExplicitDevicePin(androidDeviceB);
     fakeDeviceReadiness.setPlatformScanFailure("android", true);
     const tool = registerTool("androidFailedScanPinTool");
@@ -169,7 +175,7 @@ describe("ToolRegistry Android session context", () => {
     await expect(platformScopedTool.handler({ platform: "android" })).rejects.toThrow(
       "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
-    expect(fakeDeviceReadiness.getCurrentDevice()).toBeUndefined();
+    expect(fakeDeviceReadiness.getExplicitDevicePin()).toBeUndefined();
 
     registerInteractionTools();
     const tapAt = ToolRegistry.getTool("tapAt")!;

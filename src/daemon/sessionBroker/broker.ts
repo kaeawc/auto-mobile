@@ -1,13 +1,11 @@
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
 import {
-  drainFailureOutcome,
   failedResult,
   failureFor,
   preparationFailureError,
   sameProcess,
   unwrap,
 } from "./brokerSupport";
-import type { Timer } from "../../utils/SystemTimer";
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
@@ -15,8 +13,6 @@ import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
   resolveSessionDeviceProfile,
-  type SessionDeviceCatalog,
-  type SessionRequirementDefaults,
 } from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
@@ -27,17 +23,19 @@ import {
   type SessionBrokerReleaseReason,
   type SessionBrokerReleaseResult,
   type SessionBrokerResult,
+  type SessionBrokerStats,
 } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import type { BindingProcessIdentity } from "./registry/bindingRegistry";
-import type { BrokerLimits } from "./admission";
-import { SessionBrokerFailureError, type SessionBrokerDevicePort } from "./devicePort";
-import type { SessionLiveness } from "./sessionDisposition";
+import { defaultTimer } from "../../utils/SystemTimer";
+import { readBrokerTimingStats } from "./timingStats";
+import { BrokerTimingRecorder } from "./timingRecorder";
+import { BrokerResetRelease } from "./resetRelease";
+import { SessionBrokerFailureError } from "./devicePort";
+import type { SessionBrokerOptions } from "./brokerOptions";
 import { nativeProfile, poolProfile } from "./profile";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
-import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import {
   destructionTicket,
   EXPORT_RETENTION_MS,
@@ -50,28 +48,7 @@ import {
   type DestructionTicket,
 } from "./store";
 
-export interface SessionBrokerOptions {
-  store: SqliteSessionBrokerStore;
-  devices: SessionBrokerDevicePort;
-  owner: BindingProcessIdentity;
-  limits: BrokerLimits;
-  catalog: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
-  defaults: (platform: "ios" | "android") => SessionRequirementDefaults;
-  /** Admission-only lookup; must not start lazy release from inside recovery. */
-  sessionDisposition?: (sessionUuid: string) => SessionLiveness | Promise<SessionLiveness>;
-  /** Opt in only after the native reset baseline has passed contamination tests. */
-  reuseCleanDevices?: boolean;
-  /** How long a terminal receipt keeps answering replay; defaults to {@link RECEIPT_RETENTION_MS}. */
-  receiptRetentionMs?: number;
-  /** Maximum pin age for an unacknowledged export. */
-  exportRetentionMs?: number;
-  cleanupConcurrency?: number;
-  /** Per-item pass wait only; native work retains its slot until it settles. */
-  cleanupWaitMs?: number;
-  /** Caller wait after durable release ownership commits; native cleanup keeps running. */
-  releaseReplyBudgetMs?: number;
-  timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
-}
+export type { SessionBrokerOptions } from "./brokerOptions";
 
 export { EXPORT_RETENTION_MS } from "./store";
 export { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./releaseReply";
@@ -104,8 +81,10 @@ export class SessionBroker {
 
   private readonly cleanup: RecoveryCleanup;
   private readonly destroys = new Map<string, Promise<void>>();
-  /** Releases background recovery queued or started: a stop leaves them durable for the successor. */
+  /** A stop leaves them durable for the successor. */
   private readonly queuedRecoveryReleases = new Set<string>();
+  private readonly timing: BrokerTimingRecorder;
+  private readonly resetRelease: BrokerResetRelease;
 
   constructor(private readonly options: SessionBrokerOptions) {
     this.cleanup = new RecoveryCleanup(
@@ -113,6 +92,21 @@ export class SessionBroker {
       options.cleanupWaitMs,
       options.timer,
     );
+    this.timing = new BrokerTimingRecorder(options.store, { now: () => this.now() });
+    this.resetRelease = new BrokerResetRelease(
+      options,
+      this.timing,
+      () => this.now(),
+      (ticket, signal) => this.tryCleanup(ticket, signal),
+    );
+  }
+
+  private now(): number {
+    return this.options.timer?.now?.() ?? defaultTimer.now();
+  }
+
+  stats(windowMs = 24 * 60 * 60 * 1000, limit = 5000): Promise<SessionBrokerStats> {
+    return readBrokerTimingStats(this.options.store, () => this.now(), windowMs, limit);
   }
 
   prepare(
@@ -143,6 +137,7 @@ export class SessionBroker {
     exportIdentity?: BrokerExportIdentity,
   ): Promise<SessionBrokerResult> {
     let admitted = false;
+    const startedAtMs = this.now();
     const fingerprint = sessionRequestFingerprint(config, livenessOwnerToken);
     this.preparations.set(config.requestId, (this.preparations.get(config.requestId) ?? 0) + 1);
     try {
@@ -157,6 +152,7 @@ export class SessionBroker {
         });
       }
       const input = await this.admissionInput(config, fingerprint, signal, exportIdentity);
+      input.timingStartedAtMs = startedAtMs;
       const admission = await this.options.store.admit(input);
       if (admission.kind === "existing" || admission.kind === "refused") {
         return this.resultUnlessAborted(admission.request, signal);
@@ -214,6 +210,7 @@ export class SessionBroker {
           "Admitted session request lost its durable receipt; cleanup cannot be acknowledged",
         );
       }
+      await this.timing.recordFailedAcquisition(request);
       const result = await this.result(request);
       return request.errorCode === SESSION_REQUEST_ABANDONED_CODE
         ? result
@@ -372,6 +369,7 @@ export class SessionBroker {
       config.requestId,
       this.options.owner,
       prepared.sessionId,
+      prepared.timing,
     );
     if (this.stopping) {
       try {
@@ -391,6 +389,7 @@ export class SessionBroker {
     // own liveness policy releases it if the caller never returns. Abandonment is separate and
     // durable, so an aborted caller re-reads the receipt rather than reporting a stale one.
     try {
+      this.timing.logReadyAcquisition(request, admission.resource);
       const result = await this.result(
         signal.aborted
           ? ((await this.options.store.getRequest(config.requestId)) ?? request)
@@ -576,7 +575,7 @@ export class SessionBroker {
     );
     return committed.then(async (exit) =>
       exit
-        ? this.releaseStatus(exit.request, sessionUuid)
+        ? this.resetRelease.releaseStatus(exit.request, sessionUuid)
         : { sessionUuid, outcome: "unknown_session" },
     );
   }
@@ -620,7 +619,7 @@ export class SessionBroker {
     if (exit.ticket) {
       await this.tryCleanup(exit.ticket);
     }
-    return this.releaseStatus(exit.request, sessionUuid);
+    return this.resetRelease.releaseStatus(exit.request, sessionUuid);
   }
 
   /** Daemon shutdown joins callers; unfinished native work retains journal ownership. */
@@ -773,25 +772,7 @@ export class SessionBroker {
 
   private async recoverOneRequest(request: BrokerRequestRecord): Promise<void> {
     if (sameProcess(request.owner, this.options.owner)) {
-      if (
-        request.state === "active" &&
-        request.sessionId &&
-        this.options.sessionDisposition &&
-        (await this.options.sessionDisposition(request.sessionId)) === "gone" &&
-        !this.stopping
-      ) {
-        // Expired restart handoffs use ordinary, durably owned release; no replacement is selected.
-        await this.options.store.beginRelease(request.sessionId, this.options.owner);
-      }
-      if (request.state === "acquiring" && !this.preparations.has(request.requestId)) {
-        await this.options.store.failInterruptedAcquisition(
-          request.requestId,
-          this.options.owner,
-          "Acquisition ended without committing a session; cleanup is pending",
-        );
-      }
-      // Releasing and failed/abandoned receipts already durably name their native work.
-      // recoverCleanup drains them; no release/reset/destroy is awaited by startup.
+      await this.recoverOwnedRequest(request);
       return;
     }
     if ((await this.recoverRestartHandoff(request)) !== "terminal") {
@@ -799,6 +780,30 @@ export class SessionBroker {
     }
     // Only another process generation's receipt can need takeover; ours never does.
     await this.options.store.recoverRequest(request.requestId, this.options.owner);
+    if (request.state === "acquiring") {
+      await this.timing.recordFailedAcquisition(request);
+    }
+  }
+
+  private async recoverOwnedRequest(request: BrokerRequestRecord): Promise<void> {
+    if (
+      request.state === "active" &&
+      request.sessionId &&
+      this.options.sessionDisposition &&
+      (await this.options.sessionDisposition(request.sessionId)) === "gone" &&
+      !this.stopping
+    ) {
+      // Expired restart handoffs use ordinary, durably owned release; no replacement is selected.
+      await this.options.store.beginRelease(request.sessionId, this.options.owner);
+    }
+    if (request.state === "acquiring" && !this.preparations.has(request.requestId)) {
+      await this.options.store.failInterruptedAcquisition(
+        request.requestId,
+        this.options.owner,
+        "Acquisition ended without committing a session; cleanup is pending",
+      );
+      await this.timing.recordFailedAcquisition(request);
+    }
   }
 
   /**
@@ -848,24 +853,29 @@ export class SessionBroker {
     if (!request) {
       return { sessionUuid, outcome: "unknown_session" };
     }
-    if (request.state === "released") {
-      return { sessionUuid, outcome: "released" };
-    }
-    if (request.state === "failed") {
-      return this.releaseStatus(request, sessionUuid);
+    if (request.state === "released" || request.state === "failed") {
+      return this.resetRelease.releaseStatus(request, sessionUuid);
     }
     const resource = await this.requestResource(request);
     if (!resource) {
       throw new ActionableError("Session has no durable resource; cannot acknowledge cleanup");
     }
     signal?.throwIfAborted();
-    const disposition = await this.drainAndReset(request, resource, sessionUuid, signal);
+    const disposition = await this.resetRelease.drainAndReset(
+      request,
+      resource,
+      sessionUuid,
+      signal,
+    );
     signal?.throwIfAborted();
     if (disposition === "pending") {
-      return { sessionUuid, outcome: "cleanup_pending" };
+      return {
+        ...(await this.resetRelease.releaseStatus(request, sessionUuid)),
+        outcome: "cleanup_pending",
+      };
     }
     if (disposition === "idle") {
-      return this.releaseStatus(request, sessionUuid);
+      return this.resetRelease.releaseStatus(request, sessionUuid);
     }
     const ticket = await this.options.store.releaseByDestruction(
       request.requestId,
@@ -874,7 +884,7 @@ export class SessionBroker {
     if (ticket) {
       await this.tryCleanup(ticket, signal);
     }
-    return this.releaseStatus(request, sessionUuid);
+    return this.resetRelease.releaseStatus(request, sessionUuid);
   }
 
   private async drainAbandonedSession(sessionUuid: string): Promise<void> {
@@ -890,57 +900,6 @@ export class SessionBroker {
         `Abandoned session ${sessionUuid} release remains pending: ${errorMessage(error)}`,
       );
     }
-  }
-
-  private async drainAndReset(
-    request: BrokerRequestRecord,
-    resource: BrokerResourceRecord,
-    sessionUuid: string,
-    signal?: AbortSignal,
-  ): Promise<"idle" | "destroy" | "pending"> {
-    let resetClean = false;
-    try {
-      if (!(await this.options.devices.release(sessionUuid)).settled) {
-        return "pending";
-      }
-      signal?.throwIfAborted();
-      if (
-        !this.options.reuseCleanDevices ||
-        !this.options.devices.reset ||
-        resource.state !== "resetting"
-      ) {
-        return "destroy";
-      }
-      if ((await this.options.devices.reset(resource)) !== "clean") {
-        return "destroy";
-      }
-      signal?.throwIfAborted();
-      resetClean = true;
-      const tickets = await this.options.store.completeCleanRelease(
-        request.requestId,
-        this.options.owner,
-        this.options.limits,
-      );
-      for (const ticket of tickets) {
-        signal?.throwIfAborted();
-        await this.tryCleanup(ticket, signal);
-      }
-      return "idle";
-    } catch (error) {
-      return drainFailureOutcome(error, sessionUuid, resetClean);
-    }
-  }
-
-  private async releaseStatus(
-    request: BrokerRequestRecord,
-    sessionUuid: string,
-  ): Promise<SessionBrokerReleaseResult> {
-    const resource = await this.requestResource(request);
-    const pending =
-      resource?.requestId === request.requestId &&
-      resource.state !== "idle" &&
-      resource.state !== "destroyed";
-    return { sessionUuid, outcome: pending ? "cleanup_pending" : "released" };
   }
 
   private async requestResource(
@@ -965,6 +924,7 @@ export class SessionBroker {
       sessionUuid: request.sessionId,
       profile: resource ? nativeProfile(resource) : null,
       cleanupPending: this.cleanupIsPending(request, resource),
+      ...(request.timing ? { timing: request.timing } : {}),
       ...(request.error ? { failure: this.storedFailure(request, resource) } : {}),
     };
   }
@@ -980,10 +940,10 @@ export class SessionBroker {
       code: request.errorCode ?? "session_preparation_failed",
       message: request.error ?? "",
       retryable,
-      // Eviction retains capacity for redrive; a new request may try again after cleanup.
       ...(retryable && request.errorCode === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
-      // These stored terminal failures require a new request ID to retry preparation.
-      ...(retryable && ["capacity_exhausted", "cancelled"].includes(request.errorCode ?? "")
+      // Stored terminal failures (incl. eviction, after cleanup) retry only under a new request ID.
+      ...(retryable &&
+      ["capacity_exhausted", "cancelled", "eviction_pending"].includes(request.errorCode ?? "")
         ? { retryRequires: "new_request_id" as const }
         : {}),
     };

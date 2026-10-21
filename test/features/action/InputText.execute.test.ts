@@ -226,10 +226,8 @@ describe("InputText.execute", () => {
               ? input.appendText("a", undefined, undefined, controller.signal)
               : input.execute(
                   "hi",
-                  path === "IME done" ? "done" : "previous",
-                  false,
-                  "a11y",
-                  controller.signal,
+                  { imeAction: path === "IME done" ? "done" : "previous", mode: "a11y" },
+                  { signal: controller.signal },
                 ),
           ),
         );
@@ -314,13 +312,9 @@ describe("InputText.execute", () => {
         return execute(args, options);
       });
       const input = createInputText(androidDevice, fakeAdb);
-      const result = runWithAbortSignal(
-        undefined,
-        () => input.execute("hi", undefined, false, mode),
-        {
-          textState: state,
-        },
-      );
+      const result = runWithAbortSignal(undefined, () => input.execute("hi", { mode }), {
+        textState: state,
+      });
       await entered.promise;
       let settled = false;
       const waiter = state.settled().then(() => {
@@ -370,7 +364,7 @@ describe("InputText.execute", () => {
       }));
       const result = runWithAbortSignal(
         undefined,
-        () => input.execute(text, undefined, dismissKeyboard, mode),
+        () => input.execute(text, { dismissKeyboard, mode }),
         { textState: state },
       );
       try {
@@ -423,7 +417,7 @@ describe("InputText.execute", () => {
       return execute(command);
     });
     const input = createInputText(androidDevice, fakeAdb);
-    const result = runWithAbortSignal(undefined, () => input.execute("hi", imeAction), {
+    const result = runWithAbortSignal(undefined, () => input.execute("hi", { imeAction }), {
       textState: state,
     });
     try {
@@ -462,7 +456,7 @@ describe("InputText.execute", () => {
       );
       const input = createInputText(androidDevice, fakeAdb);
       expect(
-        await runWithAbortSignal(undefined, () => input.execute("hi", undefined, false, mode)),
+        await runWithAbortSignal(undefined, () => input.execute("hi", { mode })),
       ).toMatchObject({ success: true, method: mode });
     },
   );
@@ -487,7 +481,7 @@ describe("InputText.execute", () => {
 
     const inputText = createInputText(iosDevice, fakeAdb);
 
-    const result = await inputText.execute("hello", undefined, false, "eventAll");
+    const result = await inputText.execute("hello", { mode: "eventAll" });
 
     expect(result.success).toBe(true);
     // iOS always reports the a11y method regardless of the requested Android mode.
@@ -539,8 +533,11 @@ describe("InputText.execute", () => {
       },
     }));
     expect(
-      await input.execute("secret", undefined, false, "a11y", undefined, {
-        text: "Continue as Guest",
+      await input.execute("secret", {
+        mode: "a11y",
+        selector: {
+          text: "Continue as Guest",
+        },
       }),
     ).toEqual({ success: false, text: "secret", error, method: "a11y" });
     expect(adb.getExecutedCommands()).toEqual([]);
@@ -568,8 +565,10 @@ describe("InputText.execute", () => {
         },
       }));
 
-      const result = await inputText.execute("Ada", undefined, false, undefined, undefined, {
-        text: "First name",
+      const result = await inputText.execute("Ada", {
+        selector: {
+          text: "First name",
+        },
       });
 
       expect(result.success).toBe(true);
@@ -587,8 +586,10 @@ describe("InputText.execute", () => {
         focus: async () => ({ success: false, error: "no element matches text=Missing" }),
       }));
 
-      const result = await inputText.execute("Ada", undefined, false, undefined, undefined, {
-        text: "Missing",
+      const result = await inputText.execute("Ada", {
+        selector: {
+          text: "Missing",
+        },
       });
 
       expect(result.success).toBe(false);
@@ -612,8 +613,10 @@ describe("InputText.execute", () => {
         }),
       }));
 
-      const result = await inputText.execute("555-0100", undefined, false, undefined, undefined, {
-        text: "Phone",
+      const result = await inputText.execute("555-0100", {
+        selector: {
+          text: "Phone",
+        },
       });
 
       expect(result.success).toBe(false);

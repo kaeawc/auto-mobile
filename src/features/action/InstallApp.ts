@@ -25,6 +25,10 @@ import {
   DefaultAndroidBuildToolsLocator,
   type AndroidBuildToolsLocator,
 } from "../../utils/android-cmdline-tools/AndroidBuildToolsLocator";
+import {
+  DefaultBundletoolLocator,
+  type BundletoolLocator,
+} from "../../utils/android-cmdline-tools/BundletoolLocator";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
@@ -46,7 +50,10 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/working
 import { InspectPackageSigning } from "../observe/InspectPackageSigning";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { DefaultAndroidArtifactHost, type AndroidArtifactHost } from "./AndroidArtifactHost";
+import { AndroidBundletool } from "./AndroidBundletool";
 import { AndroidInstallPackageTools } from "./AndroidInstallPackageTools";
+import { resolveAndroidInstallPlan, type AndroidInstallPlan } from "./androidInstallPlan";
 import {
   type AndroidInstallAttempt,
   type AndroidInstallRecovery,
@@ -67,6 +74,7 @@ import {
 } from "./TerminateApp";
 import { diffInstalledPackages, extractInstallErrorText } from "./installAppParsing";
 export {
+  type AndroidInstallRequest,
   type DeviceAppInstaller,
   type InstallAppCall,
   type InstallAppOptions,
@@ -89,6 +97,14 @@ export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 
 export { IOS_INSTALL_VERIFY_ATTEMPTS, IOS_PHYSICAL_VERIFY_ATTEMPTS } from "./IosAppInstaller";
 
+/** One install attempt; downgrade recovery re-runs it unchanged without the request signal. */
+type AndroidInstallRunner = (signal?: AbortSignal) => Promise<AndroidInstallAttempt>;
+
+/** A single APK keeps the historical result shape; every other route reports itself. */
+function installRouteField(plan: AndroidInstallPlan): Pick<InstallAppResult, "installRoute"> {
+  return plan.route === "apk" ? {} : { installRoute: plan.route };
+}
+
 export class InstallApp {
   private readonly timer?: Timer;
   private readonly simctl: NonNullable<InstallAppOptions["simctl"]>;
@@ -100,6 +116,8 @@ export class InstallApp {
   private signingInspectorOverride?: PackageSigningInspector;
   private hostExecutor: HostCommandExecutor;
   private buildToolsLocator: AndroidBuildToolsLocator;
+  private bundletoolLocator: BundletoolLocator;
+  private artifactHost: AndroidArtifactHost;
   private createPerformanceTracker: () => PerformanceTracker;
   private device: BootedDevice;
   private cacheInvalidatorOverride?: DeviceWindowCacheInvalidator;
@@ -120,6 +138,8 @@ export class InstallApp {
     this.signingInspectorOverride = options.signingInspector;
     this.hostExecutor = options.hostExecutor ?? new DefaultHostCommandExecutor();
     this.buildToolsLocator = options.buildToolsLocator ?? new DefaultAndroidBuildToolsLocator();
+    this.bundletoolLocator = options.bundletoolLocator ?? new DefaultBundletoolLocator();
+    this.artifactHost = options.artifactHost ?? new DefaultAndroidArtifactHost();
     this.createPerformanceTracker =
       options.performanceTrackerFactory ?? createGlobalPerformanceTracker;
     this.cacheInvalidatorOverride = options.cacheInvalidator;
@@ -162,14 +182,14 @@ export class InstallApp {
     signalArg?: AbortSignal,
     guardArg?: InstallGuardOptions,
   ): Promise<InstallAppResult> {
-    const { userId, signal, guard } =
+    const call: InstallAppCall =
       typeof userIdOrCall === "object"
         ? userIdOrCall
         : { userId: userIdOrCall, signal: signalArg, guard: guardArg };
     const perf = this.createPerformanceTracker();
     const nested = hasAmbientPerfTracker();
     const result = await runWithNestedPerfTracker(perf, () =>
-      this.executeInner(artifactPath, userId, perf, signal, guard),
+      this.executeInner(artifactPath, call, perf),
     );
     if (!nested && perf.isEnabled()) {
       const timings = perf.getTimings();
@@ -182,10 +202,8 @@ export class InstallApp {
 
   private async executeInner(
     artifactPath: string,
-    userId: number | undefined,
+    { userId, signal, guard, android = {} }: InstallAppCall,
     perf: PerformanceTracker,
-    signal?: AbortSignal,
-    guard?: InstallGuardOptions,
   ): Promise<InstallAppResult> {
     perf.serial("installApp");
 
@@ -199,6 +217,11 @@ export class InstallApp {
       if (guard) {
         throw new ActionableError(
           "expectedSigningSha256 and allowDestructiveRecovery are only supported for Android devices",
+        );
+      }
+      if (Object.values(android).some((value) => value !== undefined)) {
+        throw new ActionableError(
+          "splits, bundle, grantAllPermissions and allowDowngrade are only supported for Android devices",
         );
       }
       const backend = this.iosInstaller.getIosInstallBackend();
@@ -225,25 +248,37 @@ export class InstallApp {
       return { ...result, userId: 0 };
     }
 
-    if (ext !== ".apk") {
-      throw new Error(
-        `Android devices only support .apk files, but got "${ext}" file. Use an .apk file for Android installation.`,
-      );
-    }
-
-    return withAndroidPackageMutationLock(this.device.deviceId, signal, () =>
-      this.executeAndroid(artifactPath, userId, perf, signal, guard),
+    const plan = await perf.track("resolveAndroidArtifact", () =>
+      resolveAndroidInstallPlan(artifactPath, android, this.androidPlanDependencies(), signal),
     );
+    try {
+      return await withAndroidPackageMutationLock(this.device.deviceId, signal, () =>
+        this.executeAndroid(plan, userId, perf, signal, guard),
+      );
+    } finally {
+      await plan.cleanup();
+    }
+  }
+
+  private androidPlanDependencies() {
+    const bundletool = new AndroidBundletool({
+      hostExecutor: this.hostExecutor,
+      locator: this.bundletoolLocator,
+      artifactHost: this.artifactHost,
+      adbPath: () => this.adb.getAdbPathOnly(),
+      deviceId: this.device.deviceId,
+    });
+    return { artifactHost: this.artifactHost, bundletool };
   }
 
   private async executeAndroid(
-    artifactPath: string,
+    plan: AndroidInstallPlan,
     userId: number | undefined,
     perf: PerformanceTracker,
     signal?: AbortSignal,
     guard?: InstallGuardOptions,
   ): Promise<InstallAppResult> {
-    const preparation = await this.prepareAndroidInstall(artifactPath, userId, perf, signal);
+    const preparation = await this.prepareAndroidInstall(plan, userId, perf, signal);
     let { packageName, isInstalled } = preparation;
     const { targetUserId, beforePackages, warnings, prior } = preparation;
     const signingGuard = await this.applySigningGuard(
@@ -257,7 +292,7 @@ export class InstallApp {
     const installation = await this.installAndroidWithRecovery(
       packageName,
       targetUserId,
-      `install --user ${targetUserId} -r "${artifactPath}"`,
+      this.installRunner(plan, targetUserId),
       prior,
       perf,
       installStepOptions(guard, signal),
@@ -297,7 +332,14 @@ export class InstallApp {
       packageName: packageName,
       warning: warning,
       ...(signingGuard ? { signingGuard } : {}),
+      ...installRouteField(plan),
     };
+  }
+
+  private installRunner(plan: AndroidInstallPlan, userId: number): AndroidInstallRunner {
+    return plan.kind === "adb"
+      ? (signal) => this.runAndroidInstall(plan.installArgs(userId), signal)
+      : (signal) => plan.install(signal);
   }
 
   private async applySigningGuard(
@@ -381,7 +423,7 @@ export class InstallApp {
   }
 
   private async prepareAndroidInstall(
-    artifactPath: string,
+    plan: AndroidInstallPlan,
     userId: number | undefined,
     perf: PerformanceTracker,
     signal?: AbortSignal,
@@ -393,12 +435,14 @@ export class InstallApp {
     warnings: string[];
     prior: AndroidPriorPackageState;
   }> {
-    const warnings: string[] = [];
+    const warnings: string[] = [...plan.warnings];
 
-    // Extract package name from APK
-    const packageNameResult = await perf.track("extractPackageName", async () => {
-      return this.extractPackageName(artifactPath, signal);
-    });
+    // Extract package name from the APK, or the base split of a split install or APK set
+    const source = plan.packageSourceApk;
+    const packageNameResult: { packageName?: string; warning?: string } = await perf.track(
+      "extractPackageName",
+      async () => (source === undefined ? {} : this.extractPackageName(source, signal)),
+    );
     if (packageNameResult.warning) {
       warnings.push(packageNameResult.warning);
     }
@@ -442,14 +486,12 @@ export class InstallApp {
   private async installAndroidWithRecovery(
     packageName: string | undefined,
     targetUserId: number,
-    installArgs: string,
+    install: AndroidInstallRunner,
     prior: AndroidPriorPackageState,
     perf: PerformanceTracker,
     { signal, allowDestructiveRecovery = true }: AndroidInstallStepOptions = {},
   ): Promise<AndroidInstallRecovery> {
-    const installAttempt = await perf.track("adbInstall", () =>
-      this.runAndroidInstall(installArgs, signal),
-    );
+    const installAttempt = await perf.track("adbInstall", () => install(signal));
     if (installAttempt.success) {
       this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
@@ -463,7 +505,7 @@ export class InstallApp {
         signal,
       );
     }
-    if (installAttempt.success || !this.isAndroidDowngradeError(installAttempt.diagnostics)) {
+    if (installAttempt.success || !this.isAndroidDowngradeError(installAttempt)) {
       return { installAttempt };
     }
     if (!allowDestructiveRecovery) {
@@ -481,7 +523,7 @@ export class InstallApp {
           "but the package name could not be determined in order to uninstall it first.",
       );
     }
-    return this.recoverAndroidDowngrade(packageName, targetUserId, installArgs, perf, signal);
+    return this.recoverAndroidDowngrade(packageName, targetUserId, install, perf, signal);
   }
 
   /**
@@ -668,7 +710,7 @@ export class InstallApp {
   private async recoverAndroidDowngrade(
     packageName: string,
     targetUserId: number,
-    installArgs: string,
+    install: AndroidInstallRunner,
     perf: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<AndroidInstallRecovery> {
@@ -694,18 +736,15 @@ export class InstallApp {
       // Once removal succeeds, finish reinstalling even if the request is cancelled.
       // Escape both explicit and ambient aborts while retaining the ADB step deadline.
       installAttempt = await runWithAbortSignal(undefined, () =>
-        raceWithDeadline(
-          () => perf.track("adbReinstall", () => this.runAndroidInstall(installArgs)),
-          {
-            timer: this.timer ?? defaultTimer,
-            timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
-            label: "Android downgrade reinstall",
-            timeoutError: () =>
-              new AdbCommandTimeoutError(
-                `Android downgrade reinstall timed out after ${ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS}ms`,
-              ),
-          },
-        ),
+        raceWithDeadline(() => perf.track("adbReinstall", () => install()), {
+          timer: this.timer ?? defaultTimer,
+          timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+          label: "Android downgrade reinstall",
+          timeoutError: () =>
+            new AdbCommandTimeoutError(
+              `Android downgrade reinstall timed out after ${ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS}ms`,
+            ),
+        }),
       );
     } catch (error) {
       if (!(error instanceof AdbCommandTimeoutError)) {
@@ -983,8 +1022,10 @@ export class InstallApp {
     );
   }
 
-  private isAndroidDowngradeError(output: string): boolean {
-    return output.includes(InstallApp.ANDROID_DOWNGRADE_MARKER);
+  private isAndroidDowngradeError(attempt: AndroidInstallAttempt): boolean {
+    return (
+      attempt.versionDowngrade ?? attempt.diagnostics.includes(InstallApp.ANDROID_DOWNGRADE_MARKER)
+    );
   }
 
   private packageTools(): AndroidInstallPackageTools {

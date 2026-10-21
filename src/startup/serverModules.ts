@@ -26,8 +26,6 @@ export async function loadServerModules(onLoggerLoaded: (logger: LoadedLogger) =
   const appearanceSocketServer = await import("../daemon/appearanceSocketServer");
   const webrtcStreamSocketServer = await import("../daemon/webrtcStreamSocketServer");
   const appearanceSyncScheduler = await import("../daemon/AppearanceSyncScheduler");
-  const { isAppearanceSyncEnabled } = await import("../daemon/PassiveWorkPolicy");
-  const { DeviceReadiness } = await import("../daemon/readiness/DeviceReadiness");
   const { FeatureFlagService } = await import("../features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("../utils/ServerConfig");
   const { AndroidCtrlProxyManager } = await import("../ctrlProxy/CtrlProxyManager");
@@ -64,10 +62,7 @@ export async function loadServerModules(onLoggerLoaded: (logger: LoadedLogger) =
     stopAppearanceSocketServer: appearanceSocketServer.stopAppearanceSocketServer,
     startWebRtcStreamSocketServer: webrtcStreamSocketServer.startWebRtcStreamSocketServer,
     stopWebRtcStreamSocketServer: webrtcStreamSocketServer.stopWebRtcStreamSocketServer,
-    startAppearanceSyncScheduler: appearanceSyncScheduler.startAppearanceSyncScheduler,
     stopAppearanceSyncScheduler: appearanceSyncScheduler.stopAppearanceSyncScheduler,
-    isAppearanceSyncEnabled,
-    DeviceReadiness,
     FeatureFlagService,
     serverConfig,
     AndroidCtrlProxyManager,

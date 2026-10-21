@@ -114,7 +114,7 @@ describe("device-client admission seam", () => {
       const manager = DeviceReadiness.createInstance(provider, new FakeAdbClientFactory(adb));
       await manager.verifyAndroidDevice(SERIAL, { readiness: "booted" });
       if (route === "current") {
-        manager.setCurrentDevice(DEVICE, "android");
+        manager.setExplicitDevicePin(DEVICE);
       }
       await quarantinedPool();
       const ready =
@@ -130,8 +130,12 @@ describe("device-client admission seam", () => {
 
   test("current quarantine refusal preserves selection and never discovers a replacement", async () => {
     const refusal = new DeviceIdentityQuarantinedError("identity unresolved");
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([DEVICE]);
+    const utils = new FakeDeviceUtils();
+    utils.setBootedDevices("android", [DEVICE]);
     const manager = DeviceReadiness.createInstance(
-      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
+      new FakeDeviceClientProvider(adb, utils),
       new FakeAdbClientFactory(),
       {
         admissionGate: {
@@ -141,7 +145,7 @@ describe("device-client admission seam", () => {
         },
       },
     );
-    manager.setCurrentDevice(DEVICE, "android");
+    manager.setExplicitDevicePin(DEVICE);
     const discovery = spyOn(manager, "findOrStartDevice").mockResolvedValue({
       ...DEVICE,
       deviceId: "emulator-5556",
@@ -151,8 +155,8 @@ describe("device-client admission seam", () => {
         manager.ensureDeviceReady("android", undefined, { readiness: "booted" }),
       ).rejects.toBe(refusal);
       expect(discovery).not.toHaveBeenCalled();
-      expect(manager.getCurrentDevice()).toBe(DEVICE);
-      expect(manager.getCurrentPlatform()).toBe("android");
+      expect(manager.getExplicitDevicePin()).toBe(DEVICE);
+      expect(manager.getExplicitDevicePin()?.platform).toBe("android");
     } finally {
       discovery.mockRestore();
     }

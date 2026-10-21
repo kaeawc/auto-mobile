@@ -41,10 +41,11 @@ describe("clean release retains warm devices across retryable failures", () => {
   });
 
   beforeEach(async () => {
+    const timer = new FakeTimer();
     registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       isExecOwnerLive: () => true,
-      timer: new FakeTimer(),
+      timer,
     });
     const scope = await registry.ensureScope({
       managedHostScope: "private-host",
@@ -63,6 +64,7 @@ describe("clean release retains warm devices across retryable failures", () => {
       catalog: async () => iosCatalog(),
       defaults: () => iosDefaults(),
       reuseCleanDevices: true,
+      timer,
     };
     broker = new SessionBroker(options);
   });
@@ -89,7 +91,10 @@ describe("clean release retains warm devices across retryable failures", () => {
   ): Promise<void> {
     const resourceId = devices.prepared[0];
     devices.dirty.add(resourceId);
-    expect(await broker.release(sessionUuid)).toEqual({ sessionUuid, outcome: "cleanup_pending" });
+    expect(await broker.release(sessionUuid)).toMatchObject({
+      sessionUuid,
+      outcome: "cleanup_pending",
+    });
     expect(devices.destroyed).toEqual([]);
     expect(await options.store.getRequest("first")).toMatchObject({ state: "releasing" });
     expect((await options.store.listResources())[0]).toMatchObject({
@@ -198,7 +203,14 @@ describe("clean release retains warm devices across retryable failures", () => {
   ])("a permanent receipt failure after a clean reset destroys: %s", async (error) => {
     const sessionUuid = await ready("first");
     spyOn(options.store, "completeCleanRelease").mockRejectedValue(error);
-    expect(await broker.release(sessionUuid)).toMatchObject({ outcome: "released" });
+    expect(await broker.release(sessionUuid)).toMatchObject({
+      outcome: "released",
+      timing: { reset: { outcome: "destroyed", retired: true } },
+    });
+    expect((await broker.status("first"))?.timing?.reset).toMatchObject({
+      outcome: "destroyed",
+      retired: true,
+    });
     expect(devices.resetResources).toEqual([devices.prepared[0]]);
     expect(devices.destroyed).toEqual([devices.prepared[0]]);
     expect((await options.store.listResources())[0].state).toBe("destroyed");
@@ -234,6 +246,8 @@ describe("clean release retains warm devices across retryable failures", () => {
       throw new Error("lost commit reply");
     });
     expect(await broker.release(sessionUuid)).toMatchObject({ outcome: "cleanup_pending" });
+    expect((await broker.status("first"))?.timing?.reset).toMatchObject({ outcome: "clean" });
+    expect((await broker.status("first"))?.timing?.reset?.fallbackReason).toBeUndefined();
     expect(devices.destroyed).toEqual([]);
     await broker.recover();
     expect(await broker.release(sessionUuid)).toMatchObject({ outcome: "released" });

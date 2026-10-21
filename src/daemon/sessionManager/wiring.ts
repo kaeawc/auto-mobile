@@ -33,30 +33,6 @@ type SessionManagerDependencyReaders = {
   ]: () => SessionManagerCollaboratorHost[Key];
 };
 
-export interface SessionManagerWiringCollaborators {
-  readonly restoreHealth: DeviceRestoreHealth;
-  readonly persistedAdmission: PersistedSessionAdmission;
-  readonly recovery: SessionRecovery;
-  readonly rehydration: SessionRehydration;
-  readonly rebinding: SessionRebinding;
-  readonly supersededRows: SupersededSessionRows;
-  readonly releasePersistence: SessionReleasePersistence;
-  readonly activityPersistence: SessionActivityPersistence;
-  readonly leaseExpiry: SessionLeaseExpiry;
-  readonly cache: SessionCache;
-  readonly acquisition: SessionAcquisition;
-  readonly releaseRequests: SessionReleaseRequests;
-  readonly planLabelsLifecycle: SessionPlanLabels;
-  readonly creation: SessionCreation;
-  readonly releaseCommit: SessionReleaseCommit;
-  readonly creationGuard: SessionCreationGuard;
-  readonly admission: SessionAdmission;
-  readonly bookkeeping: SessionBookkeeping;
-  readonly callbacks: SessionCallbacks;
-  readonly activityClocks: SessionActivityClocks;
-  readonly recoveryPublication: SessionRecoveryPublication;
-  readonly releaseWrite: SessionReleaseWrite;
-}
 export type SessionManagerWiringFacade = Pick<
   SessionManagerCollaboratorActions,
   | "expireIfDue"
@@ -196,7 +172,7 @@ export class SessionManagerWiring {
       judgeOwnerLeaseForRelease: (...args) => this.leaseExpiry.judgeOwnerLeaseForRelease(...args),
       finishReleaseForcedBeforeStart: (...args) =>
         this.facade.finishReleaseForcedBeforeStart(...args),
-      releaseSessionInternal: (...args) => this.releaseCommit.releaseSessionInternal(...args),
+      releaseSessionInternal: (request) => this.releaseCommit.releaseSessionInternal(request),
       finishIdentityReplacedRelease: (...args) =>
         this.restoreHealth.finishIdentityReplacedRelease(...args),
       releaseFinalizedSession: (...args) => this.releaseCommit.releaseFinalizedSession(...args),

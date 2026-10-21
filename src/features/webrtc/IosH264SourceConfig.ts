@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import { ENV } from "../../config/env";
+import { ENV, isTruthyEnvText } from "../../config/env";
 import type { BootedDevice } from "../../models";
 import {
   exponentialBackoff,
@@ -7,7 +7,6 @@ import {
   type BackoffInput,
   type BackoffPolicy,
 } from "../../utils/Backoff";
-import { isTruthyEnvValue } from "../../utils/ctrlProxyDownloadControl";
 import { readEnvPositiveInteger } from "../../utils/envNumbers";
 import type { Timer } from "../../utils/SystemTimer";
 import type { FfmpegClient, FfmpegProcess } from "../../utils/media/FfmpegClient";
@@ -216,7 +215,7 @@ export interface ScreenCaptureHelperEnsurer {
 /** True when the force-raw escape hatch is set on either the primary or alias env var. */
 export function readForceRawPipeline(env: NodeJS.ProcessEnv): boolean {
   return [IOS_WEBRTC_FORCE_RAW_ENV, IOS_WEBRTC_FORCE_RAW_ENV_ALIAS].some((name) =>
-    isTruthyEnvValue(env[name]),
+    isTruthyEnvText(env[name]),
   );
 }
 

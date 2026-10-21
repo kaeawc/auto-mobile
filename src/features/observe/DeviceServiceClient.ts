@@ -80,7 +80,7 @@ export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
   // Connection state
   protected ws: CtrlSocket | null = null;
 
-  /** @internal Typed socket view for unit tests; production code must not use it. */
+  /** @internal Typed socket and connection-state view for unit tests; production code must not use it. */
   get connectionTestHooks(): DeviceServiceClientConnectionTestHooks {
     return createConnectionTestHooks({
       getSocket: () => this.ws,
@@ -89,6 +89,24 @@ export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
       },
       requestManager: this.requestManager,
       deliverMessage: (data) => this.handleMessage(data),
+      readState: () => ({
+        autoReconnectEnabled: this.autoReconnectEnabled,
+        supportedCommands: this.supportedCommands,
+        isConnecting: this.isConnecting,
+        pendingConnectJoiners: this.pendingConnectJoiners,
+        inFlightConnectPromise: this.inFlightConnectPromise,
+        reconnectTimeoutId: this.reconnectTimeoutId,
+        connectionAttempts: this.connectionAttempts,
+        lastConnectionAttempt: this.lastConnectionAttempt,
+      }),
+      writeState: (patch) => {
+        this.autoReconnectEnabled = patch.autoReconnectEnabled ?? this.autoReconnectEnabled;
+        this.connectionAttempts = patch.connectionAttempts ?? this.connectionAttempts;
+        this.lastConnectionAttempt = patch.lastConnectionAttempt ?? this.lastConnectionAttempt;
+        if (patch.supportedCommands !== undefined) {
+          this.supportedCommands = patch.supportedCommands;
+        }
+      },
     });
   }
   /** Socket owning the current handshake/open lifecycle, used to reject delayed stale events. */

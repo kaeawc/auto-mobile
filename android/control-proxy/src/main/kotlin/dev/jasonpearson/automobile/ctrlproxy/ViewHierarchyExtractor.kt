@@ -32,6 +32,8 @@ import kotlin.math.min
  * UIElementInfo objects for automated testing.
  */
 class ViewHierarchyExtractor
+// Keep the independent, default-off debug flag injectable without regrouping existing callbacks.
+@Suppress("LongParameterList")
 internal constructor(
   private val recompositionStore: RecompositionStore? = null,
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
@@ -53,6 +55,7 @@ internal constructor(
     { _, _ ->
       null
     },
+  private val pruneBaselineWrappers: Boolean = false,
 ) {
 
   internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
@@ -1755,8 +1758,12 @@ internal constructor(
       !element.collectionItemInfo.isNullOrBlank() ||
       !element.rangeInfo.isNullOrBlank() ||
       !element.inputType.isNullOrBlank() ||
-      !element.actions.isNullOrEmpty() ||
-      !element.extras.isNullOrEmpty()
+      (if (pruneBaselineWrappers)
+        element.actions?.any { it !in NodeFieldNames.baselineAccessibilityActions } == true
+      else !element.actions.isNullOrEmpty()) ||
+      (if (pruneBaselineWrappers)
+        element.extras?.keys?.any { !VolatileExtras.isNeverShipped(it) } == true
+      else !element.extras.isNullOrEmpty())
   }
 
   private fun hasStringCriteria(element: UIElementInfo): Boolean {
@@ -1795,7 +1802,7 @@ internal constructor(
    * Walks the typed [UIElementInfo.children] list directly — no per-stage JSON decode/re-encode
    * (issue #5471).
    */
-  private fun optimizeHierarchy(element: UIElementInfo): List<UIElementInfo> {
+  internal fun optimizeHierarchy(element: UIElementInfo): List<UIElementInfo> {
     // Check if this element is a bounds-only wrapper (has no useful properties)
     val isBoundsOnlyWrapper = !meetsFilterCriteria(element)
 

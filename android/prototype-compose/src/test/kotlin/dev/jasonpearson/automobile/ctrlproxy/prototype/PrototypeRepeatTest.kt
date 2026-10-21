@@ -398,6 +398,9 @@ class PrototypeRepeatTest {
       listOf(PrototypeListItemCheckbox("saved_a"), PrototypeListItemCheckbox("saved_b")),
       trailing,
     )
+    // #14585: the item's headline interpolates like every other text field.
+    val listItems = rows().map { row -> row[5].source as PrototypeListItemNode }
+    assertEquals(listOf("Save Alexey", "Save Bea"), listItems.map { it.headline })
     val dialogs = rows().map { row -> (row[6].source as PrototypeDialogNode).openWhen.key }
     assertEquals(listOf("open_a", "open_b"), dialogs)
 

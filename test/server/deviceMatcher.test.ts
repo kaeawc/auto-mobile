@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { DefaultDeviceMatcher, compareVersions } from "../../src/server/deviceMatcher";
+import { DefaultDeviceMatcher, compareVersions } from "../../src/utils/deviceMatcher";
 import { matchesDeviceCriteria, describeDisplayRequirements } from "../../src/utils/deviceMatcher";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";

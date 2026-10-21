@@ -1,5 +1,5 @@
 import { ProcessEnvironmentReader } from "./ProcessEnvironmentReader";
-import { ENV } from "../config/env";
+import { ENV, isTruthyEnvText } from "../config/env";
 /**
  * Opt-in gate for provisioning (creating) simulators/emulators.
  *
@@ -22,9 +22,6 @@ import { ENV } from "../config/env";
 
 /** Env var that enables device creation when no explicit flag is supplied. */
 export const DEVICE_CREATE_ENV_VAR = ENV.ALLOW_DEVICE_CREATE.name;
-
-/** Values accepted as "on" for {@link DEVICE_CREATE_ENV_VAR}. */
-const TRUTHY_ENV_VALUES = new Set(["1", "true"]);
 
 /** Prefix applied to every device AutoMobile creates, so they are identifiable/cleanable. */
 export const CREATED_DEVICE_NAME_PREFIX = "AutoMobile";
@@ -53,7 +50,7 @@ export class EnvDeviceCreationGate implements DeviceCreationGate {
     if (typeof explicitFlag === "boolean") {
       return explicitFlag;
     }
-    return isTruthyCreationEnvValue(this.environment.get(DEVICE_CREATE_ENV_VAR));
+    return isTruthyEnvText(this.environment.get(DEVICE_CREATE_ENV_VAR));
   }
 
   describeSource(explicitFlag?: boolean): string {
@@ -66,14 +63,6 @@ export class EnvDeviceCreationGate implements DeviceCreationGate {
     }
     return `${DEVICE_CREATE_ENV_VAR}=${raw}`;
   }
-}
-
-/** `1` and `true` (case-insensitive, whitespace-tolerant) mean on; everything else is off. */
-export function isTruthyCreationEnvValue(raw: string | undefined): boolean {
-  if (raw === undefined) {
-    return false;
-  }
-  return TRUTHY_ENV_VALUES.has(raw.trim().toLowerCase());
 }
 
 let moduleGate: DeviceCreationGate | null = null;

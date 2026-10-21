@@ -1,0 +1,36 @@
+Drop box contents: 1 entries
+Max entries: 1000
+
+Searching for: data_app_native_crash
+
+========================================
+2026-10-21 10:00:03 data_app_native_crash (text, 3300 bytes)
+Process: com.example.app
+PID: 4321
+UID: 10123
+Flags: 0x38d83f44
+Package: com.example.app v42 (1.4.0)
+Foreground: Yes
+Process-Runtime: 9120
+Build: google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036/10722157:userdebug/dev-keys
+Loading-Progress: 1.0
+Dropped-Count: 0
+
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Build fingerprint: 'google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036/10722157:userdebug/dev-keys'
+Revision: '0'
+ABI: 'arm64'
+Timestamp: 2026-10-21 10:00:03.123456789+0000
+Process uptime: 9s
+Cmdline: com.example.app
+pid: 4321, tid: 4321, name: example.app  >>> com.example.app <<<
+uid: 10123
+signal 6 (SIGABRT), code -6 (SI_TKILL), fault addr --------
+Abort message: 'native boom from JNI'
+    x0  0000000000000000  x1  00000000000010e1  x2  0000000000000006  x3  0000007fe2a1c6e0
+
+backtrace:
+      #00 pc 000000000005b2bc  /apex/com.android.runtime/lib64/bionic/libc.so (abort+164) (BuildId: 2a9d6e0c8f1b4c3d)
+      #01 pc 0000000000012a40  /data/app/~~abc==/com.example.app-xyz==/lib/arm64/libnative.so (Java_com_example_app_Native_crash+48) (BuildId: 9f8e7d6c)
+      #02 pc 0000000000377030  /apex/com.android.art/lib64/libart.so (art_quick_generic_jni_trampoline+144) (BuildId: 1b2c3d4e)
+

@@ -21,6 +21,7 @@ import {
 import type { DaemonSocketReachabilityLike } from "../../../src/daemon/daemonSocketReachability";
 import { AuxiliarySocketHeldError } from "../../../src/daemon/AuxiliarySocketHeldError";
 import { AuxiliarySocketOwner } from "../../../src/daemon/auxiliarySocketOwner";
+import { statFileIdentity, type SocketFileIdentity } from "../../../src/daemon/socketFileIdentity";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../src/daemon/daemonFiles";
@@ -60,7 +61,7 @@ describe("BaseSocketServer bind guard", () => {
   let peer: NetServer;
   let peerDirectory: string;
   let peerSocketPath: string;
-  let peerIdentity: { dev: number; ino: number };
+  let peerIdentity: SocketFileIdentity;
 
   beforeAll(async () => {
     if (isWindows) {
@@ -69,8 +70,7 @@ describe("BaseSocketServer bind guard", () => {
     peerDirectory = mkdtempSync(join(tmpdir(), "aux-socket-peer-"));
     peerSocketPath = join(peerDirectory, "observation-stream.sock");
     peer = await listenOnSocket(peerSocketPath);
-    const original = statSync(peerSocketPath);
-    peerIdentity = { dev: original.dev, ino: original.ino };
+    peerIdentity = statFileIdentity(peerSocketPath);
   });
 
   afterAll(async () => {
@@ -104,8 +104,7 @@ describe("BaseSocketServer bind guard", () => {
     await expect(start).rejects.toThrow(peerSocketPath);
     await expect(start).rejects.toThrow("unknown holder");
 
-    const current = statSync(peerSocketPath);
-    expect({ dev: current.dev, ino: current.ino }).toEqual(peerIdentity);
+    expect(statFileIdentity(peerSocketPath)).toEqual(peerIdentity);
     expect(peer.listening).toBe(true);
   });
 
@@ -124,7 +123,9 @@ describe("BaseSocketServer bind guard", () => {
               version: "0.0.old",
               socketName: "BindGuardTest",
               socketPath: peerSocketPath,
-              ...peerIdentity,
+              // A record from before the exact fields: only the rounded numbers.
+              dev: Number(peerIdentity.dev),
+              ino: Number(peerIdentity.ino),
               processGenerationToken: "linux:holder",
             }),
           stat: () => peerIdentity,
@@ -140,6 +141,9 @@ describe("BaseSocketServer bind guard", () => {
           },
           link: () => {
             throw new Error("conflict must not link");
+          },
+          copyExclusive: () => {
+            throw new Error("conflict must not copy");
           },
         },
         processes,
@@ -163,10 +167,13 @@ describe("BaseSocketServer bind guard", () => {
           throw new Error("ENOENT");
         },
         lstat: () => ({ isFile: () => true, size: 0 }),
-        stat: statSync,
+        stat: statFileIdentity,
         remove: unlinkSync,
         rename: renameSync,
         link: linkSync,
+        copyExclusive: () => {
+          throw new Error("unpublished owner must not copy");
+        },
         write: () => {
           throw new Error("ENOSPC");
         },

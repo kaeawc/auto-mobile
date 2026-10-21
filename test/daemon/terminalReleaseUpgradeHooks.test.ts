@@ -4,7 +4,6 @@ import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import {
   LocationRouteRegistry,
@@ -165,7 +164,7 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
-    DeviceReadiness.getInstance().clearExplicitDevicePin(DEVICE);
+    daemon.getDeviceReadiness().clearExplicitDevicePin(DEVICE);
     NavigationGraphManager.resetInstance();
     SessionReleaseBroadcaster.clearForTesting();
   });
@@ -182,7 +181,7 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
     const sessionA = await sessions.createSession("A", DEVICE, "android");
     await sessions.releaseSession("A", "cleanup-expired");
     await sessions.createSession("B", DEVICE, "android");
-    DeviceReadiness.getInstance().setExplicitDevicePin({
+    daemon.getDeviceReadiness().setExplicitDevicePin({
       deviceId: DEVICE,
       name: DEVICE,
       platform: "android",
@@ -192,14 +191,14 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
       expectedOwner: { session: sessionA, deviceId: DEVICE },
     });
 
-    expect(DeviceReadiness.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
+    expect(daemon.getDeviceReadiness().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
     expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);
     // Device-keyed broadcast listeners (prototype agents and events) skip the marked upgrade (#11206).
     expect(broadcasts).toEqual(["A:cleanup-expired", "A:device-killed:upgrade"]);
 
     // B's own release is a real one: it clears B's pin.
     await sessions.releaseSession("B", "explicit-release");
-    expect(DeviceReadiness.getInstance().getExplicitDevicePin()).toBeUndefined();
+    expect(daemon.getDeviceReadiness().getExplicitDevicePin()).toBeUndefined();
     expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);
   });
 });

@@ -346,7 +346,9 @@ export class ProxyRuntime {
 
   buildIdentity!: BuildIdentity;
 
-  clientVersion!: string;
+  get clientVersion(): string {
+    return this.config.clientVersion ?? DAEMON_VERSION;
+  }
 
   clientAssetVersion!: string | null;
 
@@ -721,7 +723,6 @@ export class ProxyRuntime {
       config.staticToolDefinitionsProvider ?? getStaticToolDefinitions;
     this.connectedStaticToolDefinitionsProvider = connectedStaticToolDefinitionsProvider(config);
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
-    this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
     this.clientAssetVersion = isExplicitPin() ? resolveAssetVersion(resolvePinnedVersion()) : null;
   }
 }

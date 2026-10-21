@@ -163,8 +163,9 @@ export const OEM_PERSONAS: Readonly<Record<OemPersonaId, OemPersona>> = {
       display: {
         status: "inferred",
         note:
-          "One UI defaults to the three-button navigation bar and Galaxy S and A phones use a centred " +
-          "punch-hole; approximated with the AOSP overlays. One UI SystemUI is not reproduced.",
+          "Many One UI releases ship the three-button navigation bar by default and current Galaxy S " +
+          "phones use a centred punch-hole (defaults vary by model and One UI version); approximated " +
+          "with the AOSP overlays. One UI SystemUI is not reproduced.",
       },
     },
   },

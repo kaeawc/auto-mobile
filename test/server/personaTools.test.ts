@@ -123,7 +123,7 @@ describe("persona tool (#14055)", () => {
     expect(executors.calls).toEqual([]);
   });
 
-  test("a session's apply runs as that session's setup and passes the owner to the executors", async () => {
+  test("a session's apply passes the session id to the executors as owner", async () => {
     await manager.createSession("session-1", emulator.deviceId, "android");
     await handler(emulator, {
       action: "apply",

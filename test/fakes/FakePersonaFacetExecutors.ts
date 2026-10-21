@@ -27,6 +27,8 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
   killError?: Error;
   displayError?: Error;
   killStatus: ApplyKillProfileResult["status"] = "applied";
+  /** Packages the fake kill record still holds a change for. */
+  readonly killPending = new Set<string>();
   displayStatus: DisplayProfileResult["status"] = "applied";
 
   readonly keyboard: PersonaKeyboardExecutor = {
@@ -47,6 +49,7 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
       if (this.killError) {
         throw this.killError;
       }
+      this.killPending.add(appId);
       const { id, version, evidenceStatus, evidenceNote, source } = KILL_PROFILES[profile];
       return {
         message: `applied ${profile}`,
@@ -58,11 +61,13 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
         steps: [{ step: "kill", command: "shell am force-stop", status: "applied" }],
       };
     },
+    hasPending: (appId) => this.killPending.has(appId),
     reset: async (appId, owner): Promise<ResetKillProfileResult> => {
       this.calls.push({ facet: "kill", action: "reset", appId, owner });
       if (this.killError) {
         throw this.killError;
       }
+      this.killPending.delete(appId);
       return {
         message: `reset ${appId}`,
         deviceId: "emulator-5554",

@@ -113,6 +113,10 @@ export const defaultPersonaExecutors = (
     kill: {
       apply: (appId, profile, owner) => applyKillProfile(device, appId, profile, killDeps(owner)),
       reset: (appId, owner) => resetKillProfile(device, appId, {}, killDeps(owner)),
+      hasPending: (appId) =>
+        defaultKillProfileRestoreRegistry
+          .pendingFor(device.deviceId, appId)
+          .some((action) => action.appId === appId),
     },
     display: {
       apply: async (input, owner) => {
@@ -194,7 +198,9 @@ const personaTool = defineDeviceTool({
     "motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. " +
     "describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | " +
     "experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those " +
-    "returns route_to_real_device and changes nothing. reset restores what personas changed. Simulates effects, " +
+    "returns route_to_real_device and changes nothing. applying a different persona resets the recorded one first; reset restores the display, kill " +
+    "and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). " +
+    "The keyboard profile persists until reset, even across sessions. Simulates effects, " +
     "not firmware.",
   input: personaInput,
   options: {

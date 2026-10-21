@@ -222,19 +222,84 @@ describe("applyPersona / resetPersona (#14055)", () => {
     ).rejects.toThrow("changed nothing");
   });
 
-  test("reset restores display, kill and the keyboard recorded before the first persona, in reverse", async () => {
+  test("reset restores display, kill and the keyboard recorded before the first apply, in reverse", async () => {
     executors.activeKeyboardProfile = "direct";
     await applyPersona(emulator, "samsung-oneui", { appId: APP }, { executors, registry });
-    await applyPersona(emulator, "xiaomi-hyperos", { appId: "com.other" }, { executors, registry });
+    await applyPersona(emulator, "samsung-oneui", { appId: "com.other" }, { executors, registry });
     executors.calls.length = 0;
 
     const result = await resetPersona(emulator, {}, { executors, registry, owner: "session-1" });
-    expect(result.personaId).toBe("xiaomi-hyperos");
+    expect(result.personaId).toBe("samsung-oneui");
     expect(executors.calls).toEqual([
       { facet: "display", action: "reset", owner: "session-1" },
       { facet: "kill", action: "reset", appId: APP, owner: "session-1" },
       { facet: "kill", action: "reset", appId: "com.other", owner: "session-1" },
       { facet: "keyboard", action: "set", profile: "direct" },
+    ]);
+    expect(registry.get(emulator.deviceId)).toBeUndefined();
+  });
+
+  test("applying a different persona resets the recorded one first, so its facets do not linger", async () => {
+    executors.activeKeyboardProfile = "direct";
+    await applyPersona(emulator, "samsung-oneui", { appId: APP }, { executors, registry });
+    executors.calls.length = 0;
+
+    const result = await applyPersona(emulator, "pixel-baseline", {}, { executors, registry });
+    expect(result).toMatchObject({ status: "applied", replaced: "samsung-oneui" });
+    expect(executors.calls).toEqual([
+      { facet: "display", action: "reset", owner: undefined },
+      { facet: "kill", action: "reset", appId: APP, owner: undefined },
+      { facet: "keyboard", action: "set", profile: "direct" },
+      { facet: "keyboard", action: "set", profile: "gboard" },
+    ]);
+    expect(registry.get(emulator.deviceId)).toEqual({
+      personaId: "pixel-baseline",
+      keyboardProfileBefore: "direct",
+      killAppIds: [],
+    });
+  });
+
+  test("re-applying the same persona does not reset it", async () => {
+    await applyPersona(emulator, "motorola", { appId: APP }, { executors, registry });
+    executors.calls.length = 0;
+    const result = await applyPersona(
+      emulator,
+      "motorola",
+      { appId: APP },
+      { executors, registry },
+    );
+    expect(result).not.toHaveProperty("replaced");
+    expect(executors.calls.map((call) => call.action)).toEqual(["set", "apply"]);
+  });
+
+  test("cancellation during apply ends the call instead of failing the remaining facets", async () => {
+    const controller = new AbortController();
+    const keyboardSet = executors.keyboard.set;
+    executors.keyboard.set = async (profile, signal) => {
+      const result = await keyboardSet(profile, signal);
+      controller.abort();
+      return result;
+    };
+    await expect(
+      applyPersona(
+        emulator,
+        "samsung-oneui",
+        { appId: APP },
+        { executors, registry, signal: controller.signal },
+      ),
+    ).rejects.toThrow();
+    expect(executors.calls.map((call) => call.facet)).toEqual(["keyboard"]);
+  });
+
+  test("a recorded package with nothing left to restore is forgotten, not reset", async () => {
+    await applyPersona(emulator, "motorola", { appId: APP }, { executors, registry });
+    // Session release restored the kill record on its own.
+    executors.killPending.clear();
+    executors.calls.length = 0;
+    await resetPersona(emulator, {}, { executors, registry });
+    expect(executors.calls.map((call) => `${call.facet}:${call.action}`)).toEqual([
+      "display:reset",
+      "keyboard:set",
     ]);
     expect(registry.get(emulator.deviceId)).toBeUndefined();
   });

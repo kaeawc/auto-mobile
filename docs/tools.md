@@ -2644,15 +2644,20 @@ persona({ action: "reset" });
   a persona with a kill profile. Each facet reports `applied`, `partial`, `unsupported` or
   `failed`; a failed facet does not stop the others, and a persona that changes nothing is an
   error. The result names the persona's `version` and the catalog's `catalogVersion`.
+- Personas replace one another: applying a persona other than the one recorded on the device
+  first resets the recorded one, and the result names it as `replaced`. Re-applying the same
+  persona (for example for another `appId`) does not reset it.
 - `requires` lists OEM capabilities the task needs. When the persona lists one of them as
   `nonEmulatable`, `apply` returns `success: false` and `status: "route_to_real_device"` with
   the capabilities and changes nothing.
-- `reset` restores the display facets, the kill facet of every package a persona applied to
-  (plus `appId`), then the keyboard profile active before the first persona. A facet the device
-  refuses stays recorded and the reset is an error.
+- `reset` restores every recorded display facet, the kill facet of every package a persona
+  applied to that still has a change recorded (plus `appId`), then the keyboard profile active
+  before the first persona. The display and kill records are shared with `displayProfile` and
+  `killProfile`, so reset also restores direct `displayProfile` changes and the device-wide
+  battery and Doze state. A facet the device refuses stays recorded and the reset is an error.
 - In a daemon session (`sessionUuid`), release or rebind restores the kill and display facets,
   as with `killProfile` and `displayProfile`. The keyboard profile is restored only by `reset`,
-  as with `keyboard` `setProfile`. The record is in memory only. The shared `platform` and
+  as with `keyboard` `setProfile`, so it stays active for the device's next session until then. The record is in memory only. The shared `platform` and
   `keepScreenAwake` device options apply as for other tools.
 
 ### Localization, display, and event options

@@ -13567,7 +13567,7 @@
   },
   {
     "name": "persona",
-    "description": "Android: apply an OEM persona (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. reset restores what personas changed. Simulates effects, not firmware.",
+    "description": "Android: apply an OEM persona (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different persona resets the recorded one first; reset restores the display, kill and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). The keyboard profile persists until reset, even across sessions. Simulates effects, not firmware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -13660,6 +13660,17 @@
           "$ref": "#/$defs/__schema0"
         },
         "personaId": {
+          "type": "string",
+          "enum": [
+            "pixel-baseline",
+            "samsung-oneui",
+            "xiaomi-hyperos",
+            "oneplus-oxygenos",
+            "oppo-coloros",
+            "motorola"
+          ]
+        },
+        "replaced": {
           "type": "string",
           "enum": [
             "pixel-baseline",

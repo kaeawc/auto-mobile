@@ -47,6 +47,7 @@ export const personaResultSchema = z
     status: z.enum(["applied", "partial", "unsupported", "route_to_real_device"]).optional(),
     persona: personaSummarySchema.optional(),
     personaId: z.enum(OEM_PERSONA_IDS).optional(),
+    replaced: z.enum(OEM_PERSONA_IDS).optional(),
     personas: z.array(personaSummarySchema).optional(),
     evidenceStatuses: z.array(z.enum(PERSONA_EVIDENCE_STATUSES)).optional(),
     facets: z.array(facetSchema).optional(),

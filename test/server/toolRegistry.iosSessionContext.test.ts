@@ -5,6 +5,10 @@ import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { BootedDevice } from "../../src/models";
 import { z } from "zod/v4";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+} from "../../src/utils/directSessionDeviceRegistry";
 
 describe("ToolRegistry iOS session context", () => {
   const iosDeviceA: BootedDevice = {
@@ -33,6 +37,7 @@ describe("ToolRegistry iOS session context", () => {
   });
 
   afterEach(() => {
+    clearDirectSessionDevices();
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
@@ -74,6 +79,7 @@ describe("ToolRegistry iOS session context", () => {
 
   test("allows sessionUuid when multiple iOS simulators are booted", async () => {
     fakeDeviceReadiness.setConnectedDevices([iosDeviceA, iosDeviceB]);
+    registerDirectSessionDevice("session-123", iosDeviceA);
 
     ToolRegistry.registerDeviceAware(
       "iosSessionAllowedTool",

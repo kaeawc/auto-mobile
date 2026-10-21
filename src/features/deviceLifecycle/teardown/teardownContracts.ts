@@ -13,7 +13,7 @@ import {
   isVirtualAndroidDevice,
   getBootedAndroidTeardownStableName,
   isUnknownAndroidRuntimeName,
-} from "../core/androidIdentity";
+} from "../identity/androidIdentity";
 import { type TeardownDeviceArgs } from "../core/contracts";
 import {
   type DeviceToolsDependencies,

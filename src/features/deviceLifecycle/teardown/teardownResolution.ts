@@ -33,7 +33,7 @@ import {
   pooledAvdCaptureRequiringConfirmation,
   isVirtualAndroidDevice,
   isUnknownAndroidRuntimeName,
-} from "../core/androidIdentity";
+} from "../identity/androidIdentity";
 
 export async function retireAbsentTeardownOwnership(context: TeardownContext): Promise<void> {
   const devicePool = defaultDaemonContext.devicePool();

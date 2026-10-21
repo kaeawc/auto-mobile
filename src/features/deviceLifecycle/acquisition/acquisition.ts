@@ -1,9 +1,9 @@
 import { ActionableError } from "../../../models";
 import { deviceReservedForRestartRecoveryError } from "../../../daemon/inputDeviceOwnership";
 import { lifecycleRequester } from "../lifecycleRequester";
-import { type StableDeviceTarget } from "./deadlines";
-import { type StartDeviceArgs } from "./contracts";
-import { initializedDevicePool } from "./dependencies";
+import { type StableDeviceTarget } from "../core/deadlines";
+import { type StartDeviceArgs } from "../core/contracts";
+import { initializedDevicePool } from "../core/dependencies";
 
 /** Mutable holder for the acquisition stage currently in flight. */
 export type AcquisitionStage = { current: string };

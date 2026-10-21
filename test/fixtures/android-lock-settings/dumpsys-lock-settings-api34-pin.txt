@@ -1,0 +1,27 @@
+Current lock settings service state:
+
+User State:
+    User 0
+        LSKF-based SP protector ID: 8a4d22c0f1e93b77
+        LSKF last changed: 2026-10-21 09:20:41 (previous protector: 3c1f0e9a7b2d4c58)
+        SID: 6f3b0d4a91c2e85f
+        Quality: 131072
+        CredentialType: Pin
+        SeparateChallenge: false
+        Metrics: known
+
+Keys in namespace:
+    Alias: synthetic_password_8a4d22c0f1e93b77
+
+Storage:
+    User 0 [/data/system_de/0/spblob]:
+        8a4d22c0f1e93b77.pwd: [modified: 2026-10-21 09:20:41, size: 77]
+        8a4d22c0f1e93b77.spblob: [modified: 2026-10-21 09:20:41, size: 58]
+
+StrongAuth:
+    User 0 strong auth flags: 0
+
+RebootEscrow:
+    mRebootEscrowWanted=false
+
+PasswordHandleCount: 1

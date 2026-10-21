@@ -33,6 +33,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "putAppFile",
       "resetKeychain",
       "rotate",
+      "setSensor",
       "windowMode",
       "setAppPermissions",
       "setDeviceState",
@@ -106,6 +107,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
   ...pendingTools(
     ["deleteDevice", "getAndroid", "getApple", "killDevice", "provisionDevice", "startDevice"],
     "Native lifecycle is owned by the binding journal; readiness side effects still need mutation adapters (#14359).",
+  ),
+  ...pendingTools(
+    ["audit"],
+    "Observes the screen and reads app metrics; accessibility baselines are stored on the host, so there is no persistent device setting to journal (#14359).",
+    "notJournaled",
   ),
   ...pendingTools(
     ["exportPlan", "recordToolCalls", "setActiveDevice", "setToolEnabled"],

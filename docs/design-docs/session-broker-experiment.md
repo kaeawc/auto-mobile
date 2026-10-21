@@ -111,6 +111,9 @@ its host lock.
 
 ## Current qualification boundary
 
+For choosing a reuse mode, configuring resets and sizing caps, see
+[Session broker device reuse, reset, and capacity](session-broker-device-reuse.md).
+
 The first native milestone deliberately uses zero pooling. Every relinquished
 device is destroyed through the existing durable native journal, with
 authoritative absence required before its capacity is freed. Native iOS clean

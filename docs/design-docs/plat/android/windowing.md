@@ -2,13 +2,13 @@
 
 Spike notes for #14115 and the `windowMode` tool.
 
-!!! warning "Not yet verified on an emulator"
-
-    Everything below about device behavior was written from the AOSP sources
-    (`ActivityManagerShellCommand`, `ActivityStarter`, `TaskDisplayArea`, `Task`,
-    `WindowConfiguration` and the WM Shell's `ShellCommandHandler`s), with no emulator
-    available. Treat each command as a candidate. The verification checklist at the end
-    lists what to run on API 30, 34 and 36 images before these notes count as evidence.
+> [!WARNING]
+> **Not yet verified on an emulator.** Everything below about device behavior was
+> written from the AOSP sources (`ActivityManagerShellCommand`, `ActivityStarter`,
+> `TaskDisplayArea`, `Task`, `WindowConfiguration` and the WM Shell's
+> `ShellCommandHandler`s), with no emulator available. Treat each command as a
+> candidate. The verification checklist at the end lists what to run on API 30, 34
+> and 36 images before these notes count as evidence.
 
 ## How the tool decides that a command worked
 

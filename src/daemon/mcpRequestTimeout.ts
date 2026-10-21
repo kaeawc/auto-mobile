@@ -39,7 +39,7 @@ import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { readEnvPositiveInteger } from "../utils/envNumbers";
+import { readEnvPositiveInteger, readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import type { DaemonRequest } from "./types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
@@ -307,7 +307,10 @@ function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {
   return typeof toolName === "string" ? TOOL_TIMEOUT_FLOORS.get(toolName) : undefined;
 }
 
-function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
+function resolveToolTimeoutFloorMs(
+  toolName: string | undefined,
+  env?: NodeJS.ProcessEnv,
+): number | undefined {
   switch (toolName) {
     case "executePlan":
       return MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS;
@@ -330,15 +333,48 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
         OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
         LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
         DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
+        env,
       );
     case "observe":
       return resolveEnvTimeoutFloorMs(
         OBSERVE_MCP_TIMEOUT_ENV_VAR,
         LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
         DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
+        env,
       );
     default:
       return resolveFixedToolTimeoutFloorMs(toolName);
+  }
+}
+
+/**
+ * An explicit operator override is more specific than the generic connection timeout (#13797).
+ * Unset or unusable values retain the client's connection-timeout floor.
+ */
+export function resolveExplicitToolTimeoutOverrideMs(
+  request: DaemonRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  if (request.method !== "tools/call") {
+    return undefined;
+  }
+  switch (request.params?.name) {
+    case "openLink":
+      return readOptionalEnvPositiveInteger(
+        OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+        LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+        {},
+        env,
+      );
+    case "observe":
+      return readOptionalEnvPositiveInteger(
+        OBSERVE_MCP_TIMEOUT_ENV_VAR,
+        LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
+        {},
+        env,
+      );
+    default:
+      return undefined;
   }
 }
 
@@ -904,10 +940,15 @@ function resolveExecutePlanBudgetMs(request: DaemonRequest): number {
   return resolveExecutePlanStepsBudgetMs(asRecord(request.params?.arguments)?.planContent);
 }
 
-export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
+export function resolveMcpRequestTimeoutMs(
+  request: DaemonRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
   const base = clampCallerMcpRequestTimeoutMs(request.timeoutMs) ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS;
   const floor =
-    request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
+    request.method === "tools/call"
+      ? resolveToolTimeoutFloorMs(request.params?.name, env)
+      : undefined;
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
   const tapOnLongPressBudget = resolveTapOnLongPressBudgetMs(request);
   const tapAnyLongPressBudget = resolveTapAnyLongPressBudgetMs(request);
@@ -923,6 +964,18 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
     tapAnyLongPressBudget ?? 0,
     tapAnyOrdinaryTapBudget ?? 0,
   );
+}
+
+/** Apply the generic connection timeout unless an explicit tool override takes precedence. */
+export function resolveClientMcpRequestTimeoutMs(
+  request: DaemonRequest,
+  connectionTimeout: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const base = resolveMcpRequestTimeoutMs(request, env);
+  return resolveExplicitToolTimeoutOverrideMs(request, env) !== undefined
+    ? base
+    : Math.max(base, clampCallerMcpRequestTimeoutMs(connectionTimeout) ?? 0);
 }
 
 const resolvedTimeouts = new WeakMap<DaemonRequest, number>();

@@ -36,11 +36,7 @@ import {
 } from "./constants";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
-import {
-  clampCallerMcpRequestTimeoutMs,
-  ProgressExtendableDeadline,
-  resolveMcpRequestTimeoutMs,
-} from "./mcpRequestTimeout";
+import { ProgressExtendableDeadline, resolveClientMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
 import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
@@ -150,6 +146,7 @@ export class DaemonClient {
   private readonly platform: NodeJS.Platform;
 
   private readonly maxInboundFrameBytes: number;
+  private readonly env: NodeJS.ProcessEnv;
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -167,10 +164,12 @@ export class DaemonClient {
       idGenerator = defaultIdGenerator,
       platformOverride = platform(),
       maxInboundFrameBytes = DAEMON_CLIENT_MAX_FRAME_BYTES,
+      env = process.env,
     }: {
       idGenerator?: IdGenerator;
       platformOverride?: NodeJS.Platform;
       maxInboundFrameBytes?: number;
+      env?: NodeJS.ProcessEnv;
     } = {},
   ) {
     this.socketPath = socketPath;
@@ -181,6 +180,7 @@ export class DaemonClient {
     this.idGenerator = idGenerator;
     this.platform = platformOverride;
     this.maxInboundFrameBytes = maxInboundFrameBytes;
+    this.env = env;
     this.framer = this.createInboundFramer();
   }
 
@@ -789,11 +789,12 @@ export class DaemonClient {
       ...this.handshakeFields(),
     };
 
-    // Only the client's own configured timeout is clamped; server-derived
-    // per-tool floors (already in resolveMcpRequestTimeoutMs) may exceed the cap.
-    const requestTimeoutMs = Math.max(
-      resolveMcpRequestTimeoutMs(request),
-      clampCallerMcpRequestTimeoutMs(this.connectionTimeout) ?? 0,
+    // Explicit per-tool env overrides bypass the generic connection-timeout floor (#13797).
+    // Only connectionTimeout is clamped; resolved tool budgets may exceed the cap.
+    const requestTimeoutMs = resolveClientMcpRequestTimeoutMs(
+      request,
+      this.connectionTimeout,
+      this.env,
     );
     // Send the daemon budget, excluding client response grace (#6385). Without it the
     // daemon fell back to its 30s default and aborted calls the client was still

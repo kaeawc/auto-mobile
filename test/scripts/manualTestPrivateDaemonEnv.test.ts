@@ -190,6 +190,46 @@ function refusal(changes: Partial<PrivateDaemonBatchOptions>): string | undefine
   const modified = { ...options, ...changes };
   return privateDaemonBatchRefusal(derivePrivateDaemonBatch(modified), modified, host);
 }
+test("every private daemon excludes protected emulator console ports", () => {
+  const specs = derivePrivateDaemonBatch({
+    ...options,
+    protectedDevices: [
+      "emulator-5560",
+      "emulator-5554",
+      "some-ios-udid",
+      "Pixel_9",
+      "emulator-5560",
+    ],
+  });
+  expect(specs.map((spec) => spec.env.AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS)).toEqual([
+    "5554,5560",
+    "5554,5560",
+  ]);
+});
+test("private daemon exclusion overrides preserve blank opt-out and per-daemon precedence", () => {
+  const specs = derivePrivateDaemonBatch({
+    ...options,
+    protectedDevices: ["emulator-5560"],
+    extraEnv: { AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS: "5558" },
+    daemonEnv: { "2": { AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS: "" } },
+  });
+  expect(specs.map((spec) => spec.env.AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS)).toEqual([
+    "5558",
+    "",
+  ]);
+  expect(privateDaemonBatchRefusal(specs, options, host)).toBeUndefined();
+});
+test("private batches without protected selectors leave exclusions unset", () => {
+  expect(
+    derivePrivateDaemonBatch(options)[0].env.AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS,
+  ).toBeUndefined();
+});
+test("non-emulator protection still reserves the owner default console port", () => {
+  expect(
+    derivePrivateDaemonBatch({ ...options, protectedDevices: ["some-ios-udid"] })[0].env
+      .AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS,
+  ).toBe("5554");
+});
 posixTest("derives two isolated daemons with one shared ADB registry", () => {
   const specs = derivePrivateDaemonBatch(options);
   expect(specs.map((spec) => spec.port)).toEqual([3160, 3161]);

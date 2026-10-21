@@ -121,7 +121,9 @@ extension CommandHandler {
     /// The refresh path (`request_hierarchy`). A background SDK may still listen on its
     /// port without answering, so only probe when its app is actually foreground.
     private func matchingSdkHierarchy(for hierarchy: ViewHierarchy) async -> SdkViewHierarchy? {
-        guard let foregroundBundleId = normalizedBundleId(hierarchy.packageName) else {
+        let foregroundBundleId = normalizedBundleId(hierarchy.packageName)
+        await sdkHierarchyClient?.foregroundBundleDidChange(foregroundBundleId)
+        guard let foregroundBundleId else {
             return nil
         }
 

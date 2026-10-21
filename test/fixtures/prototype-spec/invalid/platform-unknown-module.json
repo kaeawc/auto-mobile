@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["nope"]
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "requires.platform[0]",
+  "expectedMessage": "Unknown platform module"
+}

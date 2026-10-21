@@ -240,6 +240,13 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
   mapKeyList(action, "requireValid", path, visit);
 }
 
+function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
+  mapField(action, "path", path, "dataPath", visit);
+  if (action.type !== "removeData" && action.value !== undefined) {
+    action.value = mapBinding(action.value, `${path}.value`, visit);
+  }
+}
+
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   switch (action.type) {
     case "setState":
@@ -256,16 +263,14 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "setData":
     case "appendData":
-      mapField(action, "path", path, "dataPath", visit);
-      if (action.value !== undefined) {
-        action.value = mapBinding(action.value, `${path}.value`, visit);
-      }
-      break;
     case "removeData":
-      mapField(action, "path", path, "dataPath", visit);
+      mapDataAction(action, path, visit);
       break;
     case "request":
       mapRequestAction(action, path, visit);
+      break;
+    case "platform":
+      mapPlatformAction(action, path, visit);
       break;
     case "scrollTo":
       // Marks the whole action so the chat scroll gate can locate it (#14232).
@@ -307,6 +312,24 @@ function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void 
   mapRequestEntries(action, "query", path, visit);
   if (action.body !== undefined) {
     action.body = mapBinding(action.body, `${path}.body`, visit);
+  }
+  mapField(action, "into", path, "requestInto", visit);
+  mapField(action, "statusKey", path, "key", visit);
+  for (const field of ["onSuccess", "onError"]) {
+    mapList(action, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  }
+}
+
+/** A `platform` call (#14294): each argument is a value binding, `into` the request grammar. */
+function mapPlatformAction(action: Raw, path: string, visit: FieldVisitor): void {
+  const args = record(action.args);
+  if (args) {
+    action.args = Object.fromEntries(
+      Object.entries(args).map(([name, value]) => [
+        name,
+        mapBinding(value, memberPath(`${path}.args`, name), visit),
+      ]),
+    );
   }
   mapField(action, "into", path, "requestInto", visit);
   mapField(action, "statusKey", path, "key", visit);

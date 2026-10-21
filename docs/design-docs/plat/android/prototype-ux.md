@@ -241,7 +241,7 @@ depth precedes array length, then children; the byte check runs last.
 | `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                |
 | `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                             |
 | Condition `.key`                                                                          | `Exactly one of key, data, all, any, not is required`                                                                                                                 |
-| Condition comparison field                                                                | `Requires key or data`; `Exactly one of equals, notEquals, gt, lt is required`                                                                                        |
+| Condition comparison field                                                                | `Requires key or data or platform`; `Exactly one of equals, notEquals, gt, lt is required`                                                                            |
 | Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                     |
 | `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                             |
 
@@ -1318,6 +1318,107 @@ Worked example: a feed that shows a spinner, the result and an error (state
 The shared native-parity fixture `test/fixtures/prototype-spec/valid/request-actions.json` covers
 both `via` values, `onSuccess` / `onError`, nesting, `statusKey` and `visibleWhen` on the status.
 
+### Platform actions and events (#14294)
+
+The platform vocabulary is the one shape every platform integration uses (notifications, media,
+location, share and so on): a `platform` action calls the platform from a tap, root `platform.on`
+handlers react to platform events, `{platform}` reads show live platform state, and a root
+`requires` block declares up front what the spec needs. It is modelled on the `request` action.
+This section is the contract and the host validation; running the calls is the device module
+registries' job (#14295 on Android, #14296 on iOS), and no production runtime advertises it yet.
+
+```json
+{
+  "requires": {
+    "platform": ["notifications", "media"],
+    "permissions": [{ "name": "notifications", "purpose": "Alerts when a new episode is out" }],
+    "background": ["audio"]
+  },
+  "platform": {
+    "on": {
+      "media.ended": [{ "type": "setState", "key": "playing", "value": false }]
+    }
+  }
+}
+```
+
+```json
+{
+  "type": "platform",
+  "call": "notifications.post",
+  "args": { "title": { "value": "New episode" }, "body": { "data": "/episodes/0/title" } },
+  "into": "/data/lastPost",
+  "statusKey": "postStatus",
+  "timeoutMs": 5000,
+  "onSuccess": [],
+  "onError": []
+}
+```
+
+**Modules.** The contract's top-level `platformModules` table is the single source for every call
+and event: each module names its capability, and each call its arguments (with the contract rule
+a literal `{value}` argument must satisfy), the permissions and background names it needs, and a
+`sensitive` flag for the threat model (#14293). The validators and the capability gates read the
+table, so a module is added by adding its entry. The placeholder module `test` (`test.echo`,
+`test.protected`, the `test.tick` event, capability `prototype_platform_test_v1`) makes the
+vocabulary testable before any real module exists; no production runtime advertises it.
+
+| Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call`                 | Required: `"<module>.<op>"` naming a call in `platformModules`, else `Unknown platform call` at `.call`. Its module must be listed in `requires.platform`, its permissions in `requires.permissions` and its background names in `requires.background`; each error is at `.call`.                                                                                                         |
+| `args`                 | Up to `MAX_PROTOTYPE_PLATFORM_ARGS` (16) entries, exactly the call's declared arguments (`Unknown argument`, `Required argument` at `.args.<name>`). Each is a value binding: `{value}`, `{state}`, `{data}`, `{platform}`, `{item}` / `{index: true}` in a repeat, and `{event}` inside a handler. A literal `{value}` must satisfy the argument's rule (error at `.args.<name>.value`). |
+| `into`                 | Optional `/data/<pointer>`, the `request` rule: an object member, not an array element, so `<into>__meta` can be written beside it. `/platform` is read-only, so an `into` under it is refused. Written with `applyPrototypeDataWrite` and reported as a `change` event.                                                                                                                  |
+| `statusKey`            | A declared **string** state key, moved `loading` → `success` or `error`, as for `request`.                                                                                                                                                                                                                                                                                                |
+| `timeoutMs`            | Optional integer, 1 to `MAX_PROTOTYPE_PLATFORM_TIMEOUT_MS` (300000, long enough for a system picker); the default is `DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS` (10000).                                                                                                                                                                                                                     |
+| `onSuccess`, `onError` | Optional action lists (1 to 32). They count toward `MAX_PROTOTYPE_ACTION_DEPTH`.                                                                                                                                                                                                                                                                                                          |
+
+A failed call writes `{code, message}` to `<into>__meta.error`, with `code` one of `unsupported`,
+`unavailable`, `permission_denied`, `invalid_args`, `cancelled`, `timeout`, `too_many_in_flight`
+(more than `MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT`, 4) or `platform_error`.
+
+**`requires`** is optional and strict. `platform` lists module names (1 to 32, unique, each in
+`platformModules`, else `Unknown platform module`). `permissions` lists `{name, purpose}` entries
+(1 to 16, names unique): `name` is one of the canonical permissions of #14297 (`camera`,
+`microphone`, `location`, `locationBackground`, `notifications`, `photos`, `photosAdd`, `contacts`,
+`calendar`, `bluetooth`, `nearbyWifi`, `motion`, `speech`) and `purpose`, a nonblank string of at
+most 512 characters, becomes the iOS usage string and the Android rationale. `background` lists
+the canonical background names of #14301 (`audio`, `location`, `call`, `connectedDevice`,
+`transfer`, `camera`, `microphone`, `remoteNotification`). The host reads `requires` before show
+for the gates below, and the disposable-app shell (#14184) derives its manifest and Info.plist from
+it.
+
+**Events.** `platform.on` maps `"<module>.<event>"` names (up to `MAX_PROTOTYPE_PLATFORM_HANDLERS`, 32) to action lists. An unknown event is refused at `platform.on["<name>"]`, and its module must be
+declared. A handler runs atomically under the interaction lock, like a tap, and may use `push` /
+`pop`, data and state actions and `platform` calls. Only inside a handler, `{event: "/pointer"}`
+reads the delivered event's data, scoped the way `{item}` is scoped to a repeat; anywhere else it
+is refused with `{event} is only available inside a platform.on handler`.
+
+**Platform state** is device-owned JSON under `/platform/<module>/...` (for example
+`/platform/permissions/camera`), at most `MAX_PROTOTYPE_PLATFORM_STATE_BYTES` (65536). It is read
+with a `{platform:/pointer}` text placeholder, a `{platform: pointer}` value binding and a
+`{platform: pointer, equals | notEquals | gt | lt}` condition, parallel to the `{data}` forms; the
+pointer's first segment names the module, which must be declared. It is not patchable, not
+storable and not part of the `/data` revision log.
+
+**Reported events.** No wire field is added. A finished call is an `emit` named
+`prototype_platform` with payload `{callId, call, outcome, error?, durationMs, simulated?}`, sent
+after the `into`, `__meta` and `statusKey` writes and before `onSuccess` / `onError`. A delivered
+event is an `emit` named `prototype_platform_event` with payload `{event, data, truncated?,
+simulated?}`, `data` cut to the 4 KiB emit budget with `truncated: true`. Await them with
+`awaitEvent {kind: "emit", eventName: "prototype_platform"}`; a malformed payload is dropped, as for
+requests (`prototypePlatformEvent.ts`). Authored emit names cannot start with `prototype_`, which
+generalizes the single reserved `prototype_request` name.
+
+**Capabilities.** `prototype_platform_v1` gates `requires`, `platform.on`, the `platform` action and
+`{platform}` reads; each module adds `prototype_platform_<module>_v1`, and a later op or event gets
+a `_v2` gate that checks the fields that version introduced. The gates are generated from
+`platformModules` and join `PROTOTYPE_SPEC_CAPABILITY_GATES`, so show, patch and `replaceNode`
+refuse uniformly. Because every module use must be declared in the root `requires`, which a patch
+cannot add, a patch never introduces a module the shown spec did not already require.
+
+The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
+`invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
+
 ### Conditions
 
 A condition is exactly one of these forms. `visibleWhen` takes any of them;
@@ -1329,6 +1430,7 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{key, notEquals: scalar}` | The state value differs, including when the key is missing.              |
 | `{key, gt: number}`        | The state value is a number greater than `gt`. Any other type is false.  |
 | `{key, lt: number}`        | The state value is a number less than `lt`. Any other type is false.     |
+| `{data \| platform, ...}`  | The same comparisons on a `/data` or `/platform` value (see above).      |
 | `{all: [condition, ...]}`  | Every member holds. One to 16 members.                                   |
 | `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
 | `{not: condition}`         | The member does not hold.                                                |

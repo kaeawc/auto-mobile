@@ -83,6 +83,12 @@ export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
 /** The `request` action (#12523); see prototypeRequest.ts. A `via: "device"` one also needs the second. */
 export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
 export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1";
+/**
+ * The platform vocabulary (#14294): root `requires`, `platform.on` handlers, the `platform` action
+ * and `{platform}` reads. Each module adds its own `prototype_platform_<module>_v1`, generated from
+ * the contract's `platformModules` table; see prototypePlatform.ts.
+ */
+export const PROTOTYPE_PLATFORM_CAPABILITY = "prototype_platform_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 /** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */

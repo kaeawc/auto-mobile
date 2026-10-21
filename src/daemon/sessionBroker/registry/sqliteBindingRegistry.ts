@@ -13,6 +13,7 @@ import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../.
 import { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
 import { BindingDiscoveryIncompleteError } from "../provisioning/refusal";
 import { SqliteSessionBrokerStore } from "../sqliteStore";
+import { SqliteDeviceMutationJournal } from "../mutations/sqliteJournal";
 import {
   assertPlatformChangeAllowed,
   assertSettlerForState,
@@ -237,6 +238,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
   /** Shares this connection, transaction lock and physical authority; never opens another DB. */
   sessionBrokerStore(scopeKey: string, ids?: IdGenerator): SqliteSessionBrokerStore {
     return new SqliteSessionBrokerStore(this.db, scopeKey, this.isExecOwnerLive, ids, this.timer);
+  }
+
+  deviceMutationJournal(): SqliteDeviceMutationJournal {
+    return new SqliteDeviceMutationJournal(this.db, this.timer);
   }
 
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {

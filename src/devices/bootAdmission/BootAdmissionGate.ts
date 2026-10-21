@@ -9,6 +9,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { CapacityLimits, InFlightBootMemory } from "./capacityLimits";
 import { SampleWindow } from "./SampleWindow";
 import { ENV } from "../../config/env";
+import type { BootAdmissionReason } from "./BootSlotReservation";
 
 /**
  * Platform-neutral boot admission (#11181): the ledger of admitted boots, the
@@ -222,6 +223,7 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
 }
 
 export interface LedgerEntry {
+  reason?: BootAdmissionReason;
   deviceId?: string;
   /** An old device whose slot is held until the replacement binds its own identity. */
   replacement?: boolean;
@@ -289,9 +291,13 @@ export class BootAdmissionLedger {
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
-  admit(deviceId?: string, replacement = false): LedgerAdmission {
+  admit(
+    deviceId?: string,
+    replacement = false,
+    reason: BootAdmissionReason = "create",
+  ): LedgerAdmission {
     const token = Symbol("boot-admission");
-    this.entries.set(token, { deviceId, replacement });
+    this.entries.set(token, { deviceId, replacement, reason });
     return {
       bind: (boundDeviceId) => {
         const entry = this.entries.get(token);
@@ -314,6 +320,14 @@ export class BootAdmissionLedger {
     };
   }
 
+  admissionsByReason(): Record<BootAdmissionReason, number> {
+    const counts = { reset: 0, create: 0, restart: 0 };
+    for (const entry of this.entries.values()) {
+      counts[entry.reason ?? "create"] += 1;
+    }
+    return counts;
+  }
+
   /**
    * The only way an entry leaves the ledger. Every open sample window keeps it: a window that
    * kept only the boots in flight when it opened lost a boot admitted and ended inside it, and
@@ -333,6 +347,7 @@ export class BootAdmissionLedger {
           processId: entry.processId,
           handedOff: entry.handedOff,
           replacement: entry.replacement,
+          reason: entry.reason,
         }
       : entry;
     for (const window of this.openWindows) {
@@ -455,6 +470,7 @@ export class BootAdmissionLedger {
 
 /** The capacity numbers `listDevices` reports per platform. */
 export interface BootCapacitySnapshot {
+  admissionsByReason?: Record<BootAdmissionReason, number>;
   limit: number;
   /** Booted devices of the platform, including ones started outside AutoMobile. */
   booted: number;

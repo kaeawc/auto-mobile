@@ -59,6 +59,9 @@ const androidBootCapacitySchema = bootCapacitySchema.extend({
 
 /** iOS also reports host pressure (#11209), which is reported only and never gates a boot. */
 const iosBootCapacitySchema = bootCapacitySchema.extend({
+  admissionsByReason: z
+    .object({ reset: z.number(), create: z.number(), restart: z.number() })
+    .optional(),
   hostPressure: z
     .object({
       sustained: z.boolean(),

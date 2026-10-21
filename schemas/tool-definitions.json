@@ -9959,6 +9959,22 @@
                 "inFlight": {
                   "$ref": "#/$defs/__schema4"
                 },
+                "admissionsByReason": {
+                  "type": "object",
+                  "properties": {
+                    "reset": {
+                      "type": "number"
+                    },
+                    "create": {
+                      "type": "number"
+                    },
+                    "restart": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["reset", "create", "restart"],
+                  "additionalProperties": false
+                },
                 "hostPressure": {
                   "type": "object",
                   "properties": {

@@ -891,6 +891,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return this.iosBootInstrumentation.run(
       {
         udid,
+        reason: "restart",
         runtime: device.runtimeId,
         profile: options.resourceProfile,
         timeoutMs,

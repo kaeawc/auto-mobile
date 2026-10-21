@@ -772,6 +772,24 @@
           },
           "optional": true
         },
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 4
+          },
+          "optional": true
+        },
+        "rotation": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": -360,
+            "max": 360
+          },
+          "optional": true
+        },
         "alignment": {
           "rule": {
             "kind": "enum",
@@ -2070,7 +2088,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2221,7 +2246,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2365,7 +2397,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2483,7 +2522,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2609,7 +2655,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2754,7 +2807,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2921,7 +2981,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3067,7 +3134,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3104,6 +3178,13 @@
               "rule": {
                 "kind": "enum",
                 "values": ["fit", "crop", "fill"]
+              },
+              "optional": true
+            },
+            "zoomable": {
+              "rule": {
+                "kind": "ref",
+                "name": "zoomable"
               },
               "optional": true
             }
@@ -3206,7 +3287,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3319,7 +3407,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3418,7 +3513,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3655,7 +3757,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3792,7 +3901,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3929,7 +4045,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4055,7 +4178,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4199,7 +4329,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4323,7 +4460,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4462,7 +4606,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4620,7 +4771,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4771,7 +4929,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4889,7 +5054,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5009,7 +5181,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5135,7 +5314,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5253,7 +5439,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5385,7 +5578,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5491,7 +5691,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5596,7 +5803,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5715,7 +5929,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5861,7 +6082,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5980,7 +6208,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6108,7 +6343,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6251,7 +6493,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6382,7 +6631,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6502,7 +6758,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6663,7 +6926,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6794,7 +7064,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6919,7 +7196,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -7064,7 +7348,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -7229,7 +7520,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -10622,6 +10920,41 @@
             "max": 128
           },
           "optional": true
+        }
+      }
+    },
+    "animate": {
+      "kind": "object",
+      "fields": {
+        "durationMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 2000
+          },
+          "optional": true
+        },
+        "easing": {
+          "rule": {
+            "kind": "enum",
+            "values": ["standard", "emphasized", "linear", "spring"]
+          },
+          "optional": true
+        }
+      }
+    },
+    "zoomable": {
+      "kind": "object",
+      "fields": {
+        "maxScale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1,
+            "max": 8
+          },
+          "optional": false
         }
       }
     }

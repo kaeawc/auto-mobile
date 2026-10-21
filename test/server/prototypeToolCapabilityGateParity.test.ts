@@ -91,6 +91,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     activeKey: "active",
     child: label,
   }),
+  prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_rich_text_v1: fixture({ type: "text", id: "label", spans: [{ text: "Hello" }] }),
   prototype_menus_v1: fixture({
     type: "menu",

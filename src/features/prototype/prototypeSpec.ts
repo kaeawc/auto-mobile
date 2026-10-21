@@ -172,7 +172,17 @@ const commonNodeShape = {
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
-  transition: z.enum(["none", "fade", "expand", "slide"]).optional(),
+  transition: z
+    .enum(["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"])
+    .optional(),
+  // Animates styleWhen-driven alpha, offset, scale, rotation, background and color (#14208).
+  animate: z
+    .object({
+      durationMs: z.number().finite().int().min(0).max(2000).optional(),
+      easing: z.enum(["standard", "emphasized", "linear", "spring"]).optional(),
+    })
+    .strict()
+    .optional(),
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
@@ -278,6 +288,10 @@ const imageBaseSchema = z
     type: z.enum(["image"]),
     asset: imageAssetSchema,
     contentScale: z.enum(["fit", "crop", "fill"]).optional(),
+    zoomable: z
+      .object({ maxScale: z.number().finite().min(1).max(8) })
+      .strict()
+      .optional(),
   })
   .strict();
 const iconBaseSchema = z

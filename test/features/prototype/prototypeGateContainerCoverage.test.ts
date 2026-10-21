@@ -54,6 +54,7 @@ const fixtures: Record<string, Node> = {
     activeKey: "active",
     child: label,
   },
+  prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
   prototype_rich_text_v1: { type: "text", spans: [{ text: "Hello" }] },
   prototype_menus_v1: {
     type: "menu",

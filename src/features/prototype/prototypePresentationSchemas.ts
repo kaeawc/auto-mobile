@@ -292,6 +292,8 @@ export const styleSchema = z
     offset: offsetSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     pressScale: z.number().finite().min(0.5).max(1).optional(),
+    scale: z.number().finite().min(0).max(4).optional(),
+    rotation: z.number().finite().min(-360).max(360).optional(),
     alignment: z
       .enum([
         "topStart",

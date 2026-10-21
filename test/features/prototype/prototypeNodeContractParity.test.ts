@@ -59,6 +59,7 @@ const COMMON_NODE_FIELDS = [
   "styleWhen",
   "visibleWhen",
   "transition",
+  "animate",
   "anchor",
   "safeAreaPadding",
 ];

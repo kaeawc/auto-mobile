@@ -6,6 +6,7 @@ import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepe
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -713,6 +714,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
+    prototypeMotionV2Error(context.nodes) ??
     pagerErrors(context) ??
     stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats)

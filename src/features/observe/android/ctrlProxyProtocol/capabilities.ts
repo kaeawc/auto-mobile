@@ -85,6 +85,8 @@ export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
 export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
+/** Node `animate`, style `scale`/`rotation`, horizontal and scale transitions, zoomable images (#14208). */
+export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
 export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";

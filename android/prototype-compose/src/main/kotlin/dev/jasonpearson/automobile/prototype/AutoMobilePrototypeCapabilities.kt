@@ -16,6 +16,7 @@ object AutoMobilePrototype {
       "prototype_emit_context_v1",
       "prototype_flow_grid_v1",
       "prototype_gestures_v1",
+      "prototype_linkify_v1",
       "prototype_menus_v1",
       "prototype_network_device_v1",
       "prototype_network_v1",

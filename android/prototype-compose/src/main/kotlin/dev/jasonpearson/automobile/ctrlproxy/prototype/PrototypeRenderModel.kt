@@ -543,24 +543,59 @@ internal fun mapPrototypeTextSpans(
   inPager: Boolean = false,
 ): List<PrototypeRenderSpan>? =
   node.spans?.map { span ->
-    val authored = span.style
-    val style =
-      PrototypeStyle(
-        color = authored?.color,
-        fontWeight = authored?.fontWeight,
-        fontStyle = authored?.fontStyle,
-        textDecoration = authored?.textDecoration,
-        textSize = authored?.textSize,
-        letterSpacing = authored?.letterSpacing,
-        fontFamily = authored?.fontFamily,
-        background = authored?.background,
-      )
     PrototypeRenderSpan(
       interpolatePrototypeText(span.text, state, inPager),
-      mapPrototypeStyle(style),
+      mapPrototypeSpanStyle(span.style),
       span.onTap,
     )
+  } ?: node.linkify?.let { linkify -> linkifiedSpans(node.text.orEmpty(), linkify, state, inPager) }
+
+private fun mapPrototypeSpanStyle(authored: PrototypeTextSpanStyle?): PrototypeRenderStyle =
+  mapPrototypeStyle(
+    PrototypeStyle(
+      color = authored?.color,
+      fontWeight = authored?.fontWeight,
+      fontStyle = authored?.fontStyle,
+      textDecoration = authored?.textDecoration,
+      textSize = authored?.textSize,
+      letterSpacing = authored?.letterSpacing,
+      fontFamily = authored?.fontFamily,
+      background = authored?.background,
+    ),
+  )
+
+/**
+ * `linkify` (#14233): the resolved text split into plain runs and one run per match, each match a
+ * link running `onTap` with its `{match}` bindings bound. Null without a match, so the text keeps
+ * the plain path.
+ */
+private fun linkifiedSpans(
+  text: String,
+  linkify: PrototypeLinkifyOptions,
+  state: Map<String, PrototypeScalar>,
+  inPager: Boolean,
+): List<PrototypeRenderSpan>? {
+  val resolved = interpolatePrototypeText(text, state, inPager)
+  val matches = PrototypeLinkify.matches(resolved, linkify.kinds)
+  if (matches.isEmpty()) return null
+  val plain = mapPrototypeSpanStyle(null)
+  val linked = mapPrototypeSpanStyle(linkify.style)
+  val spans = mutableListOf<PrototypeRenderSpan>()
+  var cursor = 0
+  for (match in matches) {
+    if (match.start > cursor) {
+      spans.add(PrototypeRenderSpan(resolved.substring(cursor, match.start), plain, null))
+    }
+    spans.add(
+      PrototypeRenderSpan(match.text, linked, PrototypeLinkify.actions(linkify.onTap, match)),
+    )
+    cursor = match.end
   }
+  if (cursor < resolved.length) {
+    spans.add(PrototypeRenderSpan(resolved.substring(cursor), plain, null))
+  }
+  return spans
+}
 
 private fun prototypeTextDecoration(value: String?): TextDecoration =
   when (value) {

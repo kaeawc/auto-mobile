@@ -1,0 +1,89 @@
+{
+  "id": "linkify-timeline",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "profileHandle": ""
+  },
+  "data": {
+    "posts": [
+      {
+        "id": "p1",
+        "body": "Hello @ana, see #launch https://example.com"
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "text",
+            "id": "post",
+            "text": "Hello @ana, see #launch https://example.com",
+            "linkify": {
+              "kinds": ["mention", "hashtag", "url"],
+              "style": {
+                "color": "primary",
+                "fontWeight": 600
+              },
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "profileHandle",
+                  "value": {
+                    "match": "text"
+                  }
+                },
+                {
+                  "type": "emit",
+                  "name": "link_tapped",
+                  "context": {
+                    "kind": {
+                      "match": "kind"
+                    },
+                    "text": {
+                      "match": "text"
+                    }
+                  }
+                },
+                {
+                  "type": "push",
+                  "stack": "nav",
+                  "screen": "profile"
+                }
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": "{data:/posts/0/body}",
+            "linkify": {
+              "kinds": ["mention"],
+              "onTap": [
+                {
+                  "type": "setData",
+                  "path": "/data/posts/0/id",
+                  "value": {
+                    "match": "text"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "profile": {
+        "type": "text",
+        "text": "Profile {profileHandle}"
+      }
+    }
+  }
+}

@@ -74,6 +74,7 @@ export type PrototypeCondition =
   | { data: string; notEquals: string | number | boolean }
   | { data: string; gt: number }
   | { data: string; lt: number }
+  | { data: string; empty: boolean }
   | { key: string; equals: string | number | boolean }
   | { key: string; notEquals: string | number | boolean }
   | { key: string; gt: number }
@@ -94,6 +95,8 @@ export const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
       z.object({ data: pointerSchema, notEquals: scalarSchema }).strict(),
       z.object({ data: pointerSchema, gt: z.number().finite() }).strict(),
       z.object({ data: pointerSchema, lt: z.number().finite() }).strict(),
+      // A missing value, [], {} or "" is empty (#14207).
+      z.object({ data: pointerSchema, empty: z.boolean() }).strict(),
       z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
@@ -292,6 +295,8 @@ export const styleSchema = z
     offset: offsetSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     pressScale: z.number().finite().min(0.5).max(1).optional(),
+    // An animated highlight sweep over the background of a loading placeholder (#14207).
+    shimmer: z.boolean().optional(),
     alignment: z
       .enum([
         "topStart",

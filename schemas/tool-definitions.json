@@ -16416,6 +16416,9 @@
                           "minimum": 0.5,
                           "maximum": 1
                         },
+                        "shimmer": {
+                          "type": "boolean"
+                        },
                         "alignment": {
                           "type": "string",
                           "enum": [
@@ -16626,6 +16629,19 @@
                                   }
                                 },
                                 "required": ["data", "lt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "data": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "empty": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["data", "empty"],
                                 "additionalProperties": false
                               },
                               {

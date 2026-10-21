@@ -131,7 +131,7 @@
       "kind": "object",
       "exactlyOne": ["key", "data", "all", "any", "not", "valid"],
       "dependents": {
-        "key|data": ["equals", "notEquals", "gt", "lt"]
+        "key|data": ["equals", "notEquals", "gt", "lt", "empty"]
       },
       "fields": {
         "key": {
@@ -163,6 +163,12 @@
           "rule": {
             "kind": "number",
             "integer": false
+          },
+          "optional": true
+        },
+        "empty": {
+          "rule": {
+            "kind": "boolean"
           },
           "optional": true
         },
@@ -769,6 +775,12 @@
             "integer": false,
             "min": 0.5,
             "max": 1
+          },
+          "optional": true
+        },
+        "shimmer": {
+          "rule": {
+            "kind": "boolean"
           },
           "optional": true
         },

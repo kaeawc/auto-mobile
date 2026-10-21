@@ -6,6 +6,7 @@ import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepe
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -181,6 +182,15 @@ function searchBarConstraint(
   }
   return undefined;
 }
+/** `empty` tests a `/data` value (#14207); a state key condition has no emptiness. */
+function emptyConditionConstraint(
+  data: Record<string, unknown>,
+  path: string,
+): PrototypeValidationError | undefined {
+  return Object.hasOwn(data, "empty") && Object.hasOwn(data, "key")
+    ? fail(keyPath(path, "empty"), "empty applies only to data conditions")
+    : undefined;
+}
 function visitObject(
   value: unknown,
   rule: Rule,
@@ -197,7 +207,7 @@ function visitObject(
     return textError;
   }
   const fields = rule.fields ?? {};
-  const searchBarError = searchBarConstraint(data, path);
+  const searchBarError = searchBarConstraint(data, path) ?? emptyConditionConstraint(data, path);
   if (searchBarError) {
     return searchBarError;
   }
@@ -713,6 +723,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
+    prototypeLoadingStatesError(context.nodes) ??
     pagerErrors(context) ??
     stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats)

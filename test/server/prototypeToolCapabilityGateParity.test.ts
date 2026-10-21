@@ -91,6 +91,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     activeKey: "active",
     child: label,
   }),
+  prototype_loading_states_v1: fixture({
+    type: "box",
+    id: "label",
+    style: { shimmer: true },
+    children: [{ type: "spacer" }],
+  }),
   prototype_rich_text_v1: fixture({ type: "text", id: "label", spans: [{ text: "Hello" }] }),
   prototype_menus_v1: fixture({
     type: "menu",

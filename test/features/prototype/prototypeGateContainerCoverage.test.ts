@@ -54,6 +54,7 @@ const fixtures: Record<string, Node> = {
     activeKey: "active",
     child: label,
   },
+  prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_rich_text_v1: { type: "text", spans: [{ text: "Hello" }] },
   prototype_menus_v1: {
     type: "menu",

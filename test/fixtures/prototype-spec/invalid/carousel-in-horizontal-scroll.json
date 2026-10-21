@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "scroll",
+      "axis": "horizontal",
+      "child": {
+        "type": "carousel",
+        "itemWidth": 120,
+        "children": [
+          {
+            "type": "text",
+            "text": "A"
+          },
+          {
+            "type": "text",
+            "text": "B"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.child",
+  "expectedMessage": "A carousel cannot appear inside a horizontal scroll"
+}

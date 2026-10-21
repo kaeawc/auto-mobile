@@ -137,7 +137,7 @@
       "kind": "object",
       "exactlyOne": ["key", "data", "platform", "all", "any", "not", "valid"],
       "dependents": {
-        "key|data|platform": ["equals", "notEquals", "gt", "lt"]
+        "key|data|platform": ["equals", "notEquals", "gt", "lt", "empty"]
       },
       "fields": {
         "key": {
@@ -169,6 +169,12 @@
           "rule": {
             "kind": "number",
             "integer": false
+          },
+          "optional": true
+        },
+        "empty": {
+          "rule": {
+            "kind": "boolean"
           },
           "optional": true
         },
@@ -784,6 +790,12 @@
           },
           "optional": true
         },
+        "shimmer": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        },
         "alignment": {
           "rule": {
             "kind": "enum",
@@ -949,6 +961,24 @@
               "labelMedium",
               "labelSmall"
             ]
+          },
+          "optional": true
+        },
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 4
+          },
+          "optional": true
+        },
+        "rotation": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": -360,
+            "max": 360
           },
           "optional": true
         }
@@ -2258,7 +2288,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2409,7 +2446,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2553,7 +2597,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2671,7 +2722,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2797,7 +2855,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -2942,7 +3007,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3109,7 +3181,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3262,7 +3341,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3299,6 +3385,13 @@
               "rule": {
                 "kind": "enum",
                 "values": ["fit", "crop", "fill"]
+              },
+              "optional": true
+            },
+            "zoomable": {
+              "rule": {
+                "kind": "ref",
+                "name": "zoomable"
               },
               "optional": true
             }
@@ -3401,7 +3494,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3514,7 +3614,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3613,7 +3720,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3850,7 +3964,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -3987,7 +4108,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4124,7 +4252,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4250,7 +4385,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4394,7 +4536,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4518,7 +4667,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4657,7 +4813,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4815,7 +4978,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -4966,7 +5136,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5084,7 +5261,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5204,7 +5388,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5330,7 +5521,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5448,7 +5646,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5580,7 +5785,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5686,7 +5898,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5791,7 +6010,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -5831,146 +6057,6 @@
               "optional": true
             },
             "max": {
-              "rule": {
-                "kind": "number",
-                "integer": false
-              },
-              "optional": true
-            }
-          }
-        },
-        "chart": {
-          "kind": "object",
-          "fields": {
-            "type": {
-              "rule": {
-                "kind": "enum",
-                "values": ["chart"]
-              },
-              "optional": false
-            },
-            "id": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
-            "testTag": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
-            "contentDescription": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
-            "onTap": {
-              "rule": {
-                "kind": "array",
-                "item": {
-                  "kind": "ref",
-                  "name": "action"
-                },
-                "min": 1,
-                "unique": false,
-                "max": 32
-              },
-              "optional": true
-            },
-            "style": {
-              "rule": {
-                "kind": "ref",
-                "name": "style"
-              },
-              "optional": true
-            },
-            "styleWhen": {
-              "rule": {
-                "kind": "array",
-                "item": {
-                  "kind": "ref",
-                  "name": "styleWhenEntry"
-                },
-                "min": 1,
-                "max": 8,
-                "unique": false
-              },
-              "optional": true
-            },
-            "visibleWhen": {
-              "rule": {
-                "kind": "ref",
-                "name": "condition"
-              },
-              "optional": true
-            },
-            "transition": {
-              "rule": {
-                "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
-              },
-              "optional": true
-            },
-            "anchor": {
-              "rule": {
-                "kind": "ref",
-                "name": "anchor"
-              },
-              "optional": true
-            },
-            "span": {
-              "rule": {
-                "kind": "number",
-                "integer": true,
-                "min": 1
-              },
-              "optional": true
-            },
-            "safeAreaPadding": {
-              "rule": {
-                "kind": "ref",
-                "name": "safeAreaPadding"
-              },
-              "optional": true
-            },
-            "variant": {
-              "rule": {
-                "kind": "enum",
-                "values": ["line", "area", "bar", "ring"]
-              },
-              "optional": false
-            },
-            "series": {
-              "rule": {
-                "kind": "array",
-                "item": {
-                  "kind": "ref",
-                  "name": "chartSeries"
-                },
-                "min": 1,
-                "max": 4,
-                "unique": false
-              },
-              "optional": false
-            },
-            "yRange": {
-              "rule": {
-                "kind": "ref",
-                "name": "chartRange"
-              },
-              "optional": true
-            },
-            "xLabels": {
-              "rule": {
-                "kind": "enum",
-                "values": ["none", "ends", "all"]
-              },
-              "optional": true
-            },
-            "goal": {
               "rule": {
                 "kind": "number",
                 "integer": false
@@ -6050,7 +6136,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6196,7 +6289,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6315,7 +6415,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6443,7 +6550,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6586,7 +6700,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6717,7 +6838,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -6867,7 +6995,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -7028,7 +7163,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -7159,7 +7301,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -7284,7 +7433,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -7429,7 +7585,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -7594,7 +7757,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },
@@ -7635,6 +7805,153 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "chart": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["chart"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["line", "area", "bar", "ring"]
+              },
+              "optional": false
+            },
+            "series": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "chartSeries"
+                },
+                "min": 1,
+                "max": 4,
+                "unique": false
+              },
+              "optional": false
+            },
+            "yRange": {
+              "rule": {
+                "kind": "ref",
+                "name": "chartRange"
+              },
+              "optional": true
+            },
+            "xLabels": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "ends", "all"]
+              },
+              "optional": true
+            },
+            "goal": {
+              "rule": {
+                "kind": "number",
+                "integer": false
               },
               "optional": true
             }
@@ -11004,6 +11321,133 @@
         }
       }
     },
+    "chartSeries": {
+      "kind": "object",
+      "fields": {
+        "path": {
+          "rule": {
+            "kind": "pointer"
+          },
+          "optional": false
+        },
+        "x": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": true
+        },
+        "y": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
+        },
+        "label": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
+    "chartRange": {
+      "kind": "object",
+      "fields": {
+        "min": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": false
+        },
+        "max": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": false
+        }
+      }
+    },
+    "linkify": {
+      "kind": "object",
+      "fields": {
+        "kinds": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 3,
+            "unique": true,
+            "item": {
+              "kind": "enum",
+              "values": ["mention", "hashtag", "url"]
+            }
+          },
+          "optional": false
+        },
+        "style": {
+          "rule": {
+            "kind": "ref",
+            "name": "textSpanStyle"
+          },
+          "optional": true
+        },
+        "onTap": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": false
+        }
+      }
+    },
+    "animate": {
+      "kind": "object",
+      "fields": {
+        "durationMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 2000
+          },
+          "optional": true
+        },
+        "easing": {
+          "rule": {
+            "kind": "enum",
+            "values": ["standard", "emphasized", "linear", "spring"]
+          },
+          "optional": true
+        }
+      }
+    },
+    "zoomable": {
+      "kind": "object",
+      "fields": {
+        "maxScale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1,
+            "max": 8
+          },
+          "optional": false
+        }
+      }
+    },
     "platformBinding": {
       "kind": "choice",
       "options": [
@@ -11189,98 +11633,6 @@
                 "kind": "ref",
                 "name": "action"
               }
-            }
-          },
-          "optional": false
-        }
-      }
-    },
-    "chartSeries": {
-      "kind": "object",
-      "fields": {
-        "path": {
-          "rule": {
-            "kind": "pointer"
-          },
-          "optional": false
-        },
-        "x": {
-          "rule": {
-            "kind": "key"
-          },
-          "optional": true
-        },
-        "y": {
-          "rule": {
-            "kind": "key"
-          },
-          "optional": false
-        },
-        "label": {
-          "rule": {
-            "kind": "string"
-          },
-          "optional": false
-        },
-        "color": {
-          "rule": {
-            "kind": "ref",
-            "name": "colorValue"
-          },
-          "optional": true
-        }
-      }
-    },
-    "chartRange": {
-      "kind": "object",
-      "fields": {
-        "min": {
-          "rule": {
-            "kind": "number",
-            "integer": false
-          },
-          "optional": false
-        },
-        "max": {
-          "rule": {
-            "kind": "number",
-            "integer": false
-          },
-          "optional": false
-        }
-      }
-    },
-    "linkify": {
-      "kind": "object",
-      "fields": {
-        "kinds": {
-          "rule": {
-            "kind": "array",
-            "min": 1,
-            "max": 3,
-            "unique": true,
-            "item": {
-              "kind": "enum",
-              "values": ["mention", "hashtag", "url"]
-            }
-          },
-          "optional": false
-        },
-        "style": {
-          "rule": {
-            "kind": "ref",
-            "name": "textSpanStyle"
-          },
-          "optional": true
-        },
-        "onTap": {
-          "rule": {
-            "kind": "array",
-            "min": 1,
-            "max": 32,
-            "item": {
-              "kind": "ref",
-              "name": "action"
             }
           },
           "optional": false

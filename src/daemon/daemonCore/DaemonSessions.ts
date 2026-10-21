@@ -24,6 +24,7 @@ import { defaultEmulatorSensorRestoreRegistry } from "../../features/utility/Emu
 import { defaultDisplayProfileRestoreRegistry } from "../../features/utility/DisplayProfileRestore";
 import { defaultPersonaRestoreRegistry } from "../../features/utility/PersonaRestore";
 import { defaultMockLocationClearRegistry } from "../../features/utility/MockLocationClear";
+import { forgetStatusBarOverrideForRemovedDevice } from "../statusBarSessionCleanup";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import {
   type ActiveSessionExecutionQuery,
@@ -171,6 +172,7 @@ export class DaemonSessions {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
         defaultMockLocationClearRegistry.retireDevice(deviceId);
+        forgetStatusBarOverrideForRemovedDevice(deviceId);
         NetworkState.getInstance().retireDevice(deviceId);
         defaultAppLinksRestoreRegistry.retireDevice(deviceId);
         defaultKillProfileRestoreRegistry.retireDevice(deviceId);

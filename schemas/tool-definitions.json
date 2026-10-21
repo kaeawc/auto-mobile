@@ -3542,6 +3542,7 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
+              "statusBar",
               "swipeAt",
               "swipeOn",
               "systemTray",
@@ -3684,6 +3685,7 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
+              "statusBar",
               "swipeAt",
               "swipeOn",
               "systemTray",
@@ -24015,6 +24017,7 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
+              "statusBar",
               "swipeAt",
               "swipeOn",
               "systemTray",
@@ -31128,6 +31131,7 @@
             "snapshotOf",
             "sqlQuery",
             "stageSessionDownloads",
+            "statusBar",
             "swipeAt",
             "swipeOn",
             "systemTray",
@@ -31236,6 +31240,7 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
+              "statusBar",
               "swipeAt",
               "swipeOn",
               "systemTray",
@@ -32000,6 +32005,202 @@
           "required": ["status", "reason"]
         }
       }
+    }
+  },
+  {
+    "name": "statusBar",
+    "description": "Deterministic status bar for screenshots and video: override time, battery, signal, data network and carrier (iOS Simulator simctl status_bar, Android SystemUI demo mode), clear it, or read it. A session's override is cleared when the session releases the device.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "override: set the given fields; clear: restore the live status bar; get: read",
+          "type": "string",
+          "enum": ["override", "clear", "get"]
+        },
+        "time": {
+          "description": "Clock text, e.g. \"9:41\" (Android demo mode needs H:MM or HH:MM)",
+          "type": "string",
+          "minLength": 1
+        },
+        "batteryLevel": {
+          "description": "Battery percent 0-100",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "batteryState": {
+          "type": "string",
+          "enum": ["charging", "charged", "discharging"]
+        },
+        "cellularBars": {
+          "description": "Cellular bars 0-4",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "wifiBars": {
+          "description": "Wi-Fi bars 0-3",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "dataNetwork": {
+          "type": "string",
+          "enum": ["wifi", "5g", "lte", "4g", "3g", "hide"]
+        },
+        "operatorName": {
+          "description": "Carrier name (iOS Simulator only)",
+          "type": "string"
+        },
+        "hideNotifications": {
+          "description": "Hide notification icons (Android only)",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["applied", "partial", "cleared", "current", "unsupported", "failed"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["override", "clear", "get"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "applied": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "unsupported": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "override": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "time": {
+                  "type": "string"
+                },
+                "batteryLevel": {
+                  "type": "number"
+                },
+                "batteryState": {
+                  "type": "string",
+                  "enum": ["charging", "charged", "discharging"]
+                },
+                "cellularBars": {
+                  "type": "number"
+                },
+                "wifiBars": {
+                  "type": "number"
+                },
+                "dataNetwork": {
+                  "type": "string",
+                  "enum": ["wifi", "5g", "lte", "4g", "3g", "hide"]
+                },
+                "operatorName": {
+                  "type": "string"
+                },
+                "hideNotifications": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownerSessionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "status", "action", "deviceId", "platform"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "string",
+          "enum": [
+            "time",
+            "batteryLevel",
+            "batteryState",
+            "cellularBars",
+            "wifiBars",
+            "dataNetwork",
+            "operatorName",
+            "hideNotifications"
+          ]
+        }
+      }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["get"]
+        }
+      ]
     }
   },
   {

@@ -5080,14 +5080,79 @@
   },
   {
     "name": "installApp",
-    "description": "Install app on device (.apk, .app, or .ipa)",
+    "description": "Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "artifactPath": {
-          "description": "App artifact path (.apk, .app, or .ipa)",
+          "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
           "type": "string"
+        },
+        "splits": {
+          "description": "Android: split APKs installed with the base .apk artifactPath (install-multiple)",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "bundle": {
+          "description": "Android .aab/.apks options",
+          "type": "object",
+          "properties": {
+            "keystore": {
+              "description": ".aab: signing key for the built APKs (default ~/.android/debug.keystore)",
+              "type": "object",
+              "properties": {
+                "path": {
+                  "description": "Keystore file path",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "alias": {
+                  "description": "Key alias",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "storePassword": {
+                  "description": "Keystore password (redacted from logs)",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "keyPassword": {
+                  "description": "Key password (redacted from logs; default storePassword)",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["path", "alias", "storePassword"],
+              "additionalProperties": false
+            },
+            "modules": {
+              "description": "Dynamic feature modules to install, or ['_ALL_']",
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "localTesting": {
+              "description": ".aab: build with bundletool --local-testing for on-demand modules",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "grantAllPermissions": {
+          "description": "Android: grant all requested runtime permissions (install -g)",
+          "type": "boolean"
+        },
+        "allowDowngrade": {
+          "description": "Android: allow a lower versionCode (install -d; debuggable apps only)",
+          "type": "boolean"
         },
         "expectedSigningSha256": {
           "description": "Android: complete signer set (SHA-256 of every signing certificate) an already installed copy must have before it is replaced; any other signer set, or signers that cannot be read, refuses the install. See inspectPackageSigning.",

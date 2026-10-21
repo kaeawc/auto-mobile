@@ -12,6 +12,7 @@ import {
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
+  PROTOTYPE_CHART_CAPABILITY,
   PROTOTYPE_CHAT_SCROLL_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_LINKIFY_CAPABILITY,
@@ -69,6 +70,7 @@ import {
   prototypeLoadingStatesFields,
   prototypeLoadingStatesUnsupportedMessage,
 } from "./prototypeLoadingStates";
+import { prototypeChartFields, prototypeChartUnsupportedMessage } from "./prototypeChart";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
 import { prototypeLinkifyFields, prototypeLinkifyUnsupportedMessage } from "./prototypeLinkify";
 import {
@@ -157,6 +159,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_LOADING_STATES_CAPABILITY,
     fields: prototypeLoadingStatesFields,
     unsupportedMessage: prototypeLoadingStatesUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_CHART_CAPABILITY,
+    fields: prototypeChartFields,
+    unsupportedMessage: prototypeChartUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_CHAT_SCROLL_CAPABILITY,

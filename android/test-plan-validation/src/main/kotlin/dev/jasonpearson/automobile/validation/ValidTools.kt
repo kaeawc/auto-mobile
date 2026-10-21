@@ -85,6 +85,7 @@ object ValidTools {
         "terminateApp",
         "uninstallApp",
         "videoRecording",
+        "performanceTrace",
         "appLifecycle",
         "displayConfig",
         "displayProfile",

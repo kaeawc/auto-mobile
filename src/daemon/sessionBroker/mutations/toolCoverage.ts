@@ -101,6 +101,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "executePlan",
       "explore",
       "navigateTo",
+      "performanceTrace",
       "prototype",
       "reconcileDeviceResources",
       "recordDeviceGestures",

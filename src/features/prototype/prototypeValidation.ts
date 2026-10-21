@@ -7,6 +7,7 @@ import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
+import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
@@ -729,6 +730,7 @@ function behaviourErrors(
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
     prototypeLoadingStatesError(context.nodes) ??
+    prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
     prototypeChatScrollError(context.nodes, context.actions) ??
     pagerErrors(context) ??

@@ -346,6 +346,8 @@ class WebSocketServer(
     add("prototype_rich_text_v1")
     // {data, empty} conditions and style shimmer for loading placeholders (#14207).
     add("prototype_loading_states_v1")
+    // Line, area, bar and ring charts over /data arrays (#14209).
+    add("prototype_chart_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
     add("prototype_linkify_v1")
     // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).

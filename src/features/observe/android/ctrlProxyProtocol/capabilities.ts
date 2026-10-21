@@ -87,6 +87,8 @@ export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1"
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 /** `{data, empty}` conditions and style `shimmer` (#14207). */
 export const PROTOTYPE_LOADING_STATES_CAPABILITY = "prototype_loading_states_v1";
+/** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
+export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */
 export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
 

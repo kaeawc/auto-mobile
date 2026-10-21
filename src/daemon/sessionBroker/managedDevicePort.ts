@@ -95,6 +95,21 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     this.isExecOwnerLive = dependencies.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
   }
 
+  /** Whether the binding is empty, so acquisition could create a retained device. */
+  private async bindingCanCreateDevice(resource: BrokerResourceRecord): Promise<boolean> {
+    try {
+      const assignment = await this.dependencies.registry.getAssignment(this.key(resource));
+      return assignment === null || assignment.stableDeviceId === null;
+    } catch (error) {
+      // If the optional budget hint is unavailable, preserve the existing retry reserve.
+      logger.warn(
+        `Cannot read binding for iOS readiness retry budget: ${errorMessage(error)}`,
+        error,
+      );
+      return true;
+    }
+  }
+
   async prepare(
     resource: BrokerResourceRecord,
     options: SessionDevicePreparationOptions,
@@ -125,7 +140,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     // Only an empty iOS binding can create a retained device for one warm readiness retry.
     // Reserve one third (at most a runner provisioning window) for that retry; an occupied
     // binding's reuse/adoption cannot produce retained creation evidence and gets the full budget.
-    const canCreate = profile.platform === "ios" && (await this.canCreateIosBinding(resource));
+    const canCreate = profile.platform === "ios" && (await this.bindingCanCreateDevice(resource));
     const remainingMs = deadlineMs - timer.now();
     const retryReserveMs = canCreate
       ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)
@@ -151,20 +166,6 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       (entry) => entry.bindingIndex === resource.allocationIndex,
     );
     return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
-  }
-
-  private async canCreateIosBinding(resource: BrokerResourceRecord): Promise<boolean> {
-    try {
-      const assignment = await this.dependencies.registry.getAssignment(this.key(resource));
-      return assignment === null || assignment.stableDeviceId === null;
-    } catch (error) {
-      // If the optional budget hint is unavailable, preserve the existing retry reserve.
-      logger.warn(
-        `Cannot read binding for iOS readiness retry budget: ${errorMessage(error)}`,
-        error,
-      );
-      return true;
-    }
   }
 
   private async captureAndroidBaseline(

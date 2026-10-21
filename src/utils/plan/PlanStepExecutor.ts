@@ -30,6 +30,7 @@ import {
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
 import { PlanStepError } from "./PlanStepError";
+import { redactToolSecrets } from "../redactToolSecrets";
 export { PlanStepError } from "./PlanStepError";
 
 /** Only the registry operations and tool metadata required to execute a step. */
@@ -149,7 +150,7 @@ function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResu
   return {
     status: "skipped",
     error,
-    details: { params: step.params, error, optional: true },
+    details: { params: redactToolSecrets(step.tool, step.params), error, optional: true },
   };
 }
 
@@ -675,7 +676,7 @@ export class DefaultPlanStepExecutor<
       { deviceLabel, signal: context.signal, targetDevice: context.targetDevice },
     );
     const details: Record<string, unknown> = {
-      params: step.params,
+      params: redactToolSecrets(step.tool, step.params),
       error,
       ...(toolResult && typeof toolResult === "object" && "debug" in toolResult
         ? { toolDebug: toolResult.debug }
@@ -700,7 +701,7 @@ export class DefaultPlanStepExecutor<
     toolResult: Record<string, unknown> | undefined,
   ): StepExecutionResult {
     const details: Record<string, unknown> = {
-      params: step.params,
+      params: redactToolSecrets(step.tool, step.params),
     };
     if (step.tool === "observe" && context.captureObserveSteps) {
       const stepObservation = this.buildObserveStepCaptureFromResponse(
@@ -774,7 +775,7 @@ export class DefaultPlanStepExecutor<
         error: errorMsg,
         ...(warnings ? { warnings } : {}),
         details: {
-          params: step.params,
+          params: redactToolSecrets(step.tool, step.params),
           error: errorMsg,
           optional: true,
         },
@@ -792,7 +793,7 @@ export class DefaultPlanStepExecutor<
       sourceError: error,
       error: errorMsg,
       details: {
-        params: step.params,
+        params: redactToolSecrets(step.tool, step.params),
         error: errorMsg,
         ...(failureObservation ? { failureObservation } : {}),
         ...(warnings ? { warnings } : {}),

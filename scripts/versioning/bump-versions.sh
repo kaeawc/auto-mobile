@@ -61,6 +61,21 @@ fi
 
 snapshot_version="${new_version}-SNAPSHOT"
 
+if ! command -v rg >/dev/null 2>&1; then
+  echo "ripgrep (rg) is required for fast Gradle scanning." >&2
+  exit 1
+fi
+
+# Android app versionName comes from VERSION_NAME in android/gradle.properties (applied by the
+# automobile.android-application convention), which this script rewrites below. A module literal
+# would pin the APK to a stale version, so refuse one before any file is written.
+while IFS= read -r -d '' gradle_file; do
+  if grep -Eq 'versionName[[:space:]]*=[[:space:]]*"' "$gradle_file"; then
+    echo "Hard-coded versionName in ${gradle_file}; Android apps take it from VERSION_NAME in android/gradle.properties." >&2
+    exit 1
+  fi
+done < <(rg -l --null -g 'build.gradle.kts' -e 'versionName\s*=' android)
+
 # Rewrite version strings *in place* rather than reserializing the document.
 # json.dump(indent=2) re-indents the whole file and explodes short arrays onto
 # one element per line, which oxfmt then collapses again — so every release
@@ -323,24 +338,13 @@ if [[ "$dry_run" != true ]]; then
   bash "${bump_script_dir}/generate-ios-version.sh"
 fi
 
-if ! command -v rg >/dev/null 2>&1; then
-  echo "ripgrep (rg) is required for fast Gradle scanning." >&2
-  exit 1
-fi
-
 while IFS= read -r -d '' gradle_file; do
   replace_optional_single_match \
     "$gradle_file" \
     '^version\s*=\s*"[^"]*"' \
     "version = \"${snapshot_version}\"" \
     "$dry_run"
-
-  replace_optional_single_match \
-    "$gradle_file" \
-    'versionName\s*=\s*"[^"]*"' \
-    "versionName = \"${snapshot_version}\"" \
-    "$dry_run"
-done < <(rg -l --null -g 'build.gradle.kts' -e 'versionName\s*=' -e '^version\s*=' android)
+done < <(rg -l --null -g 'build.gradle.kts' -e '^version\s*=' android)
 
 if [[ "$dry_run" == true ]]; then
   echo "Dry run complete."

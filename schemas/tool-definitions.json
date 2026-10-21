@@ -3731,6 +3731,7 @@
               "getDeepLinks",
               "getDeviceState",
               "getIosSimulatorCapabilities",
+              "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
               "getNotificationPolicy",
@@ -3775,6 +3776,7 @@
               "resetKeychain",
               "rotate",
               "selectAllText",
+              "sendBroadcast",
               "sendKeys",
               "sendSms",
               "setActiveDevice",
@@ -3875,6 +3877,7 @@
               "getDeepLinks",
               "getDeviceState",
               "getIosSimulatorCapabilities",
+              "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
               "getNotificationPolicy",
@@ -3919,6 +3922,7 @@
               "resetKeychain",
               "rotate",
               "selectAllText",
+              "sendBroadcast",
               "sendKeys",
               "sendSms",
               "setActiveDevice",
@@ -5090,6 +5094,185 @@
       },
       "required": ["deviceType", "runtime"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "getLogs",
+    "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS Simulator unified log by app subsystem. Bounded output.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Package or bundle id; on Android every process of the app, not one pid",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "since": {
+          "description": "Window start: \"lastAction\", \"sessionStart\", or {seconds} (default 300s)",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["lastAction", "sessionStart"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600
+                }
+              },
+              "required": ["seconds"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "tags": {
+          "description": "Android logcat tag filters, \"Tag\" or \"Tag:P\" (other tags are silenced)",
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "minPriority": {
+          "description": "Lowest priority shown (default V)",
+          "type": "string",
+          "enum": ["V", "D", "I", "W", "E", "F"]
+        },
+        "grep": {
+          "description": "Regular expression applied host-side to each line",
+          "type": "string",
+          "minLength": 1
+        },
+        "buffers": {
+          "description": "Android logcat buffers (default [\"main\",\"crash\"])",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["main", "system", "crash", "events"]
+          }
+        },
+        "includeSystem": {
+          "description": "Android: add ActivityManager/system lines that name appId (launch, death, ANR)",
+          "type": "boolean"
+        },
+        "maxLines": {
+          "description": "Newest lines kept (default 1000)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "sinceSeconds": {
+          "type": "number"
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "number"
+              },
+              "tid": {
+                "type": "number"
+              },
+              "priority": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              }
+            },
+            "required": ["timestamp", "message"],
+            "additionalProperties": {}
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "pids": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "attribution": {
+          "type": "string",
+          "enum": ["uid", "pid", "subsystem", "none"]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "deviceId",
+        "platform",
+        "sinceSeconds",
+        "lines",
+        "truncated",
+        "pids",
+        "attribution",
+        "warnings"
+      ],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -24208,6 +24391,7 @@
               "getDeepLinks",
               "getDeviceState",
               "getIosSimulatorCapabilities",
+              "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
               "getNotificationPolicy",
@@ -24252,6 +24436,7 @@
               "resetKeychain",
               "rotate",
               "selectAllText",
+              "sendBroadcast",
               "sendKeys",
               "sendSms",
               "setActiveDevice",
@@ -27998,6 +28183,276 @@
     }
   },
   {
+    "name": "sendBroadcast",
+    "description": "Android: send an explicit broadcast to the app under test (its package, or one of its receivers) with a typed intent (action, data, categories, typed extras), e.g. to toggle a debug flag or seed data. Reports the ordered-broadcast result; protected system broadcasts are refused with a typed error.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Target package: the broadcast is always explicit to it",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "intent": {
+          "type": "object",
+          "properties": {
+            "component": {
+              "description": "A class inside appId: \".Receiver\", \"com.app.Receiver\", or \"com.app/.Receiver\"",
+              "type": "string",
+              "minLength": 1
+            },
+            "action": {
+              "description": "Broadcast action",
+              "type": "string",
+              "minLength": 1
+            },
+            "data": {
+              "description": "Data URI",
+              "type": "string",
+              "minLength": 1
+            },
+            "mimeType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "categories": {
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "extras": {
+              "description": "Typed extras",
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "int"
+                      },
+                      "value": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "long"
+                      },
+                      "value": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "float"
+                      },
+                      "value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "boolean"
+                      },
+                      "value": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "stringArray"
+                      },
+                      "value": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "uri"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["key", "type", "value"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "required": ["action"],
+          "additionalProperties": false
+        },
+        "userId": {
+          "description": "Android user to deliver to",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "waitForResult": {
+          "description": "Report the ordered-broadcast result code and data (default true)",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "intent"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["delivered", "failed", "unsupported"]
+        },
+        "delivered": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "resultCode": {
+          "type": "number"
+        },
+        "resultData": {
+          "type": "string"
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": ["protected_broadcast", "permission_denied", "broadcast_failed"]
+        },
+        "error": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "status", "delivered", "deviceId", "appId"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "sendKeys",
     "description": "Execute ordered typing, clear, raw-key, and semantic IME commands. Unicode: iOS any mode; Android a11y/ime/auto/eventAll/eventLast (event modes use a11y for unsupported runs). Android eventOnly/imeKeyEvents are ASCII-only. textLength counts code points.",
     "inputSchema": {
@@ -29408,7 +29863,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, iOS and physical Android return unsupported, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. screenLock (Android) sets a PIN, password, or pattern with locksettings, or clears one (type none plus currentCredential); a session's own credential is cleared on its release (a failed clear is reported in the release result as screenLockRestore), an existing credential the session did not set is refused with errorCode lock_credential_preexisting, and the result reports only the type and outcome (for example set: true). The credential is redacted from logs, telemetry, and recorded plans; it is in the device's process list while locksettings runs. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
+    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator, iOS Simulator, or physical iOS device (through the CtrlProxy runner), iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS clears it (`simctl location clear` on a Simulator, the runner on a physical device); failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, iOS and physical Android return unsupported, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. screenLock (Android) sets a PIN, password, or pattern with locksettings, or clears one (type none plus currentCredential); a session's own credential is cleared on its release (a failed clear is reported in the release result as screenLockRestore), an existing credential the session did not set is refused with errorCode lock_credential_preexisting, and the result reports only the type and outcome (for example set: true). The credential is redacted from logs, telemetry, and recorded plans; it is in the device's process list while locksettings runs. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -31323,6 +31778,7 @@
             "getDeepLinks",
             "getDeviceState",
             "getIosSimulatorCapabilities",
+            "getLogs",
             "getNavigationGraph",
             "getNetworkGraph",
             "getNotificationPolicy",
@@ -31367,6 +31823,7 @@
             "resetKeychain",
             "rotate",
             "selectAllText",
+            "sendBroadcast",
             "sendKeys",
             "sendSms",
             "setActiveDevice",
@@ -31433,6 +31890,7 @@
               "getDeepLinks",
               "getDeviceState",
               "getIosSimulatorCapabilities",
+              "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
               "getNotificationPolicy",
@@ -31477,6 +31935,7 @@
               "resetKeychain",
               "rotate",
               "selectAllText",
+              "sendBroadcast",
               "sendKeys",
               "sendSms",
               "setActiveDevice",

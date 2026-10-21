@@ -47,4 +47,5 @@ export interface AndroidEmulatorLaunchHandle {
   readonly targetDeviceId?: string;
   /** Stops the emulator only when this launch created its process. */
   dispose(): void;
+  release(): void;
 }

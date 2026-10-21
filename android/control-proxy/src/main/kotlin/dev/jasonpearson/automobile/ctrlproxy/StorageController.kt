@@ -9,8 +9,6 @@ import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.ctrlproxy.storage.buildStorageChangedMessage
 import dev.jasonpearson.automobile.protocol.SetPreference
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 /**
  * SharedPreferences, DataStore and storage-subscription requests, with the late-created
@@ -19,20 +17,14 @@ import kotlinx.serialization.json.Json
 internal class StorageController(
   manager: () -> StorageSubscriptionManager,
   asyncActionRunner: AsyncActionRunner,
-  resultBroadcaster: ResultBroadcaster,
+  resultSender: ResultSender,
   private val timeProvider: TimeProvider,
-  private val jsonCompact: Json,
   private val responseSender: ResponseSender,
-) :
-  StorageRequests(
-    manager,
-    asyncActionRunner,
-    resultBroadcaster,
-    timeProvider,
-    jsonCompact,
-    responseSender,
-  ) {
-  /** Keeps the service's late-bound WebSocket server behind one seam. */
+) : StorageRequests(manager, asyncActionRunner, resultSender, timeProvider) {
+  /**
+   * Carries `storage_changed` push events, which answer no request, to the late-bound WebSocket
+   * server. Request results go through [ResultSender].
+   */
   interface ResponseSender {
     fun isRunning(): Boolean
 
@@ -58,12 +50,7 @@ internal class StorageController(
       // prior value so the TS telemetry ingest can skip its per-insert previous-value
       // lookup (#3000), quoting it by its OWN type so a removed/type-changed STRING
       // stays valid JSON. An absent prior value is emitted as JSON null.
-      val message =
-        buildStorageChangedMessage(
-          event,
-          timeProvider.currentTimeMillis(),
-          jsonCompact,
-        )
+      val message = buildStorageChangedMessage(event, timeProvider.currentTimeMillis())
       responseSender.broadcast(message)
       Log.d(TAG, "Broadcasted storage change to ${responseSender.connectionCount()} clients")
     } catch (e: CancellationException) {
@@ -79,11 +66,9 @@ internal class StorageController(
 internal open class StorageRequests(
   private val manager: () -> StorageSubscriptionManager,
   private val asyncActionRunner: AsyncActionRunner,
-  resultBroadcaster: ResultBroadcaster,
+  resultSender: ResultSender,
   timeProvider: TimeProvider,
-  jsonCompact: Json,
-  responseSender: StorageController.ResponseSender,
-) : StorageResponses(resultBroadcaster, timeProvider, jsonCompact, responseSender) {
+) : StorageResponses(resultSender, timeProvider) {
   private companion object {
     const val TAG = "CtrlProxy"
   }
@@ -293,10 +278,8 @@ internal open class StorageRequests(
 
 /** Encodes and broadcasts correlated storage request results. */
 internal open class StorageResponses(
-  private val resultBroadcaster: ResultBroadcaster,
+  private val resultSender: ResultSender,
   private val timeProvider: TimeProvider,
-  private val jsonCompact: Json,
-  private val responseSender: StorageController.ResponseSender,
 ) {
   private companion object {
     const val TAG = "CtrlProxy"
@@ -308,29 +291,14 @@ internal open class StorageResponses(
     files: List<PreferenceFileInfo>?,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping preference files broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "preference_files") {
-      val message = buildString {
-        append("""{"type":"preference_files","timestamp":${timeProvider.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        if (files != null) {
-          append(""","success":true,"files":${jsonCompact.encodeToString(files)}""")
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
-      Log.d(TAG, "Broadcasted preference files to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "preference_files", attachPerf = false) { _ ->
+      preferenceFilesResultFrame(
+        timeProvider.currentTimeMillis(),
+        requestId,
+        packageName,
+        files,
+        error,
+      )
     }
   }
 
@@ -341,30 +309,13 @@ internal open class StorageResponses(
     entries: List<PreferenceEntry>?,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping preferences broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "preferences") {
-      val message = buildString {
-        append("""{"type":"preferences","timestamp":${timeProvider.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (entries != null) {
-          append(""","success":true,"entries":${jsonCompact.encodeToString(entries)}""")
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
-      Log.d(TAG, "Broadcasted preferences to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "preferences", attachPerf = false) { _ ->
+      preferencesResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        entries,
+        error,
+      )
     }
   }
 
@@ -375,36 +326,12 @@ internal open class StorageResponses(
     subscriptionId: String?,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping subscribe storage broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "subscribe_storage_result") {
-      val message = buildString {
-        append(
-          """{"type":"subscribe_storage_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (subscriptionId != null) {
-          append(
-            ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}""",
-          )
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted subscribe storage result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "subscribe_storage_result", attachPerf = false) { _ ->
+      subscribeStorageResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        subscriptionId,
+        error,
       )
     }
   }
@@ -415,71 +342,18 @@ internal open class StorageResponses(
     fileName: String,
     success: Boolean,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping unsubscribe storage broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "unsubscribe_storage_result") {
-      val message = buildString {
-        append(
-          """{"type":"unsubscribe_storage_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","success":$success""")
-        append("}")
-      }
-      responseSender.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted unsubscribe storage result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "unsubscribe_storage_result", attachPerf = false) { _ ->
+      unsubscribeStorageResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        success,
       )
     }
   }
 
   protected suspend fun broadcastGetPreferenceResult(outcome: GetPreferenceOutcome) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping get preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(outcome.requestId, "get_preference_result") {
-      val message = buildString {
-        append(
-          """{"type":"get_preference_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (outcome.requestId != null) {
-          appendJsonStringField("requestId", outcome.requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(outcome.packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(outcome.fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(outcome.key)}""")
-        if (outcome.error != null) {
-          append(
-            ""","success":false,"found":false,"error":${jsonCompact.encodeToString(outcome.error)}""",
-          )
-        } else if (outcome.entry != null) {
-          append(""","success":true,"found":true""")
-          if (outcome.entry.value != null) {
-            append(""","value":${jsonCompact.encodeToString(outcome.entry.value)}""")
-          } else {
-            append(""","value":null""")
-          }
-          append(""","valueType":${jsonCompact.encodeToString(outcome.entry.type)}""")
-        } else {
-          append(""","success":true,"found":false""")
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted get preference result to ${responseSender.connectionCount()} clients",
-      )
+    resultSender.sendFrame(outcome.requestId, "get_preference_result", attachPerf = false) { _ ->
+      getPreferenceResultFrame(timeProvider.currentTimeMillis(), outcome)
     }
   }
 
@@ -490,33 +364,12 @@ internal open class StorageResponses(
     key: String,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping set preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_preference_result") {
-      val message = buildString {
-        append(
-          """{"type":"set_preference_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted set preference result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "set_preference_result", attachPerf = false) { _ ->
+      setPreferenceResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        key,
+        error,
       )
     }
   }
@@ -528,33 +381,12 @@ internal open class StorageResponses(
     key: String,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping remove preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "remove_preference_result") {
-      val message = buildString {
-        append(
-          """{"type":"remove_preference_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted remove preference result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "remove_preference_result", attachPerf = false) { _ ->
+      removePreferenceResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        key,
+        error,
       )
     }
   }
@@ -565,32 +397,11 @@ internal open class StorageResponses(
     fileName: String,
     error: String?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping clear preferences broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "clear_preferences_result") {
-      val message = buildString {
-        append(
-          """{"type":"clear_preferences_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted clear preferences result to ${responseSender.connectionCount()} clients",
+    resultSender.sendFrame(requestId, "clear_preferences_result", attachPerf = false) { _ ->
+      clearPreferencesResultFrame(
+        timeProvider.currentTimeMillis(),
+        StorageTarget(requestId, packageName, fileName),
+        error,
       )
     }
   }

@@ -233,6 +233,18 @@ function fixture(observed: BootedDevice) {
   return { client, adb, factory };
 }
 
+test("a replacement reset can fence ownership immediately before the console kill dispatch", async () => {
+  const { client, adb } = fixture(original);
+  await expect(
+    client.killDevice(original, {
+      beforeDispatch: async () => {
+        throw new Error("replacement ownership lost");
+      },
+    }),
+  ).rejects.toThrow("replacement ownership lost");
+  expect(emuKillArgv(adb)).toHaveLength(0);
+});
+
 /**
  * No executed command may ever reach for a transport id, a transport-to-serial
  * resolution, or a guest power-off: `adb emu` ignores `-t`, and `shell reboot

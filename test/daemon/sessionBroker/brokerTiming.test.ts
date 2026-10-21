@@ -14,6 +14,12 @@ import type {
 import { openExportHarness, exportConfig } from "./fixtures/exportHarness";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ResetFailureError } from "../../../src/daemon/sessionBroker/ResetFailureError";
+import { IosKeepBootedReset } from "../../../src/daemon/sessionBroker/iosKeepBootedReset";
+import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
+import { FakeDeviceMutationResetPort } from "../../fakes/FakeDeviceMutationResetPort";
+import { DEVICE_MUTATION_KINDS } from "../../../src/daemon/sessionBroker/mutations/types";
+import { drainUntil, drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
+import { ResetReadiness } from "../../../src/daemon/sessionBroker/resetReadiness";
 
 describe("durable broker timing", () => {
   let harness: Awaited<ReturnType<typeof openExportHarness>>;
@@ -84,6 +90,153 @@ describe("durable broker timing", () => {
     await broker.release(second.sessionUuid!);
     const third = await broker.prepare(exportConfig("reuse-again"), "token");
     expect(third.timing?.acquisition?.reuseCount).toBe(2);
+  });
+
+  test("ports holding the outer reset slot do not receive another slot runner", async () => {
+    let resetCalls = 0;
+    harness.options.devices.reset = async (_resource, _signal, runResetBoot) => {
+      resetCalls++;
+      expect(runResetBoot).toBeUndefined();
+      return { outcome: "clean", mode: "erase", phases: {} };
+    };
+    const session = await broker.prepare(exportConfig("outer-slot"), "token");
+
+    await expect(broker.release(session.sessionUuid!)).resolves.toMatchObject({
+      outcome: "released",
+    });
+    expect(resetCalls).toBe(1);
+  });
+
+  test("fast resets enter concurrently while their erase fallbacks share one boot slot", async () => {
+    const releaseErase = Promise.withResolvers<void>();
+    const activity = new Map<string, boolean[]>();
+    const setResetActive = ResetReadiness.prototype.setResetActive;
+    const tracking = spyOn(ResetReadiness.prototype, "setResetActive").mockImplementation(function (
+      this: ResetReadiness,
+      resourceId,
+      active,
+    ) {
+      activity.set(resourceId, [...(activity.get(resourceId) ?? []), active]);
+      setResetActive.call(this, resourceId, active);
+    });
+    let fastResets = 0;
+    let eraseStarts = 0;
+    const devices = harness.options.devices;
+    devices.managesResetBootSlots = true;
+    devices.reset = async (resource, _signal, runResetBoot) => {
+      expect(_signal).toBeUndefined();
+      fastResets++;
+      if (!runResetBoot) {
+        throw new Error("Missing reset boot runner");
+      }
+      return runResetBoot(async () => {
+        eraseStarts++;
+        if (eraseStarts === 1) {
+          await releaseErase.promise;
+        }
+        await harness.devices.reset(resource);
+        return { outcome: "clean", mode: "erase", phases: {} };
+      });
+    };
+    await broker.close();
+    broker = new SessionBroker({
+      ...harness.options,
+      limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 2, maxConcurrentResetBoots: 1 },
+    });
+    const first = await broker.prepare(exportConfig("first"), "token");
+    const second = await broker.prepare(exportConfig("second"), "token");
+    const releases = [broker.release(first.sessionUuid!), broker.release(second.sessionUuid!)];
+    try {
+      await drainUntil(() => fastResets === 2, { description: "concurrent fast resets" });
+      await drainUntilQuiescent(harness.timer);
+      expect(eraseStarts).toBe(1);
+      expect([...activity.values()]).toEqual([
+        [true, false, true],
+        [true, false],
+      ]);
+    } finally {
+      releaseErase.resolve();
+      await Promise.all(releases);
+      tracking.mockRestore();
+    }
+    expect(eraseStarts).toBe(2);
+    expect([...activity.values()]).toEqual([
+      [true, false, true, false],
+      [true, false, true, false],
+    ]);
+  });
+
+  test("persisted resource use count drives keep-booted retirement on the third release", async () => {
+    const journal = new FakeDeviceMutationJournal(harness.timer);
+    const mutations = new FakeDeviceMutationResetPort({
+      completeKinds: [...DEVICE_MUTATION_KINDS],
+      observations: [],
+      unobservable: [],
+    });
+    let erases = 0;
+    harness.options.devices.reset = async (resource) => {
+      await harness.devices.reset(resource);
+      const profile = nativeProfile(resource);
+      if (profile.platform !== "ios") {
+        throw new Error("Expected iOS");
+      }
+      const scope = {
+        deviceId: "device",
+        incarnation: "generation-1",
+        sessionUuid: resource.requestId!,
+      };
+      await journal.captureBaseline(scope, mutations.snapshot);
+      const reset = new IosKeepBootedReset({
+        journal,
+        mutations: Object.assign(mutations, {
+          sanitize: async () => {},
+          assertSettled: async () => {},
+        }),
+        timer: harness.timer,
+        maxUses: 3,
+        health: { probe: async () => true },
+        simctl: {
+          readSimulatorTarget: async () => ({
+            udid: scope.deviceId,
+            name: "phone",
+            state: "Booted",
+            isAvailable: true,
+            deviceTypeIdentifier: profile.simulatorDeviceTypeIdentifier,
+            runtime: profile.runtimeId,
+            os_version: profile.osVersion,
+          }),
+        },
+        erase: {
+          resetWithTiming: async () => {
+            erases++;
+            return { outcome: "clean", mode: "erase", phases: { erase: 1, boot: 2 } };
+          },
+        },
+      });
+      return reset.resetWithTiming(
+        { deviceId: scope.deviceId, platform: "ios", name: "phone" },
+        profile,
+        async () => {},
+        scope,
+        resource.reuseCount ?? 0,
+      );
+    };
+    for (let use = 1; use <= 3; use++) {
+      const ready = await broker.prepare(exportConfig(`use-${use}`), "token");
+      const released = await broker.release(ready.sessionUuid!);
+      expect(released.timing?.reset).toMatchObject({
+        reuseCount: use - 1,
+        outcome: use === 3 ? "fallback:erase" : "clean",
+        mode: use === 3 ? "erase" : "keep-booted",
+      });
+      const request = await harness.store.getRequest(`use-${use}`);
+      const resource = await harness.registry
+        .sessionBrokerStore(harness.scopeKey)
+        .getResource(request!.resourceId!);
+      expect(resource?.reuseCount).toBe(use - 1);
+      expect(resource?.state).toBe("idle");
+    }
+    expect(erases).toBe(1);
   });
 
   test("reset fallback retains its mode, phases and reason", async () => {

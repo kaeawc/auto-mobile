@@ -29,6 +29,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { readBrokerTimingStats } from "./timingStats";
+import { RECEIPT_RETENTION_MS } from "./retention";
 import { BrokerTimingRecorder } from "./timingRecorder";
 import { BrokerResetRelease } from "./resetRelease";
 import { ResetReadiness } from "./resetReadiness";
@@ -54,12 +55,7 @@ export type { SessionBrokerOptions } from "./brokerOptions";
 export { EXPORT_RETENTION_MS } from "./store";
 export { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./releaseReply";
 
-/**
- * Terminal receipts answer exact replay for 30 days after they become terminal. The protocol
- * promises a durable receipt for an ambiguous reply but names no horizon; this is far beyond any
- * preparation or release budget, so only a long-finished identity is ever forgotten.
- */
-export const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export { RECEIPT_RETENTION_MS } from "./retention";
 /** Rows deleted per retention call, so one pass never holds the write lock for long. */
 export const RECEIPT_PRUNE_BATCH = 500;
 

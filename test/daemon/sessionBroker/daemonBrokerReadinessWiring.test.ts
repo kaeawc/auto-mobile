@@ -16,18 +16,41 @@ describe("DaemonBroker Android reset readiness wiring", () => {
     const readiness = {
       listBootedAndroidDevices: inventory,
       verifyAndroidCtrlProxyServiceReady: ctrlProxyReady,
+      readAndroidCtrlProxySnapshotIdentity: mock(async () => "ctrlproxy-sha256"),
+      verifyDevice: mock(async () => {}),
     } satisfies Pick<
       DeviceReadiness,
-      "listBootedAndroidDevices" | "verifyAndroidCtrlProxyServiceReady"
+      | "listBootedAndroidDevices"
+      | "verifyAndroidCtrlProxyServiceReady"
+      | "readAndroidCtrlProxySnapshotIdentity"
+      | "verifyDevice"
     >;
     const getReadiness = mock(() => readiness);
     const ports = sessionBrokerAndroidResetPorts(getReadiness);
     const signal = new AbortController().signal;
 
     await expect(ports.inventory({ signal, timeoutMs: 847 })).resolves.toEqual([androidDevice]);
-    await expect(ports.ctrlProxyReady(androidDevice)).resolves.toBe(true);
+    await expect(
+      ports.ctrlProxyReady(androidDevice, { signal, timeoutMs: 847, noRetry: true }),
+    ).resolves.toBe(true);
     expect(getReadiness).toHaveBeenCalledTimes(2);
     expect(inventory).toHaveBeenCalledWith({ signal, timeoutMs: 847 });
-    expect(ctrlProxyReady).toHaveBeenCalledWith(androidDevice);
+    expect(ctrlProxyReady).toHaveBeenCalledWith(androidDevice, {
+      signal,
+      timeoutMs: 847,
+      noRetry: true,
+    });
+    await expect(ports.snapshot!.ctrlProxyIdentity(androidDevice, signal)).resolves.toBe(
+      "ctrlproxy-sha256",
+    );
+    const assertOwned = mock(async () => {});
+    await ports.snapshot!.ready(androidDevice, { signal, timeoutMs: 847, assertOwned });
+    expect(readiness.verifyDevice).toHaveBeenCalledWith(
+      androidDevice.deviceId,
+      "android",
+      { signal, readiness: "automationReady" },
+      androidDevice,
+    );
+    expect(assertOwned).toHaveBeenCalledTimes(2);
   });
 });

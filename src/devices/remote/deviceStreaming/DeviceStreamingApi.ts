@@ -13,7 +13,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 import type { RemoteDeviceSession, RemoteDeviceSessionState } from "../remoteDeviceProvider";
 
 export const DEVICE_STREAMING_ENDPOINT = "https://devicestreaming.googleapis.com/v1";
-export const DEVICE_STREAMING_OAUTH_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const DEVICE_STREAMING_OAUTH_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 export type DeviceStreamingFetch = (url: string, init: RequestInit) => Promise<Response>;

@@ -1,5 +1,5 @@
 import { createExecResult } from "../../../src/utils/execResult";
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, mock, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 import { DeviceUnreachableError } from "../../../src/models/DeviceUnreachableError";
 import path from "node:path";
@@ -14,6 +14,10 @@ import { logger } from "../../../src/utils/logger";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 // Issue #9898: the recorder is stopped by its own device-side pid, never by name,
 // whenever that pid is known.

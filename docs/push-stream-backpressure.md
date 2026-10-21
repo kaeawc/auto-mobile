@@ -5,11 +5,13 @@ message immediately, in its original JSON format. A `write()` returning false
 pauses further writes on that connection until `drain`.
 
 While paused, `screenshot_update` and `hierarchy_update` retain only the latest
-message per subscription, deviceId and type. Hierarchies carry the full tree; their diff
+message per subscription, deviceId, deviceSessionUuid and type. Absent, null and
+string session UUIDs are distinct epochs. Hierarchies carry the full tree; their diff
 annotations are advisory. There is no separate `observation_update` wire type.
 Replacements keep their slot's original position in the connection FIFO, ahead
 of any later acknowledgements. All-device subscriptions retain separate slots
-for each deviceId and type.
+for each deviceId, deviceSessionUuid and type. Frames from a new epoch queue after
+the preceding epoch's pending frames and intervening lifecycle events.
 A recovering client must continue pairing screenshot and hierarchy by
 `captureSequence`; coalescing does not establish that they describe the same capture.
 
@@ -34,8 +36,9 @@ replaced by a small additive notification:
 }
 ```
 
-At most one notification per subscription and deviceId is generated until a drain
-attempt or a send observes the buffer back at or below the threshold. It preserves
+At most one notification per subscription, deviceId and deviceSessionUuid is
+generated until a drain attempt or a send observes the buffer back at or below
+the threshold. It preserves
 the dropped frame's deviceId and deviceSessionUuid (including null, or omission
 when absent), shares the control FIFO and carries no screenshot bytes. Existing observation
 clients decode the type as a string, tolerate unknown fields and log/ignore
@@ -45,10 +48,10 @@ not claim a precise drop count or invalidate capture provenance.
 The 8 MiB threshold is not a maximum frame size: an individual screenshot may
 exceed it, and the first frame is admitted unchanged. While stalled the socket
 accepts no additional writes; outside it, there is at most one pending state
-frame per subscription/deviceId/type plus lossless controls. Only coalesced types
-have a fixed slot bound; memory for non-coalesced frames is bounded by the
-liveness timeout and producer rate. Keepalive
-pings and timeout reaping remain active; only inbound pong or drain progress
+frame per subscription/deviceId/deviceSessionUuid/type plus lossless controls.
+Coalesced types retain at most one frame per slot; memory across epochs and for
+non-coalesced frames is bounded by the liveness timeout and producer rate.
+Keepalive pings and timeout reaping remain active; only inbound pong or drain progress
 refreshes liveness, never a successful local write.
 Sockets with no subscription still receive keepalive while a stalled reply is queued.
 

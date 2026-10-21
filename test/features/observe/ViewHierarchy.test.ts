@@ -14,7 +14,10 @@ import type { ViewHierarchyAndroidCtrlProxy } from "../../../src/features/observ
 import { logger, LogLevel } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { recoverRootlessAccessibilityService } from "../../../src/features/observe/android/ObserveAccessibilityRecovery";
-import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import {
+  spyOnIosClientInstance,
+  spyOnIosExistingInstance,
+} from "../../helpers/iosCtrlProxyClientSpies";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -65,6 +68,22 @@ describe("ViewHierarchy", function () {
       expect(viewHierarchy.meetsStringFilterCriteria(propsWithResourceId)).toBe(true);
       expect(viewHierarchy.meetsStringFilterCriteria(propsWithContentDesc)).toBe(true);
       expect(viewHierarchy.meetsStringFilterCriteria(propsEmpty)).toBe(false);
+    });
+
+    test("forwards the iOS capture timestamp to the SDK identity refresh", async () => {
+      const reader = new ViewHierarchy({ ...mockDevice, platform: "ios" }, fakeAdbFactory);
+      const existing = spyOnIosExistingInstance({
+        refreshSdkScreenIdentity: async (appId?: string, capturedAt?: number) => {
+          expect(appId).toBe("com.example.sdk");
+          expect(capturedAt).toBe(123);
+          return undefined;
+        },
+      });
+      try {
+        await reader.getScreenIdentity("com.example.sdk", 123);
+      } finally {
+        existing.mockRestore();
+      }
     });
 
     describe("meetsBooleanFilterCriteria", function () {

@@ -8,10 +8,10 @@ import { type DevicePool, type PooledDevice } from "../../../daemon/devicePool";
 import { BootedDevice, ActionableError } from "../../../models";
 import { type Timer } from "../../../utils/SystemTimer";
 import { createPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { type DeviceToolsDependencies } from "./dependencies";
+import { type DeviceToolsDependencies } from "../core/dependencies";
 import { type TeardownContext, type TeardownResolvedTarget } from "./teardownContracts";
-import { runWithinShutdownDeadline } from "./deadlines";
-import { type TeardownDeviceArgs } from "./contracts";
+import { runWithinShutdownDeadline } from "../core/deadlines";
+import { type TeardownDeviceArgs } from "../core/contracts";
 
 export async function notifyResourcesAfterShutdown(
   dependencies: DeviceToolsDependencies,

@@ -139,6 +139,7 @@ class FakeAndroidManager implements ReadinessAndroidManager {
   restartResult = true;
   onRestart?: () => Promise<void> | void;
   resetSetupStateCalls = 0;
+  reopenSetupGateCalls = 0;
   private setupAttempted = false;
   compatibilityResult: Awaited<ReturnType<ReadinessAndroidManager["ensureCompatibleVersion"]>> = {
     status: "compatible",
@@ -196,6 +197,11 @@ class FakeAndroidManager implements ReadinessAndroidManager {
 
   resetSetupState(): void {
     this.resetSetupStateCalls++;
+    this.setupAttempted = false;
+  }
+
+  reopenSetupGate(): ReturnType<ReadinessAndroidManager["reopenSetupGate"]> {
+    this.reopenSetupGateCalls++;
     this.setupAttempted = false;
   }
 }
@@ -581,7 +587,8 @@ describe("RunnerReadinessService", () => {
       readinessTimeoutMs: 500,
     });
     expect(manager.setupCalls).toBe(2);
-    expect(manager.resetSetupStateCalls).toBeGreaterThanOrEqual(2);
+    expect(manager.resetSetupStateCalls).toBe(1);
+    expect(manager.reopenSetupGateCalls).toBe(2);
   });
 
   test("accepts delayed CtrlProxy enablement after setup", async () => {
@@ -1362,7 +1369,8 @@ describe("RunnerReadinessService", () => {
     await expect(service.ensureReady(readinessRequest)).resolves.toBeUndefined();
 
     expect(androidManager.setupCalls).toBe(2);
-    expect(androidManager.resetSetupStateCalls).toBe(2);
+    expect(androidManager.resetSetupStateCalls).toBe(0);
+    expect(androidManager.reopenSetupGateCalls).toBe(2);
   });
 
   test("honors disabled downloads while still enabling an installed compatible runner", async () => {

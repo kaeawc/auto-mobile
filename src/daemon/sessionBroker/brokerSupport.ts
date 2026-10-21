@@ -25,6 +25,17 @@ export function failureFor(error: unknown): SessionBrokerFailure {
     : { code: "session_preparation_failed", message: errorMessage(error), retryable: false };
 }
 
+export function preparationFailureError(error: unknown, signal: AbortSignal): unknown {
+  if (error instanceof SessionBrokerFailureError || !signal.aborted) {
+    return error;
+  }
+  return new SessionBrokerFailureError({
+    code: "cancelled",
+    retryable: true,
+    message: `Session preparation was cancelled: ${errorMessage(signal.reason)}`,
+  });
+}
+
 export function failedResult(
   config: SessionConfig,
   failure: SessionBrokerFailure,

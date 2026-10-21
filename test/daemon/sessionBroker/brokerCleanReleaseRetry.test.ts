@@ -82,20 +82,13 @@ describe("clean release retains warm devices across retryable failures", () => {
     return result.sessionUuid;
   }
 
-  function failStage(stage: ReleaseStage, error: Error): () => void {
-    if (stage === "completeCleanRelease") {
-      const failure = spyOn(options.store, stage).mockRejectedValue(error);
-      return () => failure.mockRestore();
-    }
-    const failure = spyOn(devices, stage).mockRejectedValue(error);
-    return () => failure.mockRestore();
-  }
-
-  async function expectPendingThenRedrive(stage: ReleaseStage, error: Error): Promise<void> {
-    const sessionUuid = await ready("first");
+  async function expectPendingThenRedrive(
+    stage: ReleaseStage,
+    sessionUuid: string,
+    clearFailure: () => void,
+  ): Promise<void> {
     const resourceId = devices.prepared[0];
     devices.dirty.add(resourceId);
-    const clearFailure = failStage(stage, error);
     expect(await broker.release(sessionUuid)).toEqual({ sessionUuid, outcome: "cleanup_pending" });
     expect(devices.destroyed).toEqual([]);
     expect(await options.store.getRequest("first")).toMatchObject({ state: "releasing" });
@@ -136,10 +129,16 @@ describe("clean release retains warm devices across retryable failures", () => {
       async (code) => {
         // Structured code through a cause is the dialect's contract; no message matching needed.
         const sqlite = Object.assign(new Error("write contention"), { code });
-        await expectPendingThenRedrive(
-          stage,
-          new Error("registry write failed", { cause: sqlite }),
-        );
+        const sessionUuid = await ready("first");
+        const failure =
+          stage === "completeCleanRelease"
+            ? spyOn(options.store, stage).mockRejectedValue(
+                new Error("registry write failed", { cause: sqlite }),
+              )
+            : spyOn(devices, stage).mockRejectedValue(
+                new Error("registry write failed", { cause: sqlite }),
+              );
+        await expectPendingThenRedrive(stage, sessionUuid, () => failure.mockRestore());
       },
     );
   }
@@ -149,7 +148,9 @@ describe("clean release retains warm devices across retryable failures", () => {
       new SimctlCommandTimeoutError("simctl list exceeded its deadline"),
       "Cannot start reset: fresh iOS simulator inventory failed",
     );
-    await expectPendingThenRedrive("reset", error);
+    const sessionUuid = await ready("first");
+    const failure = spyOn(devices, "reset").mockRejectedValue(error);
+    await expectPendingThenRedrive("reset", sessionUuid, () => failure.mockRestore());
   });
 
   test("shutdown cancellation wrapped at the device boundary remains retryable", async () => {
@@ -157,18 +158,30 @@ describe("clean release retains warm devices across retryable failures", () => {
       new DOMException("Shutdown", "AbortError"),
       "Release cancelled",
     );
-    await expectPendingThenRedrive("release", error);
+    const sessionUuid = await ready("first");
+    const failure = spyOn(devices, "release").mockRejectedValue(error);
+    await expectPendingThenRedrive("release", sessionUuid, () => failure.mockRestore());
   });
 
   test.each(["AbortError", "TimeoutError"])("%s identity is realm safe", async (name) => {
     // Remove the local Error prototype to stand in for an error from another realm.
     const cause = Object.setPrototypeOf(Object.assign(new Error("interrupted"), { name }), null);
     expect(cause instanceof Error).toBe(false);
-    await expectPendingThenRedrive("reset", new Error("native call failed", { cause }));
+    const sessionUuid = await ready("first");
+    const failure = spyOn(devices, "reset").mockRejectedValue(
+      new Error("native call failed", { cause }),
+    );
+    await expectPendingThenRedrive("reset", sessionUuid, () => failure.mockRestore());
   });
 
   test("an unknown receipt write failure after a clean reset stays pending for recovery", async () => {
-    await expectPendingThenRedrive("completeCleanRelease", new Error("receipt write failed"));
+    const sessionUuid = await ready("first");
+    const failure = spyOn(options.store, "completeCleanRelease").mockRejectedValue(
+      new Error("receipt write failed"),
+    );
+    await expectPendingThenRedrive("completeCleanRelease", sessionUuid, () =>
+      failure.mockRestore(),
+    );
   });
 
   test.each([

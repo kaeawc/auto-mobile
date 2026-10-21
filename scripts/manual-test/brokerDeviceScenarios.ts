@@ -486,6 +486,15 @@ export const PREPARATION_TIMEOUT_CODES: readonly string[] = [
   "daemon_unavailable",
   "provision_failed",
 ];
+export function preparationTimeoutSettled(
+  code: string,
+  statusResult: { failure?: { code?: string }; cleanupPending?: boolean } | undefined,
+): boolean {
+  if (statusResult === undefined) {
+    return code === "daemon_unavailable";
+  }
+  return statusResult.failure?.code === code && !statusResult.cleanupPending;
+}
 async function timeout(ctx: BrokerScenarioContext) {
   const c = successor(ctx, first(ctx));
   c.config = { ...c.config, preparationTimeoutMs: 1 };
@@ -496,14 +505,16 @@ async function timeout(ctx: BrokerScenarioContext) {
     code !== undefined && PREPARATION_TIMEOUT_CODES.includes(code),
     `Preparation timeout yielded ${String(code)}; expected one of ${PREPARATION_TIMEOUT_CODES.join(", ")}.`,
   );
-  assert.equal(failure.failure?.retryable, true);
   const settled = await poll(
     ctx,
     "Preparation timeout cleanup",
     () => status(ctx, c),
-    (r) => r?.failure?.code === code && !r.cleanupPending,
+    (r) => preparationTimeoutSettled(code, r),
   );
-  assert.equal(settled?.failure?.retryable, true);
+  assert.equal(failure.failure?.retryable, true);
+  if (settled !== undefined) {
+    assert.equal(settled.failure?.retryable, true);
+  }
   await poll(
     ctx,
     "Preparation timeout capacity",

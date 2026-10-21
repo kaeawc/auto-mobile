@@ -97,7 +97,8 @@ hold() {
   cd "$REPO_ROOT"
   run heavy true
   [ -z "$(ls -A "$AUTOMOBILE_COORDINATION_DIR/test-slots" 2> /dev/null)" ]
-  heavy sleep 2 &
+  # host_heavy_run appends the (empty) thread cap as the last argument; GNU sleep rejects it.
+  heavy bash -c 'sleep 2' _ &
   local runner=$!
   local attempt
   for ((attempt = 0; attempt < 100; attempt += 1)); do

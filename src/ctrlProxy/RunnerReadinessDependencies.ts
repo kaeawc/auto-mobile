@@ -38,6 +38,7 @@ export interface ReadinessAndroidManager {
     signal?: AbortSignal,
   ): Promise<ProxySetupResult>;
   resetSetupState(): void;
+  reopenSetupGate(): void;
 }
 
 export interface ReadinessIosManager {

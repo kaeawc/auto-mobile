@@ -8,6 +8,9 @@ import type {
 } from "../../src/daemon/sessionBroker/mutations/types";
 
 export class FakeDeviceMutationResetPort implements DeviceMutationResetPort {
+  get certifiableKinds(): readonly string[] {
+    return this.snapshot.completeKinds;
+  }
   readonly reverted: DeviceMutationInput[] = [];
   readonly unsupportedKinds = new Set<string>();
   captureCount = 0;

@@ -96,6 +96,12 @@ export type ShakeArgs = z.output<typeof shakeTool.schema>;
 
 export type KeyboardArgs = z.output<typeof keyboardTool.schema>;
 
+export const KEYBOARD_READ_ACTIONS: ReadonlySet<string> = new Set([
+  "detect",
+  "listImes",
+  "listProfiles",
+]);
+
 export type RecentAppsArgs = z.output<typeof recentAppsTool.schema>;
 
 export type RotateArgs = z.output<typeof rotateTool.schema>;

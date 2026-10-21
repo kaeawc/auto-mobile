@@ -29,6 +29,8 @@ import {
   type AccessibilityDisplaySnapshot,
 } from "./AccessibilityDisplayPreferences";
 import type { DeviceSettingsAccess } from "./DeviceSettingDefaults";
+import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
+import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 
 export const DISPLAY_KEYS = ["fontScale", "contentSize", "density", "nightMode"] as const;
 
@@ -79,6 +81,17 @@ export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
   }
 
   async read(
+    device: BootedDevice,
+    keys: readonly DeviceSettingKey[],
+    signal: AbortSignal | undefined = getAbortSignal(),
+  ): Promise<DeviceSettingValues> {
+    signal?.throwIfAborted();
+    return runWithAbortSignal(signal, () =>
+      awaitWhileRequestIsLive(this.readValues(device, keys), signal),
+    );
+  }
+
+  private async readValues(
     device: BootedDevice,
     keys: readonly DeviceSettingKey[],
   ): Promise<DeviceSettingValues> {

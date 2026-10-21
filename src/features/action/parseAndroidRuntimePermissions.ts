@@ -61,14 +61,14 @@ export function parseAndroidRuntimePermissions(
     section.text.startsWith(`Package [${packageName}]`),
   );
   const requested = pkg?.children.find((section) => section.text === "requested permissions:");
-  if (!requested) {
+  if (!pkg) {
     return undefined;
   }
   const install = pkg?.children.find((section) => section.text === "install permissions:");
   const user = pkg?.children.find((section) => section.text.startsWith(`User ${userId}:`));
   const runtime = user?.children.find((section) => section.text === "runtime permissions:");
   return {
-    requestedPermissions: new Set(requested.children.map((section) => section.text)),
+    requestedPermissions: new Set(requested?.children.map((section) => section.text) ?? []),
     installPermissions: permissionStates(install),
     runtimePermissions: permissionStates(runtime),
   };

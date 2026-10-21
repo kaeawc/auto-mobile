@@ -4,6 +4,7 @@ import {
   parseSessionBrokerHostConfig,
 } from "../../../src/daemon/sessionBroker/hostConfig";
 import { androidDefaults, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import { MAX_SETTIMEOUT_DELAY_MS } from "../../../src/utils/SystemTimer";
 
 function config(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -15,6 +16,94 @@ function config(overrides: Record<string, unknown> = {}): Record<string, unknown
 }
 
 describe("session broker host configuration", () => {
+  test.each(["snapshot", "keep-booted"])(
+    "accepts composed mode %s with explicit Android reuse",
+    (mode) => {
+      expect(
+        parseSessionBrokerHostConfig(
+          config({
+            defaults: { android: androidDefaults() },
+            reuseAndroidCleanDevices: true,
+            androidResetMode: mode,
+          }),
+        ).androidResetMode,
+      ).toBe(mode);
+      expect(() => parseSessionBrokerHostConfig(config({ androidResetMode: mode }))).toThrow();
+      expect(() =>
+        parseSessionBrokerHostConfig(
+          config({ androidResetMode: mode, reuseAndroidCleanDevices: true }),
+        ),
+      ).toThrow();
+    },
+  );
+
+  test.each(["snapshot", "destroy"])(
+    "accepts keep-booted fallback %s only for keep-booted",
+    (fallback) => {
+      const android = { defaults: { android: androidDefaults() }, reuseAndroidCleanDevices: true };
+      expect(
+        parseSessionBrokerHostConfig(
+          config({
+            ...android,
+            androidResetMode: "keep-booted",
+            androidKeepBootedFallback: fallback,
+          }),
+        ),
+      ).toMatchObject({ androidKeepBootedFallback: fallback });
+      for (const mode of [undefined, "snapshot"]) {
+        expect(() =>
+          parseSessionBrokerHostConfig(
+            config({ ...android, androidResetMode: mode, androidKeepBootedFallback: fallback }),
+          ),
+        ).toThrow();
+      }
+    },
+  );
+
+  test("snapshot timeout validates its bound and rejects ignored configuration", () => {
+    const android = { defaults: { android: androidDefaults() }, reuseAndroidCleanDevices: true };
+    for (const mode of ["snapshot", "keep-booted"]) {
+      const options = {
+        ...android,
+        androidResetMode: mode,
+        ...(mode === "keep-booted" ? { androidKeepBootedFallback: "snapshot" } : {}),
+      };
+      expect(
+        parseSessionBrokerHostConfig(
+          config({ ...options, androidResetTimeoutMs: MAX_SETTIMEOUT_DELAY_MS }),
+        ).androidResetTimeoutMs,
+      ).toBe(MAX_SETTIMEOUT_DELAY_MS);
+      for (const timeoutMs of [0, -1, 1.5, MAX_SETTIMEOUT_DELAY_MS + 1]) {
+        expect(() =>
+          parseSessionBrokerHostConfig(config({ ...options, androidResetTimeoutMs: timeoutMs })),
+        ).toThrow();
+      }
+    }
+    for (const options of [
+      {},
+      { ...android, androidResetMode: "keep-booted" },
+      { ...android, androidResetMode: "keep-booted", androidKeepBootedFallback: "destroy" },
+    ]) {
+      expect(() =>
+        parseSessionBrokerHostConfig(config({ ...options, androidResetTimeoutMs: 1000 })),
+      ).toThrow();
+    }
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({ ...android, androidResetMode: "snapshot", androidKeepBootedMaxUses: 5 }),
+      ),
+    ).toThrow();
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({
+          ...android,
+          androidResetMode: "keep-booted",
+          androidKeepBootedFallback: "unknown",
+        }),
+      ),
+    ).toThrow();
+  });
+
   test("iOS reuse modes preserve the legacy erase alias without changing Android", () => {
     expect(iosReusePolicy(parseSessionBrokerHostConfig(config()))).toEqual({ mode: "off" });
     expect(
@@ -155,7 +244,46 @@ describe("session broker host configuration", () => {
     ).toThrow();
   });
 
+  test("keep-booted is an optional operator mode with a positive maxUses limit", () => {
+    expect(
+      parseSessionBrokerHostConfig(
+        config({
+          defaults: { android: androidDefaults() },
+          reuseAndroidCleanDevices: true,
+          androidResetMode: "keep-booted",
+          androidKeepBootedMaxUses: 5,
+        }),
+      ),
+    ).toMatchObject({
+      androidResetMode: "keep-booted",
+      androidKeepBootedMaxUses: 5,
+      reuseAndroidCleanDevices: true,
+    });
+    for (const maxUses of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        parseSessionBrokerHostConfig(config({ androidKeepBootedMaxUses: maxUses })),
+      ).toThrow();
+    }
+    expect(() => parseSessionBrokerHostConfig(config({ androidResetMode: "unknown" }))).toThrow();
+  });
+
   test.each([
+    [
+      "reset mode without reuse",
+      { androidResetMode: "keep-booted", defaults: { android: androidDefaults() } },
+    ],
+    [
+      "reset mode without Android defaults",
+      { androidResetMode: "keep-booted", reuseAndroidCleanDevices: true },
+    ],
+    [
+      "maxUses without mode",
+      {
+        androidKeepBootedMaxUses: 2,
+        reuseAndroidCleanDevices: true,
+        defaults: { android: androidDefaults() },
+      },
+    ],
     ["negative total cap", { limits: { totalDeviceCap: -1 } }],
     ["fractional session cap", { limits: { sessionCap: 1.5 } }],
     ["unsafe idle cap", { limits: { idlePoolCap: Number.MAX_SAFE_INTEGER + 1 } }],

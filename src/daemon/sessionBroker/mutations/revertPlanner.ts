@@ -1,4 +1,4 @@
-import { genericBaselineRevert, type BaselineChange, type BaselineDiff } from "./baseline";
+import { genericBaselineRevert, type BaselineDiff, type BaselineChange } from "./baseline";
 import { DEVICE_MUTATION_KINDS, type DeviceMutationEntry, type DeviceMutationInput } from "./types";
 
 export interface DeviceRevertStep {
@@ -12,7 +12,10 @@ export type DeviceRevertPlan =
 
 export interface DeviceMutationRevertSupport {
   canRevert(mutation: DeviceMutationInput): boolean;
-  baselineRevert?(change: BaselineChange): DeviceMutationInput | null;
+  baselineRevert?(
+    change: BaselineChange,
+    changes: readonly BaselineChange[],
+  ): DeviceMutationInput | null;
 }
 
 export function planDeviceMutationRevert(
@@ -26,14 +29,25 @@ export function planDeviceMutationRevert(
     .sort((left, right) => right.sequence - left.sequence)
     .map((mutation) => ({ source: "journal", mutation }));
   for (const change of diff.changes.filter((entry) => !entry.journaled)) {
-    const mutation = genericBaselineRevert(change) ?? support.baselineRevert?.(change);
+    const mutation =
+      support.baselineRevert?.(change, diff.changes) ?? genericBaselineRevert(change);
     if (mutation) {
-      steps.push({ source: "baseline", mutation });
+      if (
+        !steps.some(
+          (step) => step.mutation.kind === mutation.kind && step.mutation.key === mutation.key,
+        )
+      ) {
+        steps.push({ source: "baseline", mutation });
+      }
     } else {
       reasons.push(`Unjournaled ${change.kind}:${change.key}`);
     }
   }
   for (const step of steps) {
+    if (step.mutation.priorValue.state === "unobservable") {
+      reasons.push(`Unobservable prior value ${step.mutation.kind}:${step.mutation.key}`);
+      continue;
+    }
     if (!knownKinds.has(step.mutation.kind) || !support.canRevert(step.mutation)) {
       reasons.push(`Unsupported ${step.mutation.kind}:${step.mutation.key}`);
     }

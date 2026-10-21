@@ -85,3 +85,67 @@ select_for() {
   grep -Fq 'detektMain detektTest :build-logic:test ${{ steps.lint-select.outputs.tasks }}' "$pr"
   grep -Fq 'detektMain detektTest :build-logic:test lintDebug' "$merge"
 }
+
+@test "SDK changes select direct and transitive Android consumers through JVM modules" {
+  mkdir -p android/auto-mobile-sdk/src/main android/playground/app android/playground/bridge
+  cat > android/settings.gradle.kts <<'GRADLE'
+include(":auto-mobile-sdk", ":foo", ":bar", ":jvm")
+include(
+  ":playground:bridge",
+  ":playground:app",
+)
+GRADLE
+  printf 'plugins { id("automobile.android-library") }\n' > android/auto-mobile-sdk/build.gradle.kts
+  cat >> android/foo/build.gradle.kts <<'GRADLE'
+dependencies { api(projects.autoMobileSdk) }
+GRADLE
+  cat > android/playground/bridge/build.gradle.kts <<'GRADLE'
+plugins { id("automobile.kotlin-common") }
+dependencies { implementation(project(":foo")) }
+GRADLE
+  cat > android/playground/app/build.gradle.kts <<'GRADLE'
+plugins { alias(libs.plugins.android.application) }
+dependencies { implementation(projects.playground.bridge) }
+GRADLE
+  # A cycle must terminate without emitting JVM lint tasks.
+  printf 'dependencies { api(project(":playground:app")) }\n' >> android/foo/build.gradle.kts
+  for path in src/main/SDK.kt src/main/res/values/strings.xml src/main/AndroidManifest.xml lint-baseline.xml; do
+    run select_for "android/auto-mobile-sdk/$path"
+    [ "$status" -eq 0 ]
+    [ "$output" = $':auto-mobile-sdk:lintDebug\n:foo:lintDebug\n:playground:app:lintDebug' ]
+  done
+}
+
+@test "real SDK changes include the playground app" {
+  cd "$REPO_ROOT"
+  run select_for android/auto-mobile-sdk/src/main/kotlin/AutoMobileSDK.kt
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\n:playground:app:lintDebug\n'* ]]
+}
+
+@test "unrelated dependency components stay out of the lint selection" {
+  printf 'dependencies { api(project(":playground:baz")) }\n' >> android/bar/build.gradle.kts
+  run select_for android/foo/src/main/Foo.kt
+  [ "$status" -eq 0 ]
+  [ "$output" = ':foo:lintDebug' ]
+}
+
+@test "unknown typesafe accessors conservatively select all" {
+  printf 'dependencies { api(projects.unknownModule) }\n' >> android/bar/build.gradle.kts
+  run select_for android/foo/src/main/Foo.kt
+  [ "$status" -eq 0 ]
+  [ "$output" = all ]
+}
+
+@test "multiline project dependencies carry JVM edits to Android consumers" {
+  cat >> android/foo/build.gradle.kts <<'GRADLE'
+dependencies {
+  implementation(project(
+    ":jvm"
+  ))
+}
+GRADLE
+  run select_for android/jvm/src/main/J.kt
+  [ "$status" -eq 0 ]
+  [ "$output" = ':foo:lintDebug' ]
+}

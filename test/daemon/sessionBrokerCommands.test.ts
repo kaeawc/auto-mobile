@@ -149,6 +149,29 @@ describe("session broker command arguments", () => {
 });
 
 describe("session broker status command", () => {
+  test("v1 status accepts additive timing and unknown fields without stripping them", async () => {
+    const receipt = {
+      contractVersion: 1,
+      requestId: REQUEST_ID,
+      outcome: "pending",
+      sessionUuid: null,
+      profile: null,
+      cleanupPending: true,
+      timing: {
+        reset: {
+          mode: "erase",
+          outcome: "pending",
+          phases: { stop: 3 },
+          reuseCount: 1,
+          startedAtMs: 0,
+          totalMs: 3,
+        },
+      },
+      futureField: "ignored",
+    } as const;
+    const client = new FakeBrokerCommandClient(receipt);
+    expect(await queryBrokerSessionRequestStatus(statusArgs, () => client)).toBe(receipt);
+  });
   test.each([
     {
       contractVersion: 1,
@@ -197,6 +220,24 @@ describe("session broker status command", () => {
 });
 
 describe("session broker release command", () => {
+  test("release accepts additive reset timing without stripping it", async () => {
+    const receipt = {
+      sessionUuid: SESSION_UUID,
+      outcome: "released",
+      timing: {
+        reset: {
+          mode: "erase",
+          outcome: "clean",
+          phases: { erase: 5 },
+          reuseCount: 1,
+          startedAtMs: 0,
+          totalMs: 5,
+        },
+      },
+    } as const;
+    const client = new FakeBrokerCommandClient(receipt);
+    expect(await releaseBrokerSession(releaseArgs, () => client)).toBe(receipt);
+  });
   test("keeps unknown_session explicit and uses the 240-second release timeout budget", async () => {
     const receipt = { sessionUuid: SESSION_UUID, outcome: "unknown_session" as const };
     const client = new FakeBrokerCommandClient(receipt);

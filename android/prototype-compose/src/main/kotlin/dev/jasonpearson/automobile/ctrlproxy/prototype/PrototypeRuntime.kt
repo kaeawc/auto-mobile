@@ -16,10 +16,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeEventSink {
   suspend fun send(event: PrototypeEvent)
 }
 
+@InternalAutoMobilePrototypeApi
 data class PrototypeRuntimeSnapshot(
   val spec: PrototypeSpec,
   val pages: Map<String, Int>,
@@ -41,6 +43,7 @@ data class PrototypeRuntimeSnapshot(
     get() = spec.state.orEmpty()
 }
 
+@InternalAutoMobilePrototypeApi
 sealed interface PrototypeInteraction {
   data class Guarded(val identity: String, val interaction: PrototypeInteraction) :
     PrototypeInteraction
@@ -119,6 +122,7 @@ sealed interface PrototypeInteraction {
  * Dismissal finishes removal/delivery even if disposing Compose cancels the gesture coroutine.
  * Dismissal closes the runtime before delivery; its dismissed event is the final permitted event.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeRuntime(
   spec: PrototypeSpec,
   private val sink: PrototypeEventSink = PrototypeEventSink {},
@@ -1263,17 +1267,19 @@ internal fun pagerCounts(root: PrototypeNode): Map<String, Int> = buildMap {
 /**
  * Detents retain author order; snapping uses physical height. All dimensions are window-local dp.
  */
-fun prototypeSheetHeights(detents: List<PrototypeDetent>, windowHeight: Double): List<Double> =
-  detents.map { detent ->
-    when (detent) {
-      PrototypeDetent.Half -> windowHeight / 2
-      PrototypeDetent.Full -> windowHeight
-      is PrototypeDetent.Dp -> detent.dp.coerceAtMost(windowHeight)
-    }
+internal fun prototypeSheetHeights(
+  detents: List<PrototypeDetent>,
+  windowHeight: Double,
+): List<Double> = detents.map { detent ->
+  when (detent) {
+    PrototypeDetent.Half -> windowHeight / 2
+    PrototypeDetent.Full -> windowHeight
+    is PrototypeDetent.Dp -> detent.dp.coerceAtMost(windowHeight)
   }
+}
 
 /** Positive drag is downward. Below half the smallest detent dismisses if swipe dismissal is on. */
-fun settlePrototypeSheet(
+internal fun settlePrototypeSheet(
   heights: List<Double>,
   current: Double,
   drag: Double,
@@ -1288,6 +1294,7 @@ fun settlePrototypeSheet(
  * Counts the requests in flight against `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT`. One instance is shared
  * by every runtime of a controller, so the cap holds for the device and not per window.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeRequestLimiter(
   private val max: Int = PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT,
 ) {

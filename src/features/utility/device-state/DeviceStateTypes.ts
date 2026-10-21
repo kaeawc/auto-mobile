@@ -1,4 +1,5 @@
 import type { BootedDevice, ExecResult } from "../../../models";
+import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
 import { ActionableError } from "../../../models/ActionableError";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -41,6 +42,8 @@ import {
   type BiometricEnrollment,
   type BiometricEnrollmentState,
 } from "./BiometricState";
+import type { ScreenLockState, SetScreenLockInput } from "../screenLock/ScreenLockTypes";
+import type { ScreenLockDeviceStateDependencies } from "../screenLock/ScreenLockOperations";
 
 export interface DeviceStateResult {
   success: boolean;
@@ -54,6 +57,7 @@ export interface DeviceStateResult {
   location?: DeviceLocationState;
   clock?: DeviceClockState;
   cameraPoster?: DeviceCameraPosterState;
+  screenLock?: ScreenLockState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -69,6 +73,7 @@ export interface SetDeviceStateInput {
   location?: SetDeviceLocationInput;
   clock?: SetDeviceClockInput;
   cameraPoster?: SetDeviceCameraPosterInput;
+  screenLock?: SetScreenLockInput;
 }
 
 /**
@@ -84,6 +89,7 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "biometrics",
   "networkCondition",
   "clock",
+  "screenLock",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -103,6 +109,7 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
   location: true,
   clock: true,
   cameraPoster: true,
+  screenLock: true,
 };
 
 /**
@@ -128,6 +135,7 @@ export interface SelectedDeviceStates {
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
   clock?: DeviceClockState;
+  screenLock?: ScreenLockState;
 }
 
 /**
@@ -151,6 +159,8 @@ export interface DeviceStateDependencies {
   timer?: Timer;
   consoleFactory?: EmulatorConsoleClientFactory;
   routeRegistry?: LocationRouteRegistry;
+  /** Emulator detection for location writes; defaults to the shared cached reader. */
+  deviceTraits?: DeviceTraits;
   canWriteLocation?: () => boolean;
   /** Session attribution is supplied by the handler, never inferred from write admission. */
   onLocationApplied?: () => void;
@@ -171,6 +181,8 @@ export interface DeviceStateDependencies {
    * conditions are refused because nothing would renew or remove the rule.
    */
   iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
+  /** Android lock-screen credential seams (#14107); a session supplies `mutation`. */
+  screenLock?: ScreenLockDeviceStateDependencies;
 }
 
 export type RequestedDeviceStates = Pick<
@@ -182,6 +194,7 @@ export type RequestedDeviceStates = Pick<
   | "location"
   | "clock"
   | "cameraPoster"
+  | "screenLock"
 >;
 
 export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must be included";
@@ -195,7 +208,8 @@ export function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean 
     !input.networkCondition &&
     !input.location &&
     !input.clock &&
-    !input.cameraPoster
+    !input.cameraPoster &&
+    !input.screenLock
   );
 }
 

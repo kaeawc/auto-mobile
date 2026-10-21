@@ -73,11 +73,13 @@ import {
 } from "./CtrlProxyManagerContracts";
 import { ctrlProxyManagerHost, type SavedPrototypeService } from "./ctrlProxyManagerHost";
 import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
+import { AndroidDeviceTraitsReader } from "../utils/android-cmdline-tools/deviceTraits";
 
 export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Kept on the manager for the observe availability-invalidation test seam.
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
   private readonly accessibility: AndroidCtrlProxyAccessibility;
+  private readonly deviceTraits: AndroidDeviceTraitsReader;
   private readonly rebind: AndroidCtrlProxyRebind;
   private readonly compatibility: AndroidCtrlProxyCompatibility;
   private readonly apkInstaller: AndroidCtrlProxyApkInstaller;
@@ -96,6 +98,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       get adb() {
         return manager.adb;
       },
+      readDeviceTraits: () => this.deviceTraits.read(this.adb, this.device.deviceId),
       statusInspectionDeviceError: (error) => this.statusInspectionDeviceError(error),
       isInstalled: () => this.isInstalled(),
       isEnabled: (_signal, options) => this.isEnabled(_signal, options),
@@ -295,6 +298,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     this.timer = timer;
     this.fileDownloader = fileDownloader;
     this.checksumCalculator = checksumCalculator;
+    // One manager per device, so a per-manager reader reads each device's traits once per TTL.
+    this.deviceTraits = new AndroidDeviceTraitsReader(timer);
     this.accessibility = this.createAndroidCtrlProxyAccessibility();
     this.rebind = this.createAndroidCtrlProxyRebind();
     this.compatibility = this.createAndroidCtrlProxyCompatibility();

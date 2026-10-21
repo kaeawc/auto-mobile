@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import { DAEMON_VERSION } from "./constants";
 
 /**
  * Identity of a particular AutoMobile build.
@@ -121,5 +122,19 @@ export function buildIdentityFromStatus(record: {
   return {
     entryScript: record.entryScript ?? "",
     buildId: record.buildId ?? UNKNOWN_BUILD_ID,
+  };
+}
+
+/**
+ * This process's handshake identity. `version` is read on every access so an
+ * identity built before {@link import("./constants").resolveDaemonVersion}
+ * settles still declares the refined (dirty-aware) stamp (#14405).
+ */
+export function liveDaemonIdentity(): { readonly version: string; build: BuildIdentity } {
+  return {
+    get version() {
+      return DAEMON_VERSION;
+    },
+    build: getCurrentBuildIdentity(),
   };
 }

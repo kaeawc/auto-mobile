@@ -18,11 +18,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.concurrent.thread
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.serializer
 
 internal object DaemonSocketClientManager : DaemonToolClient {
   override fun isAlive(): Boolean = DaemonSocketClient.isAvailable(DaemonSocketPaths.socketPath())
@@ -249,7 +247,6 @@ internal class DaemonSocketClient(
   private val livenessOwnerToken: String = DaemonLivenessOwner.token,
   private val responseObserver: ((DaemonResponse) -> Unit)? = null,
 ) : Closeable, DaemonToolClient {
-  private val json = Json { ignoreUnknownKeys = true }
   private val requests: DaemonPendingRequests
   @Volatile private var closed = false
 
@@ -296,6 +293,7 @@ internal class DaemonSocketClient(
         method = "tools/call",
         params = buildJsonParams(toolName, arguments),
         timeoutMs = timeoutMs,
+        acceptsRequestBudget = true,
         clientVersion = clientVersion,
         clientBuildId = clientBuildId,
         clientEntryScript = clientEntryScript,
@@ -317,6 +315,7 @@ internal class DaemonSocketClient(
         method = "resources/read",
         params = JsonObject(mapOf("uri" to JsonPrimitive(uri))),
         timeoutMs = timeoutMs,
+        acceptsRequestBudget = true,
         clientVersion = clientVersion,
         clientBuildId = clientBuildId,
         clientEntryScript = clientEntryScript,
@@ -394,6 +393,14 @@ internal class DaemonSocketClient(
   }
 
   private fun readLoop() {
+    val frames =
+      DaemonInboundFrames(
+        onResponse = { response ->
+          responseObserver?.invoke(response)
+          requests.handleResponse(response)
+        },
+        onBudget = requests::adoptBudget,
+      )
     try {
       while (!closed) {
         val line = reader.readLine() ?: break
@@ -401,9 +408,7 @@ internal class DaemonSocketClient(
           continue
         }
         try {
-          val response = json.decodeFromString(serializer<DaemonResponse>(), line)
-          responseObserver?.invoke(response)
-          requests.handleResponse(response)
+          frames.handle(line)
         } catch (e: Exception) {
           // One bad frame must not end the reader and fail every pending request in the user's
           // test.
@@ -514,6 +519,7 @@ internal data class DaemonRequest(
   val method: String,
   val params: JsonObject,
   val timeoutMs: Long? = null,
+  val acceptsRequestBudget: Boolean? = null,
   // Declared for the daemon's server-side version handshake gate (#2744). Null on
   // legacy runners; the daemon allows those through.
   val clientVersion: String? = null,

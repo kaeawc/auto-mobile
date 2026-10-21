@@ -116,7 +116,7 @@ export function exactHolder(fs: FakeLockFileSystem, pid: number): void {
 export function prefix(fs: FakeLockFileSystem): string {
   const { ino, mtimeMs } = fs.stat(PATH);
   const hash = createHash("sha256").update(fs.readText(PATH)).digest("hex").slice(0, 32);
-  return `${PATH}.reclaim.${ino}.${mtimeMs}.${hash}`;
+  return `${PATH}.reclaim.${Number(ino)}.${mtimeMs}.${hash}`;
 }
 
 export interface Actor {

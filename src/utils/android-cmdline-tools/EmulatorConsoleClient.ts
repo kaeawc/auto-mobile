@@ -1,5 +1,32 @@
 import { trackAmbient } from "../PerfContext";
 import { ActionableError } from "../../models";
+import {
+  defaultEmulatorConsoleBusyRegistry,
+  type EmulatorConsoleBusyRegistry,
+} from "./EmulatorConsoleBusyRegistry";
+import {
+  buildFingerRemoveCommand,
+  buildFingerTouchCommand,
+  buildGsmRadioCommand,
+  buildGsmSignalCommand,
+  buildNetworkDelayCommand,
+  buildNetworkSpeedCommand,
+  buildPostureCommand,
+  buildPowerAcCommand,
+  buildPowerCapacityCommand,
+  buildPowerHealthCommand,
+  buildPowerStatusCommand,
+  buildSensorGetCommand,
+  buildSensorSetCommand,
+  parseSensorGetOutput,
+  type ConsoleNetworkDelay,
+  type ConsoleNetworkSpeed,
+  type ConsolePostureVerb,
+  type ConsolePowerHealth,
+  type ConsolePowerStatus,
+  type ConsoleRadioState,
+} from "./emulatorConsoleCommands";
+import { buildVmSnapshotConsoleCommand, type VmSnapshotAction } from "./vmSnapshot";
 export { FileEmulatorConsoleAuthTokenReader } from "./FileEmulatorConsoleAuthTokenReader";
 export { NetEmulatorConsoleTransport } from "./NetEmulatorConsoleTransport";
 
@@ -16,7 +43,43 @@ export interface EmulatorConsoleClient {
   gsmHold(): Promise<void>;
   smsSend(phoneNumber: string, message: string): Promise<void>;
   geoFix(lon: number, lat: number, altitude?: number, signal?: AbortSignal): Promise<void>;
+  /** `power ac on|off` — charger connected or not; no root needed. */
+  powerAc(online: boolean): Promise<void>;
+  /** `power status <status>` — reported charging state. */
+  powerStatus(status: ConsolePowerStatus): Promise<void>;
+  /** `power health <health>` — reported battery health. */
+  powerHealth(health: ConsolePowerHealth): Promise<void>;
+  /** `power capacity <0-100>` — reported charge level. */
+  powerCapacity(percent: number): Promise<void>;
+  /** `sensor set <name> <a[:b[:c]]>` — inject a sensor reading. */
+  sensorSet(name: string, values: readonly number[]): Promise<void>;
+  /** `sensor get <name>` — read back the current sensor value components. */
+  sensorGet(name: string): Promise<number[]>;
+  /** `network speed <preset|up:down>` — console-layer link shaping. */
+  networkSpeed(speed: ConsoleNetworkSpeed): Promise<void>;
+  /** `network delay <preset|min[:max]>` — console-layer latency. */
+  networkDelay(delay: ConsoleNetworkDelay): Promise<void>;
+  /** `gsm data <state>` — data-radio registration state. */
+  gsmData(state: ConsoleRadioState): Promise<void>;
+  /** `gsm voice <state>` — voice-radio registration state. */
+  gsmVoice(state: ConsoleRadioState): Promise<void>;
+  /** `gsm signal <rssi> [<ber>]` — signal strength (`99` = unknown). */
+  gsmSignal(rssi: number, ber?: number): Promise<void>;
+  /** `finger touch <id>` — simulate a fingerprint touch. */
+  fingerTouch(fingerprintId: number): Promise<void>;
+  /** `finger remove` — lift the simulated finger. */
+  fingerRemove(): Promise<void>;
+  /**
+   * `avd snapshot save|load|del <name>`. Marks the console busy for the
+   * duration so a concurrent `emu avd name` probe is not read as device loss.
+   */
+  avdSnapshot(action: VmSnapshotAction, snapshotName: string, signal?: AbortSignal): Promise<void>;
+  /** `rotate` / `fold` / `unfold` — device posture. */
+  posture(verb: ConsolePostureVerb): Promise<void>;
 }
+
+/** Console exchanges that block the emulator (snapshot save/load) need a longer deadline. */
+export const AVD_SNAPSHOT_CONSOLE_TIMEOUT_MS = 30_000;
 
 /**
  * Transport for the emulator-console TCP session. Implementations open a TCP
@@ -31,6 +94,7 @@ export interface EmulatorConsoleTransport {
     authToken: string | null,
     commands: string[],
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<string>;
 }
 
@@ -125,9 +189,14 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     private readonly port: number,
     private readonly transport: EmulatorConsoleTransport,
     private readonly tokenReader: EmulatorConsoleAuthTokenReader,
+    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
   ) {}
 
-  private runCommands(commands: string[], signal?: AbortSignal): Promise<void> {
+  private runCommands(
+    commands: string[],
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<string> {
     // One span per emulator-console exchange, named by the leading verb so
     // spans aggregate (e.g. `emulator-console gsm`), recorded against the
     // ambient device-lifecycle tracker when one is in scope (see PerfContext).
@@ -135,7 +204,14 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     return trackAmbient(`emulator-console ${verb}`.trimEnd(), async () => {
       const token = await this.tokenReader.read();
       signal?.throwIfAborted();
-      const output = await this.transport.execute("127.0.0.1", this.port, token, commands, signal);
+      const output = await this.transport.execute(
+        "127.0.0.1",
+        this.port,
+        token,
+        commands,
+        signal,
+        timeoutMs,
+      );
       const acknowledgement = parseConsoleAcknowledgement(output, token !== null, commands.length);
       if (!acknowledgement.ok && acknowledgement.reason !== undefined) {
         throw new ActionableError(`Emulator console rejected command: ${acknowledgement.reason}`);
@@ -145,7 +221,13 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
           `Emulator console closed before acknowledging '${commands.join(", ")}'`,
         );
       }
+      return output;
     });
+  }
+
+  /** Runs a single command whose output carries nothing beyond the acknowledgement. */
+  private async runCommand(command: string, signal?: AbortSignal): Promise<void> {
+    await this.runCommands([command], signal);
   }
 
   private async gsmCommand(
@@ -197,5 +279,73 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
       [`geo fix ${lon} ${lat}${altitude === undefined ? "" : ` ${altitude}`}`],
       signal,
     );
+  }
+
+  async powerAc(online: boolean): Promise<void> {
+    await this.runCommand(buildPowerAcCommand(online));
+  }
+
+  async powerStatus(status: ConsolePowerStatus): Promise<void> {
+    await this.runCommand(buildPowerStatusCommand(status));
+  }
+
+  async powerHealth(health: ConsolePowerHealth): Promise<void> {
+    await this.runCommand(buildPowerHealthCommand(health));
+  }
+
+  async powerCapacity(percent: number): Promise<void> {
+    await this.runCommand(buildPowerCapacityCommand(percent));
+  }
+
+  async sensorSet(name: string, values: readonly number[]): Promise<void> {
+    await this.runCommand(buildSensorSetCommand(name, values));
+  }
+
+  async sensorGet(name: string): Promise<number[]> {
+    const output = await this.runCommands([buildSensorGetCommand(name)]);
+    return parseSensorGetOutput(name, output);
+  }
+
+  async networkSpeed(speed: ConsoleNetworkSpeed): Promise<void> {
+    await this.runCommand(buildNetworkSpeedCommand(speed));
+  }
+
+  async networkDelay(delay: ConsoleNetworkDelay): Promise<void> {
+    await this.runCommand(buildNetworkDelayCommand(delay));
+  }
+
+  async gsmData(state: ConsoleRadioState): Promise<void> {
+    await this.runCommand(buildGsmRadioCommand("data", state));
+  }
+
+  async gsmVoice(state: ConsoleRadioState): Promise<void> {
+    await this.runCommand(buildGsmRadioCommand("voice", state));
+  }
+
+  async gsmSignal(rssi: number, ber?: number): Promise<void> {
+    await this.runCommand(buildGsmSignalCommand(rssi, ber));
+  }
+
+  async fingerTouch(fingerprintId: number): Promise<void> {
+    await this.runCommand(buildFingerTouchCommand(fingerprintId));
+  }
+
+  async fingerRemove(): Promise<void> {
+    await this.runCommand(buildFingerRemoveCommand());
+  }
+
+  async avdSnapshot(
+    action: VmSnapshotAction,
+    snapshotName: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const command = buildVmSnapshotConsoleCommand(action, snapshotName);
+    await this.consoleBusyRegistry.runExclusive(`emulator-${this.port}`, () =>
+      this.runCommands([command], signal, AVD_SNAPSHOT_CONSOLE_TIMEOUT_MS),
+    );
+  }
+
+  async posture(verb: ConsolePostureVerb): Promise<void> {
+    await this.runCommand(buildPostureCommand(verb));
   }
 }

@@ -1,3 +1,4 @@
+import type { AndroidLaunchIntent } from "./androidLaunchIntent";
 import { BootedDevice, ClearAppDataResult, TerminateAppResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -71,6 +72,8 @@ export interface AndroidLaunchOptions {
   clearAppData: boolean;
   coldBoot: boolean;
   activityName?: string;
+  /** Explicit launch intent (#14080); always starts it, even when the app is in front. */
+  intent?: AndroidLaunchIntent;
   userId?: number;
   skipUiStability?: boolean;
   signal?: AbortSignal;
@@ -82,6 +85,8 @@ export interface LaunchAppCall extends ActionCall {
   coldBoot: boolean;
   /** Activity name to launch (Android only). */
   activityName?: string;
+  /** Launch intent (Android only, #14080). */
+  intent?: AndroidLaunchIntent;
   /** Android user ID (auto-detected if not provided). */
   userId?: number;
   skipUiStability?: boolean;

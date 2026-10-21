@@ -361,6 +361,17 @@ export interface CtrlProxyHingeAngleResult {
   totalTimeMs: number;
 }
 
+/** System light/dark appearance read back by the runner (`XCUIDevice.appearance`, #14092). */
+export type CtrlProxyAppearance = "light" | "dark" | "unspecified";
+
+/** `request_appearance` result: the appearance read after any requested change. */
+export interface CtrlProxyAppearanceResult {
+  success: boolean;
+  appearance?: CtrlProxyAppearance;
+  error?: string;
+  totalTimeMs: number;
+}
+
 /** Launch app result from CtrlProxy iOS */
 export type CtrlProxyLaunchAppResult = BaseResult;
 

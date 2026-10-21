@@ -20,7 +20,7 @@ export class PushSubscriberOutbox {
 
   constructor(private readonly socket: PushSocketWriter) {}
 
-  send(message: unknown, drainPending: boolean, serialized?: string): boolean {
+  send(message: unknown, drainPending: boolean, serialized?: string | (() => string)): boolean {
     if (this.socket.writableLength <= PUSH_SOCKET_WRITABLE_LIMIT_BYTES) {
       this.reportedDrops.clear();
     }
@@ -51,11 +51,12 @@ export class PushSubscriberOutbox {
       } satisfies FramesDroppedMessage;
       serialized = undefined;
     }
+    const line = typeof serialized === "function" ? serialized() : serialized;
     if (drainPending) {
-      this.enqueue(message, serialized);
+      this.enqueue(message, line);
       return false;
     }
-    return this.write(message, serialized);
+    return this.write(message, line);
   }
 
   flush(): boolean {

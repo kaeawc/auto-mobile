@@ -1,4 +1,8 @@
 import {
+  defaultDeviceTraits,
+  type DeviceTraits,
+} from "../../utils/android-cmdline-tools/deviceTraits";
+import {
   LocationOperations,
   type DeviceLocationState,
   type SetDeviceLocationInput,
@@ -118,6 +122,7 @@ export class DeviceState {
   private timer: Timer;
   private consoleFactory: EmulatorConsoleClientFactory;
   private routeRegistry: LocationRouteRegistry;
+  private deviceTraits: DeviceTraits;
   private readonly canWriteLocation: () => boolean;
   private readonly onLocationApplied?: () => void;
   private readonly cameraPosterQrWriter?: QrPosterWriter;
@@ -139,6 +144,7 @@ export class DeviceState {
     simctl: () => this.simctl,
     routeRegistry: () => this.routeRegistry,
     consoleFactory: () => this.consoleFactory,
+    deviceTraits: () => this.deviceTraits,
     canWriteLocation: () => this.canWriteLocation(),
     onLocationApplied: () => this.onLocationApplied,
   });
@@ -180,6 +186,7 @@ export class DeviceState {
     this.simctl = dependencies.simctl ?? null;
     this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
     this.routeRegistry = dependencies.routeRegistry ?? defaultLocationRouteRegistry;
+    this.deviceTraits = dependencies.deviceTraits ?? defaultDeviceTraits;
     this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
     this.onLocationApplied = dependencies.onLocationApplied;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;

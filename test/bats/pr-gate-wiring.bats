@@ -83,6 +83,81 @@ wiring_requires_yq() {
   [ "$status" -eq 0 ]
   [[ $'\n'"$output"$'\n' == *$'\n''test/fixtures/ios-contract/**'$'\n'* ]]
   [[ $'\n'"$output"$'\n' == *$'\n''test/fixtures/ios-ctrlproxy-request-snapshots.json'$'\n'* ]]
+  local path
+  for path in \
+    'test/fixtures/prototype-capabilities/**' \
+    'test/fixtures/prototype-embedded-routing/**' \
+    'test/fixtures/prototype-spec/**' \
+    'test/fixtures/prototype/**' \
+    'test/fixtures/prototype-saved-layout/**' \
+    'test/fixtures/desktop-wire/**' \
+    'test/fixtures/refusal-wire/**' \
+    'test/fixtures/refusal-wire-hints/**' \
+    'test/fixtures/daemon-http-endpoints.json' \
+    'test/fixtures/daemon-isolation-paths.json' \
+    'test/fixtures/ios/**' \
+    'test/fixtures/observe-output/ios-prototype-sheet/**' \
+    'test/fixtures/network-filter-controller/**' \
+    'test/fixtures/h264-level42-scale-golden-vectors.json' \
+    'test/fixtures/encoded-h264-golden-vectors.json'; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+}
+
+@test "Android fixture changes trigger native contract tests" {
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-android")
+    | (.with.filters | from_yaml | .android[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    'test/fixtures/prototype-capabilities/**' \
+    'test/fixtures/prototype-embedded-routing/**' \
+    'test/fixtures/prototype-spec/**' \
+    'test/fixtures/prototype/**' \
+    'test/fixtures/refusal-wire/**' \
+    'test/fixtures/refusal-wire-hints/**' \
+    'test/fixtures/daemon-http-endpoints.json' \
+    'test/fixtures/daemon-isolation-paths.json' \
+    'test/fixtures/ime-commit-contract.json' \
+    'test/fixtures/plan-schedule-feasibility/**'; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+}
+
+@test "required CtrlProxy job runs prototype-compose tests and coverage" {
+  wiring_requires_yq
+  [ "$(yq -r '.jobs."kotlin-code-coverage".name' "$WF")" = 'Run CtrlProxy Unit Tests' ]
+  [ "$(yq -r '.jobs."kotlin-code-coverage".if' "$WF")" = "needs.detect-changes.outputs.android_should_run == 'true'" ]
+  run yq -r '.jobs."kotlin-code-coverage".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$WF"
+  [ "$status" -eq 0 ]
+  [[ " $output " == *' :prototype-compose:testDebugUnitTest '* ]]
+  [[ " $output " == *' :prototype-compose:createDebugUnitTestCoverageReport '* ]]
+}
+
+@test "merge Kotlin coverage runs prototype-compose tests and coverage" {
+  wiring_requires_yq
+  run yq -r '.jobs."kotlin-code-coverage".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' .github/workflows/merge.yml
+  [ "$status" -eq 0 ]
+  [[ " $output " == *' :prototype-compose:testDebugUnitTest '* ]]
+  [[ " $output " == *' :prototype-compose:createDebugUnitTestCoverageReport '* ]]
+}
+
+@test "Kotlin badge includes the prototype-compose Android debug coverage report" {
+  local root="$BATS_TEST_TMPDIR/repo"
+  local report_dir="$root/android/prototype-compose/build/reports/coverage/test/debug"
+  mkdir -p "$root/scripts/coverage" "$report_dir"
+  cp scripts/coverage/generate-kotlin-badge.sh "$root/scripts/coverage/"
+  printf '%s\n' '<report><counter type="LINE" missed="1" covered="3"/></report>' > "$report_dir/report.xml"
+
+  run bash "$root/scripts/coverage/generate-kotlin-badge.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Found prototype-compose report:'* ]]
+  [[ "$output" == *'75% (yellow) from 1 report(s)'* ]]
+  grep -Fq '"message": "75%"' "$root/coverage/kotlin-coverage-badge.json"
 }
 
 @test "ios-build-gate EXCLUDES the simulator-flaky job (keeps the required check deterministic)" {

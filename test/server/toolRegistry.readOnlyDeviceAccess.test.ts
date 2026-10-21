@@ -728,7 +728,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     });
 
     async function arrangeNested2(): Promise<void> {
-      devices.setExplicitDevicePin(held);
+      // The pin is per connection (#14161); this suite's calls run under `connection` (#14385).
+      devices.setExplicitDevicePin(held, connection);
       executions = [];
       finishControl = undefined;
       pendingControl = undefined;

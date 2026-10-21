@@ -30,6 +30,7 @@ export interface InvocationPlan {
   readonly toolParams: Record<string, unknown>;
   readonly parsedParams: Record<string, unknown>;
   readonly sessionId: string | undefined;
+  readonly bindingKey: string | undefined;
   readonly context: CallContext;
   readonly options: McpServerOptions;
   readonly sessionToolBinding: SessionToolBinding;
@@ -119,6 +120,7 @@ export async function invokeHandler(plan: InvocationPlan): Promise<ToolHandlerRe
         routingSessionUuid: plan.handlerRoutingSessionUuid,
         // #11469: nested internal calls and plan steps run for this daemon connection.
         callerMcpSessionId: plan.context.requestMcpSessionId,
+        deviceConnectionKey: plan.bindingKey,
         ownsDeviceSession: (sessionUuid) => sessionToolBinding.ownsSession(sessionId, sessionUuid),
         execution: {
           deviceBinding: {

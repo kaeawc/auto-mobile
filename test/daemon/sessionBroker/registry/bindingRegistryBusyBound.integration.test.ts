@@ -83,6 +83,7 @@ describe("registry busy bound (real SQLite)", () => {
         "2026_10_16_009_session_broker_receipt_retention",
         "2026_10_19_010_session_broker_exports",
         "2026_10_20_011_session_broker_resource_indexes",
+        "2026_10_21_012_device_mutation_journal",
       ]);
       peer.exec("COMMIT");
       locked = false;

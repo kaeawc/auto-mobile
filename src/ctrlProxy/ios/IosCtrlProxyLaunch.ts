@@ -5,7 +5,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 import type { HostChildProcess as ChildProcess } from "../../utils/HostCommandExecutor";
-import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
+import { AMBIENT_ENV, ENV, readEnvBool, readEnvRaw } from "../../config/env";
 import {
   RemoteCtrlProxyIOSRunner,
   IproxyTunnelStartOptions,
@@ -537,7 +537,7 @@ export class IosCtrlProxyLaunch {
   }
 
   private shouldPromoteCtrlProxyOutput(output: string): boolean {
-    if (readEnvRaw(ENV.CTRLPROXY_VERBOSE) === "true") {
+    if (readEnvBool(ENV.CTRLPROXY_VERBOSE)) {
       return true;
     }
 

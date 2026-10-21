@@ -470,6 +470,42 @@ extension PrototypeURLSessionClientTests {
 }
 
 extension PrototypeURLSessionClientTests {
+    func testRedirectMethodRewriteFollowsFetchAndStripsEntityHeaders() async throws {
+        let egress = PrototypeRequestEgressCheck(policy: PrototypeEgressPolicy(), resolver: FakeHostResolver())
+        let cases: [(String, Int, String)] = [
+            ("POST", 301, "GET"), ("POST", 302, "GET"), ("POST", 303, "GET"),
+            ("PUT", 301, "PUT"), ("PATCH", 302, "PATCH"), ("DELETE", 302, "DELETE"),
+            ("PUT", 303, "GET"), ("DELETE", 303, "GET"), ("HEAD", 303, "HEAD"),
+            ("POST", 307, "POST"), ("PUT", 308, "PUT"),
+        ]
+        for (method, status, expected) in cases {
+            let source = try XCTUnwrap(PrototypeURLSessionClient.urlRequest(for: call(
+                "https://public.example/start", method: PrototypeRequestMethod(rawValue: method) ?? .post,
+                headers: ["Content-Type": "application/json", "Content-Language": "en", "X-Token": "kept"],
+                body: Data("payload".utf8)
+            )))
+            let state = PrototypeURLSessionCall(maxBytes: 100, timeoutMs: 1000, request: source)
+            let next = try await state.redirect(
+                to: XCTUnwrap(URL(string: "https://public.example/next")),
+                status: status,
+                egress: egress
+            )
+            XCTAssertEqual(next.httpMethod, expected, "\(method) \(status)")
+            XCTAssertEqual(next.value(forHTTPHeaderField: "X-Token"), "kept")
+            let rewritten = expected != method
+            XCTAssertEqual(
+                next.value(forHTTPHeaderField: "Content-Type"),
+                rewritten ? nil : "application/json",
+                "\(method) \(status)"
+            )
+            XCTAssertEqual(
+                next.value(forHTTPHeaderField: "Content-Language"),
+                rewritten ? nil : "en",
+                "\(method) \(status)"
+            )
+        }
+    }
+
     func testAuthorizationOriginComparisonIncludesSchemeAndPort() async throws {
         let egress = PrototypeRequestEgressCheck(policy: PrototypeEgressPolicy(), resolver: FakeHostResolver())
         for (target, keepsAuthorization) in [

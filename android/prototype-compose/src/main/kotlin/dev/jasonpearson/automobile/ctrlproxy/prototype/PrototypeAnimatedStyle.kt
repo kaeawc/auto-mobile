@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.isSpecified
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeAnimate
 
@@ -41,15 +42,16 @@ internal fun <T> prototypeStyleAnimation(animate: PrototypeAnimate?): AnimationS
   }
 }
 
-/** A node's alpha, animated when the node declares `animate`. */
+/**
+ * A node's alpha, animated when the node declares `animate`. Without it the authored value is used
+ * directly: an animation state that snaps would still cost a second recomposition per change.
+ */
 @Composable
 internal fun prototypeAnimatedAlpha(node: PrototypeRenderNode): Float {
+  val target = (node.style.source.alpha ?: 1.0).toFloat()
+  val animate = node.source?.animate ?: return target
   val alpha by
-    animateFloatAsState(
-      (node.style.source.alpha ?: 1.0).toFloat(),
-      prototypeStyleAnimation(node.source?.animate),
-      label = "prototypeAlpha",
-    )
+    animateFloatAsState(target, prototypeStyleAnimation(animate), label = "prototypeAlpha")
   return alpha
 }
 
@@ -68,29 +70,44 @@ internal fun prototypeAnimatedColor(node: PrototypeRenderNode, color: Color): Co
 
 /**
  * The node's draw-time `offset`, `scale` and `rotation`, animated when it declares `animate`. A
- * node with none of them and no `animate` gets no modifier. The layer reads the animated values in
- * the draw phase, so a running animation re-draws without recomposing.
+ * node with none of them and no `animate` gets no modifier, and one that only shifts gets no layer,
+ * so existing screenshots are unchanged. A shift moves the whole node (shadow, touch target and
+ * semantics included); siblings keep the layout slot it would have had.
  */
 @Composable
 internal fun Modifier.prototypeStyleTransform(node: PrototypeRenderNode): Modifier {
   val style = node.style.source
   val animate = node.source?.animate
-  val transforms = style.scale != null || style.rotation != null
-  if (animate == null && style.offset == null && !transforms) return this
-  val spec = prototypeStyleAnimation<Float>(animate)
-  val x by animateFloatAsState(style.offset?.x?.toFloat() ?: 0f, spec, label = "prototypeX")
-  val y by animateFloatAsState(style.offset?.y?.toFloat() ?: 0f, spec, label = "prototypeY")
-  val scale by animateFloatAsState(style.scale?.toFloat() ?: 1f, spec, label = "prototypeScale")
-  val rotation by
-    animateFloatAsState(style.rotation?.toFloat() ?: 0f, spec, label = "prototypeRotation")
-  // A draw-time shift of the whole node (shadow, touch target and semantics included); siblings
-  // keep the layout slot it would have had.
-  val shifted = offset(x.dp, y.dp)
-  // A node that only shifts keeps no extra layer, so its existing screenshots are unchanged.
-  if (animate == null && !transforms) return shifted
-  return shifted.graphicsLayer {
-    scaleX = scale
-    scaleY = scale
-    rotationZ = rotation
+  val x = style.offset?.x?.toFloat() ?: 0f
+  val y = style.offset?.y?.toFloat() ?: 0f
+  val scale = style.scale?.toFloat() ?: 1f
+  val rotation = style.rotation?.toFloat() ?: 0f
+  if (animate == null) {
+    val shifted = if (style.offset != null) offset(x.dp, y.dp) else this
+    return if (style.scale == null && style.rotation == null) shifted
+    else shifted.graphicsLayer(scaleX = scale, scaleY = scale, rotationZ = rotation)
   }
+  return animatedTransform(animate, x, y, scale, rotation)
+}
+
+/** The animated transform reads its values in the placement and draw phases, not in composition. */
+@Composable
+private fun Modifier.animatedTransform(
+  animate: PrototypeAnimate,
+  x: Float,
+  y: Float,
+  scale: Float,
+  rotation: Float,
+): Modifier {
+  val spec = prototypeStyleAnimation<Float>(animate)
+  val animatedX = animateFloatAsState(x, spec, label = "prototypeX")
+  val animatedY = animateFloatAsState(y, spec, label = "prototypeY")
+  val animatedScale = animateFloatAsState(scale, spec, label = "prototypeScale")
+  val animatedRotation = animateFloatAsState(rotation, spec, label = "prototypeRotation")
+  return offset { IntOffset(animatedX.value.dp.roundToPx(), animatedY.value.dp.roundToPx()) }
+    .graphicsLayer {
+      scaleX = animatedScale.value
+      scaleY = animatedScale.value
+      rotationZ = animatedRotation.value
+    }
 }

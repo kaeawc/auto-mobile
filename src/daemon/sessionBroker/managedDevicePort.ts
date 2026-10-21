@@ -10,6 +10,8 @@ import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import type { BindingJournal } from "./registry/bindingJournal";
 import { defaultBindingExecOwnerLiveness } from "./registry/ownerLiveness";
 import { runAsBindingReconciler } from "./provisioning/exclusion";
+import { brokerMutationIncarnation } from "./mutations/recorder";
+import type { DeviceMutationScope } from "./mutations/types";
 import {
   computeBindingScopeKey,
   journalOwnersEqual,
@@ -51,6 +53,7 @@ type BrokerDeviceAcquisitionEntry = BrokerDeviceAcquisitionResult["bindings"][nu
 type DestructionProgress = "absent" | "pending";
 
 export interface ManagedDevicePortDependencies {
+  bindMutationRecorder?: (scope: DeviceMutationScope) => void;
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
@@ -216,6 +219,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       });
       await runAsBindingReconciler(this.key(resource), () =>
         android.capture(resource.resourceId, device, profile, sessionId, {
+          fresh: entry.disposition === "created" || entry.disposition === "replaced",
           signal: options.signal,
           timeoutMs: Math.max(
             0,
@@ -223,6 +227,26 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
           ),
           timer: this.dependencies.timer ?? defaultTimer,
           incarnation: JSON.stringify([resource.resourceId, binding.stableId]),
+          assertOwned: async () => {
+            options.signal?.throwIfAborted();
+            const current = await this.dependencies.registry.getAssignment(this.key(resource));
+            if (
+              !current ||
+              !sameBinding(current, {
+                generation: entry.assignmentGeneration!,
+                stableDeviceId: binding.stableId,
+              }) ||
+              current.state !== "ready" ||
+              current.deviceName !== device.name ||
+              current.execOwner?.sessionUuid !== sessionId ||
+              current.settler !== null ||
+              (await this.hasOpenJournal(this.key(resource)))
+            ) {
+              throw new ActionableError(
+                "Android baseline capture lost exclusive binding ownership",
+              );
+            }
+          },
         }),
       );
     } catch (error) {
@@ -395,6 +419,23 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       result.bindings.length === 1,
     ].every(Boolean);
     if (resultReady && this.isReadyBinding(binding, profile)) {
+      if (this.dependencies.bindMutationRecorder) {
+        try {
+          this.dependencies.bindMutationRecorder({
+            sessionUuid: binding.sessionUuid,
+            deviceId: binding.device!.transportId ?? binding.device!.stableId,
+            incarnation: brokerMutationIncarnation(
+              resource.resourceId,
+              binding.assignmentGeneration,
+            ),
+          });
+        } catch (error) {
+          logger.warn(
+            "Failed to bind broker device mutation recorder; acquiring without recording",
+            error,
+          );
+        }
+      }
       return binding.sessionUuid;
     }
     const sessionId = binding === undefined ? null : binding.sessionUuid;

@@ -42,6 +42,21 @@ describe("legacy mutation journal adapters", () => {
     expect(await adapter.get(SCOPE.deviceId)).toBeNull();
   });
 
+  test("unobservable journal defaults refuse restoration instead of inventing an absent setting", async () => {
+    await legacy.put(SCOPE.deviceId, RECORD);
+    await journal.record(SCOPE, {
+      kind: "device-setting",
+      key: "fontScale",
+      priorValue: { state: "unobservable" },
+      toolName: "displayConfig",
+    });
+    const adapter = new JournalDeviceSettingDefaultsPersistence(legacy, journal, () => SCOPE);
+    await expect(adapter.get(SCOPE.deviceId)).rejects.toThrow(
+      "Unobservable journaled device setting",
+    );
+    expect(await legacy.get(SCOPE.deviceId)).toEqual(RECORD);
+  });
+
   test("broker defaults record all six originals and read them through the journal", async () => {
     const adapter = new JournalDeviceSettingDefaultsPersistence(legacy, journal, () => SCOPE);
     await adapter.put(SCOPE.deviceId, RECORD);

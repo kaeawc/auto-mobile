@@ -343,7 +343,7 @@ export class HomeScreen extends BaseVisualChange {
     throwIfAborted(signal);
     const backend = resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl });
     if (backend.kind === "physical") {
-      const client = IOSCtrlProxyClient.getInstance(this.device);
+      const client = this.iosClient();
       const pressError = await awaitWhileRequestIsLive(
         this.tryIosRunnerHome(client, 5000, perf, frameContext, { signal, onDispatch }),
         signal,
@@ -372,7 +372,7 @@ export class HomeScreen extends BaseVisualChange {
     }
 
     try {
-      const client = IOSCtrlProxyClient.getInstance(this.device);
+      const client = this.iosClient();
       await this.verifyIosHomeForeground(
         client,
         perf,
@@ -388,6 +388,11 @@ export class HomeScreen extends BaseVisualChange {
         { cause: error },
       );
     }
+  }
+
+  /** The device's runner client, resolved at each use so a retired client is never reused. */
+  private iosClient(): IOSCtrlProxyClient {
+    return IOSCtrlProxyClient.getInstance(this.device);
   }
 
   private async launchIosSpringboard(

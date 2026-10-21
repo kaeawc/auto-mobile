@@ -81,7 +81,7 @@ async function ingest(event: DecodedEvent): Promise<{
     },
     recordNetworkEvent: async () => {},
     recordLogEvent: async () => {},
-    recordLayoutEvent: async () => {},
+    recordLayoutEvent: async () => true,
   };
   const ingestor = new DefaultIosSdkEventIngestor({
     deviceId: "fixture-device",

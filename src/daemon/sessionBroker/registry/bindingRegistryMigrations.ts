@@ -1,4 +1,5 @@
 import * as resourceIndexes011 from "./migrations/2026_10_20_011_session_broker_resource_indexes";
+import * as deviceMutations012 from "./migrations/2026_10_21_012_device_mutation_journal";
 import { sql, type Kysely } from "kysely";
 import { Migrator, type Migration, type MigrationProvider } from "kysely/migration";
 import { ActionableError } from "../../../models/ActionableError";
@@ -35,6 +36,7 @@ export const BINDING_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = 
   "2026_10_16_009_session_broker_receipt_retention": receiptRetention009,
   "2026_10_19_010_session_broker_exports": sessionBrokerExports010,
   "2026_10_20_011_session_broker_resource_indexes": resourceIndexes011,
+  "2026_10_21_012_device_mutation_journal": deviceMutations012,
 };
 
 export const bindingRegistryMigrationProvider: MigrationProvider = {

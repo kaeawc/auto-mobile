@@ -1,6 +1,7 @@
 import { Kysely, type Generated, type Selectable, type Transaction } from "kysely";
 import { ActionableError } from "../../../models/ActionableError";
 import type { BrokerReceiptTables } from "../store";
+import type { DeviceMutationTables } from "../mutations/sqliteJournal";
 import {
   isBindingJournalPhaseOpen,
   type AdvanceBindingJournalInput,
@@ -76,7 +77,7 @@ export interface BindingJournalTable {
   updated_at_ms: number;
 }
 
-export interface BindingRegistryDatabase extends BrokerReceiptTables {
+export interface BindingRegistryDatabase extends BrokerReceiptTables, DeviceMutationTables {
   slot_scopes: BindingScopesTable;
   slot_assignments: BindingAssignmentsTable;
   slot_journal: BindingJournalTable;

@@ -1,5 +1,6 @@
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
 import {
+  abortedByBrokerStop,
   failedResult,
   failureFor,
   preparationFailureError,
@@ -20,6 +21,7 @@ import type { SessionConfig } from "../../devices/sessionConfig";
 import {
   SESSION_OWNER_EXITED_CODE,
   SESSION_OWNER_EXITED_MESSAGE,
+  type SessionBrokerFailure,
   type SessionBrokerReleaseReason,
   type SessionBrokerReleaseResult,
   type SessionBrokerResult,
@@ -175,6 +177,11 @@ export class SessionBroker {
         logger.warn(error.message, error.cause);
         throw error;
       }
+      if (!admitted && abortedByBrokerStop(signal)) {
+        // Shutdown before admission is expected and leaves the identity free for a successor.
+        logger.debug(`Session request ${config.requestId} refused while stopping`, error);
+        throw new SessionBrokerStoppingError();
+      }
       logger.warn(
         `Session request ${config.requestId} preparation failed: ${errorMessage(error)}`,
         error,
@@ -202,37 +209,7 @@ export class SessionBroker {
   ): Promise<SessionBrokerResult> {
     const failure = failureFor(error);
     if (admitted) {
-      const ticket = await this.options.store.fail(
-        config.requestId,
-        this.options.owner,
-        failure.message,
-        failure.code,
-        failure.retryable,
-      );
-      if (ticket) {
-        await this.tryCleanup(ticket);
-      }
-      const request = await this.options.store.getRequest(config.requestId);
-      if (!request) {
-        throw new ActionableError(
-          "Admitted session request lost its durable receipt; cleanup cannot be acknowledged",
-        );
-      }
-      await this.timing.recordFailedAcquisition(request);
-      const result = await this.result(request);
-      return request.errorCode === SESSION_REQUEST_ABANDONED_CODE
-        ? result
-        : {
-            ...result,
-            failure: {
-              ...failure,
-              retryable: Boolean(result.failure?.retryable),
-              // The stored receipt owns retry guidance, so the first reply matches every replay.
-              ...(result.failure?.retryRequires
-                ? { retryRequires: result.failure.retryRequires }
-                : {}),
-            },
-          };
+      return this.failAdmittedPreparation(config, failure);
     }
     // Retain pre-admission failures: a catalog change must not give replay a new acquisition.
     // An independently committed receipt wins; never overwrite an acquisition from a sibling
@@ -262,6 +239,46 @@ export class SessionBroker {
       failure,
     );
     return this.result(receipt);
+  }
+
+  private async failAdmittedPreparation(
+    config: SessionConfig,
+    failure: SessionBrokerFailure,
+  ): Promise<SessionBrokerResult> {
+    const ticket = await this.options.store.fail(
+      config.requestId,
+      this.options.owner,
+      failure.message,
+      failure.code,
+      failure.retryable,
+    );
+    if (ticket) {
+      await this.tryCleanup(ticket);
+    }
+    const request = await this.options.store.getRequest(config.requestId);
+    if (!request) {
+      throw new ActionableError(
+        "Admitted session request lost its durable receipt; cleanup cannot be acknowledged",
+      );
+    }
+    await this.timing.recordFailedAcquisition(request);
+    const result = await this.result(request);
+    return request.errorCode === SESSION_REQUEST_ABANDONED_CODE
+      ? result
+      : {
+          ...result,
+          failure: {
+            ...failure,
+            retryable: Boolean(result.failure?.retryable),
+            // The stored receipt owns retry guidance, so the first reply matches every replay.
+            ...(result.failure?.retryAfterMs !== undefined
+              ? { retryAfterMs: result.failure.retryAfterMs }
+              : {}),
+            ...(result.failure?.retryRequires
+              ? { retryRequires: result.failure.retryRequires }
+              : {}),
+          },
+        };
   }
 
   private finishPreparation(requestId: string): void {
@@ -686,8 +703,9 @@ export class SessionBroker {
     this.stopping = true;
     this.cleanup.stop();
     for (const preparation of this.preparationOwners.values()) {
-      // Already admitted work still fails through failureFor and retains its terminal receipt.
-      preparation.controller.abort(new ActionableError("Session broker is stopping"));
+      // Admitted work stores a retryable stopping receipt requiring a new request ID;
+      // unadmitted work stores nothing and is refused as stopping.
+      preparation.controller.abort(new SessionBrokerStoppingError());
     }
     const requests = await this.options.store.listRecoverableRequests();
     // Shutdown is not the consumer's release (#12451): an active session keeps its device for the

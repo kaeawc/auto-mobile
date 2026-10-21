@@ -98,6 +98,7 @@
     "getNetworkGraph",
     "killProfile",
     "setSensor",
+    "displayProfile",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -196,6 +197,7 @@
     "getNetworkGraph",
     "killProfile",
     "setSensor",
+    "displayProfile",
     "setToolEnabled"
   ],
   "cli": [
@@ -283,6 +285,7 @@
     "getNetworkGraph",
     "killProfile",
     "setSensor",
+    "displayProfile",
     "getPreference",
     "setPreference",
     "deviceSnapshot",

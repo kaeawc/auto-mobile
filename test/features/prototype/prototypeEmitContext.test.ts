@@ -68,7 +68,7 @@ describe("emit context reference fixtures", () => {
       const action = (node.onTap as Raw[])[0];
       const bindings = action.context as Record<
         string,
-        Exclude<PrototypeEmitContextBinding, { item: string } | { index: true }>
+        Exclude<PrototypeEmitContextBinding, { item: string } | { index: true } | { match: string }>
       >;
       expect(
         resolveEmitContext(bindings, { state, pages: fixture.pages, data: fixture.data }),

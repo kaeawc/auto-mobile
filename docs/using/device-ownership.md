@@ -1031,7 +1031,8 @@ device (owner decision 2026-10-09, #11145):
   setting's current value as the device default. Later changes keep the first
   recorded value. Changes made with no session holding the device are not
   recorded.
-- The covered settings are font scale, display density and night mode
+- The covered settings are font scale, display density, night mode, and the
+  increase contrast, reduce motion, bold text and Android display accessibility (color inversion, color correction, magnification, extra dim) preferences
   (`displayConfig`), and the 24-hour format and calendar system
   (`changeLocalization`). The iOS Simulator device-wide locale is also covered.
   Android locale changes are not: on Android 13 and later they apply per app,

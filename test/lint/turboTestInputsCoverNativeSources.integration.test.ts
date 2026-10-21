@@ -1,5 +1,6 @@
+import { readGuardFile, guardDirectoryEntries } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 
@@ -48,9 +49,12 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // sdkApiBaselineWorkflow.test.ts reads the SDK API baseline and Gradle wiring.
     "android/auto-mobile-sdk/build.gradle.kts",
     "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
+    // validToolsRegistryParity.test.ts reads the Kotlin plan-tool allowlist.
+    "android/test-plan-validation/src/main/kotlin/dev/jasonpearson/automobile/validation/ValidTools.kt",
     // registrationTeardownGuard.test.ts walks these four for listener leaks.
     "android/auto-mobile-sdk/src/main/kotlin/**",
     "android/control-proxy/src/main/kotlin/**",
+    "android/prototype-compose/src/main/kotlin/**",
     "ios/auto-mobile-sdk/Sources/**",
     "ios/control-proxy/Sources/**",
     // ctrlProxyProtocol.test.ts reads the @SerialName set from this tree.
@@ -73,6 +77,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/desktop-core/src/test/resources/sample.h264",
     // ownerTokenClientInventory.test.ts reads the JUnit socket and heartbeat owner fields.
     "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonHeartbeat.kt",
+    "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/HeartbeatTransport.kt",
     "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonSocketClient.kt",
     // executePlanToolResultsCapture.test.ts / executePlanCleanupToolResults.test.ts read the
     // captured executePlan envelopes the JUnit runner contract tests also consume (#10110).
@@ -83,8 +88,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // generateMdmProfile.test.ts reads the bundle identifiers from the network-filter
     // Info.plists to pin the profile payloads to the shipped app.
     "ios/network-filter/Packaging/**",
-    // prototypePlatformNotes.test.ts reads the Swift sfSymbols table to pin the mapped icon names.
-    "ios/prototype-agent/Sources/AutoMobilePrototypeAgent/PrototypeRenderer.swift",
+    // Prototype icon tests read the Swift capability declaration, generated symbol data and doc.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+    "ios/prototype-agent/ICON-SYMBOLS.md",
   ] as const;
 
   interface TurboConfig {
@@ -99,7 +106,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   }
 
   function loadTurbo(): TurboConfig {
-    return JSON.parse(readFileSync(join(ROOT, "turbo.json"), "utf8")) as TurboConfig;
+    return JSON.parse(readGuardFile(join(ROOT, "turbo.json"))) as TurboConfig;
   }
 
   /**
@@ -464,7 +471,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   function referencedNativePaths(): Map<string, Set<string>> {
     const found = new Map<string, Set<string>>();
     const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      for (const entry of guardDirectoryEntries(dir)) {
         const abs = join(dir, entry.name);
         if (entry.isDirectory()) {
           walk(abs);
@@ -477,7 +484,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           if (rel === GUARD_PATH) {
             continue;
           }
-          const source = readFileSync(abs, "utf8");
+          const source = readGuardFile(abs);
           const record = (path: string): void => {
             // The Markdown guard allowlists this gitignored SDK config without
             // reading it. Its presence varies by checkout, so it is not a cache input.
@@ -660,6 +667,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     ],
     [
       "ios/auto-mobile-sdk",
+      "appears only in cache-key glob-pattern string literals used to validate .github/workflows/*.yml content, not read from disk",
+    ],
+    [
+      "ios/sdk-wire",
       "appears only in cache-key glob-pattern string literals used to validate .github/workflows/*.yml content, not read from disk",
     ],
     [

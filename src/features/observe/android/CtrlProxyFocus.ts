@@ -6,13 +6,12 @@
  */
 
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
-import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { CurrentFocusResult, TraversalOrderResult, Element } from "../../../models";
 import type { DelegateContext, AccessibilityNode, A11yActionResult } from "./types";
-import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
+import { sendCommand } from "../DeviceServiceUtils";
 import { DefaultElementParser } from "../../utility/ElementParser";
 
 /**
@@ -90,6 +89,37 @@ export class CtrlProxyFocus {
   }
 
   /**
+   * Shared sendCommand wrapper for the focus requests. Auto-connects like the hand-rolled
+   * paths did, attaches no ambient abort, and bypasses the generic command gate.
+   */
+  private sendFocusCommand<T>(request: {
+    idPrefix: string;
+    messageType: string;
+    params: Record<string, unknown>;
+    timeoutMs: number;
+    perf: PerformanceTracker;
+    notConnected: () => T;
+    timeout: (timeoutMs: number) => T;
+    failure: (error: string) => T;
+  }): Promise<T> {
+    return sendCommand<T>(
+      { ...this.context, isCommandSupported: undefined, wireDeadlineParams: undefined },
+      {
+        idPrefix: request.idPrefix,
+        responseType: request.idPrefix,
+        messageType: request.messageType,
+        params: request.params,
+        timeoutMs: request.timeoutMs,
+        perf: request.perf,
+        cancelScreenshotBackoff: false,
+        notConnectedError: request.notConnected,
+        timeoutError: request.timeout,
+        unsupportedCommandError: (_messageType, error) => request.failure(error),
+      },
+    );
+  }
+
+  /**
    * Send a node action ("focus" / "clear_focus") to the accessibility service over
    * the request_action WebSocket protocol and await the action result.
    *
@@ -103,50 +133,30 @@ export class CtrlProxyFocus {
     perf: PerformanceTracker,
   ): Promise<A11yActionResult> {
     const startTime = this.context.timer.now();
+    const failureResult = (error: string): A11yActionResult => ({
+      success: false,
+      action,
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
 
     try {
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn(`[CTRL_PROXY] Failed to establish WebSocket connection for action '${action}'`);
-        return {
-          success: false,
-          action,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      const requestId = this.context.requestManager.generateId("action");
-
-      const actionPromise = this.context.requestManager.register<A11yActionResult>(
-        requestId,
-        "action",
+      const result = await this.sendFocusCommand<A11yActionResult>({
+        idPrefix: "action",
+        messageType: "request_action",
+        // resourceId is serialized as-is; an undefined selector is omitted from the wire.
+        params: { action, resourceId },
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          action,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Action timeout after ${timeout}ms`,
-        }),
-      );
-
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId }),
-        );
-        ws.send(message);
-        logger.debug(
-          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`,
-        );
+        perf,
+        notConnected: () => {
+          logger.warn(
+            `[CTRL_PROXY] Failed to establish WebSocket connection for action '${action}'`,
+          );
+          return failureResult("Failed to connect to accessibility service");
+        },
+        timeout: (timeout) => failureResult(`Action timeout after ${timeout}ms`),
+        failure: failureResult,
       });
-
-      const result = await perf.track("waitForAction", () => actionPromise);
 
       const duration = this.context.timer.now() - startTime;
       if (result.success) {
@@ -181,49 +191,26 @@ export class CtrlProxyFocus {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<CurrentFocusResult> {
     const startTime = this.context.timer.now();
+    const failureResult = (error: string): CurrentFocusResult => ({
+      focusedElement: null,
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for current focus");
-        return {
-          focusedElement: null,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      // Send current focus request
-      const requestId = this.context.requestManager.generateId("currentFocus");
-
-      // Register request with automatic timeout handling
-      const focusPromise = this.context.requestManager.register<CurrentFocusResult>(
-        requestId,
-        "currentFocus",
+      const result = await this.sendFocusCommand<CurrentFocusResult>({
+        idPrefix: "currentFocus",
+        messageType: "get_current_focus",
+        params: {},
         timeoutMs,
-        (_id, _type, timeout) => ({
-          focusedElement: null,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Current focus timeout after ${timeout}ms`,
-        }),
-      );
-
-      // Send the request
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(ctrlProxyRequests.getCurrentFocus({ requestId }));
-        ws.send(message);
-        logger.debug(`[CTRL_PROXY] Sent current focus request (requestId: ${requestId})`);
+        perf,
+        notConnected: () => {
+          logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for current focus");
+          return failureResult("Failed to connect to accessibility service");
+        },
+        timeout: (timeout) => failureResult(`Current focus timeout after ${timeout}ms`),
+        failure: failureResult,
       });
-
-      // Wait for response
-      const result = await perf.track("waitForCurrentFocus", () => focusPromise);
 
       const duration = this.context.timer.now() - startTime;
       if (result.error) {
@@ -257,55 +244,28 @@ export class CtrlProxyFocus {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<TraversalOrderResult> {
     const startTime = this.context.timer.now();
+    const failureResult = (error: string): TraversalOrderResult => ({
+      elements: [],
+      focusedIndex: null,
+      totalCount: 0,
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for traversal order");
-        return {
-          elements: [],
-          focusedIndex: null,
-          totalCount: 0,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      // Send traversal order request
-      const requestId = this.context.requestManager.generateId("traversalOrder");
-
-      // Register request with automatic timeout handling
-      const traversalPromise = this.context.requestManager.register<TraversalOrderResult>(
-        requestId,
-        "traversalOrder",
+      const result = await this.sendFocusCommand<TraversalOrderResult>({
+        idPrefix: "traversalOrder",
+        messageType: "get_traversal_order",
+        params: {},
         timeoutMs,
-        (_id, _type, timeout) => ({
-          elements: [],
-          focusedIndex: null,
-          totalCount: 0,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Traversal order timeout after ${timeout}ms`,
-        }),
-      );
-
-      // Send the request
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.getTraversalOrder({ requestId }),
-        );
-        ws.send(message);
-        logger.debug(`[CTRL_PROXY] Sent traversal order request (requestId: ${requestId})`);
+        perf,
+        notConnected: () => {
+          logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for traversal order");
+          return failureResult("Failed to connect to accessibility service");
+        },
+        timeout: (timeout) => failureResult(`Traversal order timeout after ${timeout}ms`),
+        failure: failureResult,
       });
-
-      // Wait for response
-      const result = await perf.track("waitForTraversalOrder", () => traversalPromise);
 
       const duration = this.context.timer.now() - startTime;
       if (result.error) {

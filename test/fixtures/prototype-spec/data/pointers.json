@@ -1,0 +1,110 @@
+{
+  "data": {
+    "orders": [
+      {
+        "title": "Latte"
+      }
+    ],
+    "a": {
+      "": "empty",
+      "b": true
+    },
+    "a/b~c": 7,
+    "a b": "space",
+    "01": "object",
+    "scalar": 1
+  },
+  "cases": [
+    {
+      "pointer": "/orders",
+      "valid": true,
+      "found": true,
+      "value": [
+        {
+          "title": "Latte"
+        }
+      ]
+    },
+    {
+      "pointer": "/orders/0/title",
+      "valid": true,
+      "found": true,
+      "value": "Latte"
+    },
+    {
+      "pointer": "/a/b",
+      "valid": true,
+      "found": true,
+      "value": true
+    },
+    {
+      "pointer": "/a~1b~0c",
+      "valid": true,
+      "found": true,
+      "value": 7
+    },
+    {
+      "pointer": "/a b",
+      "valid": true,
+      "found": true,
+      "value": "space"
+    },
+    {
+      "pointer": "/a/",
+      "valid": true,
+      "found": true,
+      "value": "empty"
+    },
+    {
+      "pointer": "/01",
+      "valid": true,
+      "found": true,
+      "value": "object"
+    },
+    {
+      "pointer": "/orders/01",
+      "valid": true,
+      "found": false
+    },
+    {
+      "pointer": "/orders/-",
+      "valid": true,
+      "found": false
+    },
+    {
+      "pointer": "/orders/1",
+      "valid": true,
+      "found": false
+    },
+    {
+      "pointer": "/scalar/x",
+      "valid": true,
+      "found": false
+    },
+    {
+      "pointer": "",
+      "valid": false,
+      "found": false
+    },
+    {
+      "pointer": "orders",
+      "valid": false,
+      "found": false
+    },
+    {
+      "pointer": "/a~2",
+      "valid": false,
+      "found": false
+    },
+    {
+      "pointer": "/a~",
+      "valid": false,
+      "found": false
+    },
+    {
+      "pointer": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false,
+      "found": false
+    }
+  ]
+}

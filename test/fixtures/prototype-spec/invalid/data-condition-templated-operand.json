@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "x",
+          "visibleWhen": {
+            "data": "/n",
+            "equals": "{item.id}"
+          }
+        }
+      ]
+    },
+    "data": {
+      "n": 7,
+      "orders": [
+        {
+          "id": 7,
+          "title": "Latte",
+          "total": 4.5,
+          "details": {
+            "size": "large"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].visibleWhen.equals",
+  "expectedMessage": "Repeat placeholder in a data condition operand is not supported"
+}

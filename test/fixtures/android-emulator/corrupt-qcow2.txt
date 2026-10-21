@@ -1,0 +1,3 @@
+INFO    | Android emulator version 36.1.9.0
+qemu-system-aarch64: -drive if=none,index=1,id=userdata,file=userdata-qemu.img.qcow2: qcow2: Image is corrupt; cannot be opened read/write
+QEMU main loop exits abnormally with code 1

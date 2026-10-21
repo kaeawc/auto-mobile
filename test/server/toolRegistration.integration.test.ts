@@ -1,10 +1,12 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll, spyOn } from "bun:test";
+import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { compileAjv2020, compileJsonSchema } from "../helpers/jsonSchemaCompile";
+import { isRecord } from "../../src/server/pipeline/isRecord";
 
 /**
  * Tool Registration Regression Tests
@@ -56,7 +58,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
       "pressButtonSchema",
       "systemTraySchema",
       "sendKeysSchema",
-    ];
+    ] as const;
 
     criticalSchemas.forEach((schemaName) => {
       expect(interactionTools).toHaveProperty(schemaName);
@@ -107,7 +109,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
         if (Object.hasOwn(propertySchemas, "appId")) {
           const appId = propertySchemas.appId;
           expect(appId, `${path}.properties.appId`).toBeObject();
-          if (appId && typeof appId === "object" && !Array.isArray(appId)) {
+          if (isRecord(appId)) {
             appIdProperties.push({ path: `${path}.properties.appId`, schema: appId });
           }
         }
@@ -229,12 +231,15 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     const path = await import("path");
     const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
     const originalEmbeddedSdkEnabled = serverConfig.isEmbeddedSdkEnabled();
+    const flagService = FeatureFlagService.getInstance();
+    const initializeSpy = spyOn(flagService, "initialize").mockResolvedValue();
 
     try {
       ToolRegistry.clearTools();
       serverConfig.setEmbeddedSdkEnabled(true);
-      setDebugModeEnabled(true);
       createMcpServer({ daemonMode: true });
+      // Flags are stubbed so no persisted/default flag application races the debug toggle.
+      setDebugModeEnabled(true);
 
       const schemaContent = await fs.readFile(schemaPath, "utf-8");
       const committed = JSON.parse(schemaContent) as ToolSchemaDefinition[];
@@ -268,6 +273,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
       ToolRegistry.clearTools();
       serverConfig.setEmbeddedSdkEnabled(originalEmbeddedSdkEnabled);
       setDebugModeEnabled(false);
+      initializeSpy.mockRestore();
     }
   });
 

@@ -34,20 +34,17 @@ describe("liveness handoff through the real repository without a schema change",
     await repo.markReleased("handoff", "expired", timer.now(), "daemon-restart");
     manager.stopCleanupTimer();
     timer.advanceTime(1_000);
-    manager = new SessionManager(timer, repo, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
     expect(
       await manager.rehydratePersistedSessions({
         assignDeviceToSession: async (id, _platform, target) => {
-          await manager.createSession(
-            id,
-            "emulator-5554",
-            "android",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          await manager.createSession(id, "emulator-5554", "android", {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return "emulator-5554";
         },
       }),
@@ -58,8 +55,11 @@ describe("liveness handoff through the real repository without a schema change",
     timer = new FakeTimer();
     db = await createTestDatabase();
     repo = new DeviceSessionRepository(db, timer);
-    manager = new SessionManager(timer, repo, () => new FakeDbWriteBarrier());
-    await manager.createSession("handoff", "emulator-5554", "android", 60_000, undefined, "Pixel");
+    manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
+    await manager.createSession("handoff", "emulator-5554", "android", {
+      timeoutMs: 60_000,
+      stableDeviceId: "Pixel",
+    });
     await manager.claimLivenessOwnership("handoff", "owner");
   });
   afterEach(async () => {
@@ -70,9 +70,6 @@ describe("liveness handoff through the real repository without a schema change",
   test.each(["heartbeat"])(
     "released %s row remains unowned across two rehydrations",
     async (policy) => {
-      if (policy === "cli") {
-        manager.adoptCliLivenessPolicy("handoff", 60_000);
-      }
       expect(await manager.releaseLivenessOwnership("handoff", "owner")).toBe("released");
       expect(await repo.getSession("handoff")).toMatchObject({ liveness_owner_token: null });
       for (let restart = 0; restart < 2; restart++) {
@@ -158,9 +155,6 @@ describe("liveness handoff through the real repository without a schema change",
   test.each(["heartbeat"])(
     "a former-owner keeper tick re-adopts a released %s row after restart",
     async (policy) => {
-      if (policy === "cli") {
-        manager.adoptCliLivenessPolicy("handoff", 60_000);
-      }
       expect(await manager.releaseLivenessOwnership("handoff", "owner")).toBe("released");
       await rehydrate();
       expect(manager.getSession("handoff")?.livenessOwnerToken).toBeUndefined();

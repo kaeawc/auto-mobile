@@ -19,7 +19,7 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class HierarchyDebouncerSuspendTest {
   @Test
-  fun `suspend quiescence returns same tree as blocking facade without emitting`() = runTest {
+  fun `suspend quiescence returns extracted tree without emitting`() = runTest {
     val expected = ViewHierarchy(packageName = "settled")
     val debouncer =
       HierarchyDebouncer(
@@ -28,16 +28,17 @@ class HierarchyDebouncerSuspendTest {
           object : TimeProvider {
             override fun currentTimeMillis() = testScheduler.currentTime
           },
-        extractHierarchy = { _, _ -> expected },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> expected },
+          ),
       )
     val suspending =
       debouncer.extractAfterQuiescenceSuspending(
         quiescenceMs = 0,
         initialEventWaitMs = 0,
       )
-    val blocking = debouncer.extractAfterQuiescence(quiescenceMs = 0, initialEventWaitMs = 0)
     assertEquals(expected, suspending)
-    assertEquals(suspending, blocking)
     assertTrue(debouncer.hierarchyFlow.replayCache.isEmpty())
   }
 
@@ -51,7 +52,10 @@ class HierarchyDebouncerSuspendTest {
           object : TimeProvider {
             override fun currentTimeMillis() = testScheduler.currentTime
           },
-        extractHierarchy = { _, _ -> expected },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> expected },
+          ),
       )
     val first = launch { debouncer.extractAfterQuiescenceSuspending() }
     val second = launch { debouncer.extractAfterQuiescenceSuspending() }
@@ -83,11 +87,14 @@ class HierarchyDebouncerSuspendTest {
           object : TimeProvider {
             override fun currentTimeMillis() = testScheduler.currentTime
           },
-        onDiscardedHierarchy = { discarded += it },
-        extractHierarchy = { _, _ ->
-          if (cancelDuringWalk) cancelled = true
-          next
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            onDiscardedHierarchy = { discarded += it },
+            extractHierarchy = { _, _ ->
+              if (cancelDuringWalk) cancelled = true
+              next
+            },
+          ),
       )
     debouncer.extractImmediately()
     val firstResult = debouncer.hierarchyFlow.replayCache.single()

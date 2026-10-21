@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import {
   afterAll,
   afterEach,
@@ -8,7 +9,11 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { PredictiveUIState } from "../../../src/features/observe/PredictiveUIState";
+import {
+  buildPredictionTarget,
+  PredictiveUIState,
+  type InteractableElement,
+} from "../../../src/features/observe/PredictiveUIState";
 import { PredictionHistoryRepository } from "../../../src/db/predictionHistoryRepository";
 import type { Element, ObserveResult } from "../../../src/models";
 import type { NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
@@ -18,9 +23,19 @@ import {
   type InMemoryNavManagerHarness,
 } from "../../helpers/navigationTestHarness";
 
-type Interactable = Parameters<PredictiveUIState["buildTarget"]>[1];
-const observation: ObserveResult = { updatedAt: 1, viewHierarchy: { hierarchy: {} } };
-const button: Element = { text: "Open", "resource-id": "open", clickable: true };
+type Interactable = InteractableElement;
+const observation: ObserveResult = buildObserveResult({
+  updatedAt: 1,
+  screenSize: { width: 100, height: 100 },
+  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+  viewHierarchy: { hierarchy: {} },
+});
+const button: Element = {
+  bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+  text: "Open",
+  "resource-id": "open",
+  clickable: true,
+};
 
 function edge(toolName: string, args: Record<string, unknown> = {}): NavigationEdge {
   return {
@@ -36,6 +51,7 @@ describe("PredictiveUIState characterization", () => {
   let harness: InMemoryNavManagerHarness;
   let state: PredictiveUIState;
   let parser: FakeElementParser;
+  let historyRepository: PredictionHistoryRepository;
   let currentScreen: ReturnType<typeof spyOn>;
   let currentApp: ReturnType<typeof spyOn>;
   let edges: ReturnType<typeof spyOn>;
@@ -51,11 +67,10 @@ describe("PredictiveUIState characterization", () => {
 
   beforeEach(async () => {
     await harness.db.deleteFrom("prediction_transition_stats").execute();
-    state = new PredictiveUIState();
-    state["historyRepository"] = new PredictionHistoryRepository(harness.db);
+    historyRepository = new PredictionHistoryRepository(harness.db);
     parser = new FakeElementParser();
     parser.nextFlattenedElements = [{ element: button, index: 0, depth: 0 }];
-    state["elementParser"] = parser;
+    state = new PredictiveUIState(undefined, { elementParser: parser, historyRepository });
     currentScreen = spyOn(harness.manager, "getCurrentScreen").mockReturnValue("Home");
     currentApp = spyOn(harness.manager, "getCurrentAppId").mockReturnValue("app");
     edges = spyOn(harness.manager, "getEdgesFrom").mockResolvedValue([
@@ -70,7 +85,11 @@ describe("PredictiveUIState characterization", () => {
   });
 
   test("returns no predictions for missing hierarchy, screen, or a different foreground app", async () => {
-    expect(await state.generate({ updatedAt: 0 })).toBeUndefined();
+    expect(
+      await state.generate(
+        buildObserveResult({ ...observation, updatedAt: 0, viewHierarchy: undefined }),
+      ),
+    ).toBeUndefined();
     currentScreen.mockReturnValue(null);
     expect(await state.generate(observation)).toBeUndefined();
     currentScreen.mockReturnValue("Home");
@@ -160,7 +179,7 @@ describe("PredictiveUIState characterization", () => {
         brier_score_sum: 0,
       })
       .execute();
-    const repository = state["historyRepository"];
+    const repository = historyRepository;
     const read = repository.getTransitionStatsForScreen.bind(repository);
     const history = spyOn(repository, "getTransitionStatsForScreen").mockImplementation(
       async (...args) => {
@@ -185,14 +204,16 @@ describe("PredictiveUIState characterization", () => {
   test("generates without an app id and skips invalid swipe targets", async () => {
     currentApp.mockReturnValue(null);
     expect((await state.generate(observation))?.likelyActions[0].confidence).toBe(0.5);
-    parser.nextFlattenedElements = [{ element: { scrollable: true }, index: 0, depth: 0 }];
+    parser.nextFlattenedElements = [
+      { element: { bounds: button.bounds, scrollable: true }, index: 0, depth: 0 },
+    ];
     edges.mockResolvedValue([edge("swipeOn", { container: { text: "No match" } })]);
     expect(await state.generate(observation)).toBeUndefined();
   });
 
   test("tap targets preserve nullish precedence and reject empty identifiers", () => {
     const interactable: Interactable = {
-      element: {},
+      element: { bounds: button.bounds },
       clickable: true,
       scrollable: false,
       text: "Fallback",
@@ -200,24 +221,35 @@ describe("PredictiveUIState characterization", () => {
       contentDesc: "Description",
     };
     expect(
-      state["buildTarget"](edge("tapOn", { text: "", elementId: "", id: "ignored" }), interactable),
+      buildPredictionTarget(
+        edge("tapOn", { text: "", elementId: "", id: "ignored" }),
+        interactable,
+      ),
     ).toEqual({ text: "", elementId: "", contentDesc: "Description" });
-    expect(state["buildTarget"](edge("tapOn", { id: "legacy" }), interactable)).toEqual({
+    expect(buildPredictionTarget(edge("tapOn", { id: "legacy" }), interactable)).toEqual({
       text: "Fallback",
       elementId: "legacy",
       contentDesc: "Description",
     });
     expect(
-      state["buildTarget"](edge("tapOn"), { element: {}, clickable: true, scrollable: false }),
+      buildPredictionTarget(edge("tapOn"), {
+        element: { bounds: button.bounds },
+        clickable: true,
+        scrollable: false,
+      }),
     ).toBeNull();
-    expect(state["buildTarget"](edge("unknown"), interactable)).toBeNull();
+    expect(buildPredictionTarget(edge("unknown"), interactable)).toBeNull();
     expect(
-      state["buildTarget"]({ ...edge("tapOn"), interaction: undefined }, interactable),
+      buildPredictionTarget({ ...edge("tapOn"), interaction: undefined }, interactable),
     ).toBeNull();
   });
 
   test("swipe targets retain args precedence, uiState fallbacks, and empty target rejection", () => {
-    const interactable: Interactable = { element: {}, clickable: false, scrollable: true };
+    const interactable: Interactable = {
+      element: { bounds: button.bounds },
+      clickable: false,
+      scrollable: true,
+    };
     const swipe = edge("swipeOn", {
       container: { text: "Args", elementId: "", resourceId: "args-id" },
       lookFor: { contentDesc: "Goal", elementId: "goal-id", resourceId: "ignored" },
@@ -230,21 +262,21 @@ describe("PredictiveUIState characterization", () => {
         targetElement: { text: "Target", resourceId: "target-id" },
       },
     };
-    expect(state["buildTarget"](swipe, interactable)).toEqual({
+    expect(buildPredictionTarget(swipe, interactable)).toEqual({
       container: { text: "Args", elementId: "args-id", contentDesc: undefined },
       lookFor: { text: undefined, elementId: "goal-id", contentDesc: "Goal" },
     });
     swipe.interaction!.args = {};
-    expect(state["buildTarget"](swipe, interactable)).toEqual({
+    expect(buildPredictionTarget(swipe, interactable)).toEqual({
       container: { text: "Fallback", elementId: "fallback-id", contentDesc: undefined },
       lookFor: { text: "Target", elementId: "target-id", contentDesc: undefined },
     });
     expect(
-      state["buildTarget"](edge("swipeOn", { lookFor: { text: "Only target" } }), interactable),
+      buildPredictionTarget(edge("swipeOn", { lookFor: { text: "Only target" } }), interactable),
     ).toEqual({ lookFor: { text: "Only target", elementId: undefined, contentDesc: undefined } });
-    expect(state["buildTarget"](edge("swipeOn", { container: {} }), interactable)).toEqual({
+    expect(buildPredictionTarget(edge("swipeOn", { container: {} }), interactable)).toEqual({
       container: { text: undefined, elementId: undefined, contentDesc: undefined },
     });
-    expect(state["buildTarget"](edge("swipeOn"), interactable)).toBeNull();
+    expect(buildPredictionTarget(edge("swipeOn"), interactable)).toBeNull();
   });
 });

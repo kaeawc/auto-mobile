@@ -78,9 +78,11 @@ class VideoStreamClientPolicyTest {
   fun `connect then refuse exposes Connecting before cancelling its collector`() = runTest {
     val source =
       FakeVideoStreamSource(
-        refuseWith = "rejected",
-        connectThenRefuse = true,
-        refusalScope = backgroundScope,
+        FakeVideoStreamSource.Options(
+          refuseWith = "rejected",
+          connectThenRefuse = true,
+          refusalScope = backgroundScope,
+        ),
       )
     val states = mutableListOf<VideoStreamState>()
     var cancelledConnecting = 0

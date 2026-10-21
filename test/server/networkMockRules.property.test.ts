@@ -1,7 +1,7 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import { buildNetworkMockRules } from "../../src/server/networkMockRules";
-import type { MockRule, NetworkState } from "../../src/server/NetworkState";
+import { buildNetworkMockRules } from "../../src/utils/networkMockRules";
+import type { MockRule, NetworkState } from "../../src/utils/NetworkState";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
@@ -22,10 +22,9 @@ const mockRule: fc.Arbitrary<MockRule> = fc.record({
 });
 
 // buildNetworkMockRules only reads state.getMocks(); a minimal seam keeps it pure.
-const stateFrom = (rules: MockRule[]): NetworkState =>
-  ({
-    getMocks: () => new Map(rules.map((r, i) => [`k${i}`, r] as const)),
-  }) as unknown as NetworkState;
+const stateFrom = (rules: MockRule[]): Pick<NetworkState, "getMocks"> => ({
+  getMocks: () => new Map(rules.map((r, i) => [`k${i}`, r] as const)),
+});
 
 describe("buildNetworkMockRules (property-based)", () => {
   test("preserves count and insertion order by mockId", () => {

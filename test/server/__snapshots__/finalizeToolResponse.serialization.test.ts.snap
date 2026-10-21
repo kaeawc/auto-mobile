@@ -34,10 +34,10 @@ exports[`finalizeToolResponse serialization bytes observation screenshot and hie
 exports[`finalizeToolResponse serialization bytes action diff with full projection 1`] = `
 {
   "artifacts": [
-    "{"isDiff":true,"skeleton":[],"added":[{"key":"example.app:id/root\\u00000,0,100,200\\u0000Done\\u00000","attributes":{"resource-id":"example.app:id/root","text":"Done","extras":{"diagnostic":"kept in artifact"},"bounds":[0,0,100,200]}}],"removed":[{"key":"example.app:id/root\\u00000,0,100,200\\u0000Run\\u00000","attributes":{"resource-id":"example.app:id/root","text":"Run","extras":{"diagnostic":"kept in artifact"},"bounds":[0,0,100,200]}}],"changed":[],"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"screenSize":{"width":100,"height":200},"screenshotPath":"/fixture/screenshot.png"}",
+    "{"isDiff":true,"skeleton":[],"changed":[],"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"screenSize":{"width":100,"height":200},"screenshotPath":"/fixture/screenshot.png"}",
   ],
   "wire": [
-    "{"success":true,"observation":{"artifact":{"path":"/fixture/tool-output.json","format":"json","payload":"ObserveDiff","bytes":614,"tool":"tapOn","resourceUri":"automobile:tool-output/fixture"}},"observationDiff":{"mode":"diff","reason":"diff_emitted","fromScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"},"toScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"}}}",
+    "{"success":true,"observation":{"artifact":{"path":"/fixture/tool-output.json","format":"json","payload":"ObserveDiff","bytes":204,"tool":"tapOn","resourceUri":"automobile:tool-output/fixture"}},"observationDiff":{"mode":"diff","reason":"diff_emitted","fromScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"},"toScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"}}}",
   ],
 }
 `;
@@ -45,10 +45,10 @@ exports[`finalizeToolResponse serialization bytes action diff with full projecti
 exports[`finalizeToolResponse serialization bytes action diff with skeleton projection 1`] = `
 {
   "artifacts": [
-    "{"isDiff":true,"added":[],"removed":[],"changed":[]}",
+    "{"isDiff":true,"changed":[]}",
   ],
   "wire": [
-    "{"success":true,"observation":{"skeleton":[],"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"screenSize":{"width":100,"height":200},"screenshotPath":"/fixture/screenshot.png","artifact":{"path":"/fixture/tool-output.json","format":"json","payload":"ObserveDiff","bytes":52,"tool":"tapOn","resourceUri":"automobile:tool-output/fixture"}},"observationDiff":{"mode":"diff","reason":"diff_emitted","fromScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"},"toScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"}}}",
+    "{"success":true,"observation":{"skeleton":[],"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"screenSize":{"width":100,"height":200},"screenshotPath":"/fixture/screenshot.png","artifact":{"path":"/fixture/tool-output.json","format":"json","payload":"ObserveDiff","bytes":28,"tool":"tapOn","resourceUri":"automobile:tool-output/fixture"}},"observationDiff":{"mode":"diff","reason":"diff_emitted","fromScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"},"toScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"}}}",
   ],
 }
 `;

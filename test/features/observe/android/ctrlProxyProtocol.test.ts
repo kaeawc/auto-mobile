@@ -1,6 +1,7 @@
 /**
  * Byte-for-byte contract tests for the typed Android control-proxy request layer.
  *
+ * Kotlin descriptor fixture parity is guarded by AndroidWireContract.contract.test.ts.
  * Each builder must serialize to the exact JSON the device's Kotlin sealed hierarchy
  * (`android/protocol/.../WebSocketRequest.kt`) expects — the strings asserted here mirror the
  * pre-migration hand-built `JSON.stringify(...)` send sites, so a drift in field name, order,
@@ -8,11 +9,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { HighlightShape } from "../../../../src/models/VisualHighlight";
-import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
+import type { NetworkMockRuleSync } from "../../../../src/utils/networkMockRules";
 import {
+  SAVED_PROTOTYPE_ERROR_CODES,
+  isSavedPrototypeErrorCode,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
   KNOWN_REQUEST_TYPES,
@@ -21,6 +24,14 @@ import {
   type CtrlProxyRequest,
   normalizeCtrlProxyMilliseconds,
 } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+
+// Kotlin's serializer-generated contract; loaded once for all builder rows.
+const wireContract = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "../../../fixtures/android-contract/android-wire-contract.json"),
+    "utf8",
+  ),
+) as { requests: { serialName: string; fields: { name: string; hasDefault: boolean }[] }[] };
 
 describe("IME commit budget serialization", () => {
   test("includes the optional budget and preserves legacy omission", () => {
@@ -168,109 +179,10 @@ test("Keystore discovery is an optional advertised Android capability", () => {
   expect(ANDROID_CAPABILITY_GATED_COMMANDS.has("discover_keystore")).toBe(true);
 });
 
-/**
- * Every `@SerialName` declared in WebSocketRequest.kt, transcribed by hand. Keep this in lockstep
- * with the Kotlin sealed hierarchy — this is the authoritative device contract the TS union mirrors.
- */
-const KOTLIN_SERIAL_NAMES = [
-  "show_prototype",
-  "dismiss_prototype",
-  "inspect_prototypes",
-  "put_prototype_asset",
-  "remove_prototype_asset",
-  "request_hierarchy",
-  "request_hierarchy_if_stale",
-  "set_hierarchy_interval",
-  "request_screenshot",
-  "request_tap_coordinates",
-  "request_swipe",
-  "request_two_finger_swipe",
-  "request_drag",
-  "request_pinch",
-  "request_gesture_start",
-  "request_gesture_move",
-  "request_gesture_end",
-  "request_set_text",
-  "request_insert_text",
-  "request_insert_text_state",
-  "request_commit_text",
-  "request_cancel_ime_commit",
-  "request_set_keyboard_profile",
-  "request_list_keyboard_profiles",
-  "request_ime_action",
-  "request_select_all",
-  "request_action",
-  "request_click_focused_input",
-  "request_activate_accessibility_link",
-  "request_hit_test",
-  "request_clipboard",
-  "request_settings_get",
-  "request_settings_put",
-  "request_settings_list",
-  "install_ca_cert",
-  "install_ca_cert_from_path",
-  "remove_ca_cert",
-  "get_device_owner_status",
-  "get_permission",
-  "get_current_focus",
-  "get_traversal_order",
-  "add_highlight",
-  "list_preference_files",
-  "get_preferences",
-  "discover_keystore",
-  "get_sdk_capabilities",
-  "list_data_stores",
-  "get_data_store",
-  "subscribe_storage",
-  "unsubscribe_storage",
-  "get_preference",
-  "set_preference",
-  "remove_preference",
-  "clear_preferences",
-  "request_global_action",
-  "validate_frame_context",
-  "request_device_info",
-  "set_recomposition_tracking",
-  "set_accessibility_flags",
-  "set_network_mock_rules",
-  "set_network_error_simulation",
-  "request_installed_packages",
-  "request_package_info",
-  "request_launch_intent",
-  "start_recording",
-  "stop_recording",
-];
-
-describe("ctrlProxyProtocol — Kotlin contract coverage", () => {
-  test("KNOWN_REQUEST_TYPES matches the device @SerialName set exactly", () => {
-    expect([...KNOWN_REQUEST_TYPES].sort()).toEqual([...KOTLIN_SERIAL_NAMES].sort());
-  });
-
+describe("ctrlProxyProtocol — discriminator uniqueness", () => {
   test("no duplicate discriminators", () => {
     expect(new Set(KNOWN_REQUEST_TYPES).size).toBe(KNOWN_REQUEST_TYPES.length);
   });
-
-  // Authoritative cross-language guard: read the actual @SerialName set out of the Kotlin contract
-  // and assert it equals ours. Unlike the hand-maintained KOTLIN_SERIAL_NAMES list above, this
-  // catches a request type renamed/added/removed on the device — the drift the module exists to
-  // prevent — instead of trusting a transcription. Skipped only if the Kotlin file isn't reachable
-  // (e.g. running outside the monorepo), which never happens in CI.
-  const KOTLIN_CONTRACT_PATH = resolve(
-    import.meta.dir,
-    "../../../../android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/WebSocketRequest.kt",
-  );
-
-  test.skipIf(!existsSync(KOTLIN_CONTRACT_PATH))(
-    "KNOWN_REQUEST_TYPES matches the @SerialName set read from WebSocketRequest.kt",
-    () => {
-      const source = readFileSync(KOTLIN_CONTRACT_PATH, "utf8");
-      const serialNames = [...source.matchAll(/@SerialName\("([^"]+)"\)/g)].map((m) => m[1]);
-      expect(serialNames.length).toBeGreaterThan(0);
-      expect([...new Set(serialNames)].sort()).toEqual([...KNOWN_REQUEST_TYPES].sort());
-      // The transcribed list must also match the source, so it can't rot independently.
-      expect([...new Set(serialNames)].sort()).toEqual([...KOTLIN_SERIAL_NAMES].sort());
-    },
-  );
 });
 
 /**
@@ -371,6 +283,80 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       name: "inspect (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(ctrlProxyRequests.inspectPrototypes({ requestId: "r8" })),
       expected: '{"type":"inspect_prototypes","requestId":"r8"}',
+    },
+    {
+      builder: "savePrototype",
+      name: "save omitted icon",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.savePrototype({
+          requestId: "r10",
+          spec: prototypeSpec,
+          label: "Panel",
+          icon: undefined,
+        }),
+      ),
+      expected:
+        '{"type":"save_prototype","requestId":"r10","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"label":"Panel"}',
+    },
+    {
+      builder: "savePrototype",
+      name: "save with icon",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.savePrototype({
+          requestId: "r10",
+          spec: prototypeSpec,
+          label: "Panel",
+          icon: "hero",
+        }),
+      ),
+      expected:
+        '{"type":"save_prototype","requestId":"r10","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"label":"Panel","icon":"hero"}',
+    },
+    {
+      builder: "listSavedPrototypes",
+      name: "list saved",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.listSavedPrototypes({ requestId: "r11" }),
+      ),
+      expected: '{"type":"list_saved_prototypes","requestId":"r11"}',
+    },
+    {
+      builder: "pinSavedPrototype",
+      name: "saved id and icon",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.pinSavedPrototype({ requestId: "pin", id: "panel", icon: "hero" }),
+      ),
+      expected: '{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"hero"}',
+    },
+    {
+      builder: "deleteSavedPrototype",
+      name: "delete saved",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.deleteSavedPrototype({ requestId: "r12", id: "panel" }),
+      ),
+      expected: '{"type":"delete_saved_prototype","requestId":"r12","id":"panel"}',
+    },
+    {
+      builder: "clearPrototypeStorage",
+      name: "clear storage",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.clearPrototypeStorage({ requestId: "r13", id: "panel" }),
+      ),
+      expected: '{"type":"clear_prototype_storage","requestId":"r13","id":"panel"}',
+    },
+    {
+      builder: "patchPrototype",
+      name: "patch (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.patchPrototype({
+          requestId: "r9",
+          id: "orders",
+          baseRevision: 12,
+          ops: [{ op: "replace", path: "/data/cartCount", value: 2 }],
+        }),
+      ),
+      expected:
+        '{"type":"patch_prototype","requestId":"r9","id":"orders","baseRevision":12,"ops":[{"op":"replace","path":"/data/cartCount","value":2}]}',
     },
     {
       builder: "putPrototypeAsset",
@@ -1047,6 +1033,25 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
     },
   ];
 
+  test("every builder frame uses Kotlin fields and supplies all device-required fields", () => {
+    for (const { expected } of cases) {
+      const frame = JSON.parse(expected) as Record<string, unknown> & { type: string };
+      const contract = wireContract.requests.find(({ serialName }) => serialName === frame.type);
+      expect(contract).toBeDefined();
+      const fields = new Set(contract!.fields.map(({ name }) => name));
+      for (const name of Object.keys(frame)) {
+        if (name !== "type") {
+          expect(fields.has(name)).toBe(true);
+        }
+      }
+      for (const { name, hasDefault } of contract!.fields) {
+        if (!hasDefault) {
+          expect(name in frame).toBe(true);
+        }
+      }
+    }
+  });
+
   test.each(cases)("$builder — $name", ({ actual, expected }) => {
     expect(actual).toBe(expected);
   });
@@ -1055,11 +1060,11 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 48", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 54", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(48);
+    expect(builderNames.length).toBe(54);
     const covered = new Set(cases.map((row) => row.builder));
-    expect([...covered].sort()).toEqual([...builderNames].sort());
+    expect<unknown>([...covered].sort()).toEqual([...builderNames].sort());
   });
 });
 
@@ -1094,4 +1099,53 @@ test("IME trace opt-in serializes after the timeout", () => {
   ).toBe(
     '{"type":"request_commit_text","requestId":"trace-1","text":"value","timeoutMs":1500,"trace":true}',
   );
+});
+
+// android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/WebSocketResponse.kt:
+// SavedPrototypeErrorCode @SerialName values, in declaration order.
+test("saved prototype error codes match Kotlin", () => {
+  const kotlinCodes = [
+    "pin_unsupported",
+    "device_locked",
+    "pin_failed",
+    "invalid_id",
+    "invalid_label",
+    "spec_too_large",
+    "invalid_spec",
+    "invalid_asset_id",
+    "duplicate_asset_id",
+    "unsupported_mime_type",
+    "empty_asset",
+    "asset_too_large",
+    "count_limit",
+    "total_limit",
+    "missing_asset",
+    "saved_count_limit",
+    "storage_failure",
+    "unsupported_existing",
+    "not_found",
+    "unsupported_format",
+    "internal_error",
+  ];
+  expect<unknown>(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
+  for (const code of kotlinCodes) {
+    expect(isSavedPrototypeErrorCode(code)).toBe(true);
+  }
+  for (const code of ["future", null, 1, undefined]) {
+    expect(isSavedPrototypeErrorCode(code)).toBe(false);
+  }
+});
+
+test("pin builder omits absent icon and participates in supported requests", () => {
+  expect(
+    serializeCtrlProxyRequest(
+      ctrlProxyRequests.pinSavedPrototype({ requestId: "pin", id: "panel" }),
+    ),
+  ).toBe('{"type":"pin_saved_prototype","requestId":"pin","id":"panel"}');
+  expect(
+    serializeCtrlProxyRequest(
+      ctrlProxyRequests.pinSavedPrototype({ requestId: "pin", id: "panel", icon: "hero" }),
+    ),
+  ).toBe('{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"hero"}');
+  expect(KNOWN_REQUEST_TYPES).toContain("pin_saved_prototype");
 });

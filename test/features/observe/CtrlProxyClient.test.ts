@@ -1,3 +1,5 @@
+import { createExecResult } from "../../../src/utils/execResult";
+import type { CtrlSocket } from "../../../src/features/observe/shared/types";
 import {
   afterAll,
   afterEach,
@@ -8,6 +10,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +70,8 @@ import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/andr
 import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { typedFrameSchema } from "../../helpers/wireMessageSchemas";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -144,31 +149,33 @@ describe("AndroidCtrlProxyClient", function () {
 
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     // Cached hierarchy liveness checks use process records; default cached test
     // fixtures represent a still-running app unless a test explicitly overrides it.
-    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
-      stdout: [
-        "1234:com.example.app/u0a123",
-        "1235:com.example/u0a123",
-        "1236:com.example.sdk/u0a123",
-        "1237:com.example.noneofthesdk/u0a123",
-        "1238:com.example.nosdk/u0a123",
-        "1239:com.example.new/u0a123",
-        "1240:com.example.remove/u0a123",
-        "1241:com.example.all/u0a123",
-        "1242:com.google.android.deskclock/u0a123",
-        "1243:com.test.app/u0a123",
-      ].join("\n"),
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "shell dumpsys activity processes",
+      createExecResult(
+        [
+          "1234:com.example.app/u0a123",
+          "1235:com.example/u0a123",
+          "1236:com.example.sdk/u0a123",
+          "1237:com.example.noneofthesdk/u0a123",
+          "1238:com.example.nosdk/u0a123",
+          "1239:com.example.new/u0a123",
+          "1240:com.example.remove/u0a123",
+          "1241:com.example.all/u0a123",
+          "1242:com.google.android.deskclock/u0a123",
+          "1243:com.test.app/u0a123",
+        ].join("\n"),
+        "",
+      ),
+    );
     fakeAdb.setScreenState(true);
 
     // Create test device
     testDevice = {
       deviceId: "test-device",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -180,12 +187,10 @@ describe("AndroidCtrlProxyClient", function () {
     AndroidCtrlProxyClient.resetInstances();
 
     // Pass FakeAdbExecutor directly to createForTesting since it implements AdbExecutor
-    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory).clearAvailabilityCache();
 
     // Clear any cached hierarchy data to prevent cache contamination between tests (issue #72)
@@ -242,9 +247,16 @@ describe("AndroidCtrlProxyClient", function () {
     });
   };
 
-  const waitForSocket = async (
-    getSocket: () => FakeWebSocket | null,
-  ): Promise<FakeWebSocket | null> => {
+  const requireBinding = <T extends object>(binding: T | null): T => {
+    if (binding === null) {
+      throw new Error("expected the screen geometry to be bound");
+    }
+    return binding;
+  };
+
+  const waitForSocket = async <T extends FakeWebSocket>(
+    getSocket: () => T | null,
+  ): Promise<T | null> => {
     for (let attempt = 0; attempt < 5; attempt++) {
       const socket = getSocket();
       if (socket) {
@@ -286,13 +298,7 @@ describe("AndroidCtrlProxyClient", function () {
     let removed = false;
     let remainingListings = listingsAfterRemove;
     let lastListOutput = "";
-    fakeAdb.executeCommand = async (
-      command: string,
-      timeoutMs?: number,
-      maxBuffer?: number,
-      noRetry?: boolean,
-      signal?: AbortSignal,
-    ) => {
+    fakeAdb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
       if (command === "forward --list") {
         if (shouldFailList()) {
           throw new Error("adb forward listing failed");
@@ -319,7 +325,7 @@ describe("AndroidCtrlProxyClient", function () {
       if (command.startsWith("forward tcp:")) {
         removed = false;
       }
-      return executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      return executeCommand(command, options);
     };
     return { getLastListOutput: () => lastListOutput };
   };
@@ -331,8 +337,11 @@ describe("AndroidCtrlProxyClient", function () {
   // Deliver malformed data through the same untyped WebSocket JSON boundary as the runner.
   const malformedHierarchyUpdate = async (overrides: Record<string, unknown>) => {
     const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
-    const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
+    const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => fakeAdb });
     const availability = spyOn(manager, "isAvailable").mockResolvedValue(true);
     try {
       const resultPromise = client.getAccessibilityHierarchy();
@@ -362,6 +371,7 @@ describe("AndroidCtrlProxyClient", function () {
     isSystem: false,
     requestedPermissions: [],
     grantedPermissions: {},
+    totalTimeMs: 0,
     ...(versionCode === undefined ? {} : { versionCode }),
   });
 
@@ -378,17 +388,15 @@ describe("AndroidCtrlProxyClient", function () {
     // until we trigger `open` ourselves, and the connection timeout never fires.
     const manualTimer = new FakeTimer();
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string): CtrlSocket => {
       // "timeout" mode keeps the socket CONNECTING (the timer is never advanced).
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return socket;
     };
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      factory,
-      manualTimer,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: manualTimer,
+    });
     try {
       const connectPromise = client.ensureConnected();
       // Wait only until the ws is constructed (not a fixed number of event-loop turns); open has
@@ -420,42 +428,26 @@ describe("AndroidCtrlProxyClient", function () {
       releaseForward = resolve;
     });
     class GatedForwardAdb extends FakeAdbExecutor {
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command.includes("forward")) {
           await forwardGate; // hold setupBeforeConnect until the test releases it
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
     const gatedAdb = new GatedForwardAdb();
-    gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    gatedAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     gatedAdb.setScreenState(true);
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string): CtrlSocket => {
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return socket;
     };
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      gatedAdb,
-      factory,
-      manualTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      lease,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, gatedAdb, {
+      webSocketFactory: factory,
+      timer: manualTimer,
+      ctrlProxyForwardLease: lease,
+    });
     try {
       const connectPromise = client.ensureConnected();
       await flushPromises(8); // parked inside setupBeforeConnect; no socket yet
@@ -501,12 +493,10 @@ describe("AndroidCtrlProxyClient", function () {
     const testTimer = new FakeTimer();
     testTimer.enableAutoAdvance();
     const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-    const testClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      factory,
-      testTimer,
-    );
+    const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: testTimer,
+    });
     const resultPromise = testClient.getLatestHierarchy(true, 2000);
     const socket = await waitForSocket(getSocket);
     if (!socket) {
@@ -585,7 +575,7 @@ describe("AndroidCtrlProxyClient", function () {
 
   const getScreenshotUpdates = async (socket: FakeSocket): Promise<ScreenshotUpdateMessage[]> =>
     socket
-      .getWrittenMessages<ScreenshotUpdateMessage>()
+      .getWrittenMessages(typedFrameSchema)
       .filter((message) => message.type === "screenshot_update");
 
   const expectSingleScreenshotUpdate = async (
@@ -610,7 +600,7 @@ describe("AndroidCtrlProxyClient", function () {
   const hierarchyWithScreenSize = (width: number, height: number): any => ({
     packageName: "com.example.app",
     windows: [{ bounds: { left: 0, top: 0, right: width, bottom: height } }],
-    hierarchy: { node: { $: { class: "Root" } } },
+    hierarchy: { node: { className: "Root" } },
   });
 
   /**
@@ -629,10 +619,7 @@ describe("AndroidCtrlProxyClient", function () {
   };
 
   const setAdbPngScreenshotResponse = (screenshotBase64: string = pngFrame(1, 1)): void => {
-    fakeAdb.setCommandResponse("screencap -p", {
-      stdout: `${screenshotBase64}\n`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult(`${screenshotBase64}\n`, ""));
   };
 
   const forwardScreenshotBinding = (
@@ -666,12 +653,10 @@ describe("AndroidCtrlProxyClient", function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
     fakeTimer = new FakeTimer();
-    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(fakeTimer),
-      fakeTimer,
-    );
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+    });
     accessibilityServiceClient.invalidateCache();
   };
 
@@ -683,17 +668,15 @@ describe("AndroidCtrlProxyClient", function () {
     AndroidCtrlProxyClient.resetInstances();
     fakeTimer = new FakeTimer();
     const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      factory,
-      fakeTimer,
-    );
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     accessibilityServiceClient.invalidateCache();
     const streamSocket = await startStreamServerWithScreenshotSubscriber();
 
     await accessibilityServiceClient.ensureConnected();
-    const ctrlProxySocket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+    const ctrlProxySocket = await waitForSocket(getSocket);
     await waitForSocketOpen(ctrlProxySocket);
     if (!ctrlProxySocket) {
       throw new Error("Expected capturing CtrlProxy socket");
@@ -703,10 +686,7 @@ describe("AndroidCtrlProxyClient", function () {
   };
 
   test("reports ADB screencap fallback screenshots as PNG fallback with reason", async () => {
-    fakeAdb.setCommandResponse("screencap -p", {
-      stdout: `${pngFrame(1, 1)}\n`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult(`${pngFrame(1, 1)}\n`, ""));
 
     const result = await accessibilityServiceClient.captureScreenshotForObservationStream();
 
@@ -934,18 +914,16 @@ describe("AndroidCtrlProxyClient", function () {
       // stream tests above do.
       const localTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
-      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        localTimer,
-      );
+      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: localTimer,
+      });
       accessibilityServiceClient.invalidateCache();
       // ADB PNG fallback used whenever an a11y capture fails or the latch is set.
       setAdbPngScreenshotResponse();
 
       await accessibilityServiceClient.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
@@ -1154,19 +1132,13 @@ describe("AndroidCtrlProxyClient", function () {
       },
     });
     try {
-      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(),
-        fakeTimer,
-      );
+      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(),
+        timer: fakeTimer,
+      });
 
       expect(checkedPorts).toEqual([8765, 8767]);
-      expect(
-        (
-          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
-        ).getWebSocketUrl(),
-      ).toBe("ws://127.0.0.1:8767/ws");
+      expect(accessibilityServiceClient.testHooks.getWebSocketUrl()).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -1186,29 +1158,18 @@ describe("AndroidCtrlProxyClient", function () {
       },
     });
     try {
-      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(),
-        fakeTimer,
-      );
+      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(),
+        timer: fakeTimer,
+      });
       unavailablePorts.add(8765);
 
-      await (
-        accessibilityServiceClient as unknown as {
-          setupPortForwarding: () => Promise<void>;
-          getWebSocketUrl: () => string;
-        }
-      ).setupPortForwarding();
+      await accessibilityServiceClient.setupPortForwarding();
 
       expect(checkedPorts).toEqual([8765, 8765, 8765, 8765, 8765, 8767]);
       expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8767");
       expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
-      expect(
-        (
-          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
-        ).getWebSocketUrl(),
-      ).toBe("ws://127.0.0.1:8767/ws");
+      expect(accessibilityServiceClient.testHooks.getWebSocketUrl()).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -1355,12 +1316,10 @@ describe("AndroidCtrlProxyClient", function () {
       await accessibilityServiceClient.close();
       fakeTimer = new FakeTimer();
       PortManager.setClockForTesting(fakeTimer);
-      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(),
-        fakeTimer,
-      );
+      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(),
+        timer: fakeTimer,
+      });
       registerTestSingleton(accessibilityServiceClient);
       stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:8765 tcp:8765\n`);
       const checkedPorts: number[] = [];
@@ -1397,12 +1356,10 @@ describe("AndroidCtrlProxyClient", function () {
     await accessibilityServiceClient.close();
     PortManager.reset();
     PortManager.setClockForTesting(fakeTimer);
-    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(accessibilityServiceClient);
     const forwardState = stubForwardLifecycleCommands(
       () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
@@ -1431,12 +1388,10 @@ describe("AndroidCtrlProxyClient", function () {
     await accessibilityServiceClient.close();
     PortManager.reset();
     PortManager.setClockForTesting(fakeTimer);
-    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(accessibilityServiceClient);
     stubForwardLifecycleCommands(
       () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
@@ -1459,12 +1414,10 @@ describe("AndroidCtrlProxyClient", function () {
     await accessibilityServiceClient.close();
     PortManager.reset();
     PortManager.setClockForTesting(fakeTimer);
-    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(accessibilityServiceClient);
     stubForwardLifecycleCommands(
       () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
@@ -1498,12 +1451,10 @@ describe("AndroidCtrlProxyClient", function () {
     await accessibilityServiceClient.close();
     PortManager.reset();
     PortManager.setClockForTesting(fakeTimer);
-    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     await accessibilityServiceClient.setupPortForwarding();
     stubForwardLifecycleCommands(
       () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
@@ -1533,9 +1484,7 @@ describe("AndroidCtrlProxyClient", function () {
     stubForwardLifecycleCommands(() => "");
     const debug = spyOn(logger, "debug");
     try {
-      const client = accessibilityServiceClient as unknown as {
-        removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
-      };
+      const client = accessibilityServiceClient.testHooks;
       expect(await client.removeCtrlProxyPortForward(8765)).toBe(true);
       expect(PortManager.isPortAvailable(8765)).toBe(true);
       expect(
@@ -1555,9 +1504,7 @@ describe("AndroidCtrlProxyClient", function () {
       );
       const warning = spyOn(logger, "warn");
       try {
-        const client = accessibilityServiceClient as unknown as {
-          removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
-        };
+        const client = accessibilityServiceClient.testHooks;
         expect(await client.removeCtrlProxyPortForward(8765)).toBe(false);
         expect(PortManager.isPortAvailable(8765)).toBe(true);
         expect(
@@ -1620,12 +1567,10 @@ describe("AndroidCtrlProxyClient", function () {
     fakeAdb.clearHistory();
     stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52001 tcp:8765\n`);
 
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(client);
     try {
       await client.setupPortForwarding();
@@ -1647,12 +1592,10 @@ describe("AndroidCtrlProxyClient", function () {
       () => removalFails,
     );
 
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(client);
     try {
       await expect(client.setupPortForwarding()).rejects.toThrow(
@@ -1682,12 +1625,10 @@ describe("AndroidCtrlProxyClient", function () {
       () => listingFails,
     );
 
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(client);
     try {
       await expect(client.setupPortForwarding()).rejects.toThrow("adb forward listing failed");
@@ -1713,12 +1654,10 @@ describe("AndroidCtrlProxyClient", function () {
       () => removalFails,
     );
 
-    const original = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const original = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     await original.setupPortForwarding();
 
     fakeAdb.clearHistory();
@@ -1726,12 +1665,10 @@ describe("AndroidCtrlProxyClient", function () {
     await original.close();
 
     removalFails = false;
-    const replacement = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const replacement = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     try {
       await replacement.setupPortForwarding();
 
@@ -1747,12 +1684,10 @@ describe("AndroidCtrlProxyClient", function () {
     fakeAdb.clearHistory();
     stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:8765 tcp:8765\n`);
 
-    const connectingClient = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const connectingClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(connectingClient);
     try {
       await connectingClient.sweepOrphanedCtrlProxyPortForwards();
@@ -1770,12 +1705,10 @@ describe("AndroidCtrlProxyClient", function () {
     fakeAdb.clearHistory();
     stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52003 tcp:12345\n`);
 
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(client);
     try {
       await client.setupPortForwarding();
@@ -1793,21 +1726,11 @@ describe("AndroidCtrlProxyClient", function () {
     fakeAdb.clearHistory();
     stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52004 tcp:8765\n`);
     const lease = new FakeCtrlProxyForwardLease(false);
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      lease,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+      ctrlProxyForwardLease: lease,
+    });
     try {
       await expect(client.setupPortForwarding()).rejects.toThrow(
         "Another AutoMobile process owns CtrlProxy forwarding",
@@ -1826,21 +1749,11 @@ describe("AndroidCtrlProxyClient", function () {
     fakeAdb.clearHistory();
     stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52004 tcp:8765\n`);
     const lease = new FakeCtrlProxyForwardLease(false, 71579);
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      lease,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+      ctrlProxyForwardLease: lease,
+    });
     try {
       await expect(client.setupPortForwarding()).rejects.toThrow(
         /Another AutoMobile process \(PID 71579\) owns CtrlProxy forwarding.*stale\/orphaned AutoMobile daemon.*--daemon restart.*kill 71579/s,
@@ -1862,21 +1775,11 @@ describe("AndroidCtrlProxyClient", function () {
       ownerSocketPath: "/tmp/ovl-priv/daemon.sock",
       reason: `it has live session session-abc on ${testDevice.deviceId}`,
     };
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      lease,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+      ctrlProxyForwardLease: lease,
+    });
     try {
       const caught = await client.setupPortForwarding().catch((error: unknown) => error);
       expect(caught).toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
@@ -1898,21 +1801,11 @@ describe("AndroidCtrlProxyClient", function () {
     stubForwardLifecycleCommands(() => "");
     const lease = new FakeCtrlProxyForwardLease(false, 15836);
     lease.reclaimResult = { acquired: true, ownerPid: 15836, reason: "idle" };
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      lease,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+      ctrlProxyForwardLease: lease,
+    });
     try {
       const caught = await client.setupPortForwarding().catch((error: unknown) => error);
       expect(caught).not.toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
@@ -1932,21 +1825,11 @@ describe("AndroidCtrlProxyClient", function () {
     // its own PID as the current owner. That must never surface the orphan-kill
     // diagnostic, since the PID it would name is the caller's own.
     const lease = new FakeCtrlProxyForwardLease(false, process.pid);
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      lease,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+      ctrlProxyForwardLease: lease,
+    });
     try {
       let caught: unknown;
       try {
@@ -2021,12 +1904,10 @@ describe("AndroidCtrlProxyClient", function () {
         : `${testDevice.deviceId} tcp:52005 tcp:12345\n`;
     });
 
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     registerTestSingleton(client);
     try {
       await client.setupPortForwarding();
@@ -2039,19 +1920,9 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("forward ownership across coordination directories (#10690)", function () {
-    const coordinationDirs: string[] = [];
+    const scratch = useScratchRoot("ctrlproxy-forward-owner-");
 
-    afterEach(function () {
-      for (const dir of coordinationDirs.splice(0)) {
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    const newCoordinationDir = (): string => {
-      const dir = mkdtempSync(join(tmpdir(), "ctrlproxy-forward-owner-"));
-      coordinationDirs.push(dir);
-      return dir;
-    };
+    const newCoordinationDir = (): string => scratch.next();
 
     /** One daemon's lease, as seen from its own coordination directory. */
     const daemonLease = (dir: string, pid: number = process.pid): FileCtrlProxyForwardLease =>
@@ -2063,33 +1934,17 @@ describe("AndroidCtrlProxyClient", function () {
       });
 
     const daemonClient = (lease: FileCtrlProxyForwardLease): AndroidCtrlProxyClient =>
-      AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(),
-        fakeTimer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        lease,
-      );
+      AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(),
+        timer: fakeTimer,
+        ctrlProxyForwardLease: lease,
+      });
 
     /** The one ADB server's forward table that every daemon on this host shares. */
     const installSharedForwardTable = (initialRows: string[]): { rows: () => string[] } => {
       let rows = [...initialRows];
       const executeCommand = fakeAdb.executeCommand.bind(fakeAdb);
-      fakeAdb.executeCommand = async (
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) => {
+      fakeAdb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === "forward --list") {
           const stdout = rows.map((row) => `${row}\n`).join("");
           return {
@@ -2111,7 +1966,7 @@ describe("AndroidCtrlProxyClient", function () {
             `${testDevice.deviceId} ${added[1]} ${added[2]}`,
           ];
         }
-        return executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return executeCommand(command, options);
       };
       return { rows: () => rows };
     };
@@ -2522,21 +2377,17 @@ describe("AndroidCtrlProxyClient", function () {
     await accessibilityServiceClient.close();
     const isolatedDevice = { ...testDevice, deviceId: "late-cleanup-isolated-device" };
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
-    const original = AndroidCtrlProxyClient.createForTesting(
-      isolatedDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const original = AndroidCtrlProxyClient.createForTesting(isolatedDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     const originalPort = PortManager.getPort(isolatedDevice.deviceId);
     original.invalidateForShutdownRecovery();
 
-    const replacement = AndroidCtrlProxyClient.createForTesting(
-      isolatedDevice,
-      fakeAdb,
-      createSuccessWebSocketFactory(),
-      fakeTimer,
-    );
+    const replacement = AndroidCtrlProxyClient.createForTesting(isolatedDevice, fakeAdb, {
+      webSocketFactory: createSuccessWebSocketFactory(),
+      timer: fakeTimer,
+    });
     const replacementPort = PortManager.getPort(isolatedDevice.deviceId);
     try {
       expect(replacementPort).not.toBe(originalPort);
@@ -2557,16 +2408,12 @@ describe("AndroidCtrlProxyClient", function () {
           lostDeviceIds.push(deviceId);
         },
       };
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer,
-        undefined,
-        new DefaultRetryExecutor(fakeTimer),
-        undefined,
-        notifier,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+        retryExecutor: new DefaultRetryExecutor(fakeTimer),
+        deviceConnectionLostNotifier: notifier,
+      });
 
       expect(await testClient.waitForConnection(3, 0)).toBe(false);
       expect(lostDeviceIds).toEqual([]);
@@ -2578,14 +2425,11 @@ describe("AndroidCtrlProxyClient", function () {
     // (matching iOS's 2000ms) rather than the 10s base default, so it does
     // not outlive waitForConnection()'s default retry budget (~2.7s).
     test("cooldown after max attempts is the short Android-specific constant, not the 10s base default", async () => {
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer,
-        undefined,
-        new DefaultRetryExecutor(fakeTimer),
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+        retryExecutor: new DefaultRetryExecutor(fakeTimer),
+      });
 
       try {
         expect(await testClient.waitForConnection(3, 0)).toBe(false);
@@ -2603,14 +2447,11 @@ describe("AndroidCtrlProxyClient", function () {
     // right after a successful setup()) must be able to dial immediately —
     // not wait out the remaining cooldown.
     test("resetConnectionBudget lets a post-setup waitForConnection dial immediately", async () => {
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createNthAttemptSuccessWebSocketFactory(4, fakeTimer),
-        fakeTimer,
-        undefined,
-        new DefaultRetryExecutor(fakeTimer),
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createNthAttemptSuccessWebSocketFactory(4, fakeTimer),
+        timer: fakeTimer,
+        retryExecutor: new DefaultRetryExecutor(fakeTimer),
+      });
 
       try {
         // The runner is not listening yet — exhaust the connect budget.
@@ -2635,16 +2476,11 @@ describe("AndroidCtrlProxyClient", function () {
           lostDeviceIds.push(deviceId);
         },
       };
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-        undefined,
-        undefined,
-        undefined,
-        notifier,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+        deviceConnectionLostNotifier: notifier,
+      });
 
       testClient.onConnectionClosed();
 
@@ -2656,17 +2492,15 @@ describe("AndroidCtrlProxyClient", function () {
     // describe UI state from before whatever triggered the runner restart. iOS already clears
     // its equivalent cache on every close (IOSCtrlProxyClient.onConnectionClosed); mirror that.
     test("clears the cached hierarchy when the WebSocket connection closes", function () {
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       testClient.handleHierarchyUpdate({
         updatedAt: 1,
         packageName: "com.example.app",
-        hierarchy: { node: { $: { class: "Root" } } },
+        hierarchy: { node: { className: "Root" } },
       });
       expect(testClient.hasCachedHierarchy()).toBe(true);
 
@@ -2680,12 +2514,10 @@ describe("AndroidCtrlProxyClient", function () {
     // covered by ctrlProxyHierarchyRecompositionLatchReset.test.ts) so a future refactor of
     // onConnectionClosed() cannot drop the call silently.
     test("resets the recomposition-tracking latch when the WebSocket connection closes", function () {
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       const hierarchyDelegate = testClient.hierarchy;
       let resetCalls = 0;
@@ -2729,12 +2561,10 @@ describe("AndroidCtrlProxyClient", function () {
         await accessibilityServiceClient.close();
         fakeTimer = new FakeTimer();
         const sockets = createCapturingWebSocketFactory(fakeTimer);
-        accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
-          testDevice,
-          fakeAdb,
-          sockets.factory,
-          fakeTimer,
-        );
+        accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+          webSocketFactory: sockets.factory,
+          timer: fakeTimer,
+        });
         pkgInfo = spyOn(accessibilityServiceClient, "requestPackageInfo").mockResolvedValue(
           packageInfoResult(false),
         );
@@ -3015,12 +2845,10 @@ describe("AndroidCtrlProxyClient", function () {
       testTimer.enableAutoAdvance();
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.getLatestHierarchy(true, 2000);
@@ -3063,12 +2891,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       // Don't use autoAdvance - we need to control time for polling
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         // First call to populate cache - use resolveWithFakeTimer for polling
@@ -3110,12 +2936,10 @@ describe("AndroidCtrlProxyClient", function () {
       // Use FakeWebSocket that connects successfully but sends no data
       // Use delayed mode with 1ms for fast execution
 
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       try {
         // Use a short timeout (50ms) to make test run fast
@@ -3136,12 +2960,10 @@ describe("AndroidCtrlProxyClient", function () {
       // in CI). Default is now 1000ms, matching the cache freshness TTL.
       const testTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         // Call without specifying a timeout so we exercise the default.
@@ -3182,7 +3004,10 @@ describe("AndroidCtrlProxyClient", function () {
       const createSuppressionHarness = async () => {
         const timer = new FakeTimer();
         const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-        const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+        const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+          webSocketFactory: factory,
+          timer,
+        });
         const server = new DeviceDataStreamSocketServer("/fake/suppression.sock", timer, {
           authorize: () => {},
         });
@@ -3217,6 +3042,45 @@ describe("AndroidCtrlProxyClient", function () {
           );
         return { client, timer, socket, getSocket, push, pushes, backoff, requestIds, request };
       };
+
+      test("pushes a domain-shaped ViewHierarchyResult to the observation stream, not the wire frame", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const bounds = { left: 0, top: 0, right: 1080, bottom: 2340 };
+          h.socket.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              timestamp: h.timer.now(),
+              data: {
+                ...hierarchyWithScreenSize(1080, 2340),
+                updatedAt: 4242,
+                hierarchy: {
+                  className: "android.widget.FrameLayout",
+                  bounds,
+                  node: [
+                    { className: "android.widget.TextView", text: "one", bounds },
+                    { className: "android.widget.Button", text: "two", bounds },
+                  ],
+                },
+              },
+            }),
+          );
+          expect(h.pushes).toHaveBeenCalledTimes(1);
+          const pushed = h.pushes.mock.calls[0]![1];
+          const root = pushed.hierarchy as { class?: string; node?: Array<{ class?: string }> };
+          // The domain converter emits `class` (wire carries only `className`) and keeps `node` an array.
+          expect(root.class).toBe("android.widget.FrameLayout");
+          expect(Array.isArray(root.node)).toBe(true);
+          expect(root.node?.map((child) => child.class)).toEqual([
+            "android.widget.TextView",
+            "android.widget.Button",
+          ]);
+          expect(pushed.updatedAt).toBe(4242);
+          expect(pushed.sources).toEqual(["control-proxy"]);
+        } finally {
+          await h.client.close();
+        }
+      });
 
       test("debounced push stays live and the later explicit response stays suppressed", async () => {
         const h = await createSuppressionHarness();
@@ -3593,7 +3457,7 @@ describe("AndroidCtrlProxyClient", function () {
           h.push("newer live", "foreign-request", 200);
           h.push("older explicit", h.requestIds()[0]!, 100);
           expect((await pending)?.hierarchy.hierarchy.text).toBe("older explicit");
-          expect(h.client.cachedHierarchy?.hierarchy.hierarchy.text).toBe("newer live");
+          expect(h.client.testHooks.cachedHierarchy()?.hierarchy.hierarchy.text).toBe("newer live");
           expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
           expect(h.timer.getPendingTimeouts()).not.toContain(1000);
           expect(h.pushes).toHaveBeenCalledTimes(1);
@@ -3607,12 +3471,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("tracks concurrent suppressed hierarchy syncs independently", async function () {
       const testTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
       const suppressionCount = (): number => testClient.hierarchyObservationStreamSuppressions.size;
 
       try {
@@ -3679,12 +3541,10 @@ describe("AndroidCtrlProxyClient", function () {
       // Use FakeWebSocket with instant failure and FakeTimer for fast, reliable test execution
       // See issues #68 (timeout race condition) and #72 (cache contamination)
 
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       try {
         const result = await testClient.getLatestHierarchy(true, 1000);
@@ -3703,12 +3563,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.getLatestHierarchy(true, 2000);
@@ -3867,12 +3725,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
 
       // Eagerly construct the detector via the public getter so the spy is in
       // place before any hierarchy_update arrives.
@@ -3939,12 +3795,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
 
       const detector = testClient.getHierarchyNavigationDetector();
       const onHierarchyUpdateSpy = spyOn(detector, "onHierarchyUpdate");
@@ -3992,12 +3846,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
       const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue(
         packageInfoResult(true, 42),
       );
@@ -4043,12 +3895,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
       const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue(
         packageInfoResult(false),
       );
@@ -4090,12 +3940,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         testClient.bindSession("session-A");
@@ -4126,12 +3974,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
       const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue(
         packageInfoResult(false),
       );
@@ -4193,12 +4039,10 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
       let allowFirstWrite: (() => void) | undefined;
       const firstWriteAllowed = new Promise<void>((resolve) => {
         allowFirstWrite = resolve;
@@ -4282,15 +4126,13 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
       const DIGEST = "a".repeat(64);
-      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
-      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      fakeAdb.setCommandResponse("pm path", createExecResult("package:/a/base.apk", ""));
+      fakeAdb.setCommandResponse("sha256sum", createExecResult(`${DIGEST}  /a/base.apk`, ""));
       const pkgSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue(
         packageInfoResult(true, 5),
       );
@@ -4343,7 +4185,7 @@ describe("AndroidCtrlProxyClient", function () {
         expect(pkgSpy).toHaveBeenCalledTimes(1); // cached — no re-resolution
 
         // Connection drops (app may be replaced unobserved), then a later event arrives.
-        (testClient as unknown as { onConnectionClosed: () => void }).onConnectionClosed();
+        testClient.onConnectionClosed();
 
         navEvent("Home2");
         await settle();
@@ -4362,15 +4204,13 @@ describe("AndroidCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: testTimer,
+      });
       const DIGEST = "b".repeat(64);
-      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
-      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      fakeAdb.setCommandResponse("pm path", createExecResult("package:/a/base.apk", ""));
+      fakeAdb.setCommandResponse("sha256sum", createExecResult(`${DIGEST}  /a/base.apk`, ""));
       let releasePackageInfo: () => void = () => {};
       const pkgSpy = spyOn(testClient, "requestPackageInfo").mockImplementation(
         () =>
@@ -4555,21 +4395,23 @@ describe("AndroidCtrlProxyClient", function () {
       const result =
         accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
-      expect(result.hierarchy.text).toBe("6:43 AM");
-      expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
-      expect(result.hierarchy.class).toBe("android.widget.TextClock");
-      expect(result.hierarchy.className).toBe("android.widget.TextClock");
+      expect(result.hierarchy).toHaveProperty("text", "6:43 AM");
+      expect(result.hierarchy).toHaveProperty("content-desc", "6:43 AM");
+      expect(result.hierarchy).toHaveProperty("class", "android.widget.TextClock");
+      expect(result.hierarchy).toHaveProperty("className", "android.widget.TextClock");
       expect(result.hierarchy.bounds).toEqual({
         left: 175,
         top: 687,
         right: 692,
         bottom: 973,
       });
-      expect(result.hierarchy.clickable).toBeUndefined();
-      expect(result.hierarchy.enabled).toBe("true");
-      expect(result.hierarchy.occlusionState).toBe("partial");
-      expect(result.hierarchy.occludedBy).toBe("Debug menu");
-      expect(result.hierarchy.occludedByViewId).toBe("stable-debug-menu");
+      expect(
+        "clickable" in result.hierarchy ? result.hierarchy.clickable : undefined,
+      ).toBeUndefined();
+      expect(result.hierarchy).toHaveProperty("enabled", "true");
+      expect(result.hierarchy).toHaveProperty("occlusionState", "partial");
+      expect(result.hierarchy).toHaveProperty("occludedBy", "Debug menu");
+      expect(result.hierarchy).toHaveProperty("occludedByViewId", "stable-debug-menu");
       expect(result.intentChooserDetected).toBe(true);
       expect(result.notificationPermissionDetected).toBe(true);
       expect(result.contentHiddenRegions).toEqual([
@@ -4581,10 +4423,13 @@ describe("AndroidCtrlProxyClient", function () {
       ]);
 
       // Check child node conversion
+      if (!result.hierarchy.node) {
+        throw new Error("Expected converted child");
+      }
       expect(typeof result.hierarchy.node).toBe("object");
       expect(result.hierarchy.node.text).toBe("Child Node");
       expect(result.hierarchy.node.class).toBe("android.widget.TextView");
-      expect(result.hierarchy.node.className).toBe("android.widget.TextView");
+      expect(result.hierarchy.node).toHaveProperty("className", "android.widget.TextView");
       expect(result.hierarchy.node.bounds).toEqual({
         left: 0,
         top: 0,
@@ -4612,6 +4457,9 @@ describe("AndroidCtrlProxyClient", function () {
       const result =
         accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
+      if (!result.hierarchy.node) {
+        throw new Error("Expected converted child");
+      }
       expect(typeof result.hierarchy.node).toBe("object"); // Single child should not be in array
       expect(result.hierarchy.node.text).toBe("Single Child");
       expect(result.hierarchy.node.clickable).toBe("true");
@@ -4724,7 +4572,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(rootless.screenHeight).toBe(2340);
       expect(rootless.rotation).toBe(1);
       expect(rootless.systemInsets).toEqual({ top: 24, right: 0, bottom: 48, left: 0 });
-      expect(rootless.insets?.displayCutoutInfo).toEqual({
+      expect<unknown>(rootless.insets?.displayCutoutInfo).toEqual({
         classification: "hole_punch",
         bounds: [[480, 0, 600, 120]],
       });
@@ -4784,7 +4632,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(beforeId).toStartWith(STABLE_VIEW_ID_PREFIX);
       expect(afterId).toBe(beforeId);
       // Resource-id-backed view-ids pass through untouched.
-      expect(before.hierarchy["view-id"]).toBe("com.test.app:id/root");
+      expect(before.hierarchy).toHaveProperty("view-id", "com.test.app:id/root");
     });
 
     test("rewrites accessibility-focused mirror occlusion links against the emitted hierarchy ids", function () {
@@ -4866,7 +4714,7 @@ describe("AndroidCtrlProxyClient", function () {
   describe("getAccessibilityHierarchy", function () {
     test("should return null when service is not available", async function () {
       // Keep the unavailable verdict deterministic and independent of ADB I/O.
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
+      const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => fakeAdb });
       spyOn(manager, "isAvailable").mockResolvedValue(false);
 
       const result = await accessibilityServiceClient.getAccessibilityHierarchy();
@@ -4875,13 +4723,11 @@ describe("AndroidCtrlProxyClient", function () {
 
     test("preserves a fresh delegate verdict instead of comparing the device timestamp to the host clock", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
+      const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => fakeAdb });
       const availability = spyOn(manager, "isAvailable").mockResolvedValue(true);
 
       try {
@@ -4915,7 +4761,7 @@ describe("AndroidCtrlProxyClient", function () {
     });
 
     test("fresh-hierarchy wait fails fast — well under the timeout budget — when the screen is off", async function () {
-      fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+      fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
 
       // Screen off: the connection succeeds (so the fresh-data wait is actually entered), but no
       // hierarchy is ever pushed, so waitForFreshData can only exit via the periodic screen check
@@ -4926,12 +4772,10 @@ describe("AndroidCtrlProxyClient", function () {
       // auto-advance models as a one-shot, so we drive virtual time explicitly and step past the
       // ~1s screen-check cadence ourselves.
       const manualTimer = new FakeTimer();
-      const asleepClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(manualTimer),
-        manualTimer,
-      );
+      const asleepClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(manualTimer),
+        timer: manualTimer,
+      });
 
       // A generous wait budget so the fast-fail signal is unmistakable: the screen-off exit lands
       // near the ~1s screen-check cadence, an order of magnitude below this ceiling. Asserting the
@@ -4984,13 +4828,11 @@ describe("AndroidCtrlProxyClient", function () {
       ]);
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
         timer,
-        repo,
-      );
+        installedAppsRepository: repo,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -5031,13 +4873,11 @@ describe("AndroidCtrlProxyClient", function () {
       const timestamp = timer.now();
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
         timer,
-        repo,
-      );
+        installedAppsRepository: repo,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -5095,13 +4935,11 @@ describe("AndroidCtrlProxyClient", function () {
       ]);
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
         timer,
-        repo,
-      );
+        installedAppsRepository: repo,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -5157,13 +4995,11 @@ describe("AndroidCtrlProxyClient", function () {
       ]);
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
         timer,
-        repo,
-      );
+        installedAppsRepository: repo,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -5200,12 +5036,10 @@ describe("AndroidCtrlProxyClient", function () {
       // Don't use autoAdvance - we need to control time for the request timeout
 
       const { factory, getSocket } = createCapturingWebSocketFactory(highlightTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        highlightTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: highlightTimer,
+      });
 
       const shape: HighlightShape = {
         type: "circle",
@@ -5266,12 +5100,10 @@ describe("AndroidCtrlProxyClient", function () {
       // asserts the pending request resolves immediately with a failed result carrying the message.
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       const shape: HighlightShape = {
         type: "circle",
@@ -5319,12 +5151,10 @@ describe("AndroidCtrlProxyClient", function () {
       const errorTimer = new FakeTimer();
 
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       const shape: HighlightShape = {
         type: "circle",
@@ -5384,12 +5214,10 @@ describe("AndroidCtrlProxyClient", function () {
       const errorTimer = new FakeTimer();
 
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       const shape: HighlightShape = {
         type: "circle",
@@ -5446,12 +5274,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a correlated hierarchy sync settles as soon as the socket closes", async function () {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
         timer,
-      );
+      });
 
       try {
         testClient.invalidateCache();
@@ -5484,12 +5310,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a socket close leaves hierarchy runner diagnostics unset", async function () {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
         timer,
-      );
+      });
 
       try {
         testClient.invalidateCache();
@@ -5525,12 +5349,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("an uncorrelated latest-hierarchy wait settles on the next poll after close", async function () {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
         timer,
-      );
+      });
 
       try {
         testClient.invalidateCache();
@@ -5574,12 +5396,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a type:error frame for an in-flight hierarchy requestId fails requestHierarchySync fast", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -5621,12 +5441,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a type:error frame with an unknown requestId does not disturb an in-flight hierarchy sync", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -5678,7 +5496,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a raw waiter ignores idless filtered pushes after correlated frames appeared", async function () {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer,
+      });
       try {
         const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
         let settled = false;
@@ -5716,7 +5537,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("an older correlated tree resolves its waiter without replacing a newer cached tree", async function () {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer,
+      });
       try {
         const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
@@ -5747,7 +5571,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a raw waiter ignores a correlated default-filter stale nudge", async function () {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer,
+      });
       try {
         const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
         let settled = false;
@@ -5791,7 +5618,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a waiter rejects another requestId and accepts its own", async function () {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer,
+      });
 
       try {
         const syncPromise = client.requestHierarchySync(undefined, true, undefined, 10000);
@@ -5852,7 +5682,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("an old runner's idless update still satisfies the existing freshness wait", async function () {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer,
+      });
 
       try {
         const syncPromise = client.requestHierarchySync(undefined, false, undefined, 10000);
@@ -5922,12 +5755,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a type:error frame for an in-flight request_hierarchy_if_stale nudge fails the sync fast", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -5975,12 +5806,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a type:error frame with an unknown requestId does not disturb the stale-nudge wait", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6038,12 +5867,10 @@ describe("AndroidCtrlProxyClient", function () {
       // hierarchy:null).
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         // Prime the connection + cache via a sync that a push resolves quickly.
@@ -6139,12 +5966,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a correlated runner error populates diagnostics.runnerError while still returning null", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6194,12 +6019,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a plain timeout leaves diagnostics.runnerError undefined (no misattribution)", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6231,12 +6054,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("an uncorrelated error id leaves diagnostics.runnerError undefined and the push still resolves", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6289,12 +6110,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a correlated stale-nudge runner error also populates diagnostics.runnerError", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6346,18 +6165,11 @@ describe("AndroidCtrlProxyClient", function () {
       const errorTimer = new FakeTimer();
       const log = new FakeLogger();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        log,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+        logger: log,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6491,19 +6303,13 @@ describe("AndroidCtrlProxyClient", function () {
       const timer = new FakeTimer();
       const log = new FakeLogger();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
         timer,
-        undefined,
         // Retry delays must run on the SAME fake timer so the test controls them.
-        new DefaultRetryExecutor(timer),
-        undefined,
-        undefined,
-        undefined,
-        log,
-      );
+        retryExecutor: new DefaultRetryExecutor(timer),
+        logger: log,
+      });
       return { testClient, getSocket, timer, log };
     };
 
@@ -6758,12 +6564,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a type:error frame echoing the broadcast sync_ uuid fails requestHierarchySync fast", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createSendFailingFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6808,12 +6612,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("a broadcast-fallback runner error populates diagnostics.runnerError (parity with #3062)", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createSendFailingFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6861,12 +6663,10 @@ describe("AndroidCtrlProxyClient", function () {
     test("an uncorrelated error id during the broadcast fallback is a safe no-op; the push still resolves", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createSendFailingFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         testClient.invalidateCache();
@@ -6922,12 +6722,10 @@ describe("AndroidCtrlProxyClient", function () {
       // uncorrelated no-op here and must NOT reject the wait to null (which would discard the cache).
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        errorTimer,
-      );
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: errorTimer,
+      });
 
       try {
         // Prime the connection + cache via a sync that a push resolves quickly.
@@ -7101,13 +6899,12 @@ describe("AndroidCtrlProxyClient", function () {
       const socket = await startStreamServerWithScreenshotSubscriber();
 
       accessibilityServiceClient.handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
-      const boundToScreenA = accessibilityServiceClient.screenGeometry.bind();
-      expect(boundToScreenA).not.toBeNull();
+      const boundToScreenA = requireBinding(accessibilityServiceClient.screenGeometry.bind());
 
       // Screen B arrives and is forwarded while the frame is still in flight. Same resolution, so
       // the geometry cache is unchanged and the provenance stays valid — only the capture moves.
       accessibilityServiceClient.handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
-      const currentAfterB = accessibilityServiceClient.screenGeometry.bind();
+      const currentAfterB = requireBinding(accessibilityServiceClient.screenGeometry.bind());
       expect(currentAfterB.captureSequence).toBeGreaterThan(boundToScreenA.captureSequence);
 
       socket.resetWrittenData();
@@ -7204,23 +7001,21 @@ describe("AndroidCtrlProxyClient", function () {
       fakeScheduler: FakeScreenshotBackoffScheduler,
     ): Promise<{ client: AndroidCtrlProxyClient; socket: CapturingWebSocket }> => {
       const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        localTimer,
-        undefined, // installedAppsRepository
-        undefined, // retryExecutor
-        undefined, // crashEventSink
-        undefined, // deviceConnectionLostNotifier
-        undefined, // sdkEventIngestor
-        undefined, // loggerInstance
-        undefined, // certificateFileSystem
-        fakeScheduler,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: localTimer,
+        // installedAppsRepository
+        // retryExecutor
+        // crashEventSink
+        // deviceConnectionLostNotifier
+        // sdkEventIngestor
+        // loggerInstance
+        // certificateFileSystem
+        screenshotBackoffScheduler: fakeScheduler,
+      });
       client.invalidateCache();
       await client.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
@@ -7262,20 +7057,18 @@ describe("AndroidCtrlProxyClient", function () {
       localTimer.enableAutoAdvance();
       const fakeScheduler = new FakeScreenshotBackoffScheduler();
       const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        localTimer,
-        undefined, // installedAppsRepository
-        undefined, // retryExecutor
-        undefined, // crashEventSink
-        undefined, // deviceConnectionLostNotifier
-        undefined, // sdkEventIngestor
-        undefined, // loggerInstance
-        undefined, // certificateFileSystem
-        fakeScheduler,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: localTimer,
+        // installedAppsRepository
+        // retryExecutor
+        // crashEventSink
+        // deviceConnectionLostNotifier
+        // sdkEventIngestor
+        // loggerInstance
+        // certificateFileSystem
+        screenshotBackoffScheduler: fakeScheduler,
+      });
       client.invalidateCache();
       const controller = new AbortController();
 
@@ -7289,7 +7082,7 @@ describe("AndroidCtrlProxyClient", function () {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(OPERATION_CANCELLED_MESSAGE);
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       expect(socket === null ? [] : screenshotFrames(socket)).toHaveLength(0);
       expect(fakeScheduler.noteCaptureStartedCalls).toBe(0);
 
@@ -7451,23 +7244,21 @@ describe("AndroidCtrlProxyClient", function () {
       const fakeScheduler = new FakeScreenshotBackoffScheduler();
       const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
       // Inject the fake scheduler via the test-only createForTesting seam (positional optionals).
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        localTimer,
-        undefined, // installedAppsRepository
-        undefined, // retryExecutor
-        undefined, // crashEventSink
-        undefined, // deviceConnectionLostNotifier
-        undefined, // sdkEventIngestor
-        undefined, // loggerInstance
-        undefined, // certificateFileSystem
-        fakeScheduler,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: localTimer,
+        // installedAppsRepository
+        // retryExecutor
+        // crashEventSink
+        // deviceConnectionLostNotifier
+        // sdkEventIngestor
+        // loggerInstance
+        // certificateFileSystem
+        screenshotBackoffScheduler: fakeScheduler,
+      });
       client.invalidateCache();
       await client.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");

@@ -9,10 +9,8 @@ import {
   test,
 } from "bun:test";
 import { z } from "zod/v4";
-import {
-  DefaultPlanExecutor,
-  UNEVALUATED_EXPECTATIONS_WARNING,
-} from "../../src/utils/plan/PlanExecutor";
+import { UNEVALUATED_EXPECTATIONS_WARNING } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
@@ -20,19 +18,19 @@ import { registerCriticalSectionTools } from "../../src/server/criticalSectionTo
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetTapOnElementFactory,
-  setTapOnElementFactory,
 } from "../../src/server/interactionTools";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
+const interactionDeps: InteractionToolDependencies = {};
 // criticalSection sub-steps run through ToolRegistry.callInternal, which does not
 // parse. They must still get the migration + schema parse a top-level step gets
 // (#9927). Real tapOn registration + the fake element factory, no device I/O.
 describe("criticalSection sub-steps get the plan path's migration and schema parse (#9927)", () => {
   const device = { platform: "android" as const, deviceId: "fake-device", name: "Fake" };
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let coordinator: CriticalSectionCoordinator;
   let restoreTools: () => void;
   let restoreCoordinator: () => void;
@@ -42,7 +40,7 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
 
   beforeAll(() => {
     restoreSuiteTools = preserveToolRegistry();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     registerCriticalSectionTools();
   });
 
@@ -50,11 +48,11 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
 
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
-    executor = new DefaultPlanExecutor(new FakeTimer());
+    executor = createDefaultPlanExecutor(new FakeTimer());
     coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
     restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
     tappedTexts = [];
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async (params) => {
         tappedTexts.push(params.text);
         return {
@@ -63,7 +61,7 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
           element: { text: params.text, bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
         };
       },
-    }));
+    });
     const section = ToolRegistry.getToolForPlan("criticalSection")!;
     const tap = ToolRegistry.getToolForPlan("tapOn")!;
     const handlers = [tap, section].map((tool) =>
@@ -79,7 +77,7 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
 
   afterEach(() => {
     restoreHandlers();
-    resetTapOnElementFactory();
+    delete interactionDeps.tapOnElementFactory;
     coordinator.reset();
     restoreCoordinator();
     restoreTools();

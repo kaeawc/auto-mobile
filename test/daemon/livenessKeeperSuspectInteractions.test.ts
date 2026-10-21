@@ -25,6 +25,7 @@ const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 
@@ -88,7 +89,7 @@ describe("CLI keeper against a proxy-owned session whose lease lapsed (#10051 x 
       },
       timer,
     );
-    await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     const claim = await heartbeat({
       livenessPolicy: "heartbeat",
       livenessOwnerToken: PROXY_TOKEN,

@@ -4,13 +4,15 @@ import { Migrator, FileMigrationProvider, DEFAULT_MIGRATION_TABLE } from "kysely
 import { existsSync, promises as fs } from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { ENV, readEnvRaw } from "../config/env";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { ActionableError } from "../models/ActionableError";
 import type { MigrationLock } from "./migrationLock";
-import { NoOpMigrationLock } from "./migrationLock";
-import { asMigratorDb, type MigratorSchema } from "./migratorSchema";
+import { NoOpMigrationLock } from "./NoOpMigrationLock";
+import { asMigratorDb, type MigrationTargetDb, type MigratorSchema } from "./migratorSchema";
+import { staticMigrationProvider } from "./staticMigrations";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 const DISABLED_RECOVERY_VALUES = new Set(["0", "false", "no", "off"]);
@@ -29,11 +31,11 @@ type BackupDatabase = () => Promise<void>;
 type CountTableRows<DB> = (db: Kysely<DB>, tableName: string) => Promise<number>;
 
 export interface RunMigrationsOptions {
-  /** Override the migration source (defaults to the on-disk migration folder). */
+  /** Override the static migration source; takes precedence over migration directory env overrides. */
   provider?: MigrationProvider;
   /** Backup mechanism invoked before a destructive reset drops a populated DB. */
   backup?: BackupDatabase;
-  /** Environment to read recovery gates from (defaults to `process.env`). */
+  /** Environment to read migration directory overrides and recovery gates from (defaults to `process.env`). */
   env?: NodeJS.ProcessEnv;
   /**
    * Cross-process lock serializing the migration run so two openers on the same
@@ -46,11 +48,11 @@ export interface RunMigrationsOptions {
   lock?: MigrationLock;
 }
 
-export function resolveMigrationFolder(): string {
+export function resolveMigrationFolder(env: NodeJS.ProcessEnv = process.env): string {
   // @deprecated AUTO_MOBILE_MIGRATIONS_DIR - use AUTOMOBILE_MIGRATIONS_DIR instead
-  const envPath = process.env.AUTOMOBILE_MIGRATIONS_DIR ?? process.env.AUTO_MOBILE_MIGRATIONS_DIR;
+  const envPath = readEnvRaw(ENV.MIGRATIONS_DIR, env);
   if (envPath) {
-    return resolvePathFromDaemonLaunchWorkingDirectory(envPath);
+    return resolvePathFromDaemonLaunchWorkingDirectory(envPath, env);
   }
 
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -66,7 +68,7 @@ export function resolveMigrationFolder(): string {
 }
 
 function readRecoveryEnv(env: NodeJS.ProcessEnv): string | undefined {
-  return (env.AUTOMOBILE_MIGRATION_RECOVERY ?? env.AUTO_MOBILE_MIGRATION_RECOVERY)?.trim();
+  return readEnvRaw(ENV.MIGRATION_RECOVERY, env)?.trim();
 }
 
 function isMigrationRecoveryEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -496,7 +498,7 @@ async function recoverCorruptedMigrations(
  * always released, even when the migration throws.
  */
 export async function runMigrations(
-  db: Kysely<unknown>,
+  db: MigrationTargetDb,
   options: RunMigrationsOptions = {},
 ): Promise<void> {
   const env = options.env ?? process.env;
@@ -508,11 +510,14 @@ export async function runMigrations(
       db,
       provider:
         options.provider ??
-        new FileMigrationProvider({
-          fs,
-          path,
-          migrationFolder: resolveMigrationFolder(),
-        }),
+        // Static imports keep bundled builds independent of the on-disk folder.
+        (readEnvRaw(ENV.MIGRATIONS_DIR, env)
+          ? new FileMigrationProvider({
+              fs,
+              path,
+              migrationFolder: resolveMigrationFolder(env),
+            })
+          : staticMigrationProvider),
     });
 
     const { error } = await runMigrationsOnce(migrator);

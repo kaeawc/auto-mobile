@@ -1,0 +1,16 @@
+# Keep each exception tied to a specific review decision.
+scripts/act/apply_act.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/android/generate-dokka.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/android/put-app-file-picker-smoke.sh  # docs/decisions/ios-user-files-provider.md documents the ios/ path, not this android/ path
+scripts/ios/ctrl-proxy-uninstall.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/ios/generate-docc.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/ios/kill-all-simulators.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/ios/prototype-viewer-attach-smoke.ts  # manual simulator diagnostic invoked with a runtime bundle id and UDID
+scripts/local-dev/use-source-ctrl-proxy.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/lychee/apply_lychee.sh  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/talkback-form-interaction.ts  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/talkback-list-scroll.ts  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/talkback-login-flow.ts  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/voiceover-form-interaction.ts  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/voiceover-list-scroll.ts  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending
+scripts/voiceover-login-flow.ts  # unreferenced as of 2026-10-14 (#11874): keep/delete decision pending

@@ -3,102 +3,69 @@ import { join, resolve } from "node:path";
 import {
   parsePrivateDaemonArgs,
   runPrivateDaemonCommand,
-  type PrivateDaemonCliDeps,
-  type PrivateDaemonCommand,
 } from "../../scripts/manual-test/private-daemon";
-import {
-  derivePrivateDaemonBatch,
-  type PrivateDaemonBatchOptions,
-} from "../../scripts/manual-test/privateDaemonEnv";
+import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
+import { brokerBatchInput, fixture, options, parsed } from "./manualTestPrivateDaemonFixture";
 const posixTest = process.platform === "win32" ? test.skip : test;
-const options: PrivateDaemonBatchOptions = {
-  batchDir: resolve("/mt-batch"),
-  count: 2,
-  basePort: 3160,
-  auxRoot: resolve("/mt-aux"),
-  serverPath: resolve("/built/index.js"),
-};
-function parsed(args: string[]): PrivateDaemonCommand {
-  const result = parsePrivateDaemonArgs(args);
-  if ("help" in result) {
-    throw new Error("Unexpected help");
-  }
-  if ("error" in result) {
-    throw new Error(result.error);
-  }
-  return result;
-}
-function fixture() {
-  const files = new Map<string, string>();
-  const writes: string[] = [],
-    dirs: Array<[string, number]> = [],
-    logs: string[] = [];
-  const removes: string[] = [],
-    modes: Array<[string, number]> = [],
-    captures: Array<{
-      command: string;
-      args: string[];
-      env: Record<string, string>;
-      timeoutMs: number;
-    }> = [];
-  const launches: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
-  const deps: PrivateDaemonCliDeps = {
-    runtimePath: resolve("/fake/runtime"),
-    repoRoot: resolve("/fake/repo"),
-    removeFile: (path) => {
-      removes.push(path);
-      files.delete(path);
-    },
-    chmod: (path, mode) => {
-      modes.push([path, mode]);
-    },
-    runCapture: async (command, args, env, timeoutMs) => {
-      captures.push({ command, args, env, timeoutMs });
-      return {
-        exitCode: 0,
-        stdout: '{"devices":{"runtime":[{"udid":"sim1","name":"fake","state":"Booted"}]}}',
-        stderr: "",
-      };
-    },
-    probeSocket: async () => ({ alive: false, reason: "not running" }),
-    queryAdbHost: async () => {
-      throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
-    },
-    host: { homeDirs: [resolve("/home/fake")], uid: 4242, canonicalize: resolve },
-    env: {
-      AUTOMOBILE_MANAGED_SLOT_CONFIG: "inherited",
-      AUTOMOBILE_DB_PATH: "/wrong-db",
-      KEEP: "kept",
-    },
-    readFile: (path) => {
-      const text = files.get(path);
-      if (text === undefined) {
-        throw new Error(`Missing fake file ${path}`);
+test.each(["mkdir", "writeFile"])(
+  "F5 failing baseline %s preserves launch result",
+  async (kind) => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    const mkdir = f.deps.mkdir;
+    f.deps.mkdir = (path, mode) => {
+      if (kind === "mkdir" && path === join(options.batchDir, "shared")) {
+        throw new Error("baseline mkdir failed");
       }
-      return text;
-    },
-    writeFile: (path, text) => {
-      files.set(path, text);
-      writes.push(path);
-    },
-    mkdir: (path, mode) => {
-      dirs.push([path, mode]);
-    },
-    exists: (path) => files.has(path),
-    isPidAlive: () => false,
-    log: (text) => {
-      logs.push(text);
-    },
-    runCommand: async (command, args, env) => {
-      launches.push({ command, args, env });
-      if (args[2] === "start") {
-        files.set(env.AUTOMOBILE_DAEMON_PID_FILE_PATH, JSON.stringify({ pid: 1234 }));
+      mkdir(path, mode);
+    };
+    const write = f.deps.writeFile;
+    f.deps.writeFile = (path, text) => {
+      if (kind === "writeFile" && path.endsWith("host-devices-at-start.json")) {
+        throw new Error("baseline write failed");
       }
-      return { exitCode: 0 };
-    },
-  };
-  return { files, writes, dirs, logs, launches, removes, modes, captures, deps };
-}
+      write(path, text);
+    };
+    f.deps.runCommand = async (command, args, env) => {
+      f.launches.push({ command, args, env });
+      return { exitCode: 7 };
+    };
+    expect(
+      await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(7);
+    expect(f.launches).toHaveLength(1);
+    expect(f.logs.filter((line) => line.startsWith("BASELINE WARNING:"))).toEqual([
+      expect.stringContaining("provenance will be unknown"),
+    ]);
+  },
+);
+test("F8 help documents evidence, refusals, launch exit codes and gate limitations", () => {
+  const help = parsePrivateDaemonArgs(["--help"]);
+  if (!("help" in help)) {
+    throw new Error("Expected help");
+  }
+  for (const text of [
+    "batch-inferred",
+    "foreign",
+    "bootedBy",
+    "processAvdName",
+    "ps eww",
+    "not yet been observed on a live batch",
+    "inferred-not-stopped",
+    "device ID (serial/UDID)",
+    "ambiguous selector stops nothing",
+    "ambiguous",
+    "held-by-other-daemon",
+    "daemonErrors",
+    "device_already_stopped",
+    "start propagates",
+    "--wait-ms 0",
+    "best-effort",
+    "PID is gone",
+  ]) {
+    expect(help.help).toContain(text);
+  }
+});
 posixTest("parses each command and exact start passthrough", () => {
   expect(
     parsed([
@@ -118,7 +85,7 @@ posixTest("parses each command and exact start passthrough", () => {
       "0",
     ]).op,
   ).toBe("init");
-  for (const op of ["start", "stop", "status", "env"]) {
+  for (const op of ["start", "stop", "status", "env"] as const) {
     expect(parsed([op, "--batch-dir", options.batchDir, "--daemon", "1"]).op).toBe(op);
   }
   const start = parsed([
@@ -130,7 +97,7 @@ posixTest("parses each command and exact start passthrough", () => {
     "--plan-execution-lock-scope",
     "session",
   ]);
-  if (start.op === "init") {
+  if (start.op !== "start") {
     throw new Error("wrong op");
   }
   expect(start.extraFlags).toEqual(["--debug", "--plan-execution-lock-scope", "session"]);
@@ -165,10 +132,11 @@ posixTest("init writes only private manifest/env/0700 dirs, refuses overwrite", 
     join(options.batchDir, "daemon2", "env.sh"),
     join(options.batchDir, "batch.json"),
     ...[1, 2].flatMap((index) =>
-      ["am", "proxy", "frame", "aux"].map((name) =>
+      ["am", "proxy", "frame", "aux", "broker"].map((name) =>
         join(options.batchDir, "bin", `${name}${index}`),
       ),
     ),
+    join(options.batchDir, "shared", "preflight-0.json"),
   ]);
   expect(f.dirs.every(([, mode]) => mode === 0o700)).toBe(true);
   expect(JSON.parse(f.files.get(join(options.batchDir, "batch.json"))!).specs).toEqual(
@@ -224,7 +192,7 @@ posixTest("start refuses any live pid before launching the batch", async () => {
   ).toBe(2);
   expect(f.launches).toEqual([]);
 });
-posixTest("stop only launches isolated daemon stop; status and env never launch", async () => {
+posixTest("gone stop, status and env never launch", async () => {
   const f = fixture();
   await runPrivateDaemonCommand({ op: "init", options }, f.deps);
   f.writes.length = 0;
@@ -235,7 +203,7 @@ posixTest("stop only launches isolated daemon stop; status and env never launch"
       f.deps,
     ),
   ).toBe(0);
-  expect(f.launches[0].args).toEqual([options.serverPath, "--daemon", "stop"]);
+  expect(f.launches).toEqual([]);
   expect(f.writes).toEqual([]);
   expect(f.dirs).toEqual([]);
   f.files.set(join(options.batchDir, "daemon1", "pid.txt"), "1234\n");
@@ -244,8 +212,7 @@ posixTest("stop only launches isolated daemon stop; status and env never launch"
     parsed(["env", "--batch-dir", options.batchDir, "--daemon", "1"]),
     f.deps,
   );
-  expect(f.launches).toHaveLength(1);
-  expect(f.launches[0].command).toBe(f.deps.runtimePath);
+  expect(f.launches).toHaveLength(0);
   expect(f.logs.at(-1)).toBe(join(options.batchDir, "daemon1", "env.sh"));
 });
 posixTest("tampered specs/default options are refused before a launch", async () => {
@@ -344,7 +311,7 @@ posixTest(
       parsed(["start", "--batch-dir", options.batchDir, "--daemon", "2", "--", "--debug"]),
       f.deps,
     );
-    expect(f.launches[1].args.slice(3)).toEqual([
+    expect(f.launches[0].args.slice(3)).toEqual([
       "--port",
       "3161",
       "--strict-port",
@@ -352,8 +319,8 @@ posixTest(
       "--tool-call-recording",
       "--debug",
     ]);
-    expect(f.launches[1].env.NOTE).toBe("private");
-    expect(JSON.parse(f.logs.at(-1)!).args).toEqual(f.launches[1].args.slice(3));
+    expect(f.launches[0].env.NOTE).toBe("private");
+    expect(JSON.parse(f.logs.at(-1)!).args).toEqual(f.launches[0].args.slice(3));
     expect(f.files.get(spec.plainPidFilePath)).toBe("1234\n");
   },
 );
@@ -364,12 +331,15 @@ posixTest(
     await runPrivateDaemonCommand({ op: "init", options }, f.deps);
     const spec = derivePrivateDaemonBatch(options)[0];
     f.files.set(spec.plainPidFilePath, "22\n");
+    f.files.set(spec.pidFilePath, '{"pid":22}');
+    f.deps.isPidAlive = () => true;
     f.deps.runCommand = async () => ({ exitCode: 7 });
     const stop = parsed(["stop", "--batch-dir", options.batchDir, "--daemon", "1"]);
-    expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(7);
+    expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(1);
     expect(f.files.get(spec.plainPidFilePath)).toBe("22\n");
     expect(f.removes).toEqual([]);
     f.files.delete(spec.plainPidFilePath);
+    f.deps.isPidAlive = () => false;
     f.deps.runCommand = async () => ({ exitCode: 0 });
     expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(0);
   },
@@ -483,6 +453,7 @@ posixTest(
 );
 posixTest("wrapper rendering quotes absolute paths containing spaces", () => {
   expect(renderPrivateDaemonWrappers("/private/a b", 1, "/repo root")).toEqual({
+    broker1: `#!/usr/bin/env bash\nset -euo pipefail\nexec bash '/repo root/scripts/manual-test/in-daemon-env.sh' --batch-dir '/private/a b' --daemon 1 -- bun '/repo root/scripts/manual-test/broker-batch.ts' "$@"\n`,
     am1: `#!/usr/bin/env bash\nset -euo pipefail\nexec bash '/repo root/scripts/manual-test/in-daemon-env.sh' --batch-dir '/private/a b' --daemon 1 --cd '/repo root' "$@"\n`,
     ...Object.fromEntries(
       ["proxy", "frame", "aux"].map((name) => [
@@ -492,19 +463,19 @@ posixTest("wrapper rendering quotes absolute paths containing spaces", () => {
     ),
   });
 });
-posixTest("init and wrappers write exactly four executable wrappers per daemon", async () => {
+posixTest("init and wrappers write exactly five executable wrappers per daemon", async () => {
   const f = fixture();
   await runPrivateDaemonCommand({ op: "init", options }, f.deps);
-  expect(f.modes).toHaveLength(8);
+  expect(f.modes).toHaveLength(10);
   expect(f.modes.every(([, mode]) => mode === 0o755)).toBe(true);
   f.writes.length = 0;
   f.modes.length = 0;
   expect(
     await runPrivateDaemonCommand(parsed(["wrappers", "--batch-dir", options.batchDir]), f.deps),
   ).toBe(0);
-  expect(f.writes).toHaveLength(8);
+  expect(f.writes).toHaveLength(10);
   expect(f.writes.every((path) => path.startsWith(join(options.batchDir, "bin") + "/"))).toBe(true);
-  expect(f.modes).toHaveLength(8);
+  expect(f.modes).toHaveLength(10);
 });
 posixTest(
   "older manifest reports only missing new state defaults; other tampering stays refused",
@@ -642,3 +613,273 @@ posixTest("ADB host FAIL returns the server message without invoking adb", async
   });
   expect(f.captures.map((call) => call.command)).toEqual(["xcrun"]);
 });
+
+function brokerInitArgs(): string[] {
+  return [
+    "init",
+    "--batch-dir",
+    options.batchDir,
+    "--count",
+    "2",
+    "--base-port",
+    "3160",
+    "--aux-root",
+    options.auxRoot!,
+    "--broker-batch",
+    "/input/broker-batch.json",
+  ];
+}
+function brokerFixture() {
+  const f = fixture();
+  f.files.set("/input/broker-batch.json", JSON.stringify(brokerBatchInput()));
+  return f;
+}
+
+test("broker init persists product configs, client requests and private modes", async () => {
+  const f = brokerFixture();
+  expect(await runPrivateDaemonCommand(parsed(brokerInitArgs()), f.deps)).toBe(0);
+  const read = (name: string) => JSON.parse(f.files.get(join(options.batchDir, name))!);
+  expect(read("batch.json").broker).toEqual({
+    daemon: 1,
+    hostConfig: "broker/host-config.json",
+    allowReuse: false,
+    maxDevices: 2,
+  });
+  expect(read("broker/host-config.json")).toMatchObject({
+    contractVersion: 1,
+    limits: { totalDeviceCap: 2 },
+    reuseCleanDevices: false,
+  });
+  expect(read("broker/clients.json")["i-phone"]).toMatchObject({
+    platform: "ios",
+    requestId: "batch-id-i-phone-1",
+    tokenFile: "sessions/i-phone/owner-token",
+    expected: "failed:capacity_exhausted",
+    profile: {
+      schemaVersion: 1,
+      platform: "ios",
+      hardware: { kind: "archetype", archetype: "phone" },
+    },
+  });
+  for (const name of ["host-config.json", "clients.json"]) {
+    expect(f.modes).toContainEqual([join(options.batchDir, "broker", name), 0o600]);
+  }
+  expect(f.dirs.every(([, mode]) => mode === 0o700)).toBe(true);
+  expect(f.launches).toEqual([]);
+});
+
+test("broker start sets config only for daemon 1 and leaves client env scrubbed", async () => {
+  const f = brokerFixture();
+  expect(await runPrivateDaemonCommand(parsed(brokerInitArgs()), f.deps)).toBe(0);
+  expect(
+    await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+  ).toBe(0);
+  expect(f.launches).toHaveLength(2);
+  expect(f.launches[0].env.AUTOMOBILE_SESSION_BROKER_CONFIG).toBe(
+    join(options.batchDir, "broker/host-config.json"),
+  );
+  expect(f.launches[1].env.AUTOMOBILE_SESSION_BROKER_CONFIG).toBeUndefined();
+  for (const launch of f.launches) {
+    expect(launch.env.AUTOMOBILE_SESSION_CONFIG).toBeUndefined();
+  }
+  for (const index of [1, 2]) {
+    const env = f.files.get(join(options.batchDir, `daemon${index}/env.sh`))!;
+    expect(env).toContain("unset AUTOMOBILE_SESSION_BROKER_CONFIG");
+    expect(env).not.toContain("export AUTOMOBILE_SESSION_BROKER_CONFIG");
+    expect(f.files.get(join(options.batchDir, `bin/broker${index}`))).toContain(
+      "--daemon 1 -- bun",
+    );
+  }
+});
+
+test("broker init dry run matches real file content and modes without writes or host probes", async () => {
+  const f = brokerFixture();
+  f.deps.runCapture = async () => {
+    throw new Error("unexpected host probe");
+  };
+  expect(await runPrivateDaemonCommand(parsed([...brokerInitArgs(), "--dry-run"]), f.deps)).toBe(0);
+  expect(f.writes).toEqual([]);
+  expect(f.dirs).toEqual([]);
+  expect(f.modes).toEqual([]);
+  expect(f.launches).toEqual([]);
+  const plan = JSON.parse(f.logs[0]);
+  expect(plan.dryRun).toBe(true);
+  expect(plan.daemonEnvironments[0].env.KEEP).toBeUndefined();
+  expect(plan.daemonEnvironments[0].env.AUTOMOBILE_SESSION_BROKER_CONFIG).toBe(
+    join(options.batchDir, "broker/host-config.json"),
+  );
+  expect(plan.daemonEnvironments[1].env.AUTOMOBILE_SESSION_BROKER_CONFIG).toBeUndefined();
+  expect(
+    plan.clientEnvironments.every(
+      (row: { env: Record<string, string> }) =>
+        row.env.AUTOMOBILE_SESSION_BROKER_CONFIG === undefined,
+    ),
+  ).toBe(true);
+  const real = brokerFixture();
+  expect(await runPrivateDaemonCommand(parsed(brokerInitArgs()), real.deps)).toBe(0);
+  for (const file of plan.files) {
+    expect(file.content).toBe(real.files.get(file.path));
+    expect(file.mode).toBe(
+      file.path.includes(`${join(options.batchDir, "bin")}`) ? "0755" : "0600",
+    );
+  }
+});
+
+test.each(["AUTOMOBILE_SESSION_BROKER_CONFIG", "AUTOMOBILE_SESSION_CONFIG"])(
+  "broker init refuses owned env %s explicitly",
+  (key) => {
+    for (const assignment of [
+      ["--env", `${key}=/foreign`],
+      ["--daemon-env", `2:${key}=/foreign`],
+    ]) {
+      const result = parsePrivateDaemonArgs([...brokerInitArgs(), ...assignment]);
+      expect(result).toHaveProperty("error", expect.stringContaining(key));
+      expect(result).toHaveProperty("error", expect.stringContaining("harness owns"));
+    }
+  },
+);
+
+test("broker init cap and reuse refusals happen before writing", async () => {
+  for (const change of [{ totalDeviceCap: 3 }, { totalDeviceCap: 5 }, { idlePoolCap: 1 }]) {
+    const f = brokerFixture();
+    const input = brokerBatchInput();
+    Object.assign(input.limits, change);
+    f.files.set("/input/broker-batch.json", JSON.stringify(input));
+    expect(await runPrivateDaemonCommand(parsed(brokerInitArgs()), f.deps)).toBe(2);
+    expect(f.writes).toEqual([]);
+    expect(f.dirs).toEqual([]);
+  }
+  for (const flag of [
+    ["--max-devices", "5"],
+    ["--max-devices", "1.5"],
+  ]) {
+    expect(parsePrivateDaemonArgs([...brokerInitArgs(), ...flag])).toHaveProperty("error");
+  }
+});
+
+test.each(["coordination", "shared/adb-servers", "broker/host-config.json"])(
+  "broker start refuses canonical path escape %s before probes",
+  async (path) => {
+    const f = brokerFixture();
+    expect(await runPrivateDaemonCommand(parsed(brokerInitArgs()), f.deps)).toBe(0);
+    f.writes.length = 0;
+    f.deps.runCapture = async () => {
+      throw new Error("unexpected host probe");
+    };
+    const escaped =
+      path === "coordination"
+        ? join(options.batchDir, "daemon1/coordination")
+        : join(options.batchDir, path);
+    f.deps.host.canonicalize = (candidate) =>
+      candidate === escaped ? resolve("/outside/broker") : resolve(candidate);
+    expect(
+      await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(2);
+    expect(f.logs.at(-1)).toContain("under the batch root");
+    expect(f.launches).toEqual([]);
+    expect(f.writes).toEqual([]);
+  },
+);
+
+test("broker manifest cannot designate daemon 2", async () => {
+  const f = brokerFixture();
+  await runPrivateDaemonCommand(parsed(brokerInitArgs()), f.deps);
+  const path = join(options.batchDir, "batch.json");
+  const manifest = JSON.parse(f.files.get(path)!);
+  manifest.broker.daemon = 2;
+  f.files.set(path, JSON.stringify(manifest));
+  expect(
+    await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+  ).toBe(2);
+  expect(f.launches).toEqual([]);
+});
+
+test("broker init records explicit reuse permission in the broker manifest", async () => {
+  const f = brokerFixture();
+  const input = brokerBatchInput();
+  input.reuseCleanDevices = true;
+  input.limits.idlePoolCap = 1;
+  f.files.set("/input/broker-batch.json", JSON.stringify(input));
+  expect(
+    await runPrivateDaemonCommand(parsed([...brokerInitArgs(), "--allow-reuse"]), f.deps),
+  ).toBe(0);
+  expect(JSON.parse(f.files.get(join(options.batchDir, "batch.json"))!).broker.allowReuse).toBe(
+    true,
+  );
+});
+
+test("broker start revalidates host caps and pooling before host probes or launch", async () => {
+  for (const edit of ["hard-cap", "recorded-cap", "idle-pool", "reuse"]) {
+    const f = brokerFixture();
+    expect(
+      await runPrivateDaemonCommand(parsed([...brokerInitArgs(), "--max-devices", "1"]), {
+        ...f.deps,
+        readFile: (path) =>
+          path === "/input/broker-batch.json"
+            ? JSON.stringify({
+                ...brokerBatchInput(),
+                limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 0 },
+              })
+            : f.deps.readFile(path),
+      }),
+    ).toBe(0);
+    const path = join(options.batchDir, "broker/host-config.json");
+    const host = JSON.parse(f.files.get(path)!);
+    if (edit === "hard-cap") {
+      host.limits.totalDeviceCap = 5;
+    }
+    if (edit === "recorded-cap") {
+      host.limits.totalDeviceCap = 2;
+    }
+    if (edit === "idle-pool") {
+      host.limits.idlePoolCap = 1;
+    }
+    if (edit === "reuse") {
+      host.reuseCleanDevices = true;
+    }
+    f.files.set(path, JSON.stringify(host));
+    f.writes.length = 0;
+    f.captures.length = 0;
+    expect(
+      await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(2);
+    expect(f.logs.at(-1)).toMatch(/max-devices|idlePoolCap/);
+    expect(f.launches).toEqual([]);
+    expect(f.captures).toEqual([]);
+    expect(f.writes).toEqual([]);
+  }
+});
+
+test("broker start honors explicit reuse permission and the recorded four-device ceiling", async () => {
+  const f = brokerFixture();
+  const input = brokerBatchInput();
+  input.limits = { totalDeviceCap: 4, sessionCap: 4, idlePoolCap: 1 };
+  input.reuseCleanDevices = true;
+  f.files.set("/input/broker-batch.json", JSON.stringify(input));
+  expect(
+    await runPrivateDaemonCommand(
+      parsed([...brokerInitArgs(), "--max-devices", "4", "--allow-reuse"]),
+      f.deps,
+    ),
+  ).toBe(0);
+  expect(
+    await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+  ).toBe(0);
+  expect(f.launches).toHaveLength(2);
+});
+test.each([0, 5, 1.5])(
+  "broker start refuses invalid recorded maxDevices %s",
+  async (maxDevices) => {
+    const f = brokerFixture();
+    expect(await runPrivateDaemonCommand(parsed(brokerInitArgs()), f.deps)).toBe(0);
+    const path = join(options.batchDir, "batch.json");
+    const manifest = JSON.parse(f.files.get(path)!);
+    manifest.broker.maxDevices = maxDevices;
+    f.files.set(path, JSON.stringify(manifest));
+    expect(
+      await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(2);
+    expect(f.logs.at(-1)).toContain("maxDevices");
+    expect(f.launches).toEqual([]);
+  },
+);

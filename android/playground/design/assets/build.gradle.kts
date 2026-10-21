@@ -1,26 +1,12 @@
 plugins {
-  id("automobile.kotlin-common")
-  alias(libs.plugins.android.library)
+  id("automobile.android-library")
 }
 
 android {
   namespace = "dev.jasonpearson.automobile.design.assets"
-  compileSdk = libs.versions.build.android.compileSdk.get().toInt()
-  buildToolsVersion = libs.versions.build.android.buildTools.get()
 
   defaultConfig {
-    minSdk = libs.versions.build.android.minSdk.get().toInt()
-    consumerProguardFiles("consumer-rules.pro")
-  }
-
-  buildTypes {
-    release {
-      isMinifyEnabled = false
-      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-    }
-  }
-  compileOptions {
-    sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
-    targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
+    // Preserve this resource-only module's absence of an instrumentation runner.
+    testInstrumentationRunner = null
   }
 }

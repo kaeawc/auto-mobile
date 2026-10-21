@@ -1,11 +1,11 @@
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod/v4";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/daemon/InMemoryToolSelectionProfileRegistry";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { INTERNAL_ACTIONS_COMPACT_METADATA_PARAM } from "../../src/daemon/constants";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
@@ -53,7 +53,7 @@ afterAll(async () => {
   for (const server of servers) {
     await server.close();
   }
-  Reflect.get(ToolRegistry, "tools").delete(TOOL);
+  ToolRegistry.removeToolForTesting(TOOL);
   serverConfig.setActionsCompactMetadataEnabled(previous);
   restore();
 });

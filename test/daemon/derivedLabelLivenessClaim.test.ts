@@ -43,6 +43,7 @@ async function daemon(): Promise<Daemon> {
     getSessionManager: () => manager,
     getDevicePool: () => ({
       refreshDevices: async () => 0,
+      releaseDevice: async () => {},
       getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
     }),
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(timer),

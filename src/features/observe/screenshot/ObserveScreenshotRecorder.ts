@@ -26,6 +26,9 @@ import {
 import { validateCapturedScreenshot } from "./validateCapturedScreenshot";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 
+// Two attempts preserve the existing screenshot recording retry bound.
+export const SCREENSHOT_RECORD_ATTEMPTS = 2;
+
 /** Capture-time options for the non-settled captures, which keep the device's own encoding. */
 export type ObserveCaptureOptions = Pick<ObserveScreenshotOptions, "hidePrototypes">;
 
@@ -231,7 +234,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     this.store.beginObservation(this.device.deviceId, observationId);
     try {
       return await perf.track("screenshot", async () => {
-        for (let attempt = 0; attempt < 2; attempt++) {
+        for (let attempt = 0; attempt < SCREENSHOT_RECORD_ATTEMPTS; attempt++) {
           const { result, cancelled } = await this.captureSettledAttempt(
             signal,
             displayId,

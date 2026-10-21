@@ -45,6 +45,9 @@ shift 3 # -k 2 <seconds>
 if [[ "${TIMEOUT_BUILD:-}" == "1" && "$*" == "bun run build" ]]; then
   exit 124
 fi
+if [[ "${TIMEOUT_BROKER:-}" == "1" && "$*" == *"--scenario broker"* ]]; then
+  exit 124
+fi
 if [[ "${TIMEOUT_ANDROID:-}" == "1" && "$*" == *"--platform android"* ]]; then
   exit 124
 fi
@@ -323,4 +326,54 @@ run_harness() {
   [ "${status}" -eq 2 ]
   [[ "${output}" == *"--ios-same-name-sibling-uuid must differ"* ]]
   [ ! -f "${COMMAND_LOG}" ]
+}
+
+@test "broker lane forwards batch options once without building or requiring full targets" {
+  run env AUTOMOBILE_ACCEPTANCE_LIVE=1 PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" \
+    --scenario broker --broker-batch /private/broker-batch --clients a,b,c \
+    --max-devices 2 --allow-crash --only parallel-acquire,capacity-refusal-and-replay \
+    --confirm-live --test-owned-devices
+  [ "$status" -eq 0 ]
+  [[ "$(cat "${COMMAND_LOG}")" == *"--scenario broker --broker-batch /private/broker-batch --max-devices 2 --clients a,b,c --only parallel-acquire,capacity-refusal-and-replay --allow-crash --confirm-live --test-owned-devices"* ]]
+  [[ "$(cat "${COMMAND_LOG}")" != *"run build"* ]]
+  grep -q '^timeout -k 2 1198 bun scripts/live-device-acceptance.ts --scenario broker' "${COMMAND_LOG}"
+  [ ! -e "${TEST_REPO}/scratch" ]
+}
+
+@test "broker lane refuses missing batch, excessive caps and missing live confirmations" {
+  for args in "--scenario broker" "--scenario broker --broker-batch /batch --max-devices 5" "--scenario broker --broker-batch /batch"; do
+    # Intentional word splitting: these are trusted fixed argument vectors.
+    # shellcheck disable=SC2086
+    run env PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" $args
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "${COMMAND_LOG}" ]
+}
+
+@test "broker dry-run forwards a plan without build, key creation or evidence directories" {
+  run env PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" \
+    --scenario broker --broker-batch /batch --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$(cat "${COMMAND_LOG}")" == *"--scenario broker --broker-batch /batch --max-devices 2 --dry-run"* ]]
+  [ ! -e "${TEST_REPO}/scratch" ]
+  [ ! -e "${TEST_REPO}/dist" ]
+}
+
+
+@test "broker watchdog propagates expiry with the configured total budget" {
+  run env TIMEOUT_BROKER=1 AUTOMOBILE_ACCEPTANCE_LIVE=1 PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" \
+    --scenario broker --broker-batch /batch --confirm-live --test-owned-devices --total-timeout-seconds 30
+  [ "${status}" -eq 124 ]
+  grep -q '^timeout -k 2 28 bun scripts/live-device-acceptance.ts --scenario broker' "${COMMAND_LOG}"
+  [ "$(grep -c '^timeout ' "${COMMAND_LOG}")" -eq 1 ]
+  [ "$(grep -c '^bun ' "${COMMAND_LOG}" || true)" -eq 0 ]
+}
+
+@test "broker watchdog refuses invalid total budgets before bun" {
+  for budget in 0 2 invalid; do
+    run env AUTOMOBILE_ACCEPTANCE_LIVE=1 PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" \
+      --scenario broker --broker-batch /batch --confirm-live --test-owned-devices --total-timeout-seconds "${budget}"
+    [ "${status}" -eq 2 ]
+  done
+  [ ! -e "${COMMAND_LOG}" ]
 }

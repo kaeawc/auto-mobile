@@ -8,6 +8,9 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { scoreSelectedElementMatch } from "./ExploreElementScoring";
 
+// Validation waits for the explored screen to settle.
+const EXPLORE_VALIDATION_SETTLE_MS = 500;
+
 /**
  * Initialize graph traversal state for validate mode
  */
@@ -157,15 +160,20 @@ export function markNodeVisited(state: GraphTraversalState, screenName: string):
 /**
  * Mark edge as traversed with validation result
  */
+export interface EdgeTraversalOutcome {
+  actualTo: string | null;
+  success: boolean;
+  error?: string;
+  matchConfidence?: number;
+}
+
 export function markEdgeTraversed(
   state: GraphTraversalState,
   edge: NavigationEdge,
-  actualTo: string | null,
-  success: boolean,
+  outcome: EdgeTraversalOutcome,
   timer: Timer,
-  error?: string,
-  matchConfidence?: number,
 ): void {
+  const { actualTo, success, error, matchConfidence } = outcome;
   const edgeKey = getEdgeKey(edge);
   state.traversedEdges.add(edgeKey);
 
@@ -388,6 +396,13 @@ function resolveCoordinateTap(
   args: Record<string, unknown>,
 ): EdgeTargetResolution {
   const { x, y } = args;
+  if (args.pointer !== undefined) {
+    // An element tap is a finger touch; replaying a stylus edge that way would silently change it.
+    return notValidatable(
+      edge,
+      'recorded "tapAt" used a stylus pointer, which an element tap cannot replay',
+    );
+  }
   if (typeof x !== "number" || typeof y !== "number") {
     return notValidatable(edge, 'recorded "tapAt" interaction has no numeric x/y coordinate');
   }
@@ -479,7 +494,7 @@ export async function validateNavigation(
   setStopReason: (reason: string) => void,
 ): Promise<boolean> {
   // Wait a bit for navigation to complete
-  await timer.sleep(500);
+  await timer.sleep(EXPLORE_VALIDATION_SETTLE_MS);
 
   const actualScreen = navigationManager.getCurrentScreen() ?? "unknown";
   const success = actualScreen === expectedEdge.to;
@@ -488,11 +503,13 @@ export async function validateNavigation(
   markEdgeTraversed(
     state,
     expectedEdge,
-    actualScreen,
-    success,
+    {
+      actualTo: actualScreen,
+      success,
+      error: success ? undefined : `Expected ${expectedEdge.to}, got ${actualScreen}`,
+      matchConfidence: elementConfidence,
+    },
     timer,
-    success ? undefined : `Expected ${expectedEdge.to}, got ${actualScreen}`,
-    elementConfidence,
   );
 
   if (!success) {

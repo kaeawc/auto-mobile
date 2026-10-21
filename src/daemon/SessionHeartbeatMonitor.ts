@@ -3,7 +3,7 @@ import {
   MAX_CREDIBLE_DAEMON_STALL_MS,
   splitScheduleGap,
 } from "./timerLateness";
-export { DEFAULT_STALL_MARGIN_MS, MAX_CREDIBLE_DAEMON_STALL_MS } from "./timerLateness";
+export { MAX_CREDIBLE_DAEMON_STALL_MS } from "./timerLateness";
 import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
 import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { logger } from "../utils/logger";
@@ -27,6 +27,7 @@ import {
   type SessionExecutionProbeInput,
 } from "./unsettledExecutionVeto";
 import { getSessionHeartbeatCheckIntervalMs, SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
+import { ENV } from "../config/env";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -248,8 +249,8 @@ export class SessionHeartbeatMonitor {
     this.graceMs =
       config.graceMs ??
       readPositiveMsEnv(
-        "AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
-        "AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+        ENV.SESSION_HEARTBEAT_INITIAL_GRACE_MS.name,
+        ENV.SESSION_HEARTBEAT_INITIAL_GRACE_MS.legacyName,
       ) ??
       DEFAULT_INITIAL_GRACE_MS;
     this.preFirstHeartbeatGraceMs =
@@ -257,8 +258,8 @@ export class SessionHeartbeatMonitor {
     this.defaultHeartbeatTimeoutMs =
       config.heartbeatTimeoutMs ??
       readPositiveMsEnv(
-        "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
-        "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+        ENV.SESSION_HEARTBEAT_TIMEOUT_MS.name,
+        ENV.SESSION_HEARTBEAT_TIMEOUT_MS.legacyName,
       ) ??
       getDefaultSessionHeartbeatTimeoutMs();
     this.stallThresholdMs = config.stallThresholdMs ?? DEFAULT_STALL_MARGIN_MS;

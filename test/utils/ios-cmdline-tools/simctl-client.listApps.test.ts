@@ -100,16 +100,7 @@ describe("SimCtlClient listApps", () => {
       return createExecResult("", "");
     };
 
-    const apps = await new SimCtlClient(
-      device,
-      execAsync,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      plist,
-    ).listApps();
+    const apps = await new SimCtlClient(device, execAsync, { plist }).listApps();
 
     expect(converted?.toString("utf8")).toBe("<plist />");
     expect(calls.some((call) => call.startsWith("plutil "))).toBe(false);

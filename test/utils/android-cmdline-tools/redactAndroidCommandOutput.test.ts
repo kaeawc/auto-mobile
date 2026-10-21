@@ -48,4 +48,29 @@ describe("redactAndroidCommandOutput", () => {
     expect(output).toBe("token=[REDACTED] diagnostic");
     expect(output).not.toContain("secret-tail");
   });
+
+  test("decodes split UTF-8 before redacting and flushes incomplete bytes", () => {
+    const redactor = new AndroidCommandOutputStreamRedactor();
+    const output =
+      redactor.append(Buffer.from([0x78, 0x20, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0xc2])) +
+      redactor.append(Buffer.from([0xa0, 0x3d, ...Buffer.from("SECRETVALUE\n")])) +
+      redactor.flush();
+    expect(output).toContain("token=[REDACTED]");
+    expect(output).not.toContain("SECRETVALUE");
+    expect(output).not.toContain("�");
+
+    for (const value of ["😀", "€"]) {
+      const bytes = Buffer.from(value);
+      const split = new AndroidCommandOutputStreamRedactor();
+      let roundTrip = "";
+      for (const byte of bytes) {
+        roundTrip += split.append(Buffer.from([byte]));
+      }
+      roundTrip += split.flush();
+      expect(roundTrip).toBe(value);
+    }
+    const trailing = new AndroidCommandOutputStreamRedactor();
+    trailing.append(Buffer.from([0xe2, 0x82]));
+    expect(trailing.flush()).toBe("�");
+  });
 });

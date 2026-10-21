@@ -1,0 +1,13 @@
+{
+  "code": "cancelled.sdkCapabilityQuery",
+  "builder": "SdkCapabilityQueryError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"SDK capability query cancelled\",\"code\":\"cancelled\",\"retryable\":true}"
+      }
+    ],
+    "isError": true
+  }
+}

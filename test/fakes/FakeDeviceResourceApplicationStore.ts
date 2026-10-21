@@ -13,7 +13,9 @@ export class FakeDeviceResourceApplicationStore implements DeviceResourceApplica
   failWrites = false;
 
   async get(identity: SimulatorResourceIdentity): Promise<DeviceResourceApplicationRecord | null> {
-    return this.records.get(simulatorResourceIdentityKey(identity)) ?? null;
+    const stored = this.records.get(simulatorResourceIdentityKey(identity));
+    // Like the SQLite row, every read is a fresh copy; callers cannot mutate stored state.
+    return stored ? { ...structuredClone(stored), identity } : null;
   }
 
   async put(record: DeviceResourceApplicationRecord): Promise<void> {

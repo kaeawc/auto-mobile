@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import type { CtrlSocket } from "../../src/features/observe/shared/types";
 import { Timer } from "../../src/utils/SystemTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
@@ -24,10 +25,7 @@ export type PongMode = "auto" | "withhold";
  * Fake WebSocket implementation for testing
  * Allows simulating instant connection failures without waiting for timeout
  */
-export class FakeWebSocket
-  extends EventEmitter
-  implements Pick<WebSocket, "readyState" | "send" | "close" | "ping" | "terminate">
-{
+export class FakeWebSocket extends EventEmitter implements CtrlSocket {
   public readyState: WebSocketState = WebSocketState.CONNECTING;
   private failureMode: "instant" | "timeout" | "none";
   private connectTimeoutMs: number = 0;

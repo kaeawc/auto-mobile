@@ -1,36 +1,28 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { z } from "zod/v4";
-import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { Telephony, PhoneCallOptions, SendSmsOptions } from "../features/action/Telephony";
+import { Telephony } from "../features/action/Telephony";
 import { ActionableError, BootedDevice } from "../models";
-import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { phoneCallResultSchema, sendSmsResultSchema } from "./telephonyToolOutputSchemas";
+import { defineDeviceTool } from "./defineTool";
 
 // #6712: the advertised `additionalProperties: false` was not enforced at
-// runtime — a plain z.object silently DROPPED an undeclared caller argument.
-// `.strict()` closes that gap, matching launchApp/tapOn (#6154) and the
-// preference tools (#6348).
-export const phoneCallSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      action: z
-        .enum(["call", "accept", "cancel", "busy", "hold"])
-        .describe("call/accept/cancel/busy/hold; hold needs no phoneNumber"),
-      phoneNumber: z.string().optional().describe("Phone number; required except for hold"),
-    })
-    .strict(),
-);
+// runtime. `defineDeviceTool` applies `.strict()` and device targeting, so the
+// handler args below are inferred from these schemas (no hand-written Args).
+const phoneCallInput = z.object({
+  action: z
+    .enum(["call", "accept", "cancel", "busy", "hold"])
+    .describe("call/accept/cancel/busy/hold; hold needs no phoneNumber"),
+  phoneNumber: z.string().optional().describe("Phone number; required except for hold"),
+});
 
-export const sendSmsSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      phoneNumber: z.string().describe("Sender phone number"),
-      message: z.string().describe("SMS body; max 1024 chars, no newlines/NUL"),
-    })
-    .strict(),
-);
+const sendSmsInput = z.object({
+  phoneNumber: z.string().describe("Sender phone number"),
+  message: z.string().describe("SMS body; max 1024 chars, no newlines/NUL"),
+});
 
-export interface PhoneCallArgs extends PhoneCallOptions {}
-export interface SendSmsArgs extends SendSmsOptions {}
+type PhoneCallArgs = z.output<typeof phoneCallInput>;
+type SendSmsArgs = z.output<typeof sendSmsInput>;
 
 /** Builds the Telephony a handler drives; injectable so tests substitute fakes. */
 export type TelephonyFactory = (device: BootedDevice) => Telephony;
@@ -42,7 +34,7 @@ const defaultTelephonyFactory: TelephonyFactory = (device) => new Telephony(devi
 // in-app SDK trigger route (#1580); tests inject a Telephony with a fake sender.
 export const createPhoneCallHandler =
   (makeTelephony: TelephonyFactory = defaultTelephonyFactory) =>
-  async (device: BootedDevice, args: PhoneCallArgs, _progress?: ProgressCallback) => {
+  async (device: BootedDevice, args: PhoneCallArgs) => {
     const telephony = makeTelephony(device);
     const result = await telephony.phoneCall({
       action: args.action,
@@ -51,7 +43,7 @@ export const createPhoneCallHandler =
     if (!result.success) {
       throw new ActionableError(result.error || `Failed to execute phoneCall ${args.action}`);
     }
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: result.message || `Phone call ${args.action} executed`,
       ...result,
     });
@@ -61,7 +53,7 @@ export const phoneCallHandler = createPhoneCallHandler();
 
 export const createSendSmsHandler =
   (makeTelephony: TelephonyFactory = defaultTelephonyFactory) =>
-  async (device: BootedDevice, args: SendSmsArgs, _progress?: ProgressCallback) => {
+  async (device: BootedDevice, args: SendSmsArgs) => {
     const telephony = makeTelephony(device);
     const result = await telephony.sendSms({
       phoneNumber: args.phoneNumber,
@@ -70,7 +62,7 @@ export const createSendSmsHandler =
     if (!result.success) {
       throw new ActionableError(result.error || "Failed to send simulated SMS");
     }
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: result.message || "Simulated SMS delivered",
       ...result,
     });
@@ -78,20 +70,28 @@ export const createSendSmsHandler =
 
 export const sendSmsHandler = createSendSmsHandler();
 
-export function registerTelephonyTools() {
-  ToolRegistry.registerDeviceAware(
-    "phoneCall",
+const phoneCallTool = defineDeviceTool({
+  name: "phoneCall",
+  description:
     "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
-    phoneCallSchema,
-    phoneCallHandler,
-    { defaultEnabled: false },
-  );
+  input: phoneCallInput,
+  handler: phoneCallHandler,
+  options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: phoneCallResultSchema },
+});
 
-  ToolRegistry.registerDeviceAware(
-    "sendSms",
+const sendSmsTool = defineDeviceTool({
+  name: "sendSms",
+  description:
     "Send simulated incoming SMS: Android emulator, or a notification via the app's AutoMobile iOS SDK.",
-    sendSmsSchema,
-    sendSmsHandler,
-    { defaultEnabled: false },
-  );
+  input: sendSmsInput,
+  handler: sendSmsHandler,
+  options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: sendSmsResultSchema },
+});
+
+export const phoneCallSchema = phoneCallTool.schema;
+export const sendSmsSchema = sendSmsTool.schema;
+
+export function registerTelephonyTools() {
+  phoneCallTool.register();
+  sendSmsTool.register();
 }

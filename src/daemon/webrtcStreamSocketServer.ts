@@ -11,9 +11,9 @@ import {
   getDaemonStreamDeviceLifecycleEmitter,
   type StreamDeviceLifecycleEvents,
 } from "./streamDeviceLifecycleEvents";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
-import { WebRtcSubscriptionEndedError } from "../server/WebRtcSubscriptionEndedError";
+import { WebRtcSubscriptionEndedError } from "./WebRtcSubscriptionEndedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
@@ -34,7 +34,7 @@ import type {
   reconcileWebRtcStreamsForDeviceOwnership,
   stopAllWebRtcStreams,
   waitForWebRtcStreamReadiness,
-} from "../server/webrtcStreamManager";
+} from "./webrtcStreamManager";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
@@ -49,7 +49,7 @@ import {
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { resolveStreamDevice } from "./streamDeviceResolver";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import type { DeviceOwnershipChanges } from "./videoStreamSocketServer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -110,12 +110,11 @@ const WEBRTC_STREAM_PURPOSE = "to start a WebRTC stream";
  * actually arrives, so the daemon does not load the heavy WebRTC stack at boot.
  */
 function loadManager() {
-  return import("../server/webrtcStreamManager");
+  return import("./webrtcStreamManager");
 }
 
 function defaultOwnershipChanges(): DeviceOwnershipChanges | null {
-  const state = DaemonState.getInstance();
-  return state.isInitialized() ? state.getSessionManager() : null;
+  return defaultDaemonContext.sessionManager() ?? null;
 }
 
 const WEBRTC_SOCKET_CLOSE_TIMEOUT_MS = 5_000;

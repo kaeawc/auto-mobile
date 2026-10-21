@@ -1,6 +1,9 @@
-import type { HostChildProcess, HostSpawnOptions } from "../HostCommandExecutor";
+import type { HostSpawnOptions } from "../HostCommandExecutor";
+import { StringDecoder } from "node:string_decoder";
 import type { Timer } from "../SystemTimer";
 import { appendBounded } from "./appendBounded";
+import { AndroidCommandTerminatedError } from "./AndroidCommandTerminatedError";
+export { AndroidCommandTerminatedError } from "./AndroidCommandTerminatedError";
 
 export interface AndroidCommandResult {
   stdout: string;
@@ -10,8 +13,24 @@ export interface AndroidCommandResult {
   stderrTruncated: boolean;
 }
 
+type ChildOutputStream = { on(event: "data", listener: (data: Buffer) => void): unknown };
+
+/**
+ * The slice of a spawned child the runner drives. A real `ChildProcess` satisfies it;
+ * fakes implement exactly this surface instead of the full node type.
+ */
+export interface AndroidCommandChild {
+  readonly stdout: ChildOutputStream | null;
+  readonly stderr: ChildOutputStream | null;
+  readonly stdin: { write(chunk: string): unknown; end(): unknown } | null;
+  on(event: "close", listener: (code: number | null) => void): unknown;
+  on(event: "exit", listener: () => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  kill(signal?: NodeJS.Signals): unknown;
+}
+
 interface AndroidCommandDependencies {
-  spawn: (command: string, args: string[], options: HostSpawnOptions) => HostChildProcess;
+  spawn: (command: string, args: string[], options: HostSpawnOptions) => AndroidCommandChild;
   timer: Timer;
 }
 
@@ -33,20 +52,6 @@ interface AndroidCommandRequest {
   onOutput?: (stream: "stdout" | "stderr", output: string) => void;
 }
 
-/**
- * The command was stopped by its timeout or caller cancellation rather than
- * exiting on its own, so whatever it was doing may be half done.
- */
-export class AndroidCommandTerminatedError extends Error {
-  constructor(
-    message: string,
-    public readonly reason: "timeout" | "cancelled",
-  ) {
-    super(message);
-    this.name = "AndroidCommandTerminatedError";
-  }
-}
-
 /** Orchestration over the existing injectable host spawn seam, not a new process seam. */
 class AndroidCommandRun {
   private settled = false;
@@ -61,11 +66,13 @@ class AndroidCommandRun {
     stdoutTruncated: false,
     stderrTruncated: false,
   };
+  private readonly stdoutDecoder = new StringDecoder("utf8");
+  private readonly stderrDecoder = new StringDecoder("utf8");
 
   constructor(
     private readonly dependencies: AndroidCommandDependencies,
     private readonly request: AndroidCommandRequest,
-    private readonly child: HostChildProcess,
+    private readonly child: AndroidCommandChild,
     private readonly resolve: (result: AndroidCommandResult) => void,
     private readonly reject: (error: Error) => void,
   ) {}
@@ -84,9 +91,21 @@ class AndroidCommandRun {
       request.timeoutMs,
     );
     request.onStart();
-    child.stdout?.on("data", (data) => this.capture("stdout", data.toString()));
-    child.stderr?.on("data", (data) => this.capture("stderr", data.toString()));
+    child.stdout?.on("data", (data) =>
+      this.capture("stdout", typeof data === "string" ? data : this.stdoutDecoder.write(data)),
+    );
+    child.stderr?.on("data", (data) =>
+      this.capture("stderr", typeof data === "string" ? data : this.stderrDecoder.write(data)),
+    );
     child.on("close", (code) => {
+      const stdoutTail = this.stdoutDecoder.end();
+      const stderrTail = this.stderrDecoder.end();
+      if (stdoutTail) {
+        this.capture("stdout", stdoutTail);
+      }
+      if (stderrTail) {
+        this.capture("stderr", stderrTail);
+      }
       this.settle(() => {
         if (this.terminationError) {
           this.reject(this.terminationError);

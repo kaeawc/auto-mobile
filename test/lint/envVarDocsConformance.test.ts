@@ -1,7 +1,9 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
+
 import path, { resolve } from "node:path";
 import ts from "typescript";
+import { ENV_REGISTRY } from "../../src/config/env";
 import { moduleExportResolver, resolveModule, toPosixPath } from "./moduleExportResolver";
 
 import {
@@ -14,13 +16,9 @@ const ROOT = resolve(import.meta.dir, "../..");
 const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 
 const INTERNAL: Record<string, string> = {
-  AUTOMOBILE_MANAGED_SLOT_CONFIG:
-    "Experimental managed-slot launch config (#11172); documented in managed-slots.md with #11180.",
   AUTOMOBILE_TEST_MODE: "ADB test fake activation, not a device configuration option.",
   AUTOMOBILE_ALLOW_IN_MEMORY_DB: "Test-only opt-in to a nonpersistent database.",
   AUTOMOBILE_ALLOW_REAL_CTRL_PROXY_WEBSOCKET: "Test-only opt-in to a real CtrlProxy WebSocket.",
-  AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR:
-    "Unit-test preload marker for the per-process data directory it assigned.",
   AUTOMOBILE_ACCEPTANCE_LIVE: "Live acceptance harness activation.",
   AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER: "Acceptance harness discovery ordering.",
   AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY:
@@ -38,7 +36,7 @@ const INTERNAL: Record<string, string> = {
 };
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(directory).flatMap((entry) => {
     const path = resolve(directory, entry.name);
     return entry.isDirectory() ? sourceFiles(path) : entry.name.endsWith(".ts") ? [path] : [];
   });
@@ -470,9 +468,16 @@ describe("environment variable documentation", () => {
   // a loaded one exceeded the old 15s hook cap. The scan is not a unit under the per-test budget.
   beforeAll(() => {
     reads = extractReads(
-      sourceFiles(resolve(ROOT, "src")).map((path) => ({ path, text: readFileSync(path, "utf8") })),
+      sourceFiles(resolve(ROOT, "src")).map((path) => ({ path, text: readGuardFile(path) })),
     );
-    markdown = readFileSync(resolve(ROOT, "docs/using/environment-variables.md"), "utf8");
+    // Registry readers index the environment by spec.name, which syntax-only resolution cannot follow.
+    for (const spec of ENV_REGISTRY) {
+      reads.add(spec.name);
+      if (spec.legacyName) {
+        reads.add(spec.legacyName);
+      }
+    }
+    markdown = readGuardFile(resolve(ROOT, "docs/using/environment-variables.md"));
     docs = documentedNames(markdown);
   }, 60_000);
   test("product path registry covers AST reads without stale rows", () => {

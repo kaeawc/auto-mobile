@@ -1,3 +1,5 @@
+import type { BootedDevice } from "../../../src/models";
+import type { SystemImageFilter } from "../../../src/utils/android-cmdline-tools/avdmanager";
 import { getAbortSignal } from "../../../src/utils/AbortContext";
 import { createListingHandlers } from "../../../src/server/deviceToolsListing";
 import {
@@ -7,7 +9,6 @@ import {
 import {
   setDeviceManager,
   setDeviceLockProbe,
-  setOrientationReaderFactory,
   resetBootedDevicesResourceCache,
   getBootedDevicesForPlatforms,
 } from "../../../src/server/bootedDeviceResources";
@@ -25,8 +26,8 @@ class SlowCatalog extends FakeAvdManager {
   constructor(readonly timer: FakeTimer) {
     super();
   }
-  override async listInstalledSystemImages(apiLevel?: number, signal?: AbortSignal) {
-    const images = await super.listInstalledSystemImages(apiLevel, signal);
+  override async listInstalledSystemImages(filter?: SystemImageFilter, signal?: AbortSignal) {
+    const images = await super.listInstalledSystemImages(filter, signal);
     await this.timer.sleep(10_000);
     signal?.throwIfAborted();
     return images;
@@ -36,7 +37,6 @@ class SlowCatalog extends FakeAvdManager {
 afterEach(() => {
   setDeviceManager(null);
   setDeviceLockProbe(null);
-  setOrientationReaderFactory(null);
   resetBootedDevicesResourceCache();
   resetDeviceToolsDependencies();
   invalidateAndroidInventoryProvenanceAndCatalog();
@@ -64,13 +64,15 @@ describe("Android inventory read budgets", () => {
       lockSignal = getAbortSignal();
       return lateLock.promise;
     });
-    setOrientationReaderFactory(() => ({
-      readOrientation: async (_device, signal) => {
+    const orientationReaderFactory = () => ({
+      readOrientation: async (_device: BootedDevice, signal?: AbortSignal) => {
         orientationSignal = signal;
         return lateOrientation.promise;
       },
-    }));
-    const pending = getBootedDevicesForPlatforms(["android"], timer);
+    });
+    const pending = getBootedDevicesForPlatforms(["android"], timer, {
+      injectedOrientationReaderFactory: orientationReaderFactory,
+    });
     await new Promise<void>((resolve) => setImmediate(resolve));
     await timer.advanceTimeAsync(8_000);
     const response = await pending;
@@ -121,7 +123,9 @@ describe("Android inventory read budgets", () => {
   test("9s images response is retryable and a late catalog completes the next read without new children", async () => {
     const timer = new FakeTimer();
     const manager = new FakeDeviceUtils();
-    manager.setDeviceImages("android", [{ name: "Pixel_9", platform: "android" }]);
+    manager.setDeviceImages("android", [
+      { name: "Pixel_9", platform: "android", isRunning: false },
+    ]);
     const avds = new SlowCatalog(timer);
     const handler = createDeviceImageResourcesHandler({
       deviceManager: manager,

@@ -1,4 +1,5 @@
-import { readEnvPositiveInteger } from "./envNumbers";
+import { ENV } from "../config/env";
+import { readEnvInt } from "./envNumbers";
 
 /**
  * Bound every external diagnostic call. Tools like `xcrun`, the keychain
@@ -9,7 +10,7 @@ import { readEnvPositiveInteger } from "./envNumbers";
  * AUTOMOBILE_DOCTOR_TIMEOUT_MS.
  */
 export function resolveDoctorExecTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  return readEnvPositiveInteger("AUTOMOBILE_DOCTOR_TIMEOUT_MS", undefined, { fallback: 5000 }, env);
+  return readEnvInt(ENV.DOCTOR_TIMEOUT_MS, env);
 }
 
 /** Resolved once at module load (the probes share one budget); tests use {@link resolveDoctorExecTimeoutMs}. */

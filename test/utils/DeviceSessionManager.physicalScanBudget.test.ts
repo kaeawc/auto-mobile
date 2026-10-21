@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import type {
   IosPhysicalDeviceLister,
   PhysicalIosDeviceDiscovery,
@@ -27,14 +27,9 @@ describe("DeviceSessionManager physical iOS scan budget (#11077)", () => {
     };
     const timer = new FakeTimer();
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(
-        new FakeAdbExecutor(),
-        new FakeDeviceUtils(),
-        new FakeSimctl() as never,
-        {
-          iosPhysicalDeviceLister: lister,
-        },
-      ),
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), new FakeSimctl(), {
+        iosPhysicalDeviceLister: lister,
+      }),
       undefined,
       { runnerReadinessTimer: timer, physicalIosScanBudgetMs: 1_000 },
     );
@@ -52,7 +47,7 @@ describe("DeviceSessionManager physical iOS scan budget (#11077)", () => {
       platform: "android",
     });
     expect(calls()).toBe(0);
-    expect(scan.scannedSources["ios-physical"]).toBe(false);
+    expect(scan.scannedSources?.["ios-physical"]).toBe(false);
   });
 
   test("a hung lister loses to the readiness budget and leaves ios-physical unscanned", async () => {
@@ -62,8 +57,8 @@ describe("DeviceSessionManager physical iOS scan budget (#11077)", () => {
     await timer.advanceTimeAsync(1_000);
     const scan = await pending;
     expect(calls()).toBe(1);
-    expect(scan.scannedSources["ios-physical"]).toBe(false);
-    expect(scan.scannedSources.android).toBe(true);
+    expect(scan.scannedSources?.["ios-physical"]).toBe(false);
+    expect(scan.scannedSources?.android).toBe(true);
     // The shared run is not cancelled: a late result is simply ignored.
     release({ devices: [physical], complete: true });
   });

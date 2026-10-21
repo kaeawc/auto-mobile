@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import os from "node:os";
+import { createExecResult } from "../../../src/utils/execResult";
+import { afterEach, mock, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
+import { DeviceUnreachableError } from "../../../src/models/DeviceUnreachableError";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { PlatformVideoCaptureBackend } from "../../../src/features/video/PlatformVideoCaptureBackend";
@@ -12,6 +14,10 @@ import { logger } from "../../../src/utils/logger";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 // Issue #9898: the recorder is stopped by its own device-side pid, never by name,
 // whenever that pid is known.
@@ -28,8 +34,9 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
   let timer: FakeTimer;
   let backend: PlatformVideoCaptureBackend;
 
+  const scratch = useScratchRoot("platform-video-pid-");
   beforeEach(async () => {
-    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-pid-"));
+    tempDir = scratch.next();
     factory = new FakeAdbClientFactory();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -38,10 +45,6 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
         return "h264";
       },
     });
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(tempDir, { recursive: true, force: true });
   });
 
   async function startRecording(launchStdout?: string): Promise<RecordingHandle> {
@@ -299,6 +302,57 @@ describe("orphaned Android recorder teardown", () => {
     const backend = new PlatformVideoCaptureBackend(factory, new FakeTimer());
     return { backend, client: factory.getFakeClient() };
   }
+  test.each(["thrown", "returned"])("unanswered orphan probe is unreachable (%s)", async (mode) => {
+    const { backend, client } = harness();
+    const cause = mode === "thrown" ? new Error("probe timed out") : "probe timed out";
+    const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
+      if (cause instanceof Error) {
+        throw cause;
+      }
+      return { ...createExecResult("", ""), error: cause };
+    });
+    try {
+      const error = await backend
+        .forceStopOrphanedCapture(device, descriptor)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(DeviceUnreachableError);
+      expect(error).toMatchObject({ cause });
+    } finally {
+      execute.mockRestore();
+    }
+  });
+  // Exercise the shared signal method used by live SIGINT/force-stop without launching a capture.
+  test.each(["thrown", "returned"])(
+    "live recorder probe retains its original error (%s)",
+    async (mode) => {
+      const { backend, client } = harness();
+      const cause = mode === "thrown" ? new Error("probe timed out") : "probe timed out";
+      const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
+        if (cause instanceof Error) {
+          throw cause;
+        }
+        return { ...createExecResult("", ""), error: cause };
+      });
+      try {
+        for (const kind of [2, 9] as const) {
+          const error = await backend
+            .signalDeviceRecorder(client, descriptor, 4321, kind)
+            .catch((caught: unknown) => caught);
+          expect(error).not.toBeInstanceOf(DeviceUnreachableError);
+          if (mode === "thrown") {
+            expect(error).toBe(cause);
+          } else {
+            expect(error).toMatchObject({
+              message: "Could not inspect recorder pid 4321: probe timed out",
+              cause,
+            });
+          }
+        }
+      } finally {
+        execute.mockRestore();
+      }
+    },
+  );
   test("descriptor reads the pid learned after start", () => {
     const { backend } = harness();
     const devicePid: { pid?: number } = {};
@@ -380,7 +434,11 @@ describe("orphaned Android recorder teardown", () => {
   test("orphan still alive after kill is unconfirmed", async () => {
     const { backend, client } = harness();
     client.setCommandResult(PROBE, OUR_CMDLINE);
-    await expect(backend.forceStopOrphanedCapture(device, descriptor)).rejects.toThrow("confirm");
+    const error = await backend
+      .forceStopOrphanedCapture(device, descriptor)
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ message: expect.stringContaining("confirm") });
+    expect(error).not.toBeInstanceOf(DeviceUnreachableError);
   });
   test("orphan with no pid cannot be identified and sends no command", async () => {
     const { backend, client } = harness();

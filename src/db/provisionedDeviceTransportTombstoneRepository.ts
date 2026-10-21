@@ -5,10 +5,7 @@ import type {
   RetiredProvisionedDeviceTransport,
   ProvisionedDeviceTransportTombstoneStore,
 } from "../utils/provisionedDeviceTransportFence";
-export type {
-  RetiredProvisionedDeviceTransport,
-  ProvisionedDeviceTransportTombstoneStore,
-} from "../utils/provisionedDeviceTransportFence";
+export type { RetiredProvisionedDeviceTransport } from "../utils/provisionedDeviceTransportFence";
 
 export class ProvisionedDeviceTransportTombstoneRepository implements ProvisionedDeviceTransportTombstoneStore {
   constructor(private readonly database?: Kysely<Database>) {}

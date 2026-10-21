@@ -1,22 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { staleDisplayError, withStaleDisplay } from "../../src/models/StaleDisplayError";
+import { staleDisplayError, withStaleDisplay } from "../../src/features/observe/StaleDisplayError";
 import { runWithSelectedDisplayPin } from "../../src/features/observe/SessionDisplayContext";
 import type {
   TapAtResult,
   TapOnElementResult,
-  TapAnyElementResult,
   SwipeOnResult,
   DragAndDropResult,
   PinchOnResult,
   ObserveResult,
 } from "../../src/models";
 import {
+  type InteractionToolDependencies,
   tapAtHandler,
   tapOnHandler,
-  setTapAtElementFactory,
-  setTapOnElementFactory,
-  resetTapAtElementFactory,
-  resetTapOnElementFactory,
 } from "../../src/server/interactionTools";
 import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
 import { getStructuredField, createStructuredToolResponse } from "../../src/utils/toolUtils";
@@ -40,7 +36,9 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { observation } from "../helpers/tapAtCoordinate";
+import type { TapAnyElementResult } from "../../src/models/TapAnyElementResult";
 
+const interactionDeps: InteractionToolDependencies = {};
 const bounds = { left: 0, top: 0, right: 0, bottom: 0 };
 const results: {
   tapAt: TapAtResult;
@@ -69,8 +67,8 @@ const results: {
 const stale = staleDisplayError(7, 9, "cover");
 const device = { deviceId: "typed-stale-wire", platform: "android" as const, name: "fake" };
 afterEach(() => {
-  resetTapAtElementFactory();
-  resetTapOnElementFactory();
+  delete interactionDeps.tapAtElementFactory;
+  delete interactionDeps.tapOnElementFactory;
 });
 
 describe("stale-display result channel", () => {
@@ -100,15 +98,31 @@ describe("stale-display result channel", () => {
     expect(withStaleDisplay(result, new Error("invalid coordinates"))).toBe(result);
   });
   test("tapAt handler spreads details into structuredContent", async () => {
-    setTapAtElementFactory(() => ({ execute: async () => withStaleDisplay(results.tapAt, stale) }));
-    const response = await tapAtHandler(device, { x: 1, y: 2 });
+    interactionDeps.tapAtElementFactory = () => ({
+      execute: async () => withStaleDisplay(results.tapAt, stale),
+    });
+    const response = await tapAtHandler(
+      device,
+      { x: 1, y: 2 },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "staleDisplay")).toEqual(stale.details);
     expect(getStructuredField(response, "error")).toBe(stale.message);
   });
   test("tapOn handler spreads details and its declared schema retains them", async () => {
-    setTapOnElementFactory(() => ({ execute: async () => withStaleDisplay(results.tapOn, stale) }));
-    const response = await tapOnHandler(device, { selector: { text: "Target" } });
+    interactionDeps.tapOnElementFactory = () => ({
+      execute: async () => withStaleDisplay(results.tapOn, stale),
+    });
+    const response = await tapOnHandler(
+      device,
+      { action: "tap", selector: { text: "Target" } },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "staleDisplay")).toEqual(stale.details);
     expect(getStructuredField(response, "error")).toBe(stale.message);

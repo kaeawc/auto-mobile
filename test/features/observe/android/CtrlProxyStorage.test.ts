@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
@@ -26,15 +27,14 @@ describe("CtrlProxyStorage (Android)", function () {
     fakeTimer.enableAutoAdvance();
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
     // The inspected app has a live process unless a test says otherwise (#10246).
-    fakeAdb.setCommandResponse("pidof", { stdout: "4242\n", stderr: "" });
+    fakeAdb.setCommandResponse("pidof", createExecResult("4242\n", ""));
 
     testDevice = {
       deviceId: "test-device-storage",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -127,7 +127,10 @@ describe("CtrlProxyStorage (Android)", function () {
 
   test("Keystore discovery round trip preserves typed state and strips unexpected fields", async () => {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -143,7 +146,7 @@ describe("CtrlProxyStorage (Android)", function () {
       const pending = client.discoverKeystore("com.example");
       await waitForSentMessages(socket, count + 1);
       const request = findSentMessage(socket!, "discover_keystore");
-      const state = {
+      const state: Awaited<ReturnType<AndroidCtrlProxyClient["discoverKeystore"]>> = {
         schemaVersion: 1,
         capability: "storage.keystore",
         outcome: "disabled",
@@ -170,7 +173,10 @@ describe("CtrlProxyStorage (Android)", function () {
 
   test("old APK consistently reports unsupported Keystore discovery without sending requests", async () => {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -192,7 +198,10 @@ describe("CtrlProxyStorage (Android)", function () {
     }
   });
 
-  const sdkSnapshot = {
+  const sdkSnapshot: Extract<
+    Awaited<ReturnType<AndroidCtrlProxyClient["getSdkCapabilities"]>>,
+    { status: "available" }
+  >["snapshot"] = {
     schemaVersion: 1,
     capabilities: [
       { id: "network.control", state: "SUPPORTED" },
@@ -203,7 +212,10 @@ describe("CtrlProxyStorage (Android)", function () {
 
   const openSdkCapabilitiesClient = async (supportedCommands: string[]) => {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     await client.ensureConnected();
     const socket = await waitForSocket(getSocket);
     await waitForSocketOpen(socket);
@@ -320,7 +332,10 @@ describe("CtrlProxyStorage (Android)", function () {
     ["get_preferences", "preferences"],
   ])("classifies absent SDK authority in %s", async (requestType, responseType) => {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -348,14 +363,12 @@ describe("CtrlProxyStorage (Android)", function () {
 
   describe("subscribeStorage", function () {
     test("refuses a stopped app before any provider request and never starts it (#10246)", async function () {
-      fakeAdb.setCommandResponse("pidof", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("pidof", createExecResult("", ""));
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -376,12 +389,10 @@ describe("CtrlProxyStorage (Android)", function () {
 
     test("resolves with a subscription rebuilt from the device's flat result fields", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -425,12 +436,10 @@ describe("CtrlProxyStorage (Android)", function () {
 
     test("rejects when the device reports failure", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -460,18 +469,16 @@ describe("CtrlProxyStorage (Android)", function () {
   });
 
   describe("unsubscribeStorage", function () {
-    // CtrlProxyMessageHandlerTest.kt's `unsubscribe_storage with only subscriptionId resolves
+    // CtrlProxyMessageHandlerStorageTest.kt's `unsubscribe_storage with only subscriptionId resolves
     // packageName and fileName` uses the same JSON shape; changing either side must change both.
     const subscriptionId = "com.example:settings.xml";
 
     test("sends the subscriptionId and resolves on the device's result", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -510,12 +517,10 @@ describe("CtrlProxyStorage (Android)", function () {
 
     test("sends the subscriptionId returned by subscribeStorage unchanged", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       const packageName = "com.example";
       const fileName = "settings.xml";
       try {
@@ -566,12 +571,10 @@ describe("CtrlProxyStorage (Android)", function () {
   describe("getPreference", function () {
     test("resolves a found entry from the valueType wire field", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -609,12 +612,10 @@ describe("CtrlProxyStorage (Android)", function () {
   describe("listDataStores", function () {
     test("sends adapterName and resolves with the device's file list", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -652,12 +653,10 @@ describe("CtrlProxyStorage (Android)", function () {
 
     test("rejects when the device reports failure", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -688,12 +687,10 @@ describe("CtrlProxyStorage (Android)", function () {
   describe("getDataStore", function () {
     test("sends adapterName + storeName and resolves with the device's entries", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -735,12 +732,10 @@ describe("CtrlProxyStorage (Android)", function () {
     // client verbatim (STRING_SET as a JSON array string, BYTE_ARRAY as base64).
     test("carries STRING_SET and BYTE_ARRAY entries across the wire", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);

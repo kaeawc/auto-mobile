@@ -25,7 +25,7 @@ import type {
   VideoStreamSocketResponse,
 } from "../../src/daemon/videoStreamSocketTypes";
 import type { WebRtcStreamSocketRequest } from "../../src/daemon/webrtcStreamSocketTypes";
-import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
+import { sendWebRtcStreamRequest } from "../lib/webrtcStreamClient";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { errorMessage } from "../../src/utils/describeUnknownError";
@@ -50,7 +50,6 @@ import {
 
 import {
   AUX_SOCKET_COMMANDS,
-  AUX_SOCKET_ACTIONS,
   AUX_SOCKET_FLAGS,
   RECORDING_SESSION_GUIDANCE,
   auxSocketHelp,
@@ -95,21 +94,27 @@ export function parseAuxSocketArgs(
       if (value.action !== "subscribe") {
         return { error: "video requires a subscribe JSON object." };
       }
-      request = value as unknown as VideoStreamSocketRequest;
+      request = { ...value, action: "subscribe" };
     } else if (kind === "recording") {
-      if (!(AUX_SOCKET_ACTIONS.recording as readonly string[]).includes(action)) {
+      if (action !== "start" && action !== "stop" && action !== "status") {
         return { error: usage };
       }
       request = { command: action };
     } else {
-      if (!(AUX_SOCKET_ACTIONS.webrtc as readonly string[]).includes(action)) {
+      if (
+        action !== "start" &&
+        action !== "stop" &&
+        action !== "status" &&
+        action !== "list" &&
+        action !== "await"
+      ) {
         return { error: usage };
       }
       const value = argv[index] && !argv[index].startsWith("--") ? jsonRequest(argv[index++]) : {};
       request = { ...value, action };
       if (
         action === "start" &&
-        (typeof request.whipEndpoint !== "string" || !request.whipEndpoint.trim())
+        (typeof value.whipEndpoint !== "string" || !value.whipEndpoint.trim())
       ) {
         return { error: "webrtc start requires whipEndpoint in request JSON." };
       }

@@ -59,7 +59,7 @@ describe("BEGIN IMMEDIATE across two connections (issue #10042)", () => {
   );
 
   it(
-    "runs the app connection in WAL mode with the configured busy timeout",
+    "runs the app connection in WAL mode with the short app-connection busy timeout (#11858)",
     async () => {
       const lifecycle = await getHarness().openLifecycleTestDb("auto-mobile-begin-immediate-wal-");
       try {
@@ -71,7 +71,10 @@ describe("BEGIN IMMEDIATE across two connections (issue #10042)", () => {
           timeout: number;
         }>`SELECT timeout FROM pragma_busy_timeout`.execute(db);
         expect(journal.rows[0]?.journal_mode).toBe("wal");
-        expect(timeout.rows[0]?.timeout).toBe(5000);
+        expect(timeout.rows[0]?.timeout).toBe(
+          lifecycle.module.SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS,
+        );
+        expect(timeout.rows[0]?.timeout).toBeLessThan(lifecycle.module.SQLITE_BUSY_TIMEOUT_MS);
       } finally {
         await lifecycle.close();
       }

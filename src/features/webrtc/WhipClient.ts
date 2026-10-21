@@ -47,6 +47,18 @@ export interface WhipSession {
   etag: string | null;
 }
 
+/** The WHIP operations the publisher drives; {@link WhipClient} is the HTTP implementation. */
+export interface WhipSignalingClient {
+  publish(offerSdp: string, signal?: AbortSignal): Promise<WhipSession>;
+  patchCandidate(
+    resourceUrl: string,
+    etag: string,
+    sdpFragment: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  delete(resourceUrl: string, signal?: AbortSignal): Promise<void>;
+}
+
 /**
  * Client for the WebRTC-HTTP Ingestion Protocol (WHIP, RFC 9725).
  * The publisher POSTs an SDP offer and receives an SDP answer plus a resource
@@ -59,7 +71,7 @@ export interface WhipSession {
  * - DELETE session termination: §4.2
  * - bearer authentication: §4.7
  */
-export class WhipClient {
+export class WhipClient implements WhipSignalingClient {
   private readonly endpoint: string;
   private readonly bearerToken?: string;
   private readonly fetchImpl: FetchLike;
@@ -72,11 +84,17 @@ export class WhipClient {
     }
     this.endpoint = options.endpoint;
     this.bearerToken = options.bearerToken;
-    // eslint-disable-next-line auto-mobile/no-unknown-cast -- global fetch's lib.dom types are wider than the narrow FetchLike we call (url,{method,headers,body,signal}) -> {status,ok,headers.get,text}.
-    this.fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
-    if (!this.fetchImpl) {
+    // The global fetch is wider than the narrow FetchLike this client calls, so
+    // adapt it by delegation rather than casting.
+    const fetchImpl: FetchLike | undefined =
+      options.fetchImpl ??
+      (typeof globalThis.fetch === "function"
+        ? (url, init) => globalThis.fetch(url, init)
+        : undefined);
+    if (!fetchImpl) {
       throw new ActionableError("No fetch implementation available for WHIP client.");
     }
+    this.fetchImpl = fetchImpl;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_WHIP_REQUEST_TIMEOUT_MS;
     if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
       throw new ActionableError("WHIP request timeout must be a positive number of milliseconds.");

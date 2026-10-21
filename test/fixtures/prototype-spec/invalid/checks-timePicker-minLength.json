@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "hour": 1,
+      "minute": 2
+    },
+    "root": {
+      "type": "timePicker",
+      "checks": [
+        {
+          "message": "Bad",
+          "minLength": 1
+        }
+      ],
+      "hourKey": "hour",
+      "minuteKey": "minute"
+    }
+  },
+  "expectedPath": "root.checks[0].minLength"
+}

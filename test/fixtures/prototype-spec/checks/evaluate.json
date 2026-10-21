@@ -1,0 +1,2085 @@
+[
+  {
+    "nodeType": "textField",
+    "value": "a",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "  ",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": 0,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": 1,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": "  ",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "checkbox",
+    "value": true,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "checkbox",
+    "value": false,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "checkbox",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "checkbox",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "switch",
+    "value": true,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "switch",
+    "value": false,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "switch",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "switch",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "radioGroup",
+    "value": "a",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "radioGroup",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "radioGroup",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "radioGroup",
+    "value": "  ",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "a",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "  ",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": 0,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": 1,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": "  ",
+    "checks": [
+      {
+        "message": "First failure",
+        "required": true
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "ab",
+    "checks": [
+      {
+        "message": "First failure",
+        "minLength": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "éé",
+    "checks": [
+      {
+        "message": "First failure",
+        "minLength": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "😀",
+    "checks": [
+      {
+        "message": "First failure",
+        "minLength": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "minLength": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a",
+    "checks": [
+      {
+        "message": "First failure",
+        "minLength": 2
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "ab",
+    "checks": [
+      {
+        "message": "First failure",
+        "maxLength": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "é",
+    "checks": [
+      {
+        "message": "First failure",
+        "maxLength": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "maxLength": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "abc",
+    "checks": [
+      {
+        "message": "First failure",
+        "maxLength": 2
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "😀a",
+    "checks": [
+      {
+        "message": "First failure",
+        "maxLength": 2
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": 2,
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": 3,
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": 1,
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 2
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": 1,
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": 2,
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "slider",
+    "value": 3,
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 2
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": 2,
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": 3,
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": 1,
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 2
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": 1,
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": 2,
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": null,
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 2
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "timePicker",
+    "value": 3,
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 2
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "2026-01-01",
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 1767225600000
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "2026-02-01",
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 1767225600000
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 1767225600000
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "2025-12-31",
+    "checks": [
+      {
+        "message": "First failure",
+        "min": 1767225600000
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "2026-01-01",
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 1767225600000
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "2025-12-31",
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 1767225600000
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 1767225600000
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "datePicker",
+    "value": "2026-01-02",
+    "checks": [
+      {
+        "message": "First failure",
+        "max": 1767225600000
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a@b.co",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "user@example.com",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a+b@x.org",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "x.y@a.b",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "é@例.子",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "😀@a.b",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a@b.c.d",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a_b@localhost.test",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "abc",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "@a.b",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a@b",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a@@b.c",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a b@c.d",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a@b. c",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a@b.c\n",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a\n@b.c",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1234567",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "+1234567",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "123456789012345",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "123-4567",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "(123)4567",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "123 4567",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "+1 (234)567890",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "12345678",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "123456",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "１２３４５６７",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "١٢٣٤٥٦٧",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1234567890123456",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "++1234567",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "123abc4567",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1234567\n",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1------2",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "phone"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "0",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "123",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "0123",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "999999",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "123456789012345",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "42",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "100",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "777",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "-1",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1.2",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "１２３",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "١٢٣",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1 2",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "+1",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1\n",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "abc",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "digits"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "0",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "-0",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "123",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "-123",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1.0",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "-12.34",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "00.10",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "99999",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": ".1",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1.",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "+1",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1e2",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "１２.３",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "١.٢",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "1\n",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "--1",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "decimal"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "http://a",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://example.com",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "http://a/b",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://a?b=c",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://a#x",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://例.子/路径",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "http://localhost:80",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://a/b?q=😀#x",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "ftp://a",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "HTTP://a",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "http:///a",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://a b",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://a/ x",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "https://a\n",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a.com",
+    "checks": [
+      {
+        "message": "First failure",
+        "format": "url"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "12",
+    "checks": [
+      {
+        "message": "First failure",
+        "pattern": "[0-9]{2}"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "",
+    "checks": [
+      {
+        "message": "First failure",
+        "pattern": "[0-9]{2}"
+      }
+    ],
+    "expected": {
+      "valid": true
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a",
+    "checks": [
+      {
+        "message": "First failure",
+        "pattern": "[0-9]{2}"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "١٢",
+    "checks": [
+      {
+        "message": "First failure",
+        "pattern": "[0-9]{2}"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "First failure"
+    }
+  },
+  {
+    "nodeType": "textField",
+    "value": "a",
+    "checks": [
+      {
+        "required": true,
+        "message": "Required"
+      },
+      {
+        "minLength": 2,
+        "message": "Too short"
+      },
+      {
+        "format": "email",
+        "message": "Email"
+      }
+    ],
+    "expected": {
+      "valid": false,
+      "firstFailingMessage": "Too short"
+    }
+  }
+]

@@ -7,9 +7,12 @@ import {
   ANDROID_RUNNING_RETRY_MAX_ATTEMPTS,
   AndroidH264Source,
   capToQualityPreset,
-  type SpawnedProcess,
 } from "../../../src/features/webrtc/AndroidH264Source";
-import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type {
+  VideoSourceAdb,
+  VideoSourceAdbFactory,
+} from "../../../src/features/webrtc/videoSourceAdb";
+import { createExecResult } from "../../../src/utils/execResult";
 import type { BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -17,7 +20,7 @@ const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
   name: "test",
-} as BootedDevice;
+};
 
 function fakeAdbFactory(
   commands: string[] = [],
@@ -25,14 +28,13 @@ function fakeAdbFactory(
   processes: FakeProcess[] = [],
   wmSizeOutput = "",
   onSpawn?: (process: FakeProcess) => void,
-): AdbClientFactory {
+): VideoSourceAdbFactory {
   return {
     create() {
       return {
-        getAdbPathOnly: async () => "adb",
         executeCommand: async (command: string) => {
           commands.push(command);
-          return { stdout: wmSizeOutput, stderr: "", exitCode: 0 };
+          return createExecResult(wmSizeOutput, "");
         },
         spawn: async (args: string[]) => {
           spawnArgs.push(args);
@@ -41,13 +43,13 @@ function fakeAdbFactory(
           onSpawn?.(process);
           return process;
         },
-      } as unknown as ReturnType<AdbClientFactory["create"]>;
+      };
     },
   };
 }
 
 function makeSource(
-  overrides: Partial<Parameters<typeof AndroidH264Source.prototype.constructor>[0]> = {},
+  overrides: Partial<ConstructorParameters<typeof AndroidH264Source>[0]> = {},
   wmSizeOutput = "",
   onSpawn?: (process: FakeProcess) => void,
 ) {
@@ -177,7 +179,7 @@ describe("AndroidH264Source", () => {
 
     // Rotate timer fires -> current segment is SIGINT'd.
     timer.advanceTime(1000);
-    expect(processes[0].killed).toContain("SIGINT");
+    expect(processes[0].killSignals).toContain("SIGINT");
 
     // Segment exit triggers the next segment.
     processes[0].simulateExit(0, "SIGINT");
@@ -199,12 +201,12 @@ describe("AndroidH264Source", () => {
 
     // screenrecord cannot be signalled for an IDR mid-stream; a request rotates.
     expect(source.requestKeyFrame()).toBe(true);
-    expect(processes[0].killed).toContain("SIGINT");
-    const killsAfterFirst = processes[0].killed.length;
+    expect(processes[0].killSignals).toContain("SIGINT");
+    const killsAfterFirst = processes[0].killSignals.length;
 
     // A second request within the throttle window is coalesced away.
     expect(source.requestKeyFrame()).toBe(false);
-    expect(processes[0].killed).toHaveLength(killsAfterFirst);
+    expect(processes[0].killSignals).toHaveLength(killsAfterFirst);
 
     // Complete the rotation so a fresh segment is running.
     processes[0].simulateExit(0, "SIGINT");
@@ -215,7 +217,7 @@ describe("AndroidH264Source", () => {
     // After the throttle interval, a request rotates the new segment.
     timer.advanceTime(ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS);
     expect(source.requestKeyFrame()).toBe(true);
-    expect(processes[processes.length - 1].killed).toContain("SIGINT");
+    expect(processes[processes.length - 1].killSignals).toContain("SIGINT");
 
     await source.stop();
   });
@@ -225,7 +227,7 @@ describe("AndroidH264Source", () => {
     await source.start();
     await source.stop();
 
-    expect(processes[0].killed).toContain("SIGINT");
+    expect(processes[0].killSignals).toContain("SIGINT");
     // Must NOT device-wide pkill: that would also kill a concurrent videoRecording.
     expect(commands.some((command) => command.includes("pkill"))).toBe(false);
 
@@ -249,8 +251,8 @@ describe("AndroidH264Source", () => {
   });
 
   test("does not rotate when a segment exits with a non-zero code; surfaces onError after retries", async () => {
-    let captured: Error | null = null;
-    const { source, processes, timer } = makeSource({ onError: (error) => (captured = error) });
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource({ onError: (error) => errors.push(error) });
     await source.start();
     expect(processes).toHaveLength(1);
 
@@ -258,7 +260,7 @@ describe("AndroidH264Source", () => {
     for (let attempt = 1; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
       processes[attempt - 1].simulateExit(1, null);
       await drainSegmentStart();
-      expect(captured).toBeNull();
+      expect(errors).toHaveLength(0);
       expect(processes).toHaveLength(attempt); // backoff blocks the next spawn
       timer.advanceTime(attempt === 1 ? 500 : 1000);
       await drainSegmentStart();
@@ -269,8 +271,8 @@ describe("AndroidH264Source", () => {
 
     expect(processes).toHaveLength(1 + ANDROID_RUNNING_RETRY_MAX_ATTEMPTS);
     expect(source.isRunning).toBe(false);
-    expect(captured).not.toBeNull();
-    expect((captured as unknown as Error).message).toContain("code 1");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("code 1");
   });
 
   test("still rotates on a clean time-limit exit (code 0)", async () => {
@@ -287,17 +289,15 @@ describe("AndroidH264Source", () => {
   test("stop during adb setup aborts the spawn (no orphan process)", async () => {
     let resolveAdb: (() => void) | undefined;
     const lateProcess = new FakeProcess();
-    const adbFactory = {
-      create() {
-        return {
-          spawn: () =>
-            new Promise<SpawnedProcess>((resolve) => {
-              resolveAdb = () => resolve(lateProcess);
-            }),
-          executeCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
-        } as unknown as ReturnType<AdbClientFactory["create"]>;
-      },
-    } as unknown as AdbClientFactory;
+    const adbFactory: VideoSourceAdbFactory = {
+      create: (): VideoSourceAdb => ({
+        spawn: () =>
+          new Promise<FakeProcess>((resolve) => {
+            resolveAdb = () => resolve(lateProcess);
+          }),
+        executeCommand: async () => createExecResult("", ""),
+      }),
+    };
 
     const { source, processes } = makeSource({ adbFactory });
     const startPromise = source.start(); // suspends on adb.spawn
@@ -308,25 +308,25 @@ describe("AndroidH264Source", () => {
     await startPromise;
 
     expect(processes).toHaveLength(0); // no screenrecord spawned
-    expect(lateProcess.killed).toEqual(["SIGINT"]);
+    expect(lateProcess.killSignals).toEqual(["SIGINT"]);
     expect(source.isRunning).toBe(false);
   });
 
   test("surfaces a fatal error when a segment process errors", async () => {
-    let captured: Error | null = null;
-    const { source, processes, timer } = makeSource({ onError: (error) => (captured = error) });
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource({ onError: (error) => errors.push(error) });
     await source.start();
 
     for (let attempt = 1; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
       processes[attempt - 1].emit("error", new Error("adb not found"));
-      expect(captured).toBeNull();
+      expect(errors).toHaveLength(0);
       timer.advanceTime(attempt === 1 ? 500 : 1000);
       await drainSegmentStart();
       expect(processes).toHaveLength(attempt + 1);
     }
     processes[ANDROID_RUNNING_RETRY_MAX_ATTEMPTS].emit("error", new Error("adb not found"));
-    expect(captured).not.toBeNull();
-    expect((captured as unknown as Error).message).toBe("adb not found");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe("adb not found");
     expect(source.isRunning).toBe(false);
   });
 
@@ -434,21 +434,20 @@ describe("AndroidH264Source", () => {
     const lateProcess = new FakeProcess();
     let resolveRetry: (() => void) | undefined;
     let spawnCount = 0;
-    const adbFactory = {
-      create() {
-        return {
-          spawn: () => {
-            spawnCount++;
-            if (spawnCount === 1) {
-              return Promise.resolve(firstProcess);
-            }
-            return new Promise<SpawnedProcess>((resolve) => {
-              resolveRetry = () => resolve(lateProcess);
-            });
-          },
-        } as unknown as ReturnType<AdbClientFactory["create"]>;
-      },
-    } as AdbClientFactory;
+    const adbFactory: VideoSourceAdbFactory = {
+      create: (): VideoSourceAdb => ({
+        spawn: () => {
+          spawnCount++;
+          if (spawnCount === 1) {
+            return Promise.resolve(firstProcess);
+          }
+          return new Promise<FakeProcess>((resolve) => {
+            resolveRetry = () => resolve(lateProcess);
+          });
+        },
+        executeCommand: async () => createExecResult("", ""),
+      }),
+    };
     const { source, timer } = makeSource({
       adbFactory,
       size: { width: 720, height: 1280 },
@@ -463,7 +462,7 @@ describe("AndroidH264Source", () => {
     resolveRetry!();
     await drainSegmentStart();
     timer.advanceTime(5000);
-    expect(lateProcess.killed).toEqual(["SIGINT"]);
+    expect(lateProcess.killSignals).toEqual(["SIGINT"]);
     expect(source.segmentsStarted).toBe(1);
     expect(source.isRunning).toBe(false);
   });
@@ -483,7 +482,7 @@ describe("AndroidH264Source", () => {
     // The recovered segment reaches its scheduled rotation, then exits on our
     // SIGINT. It has run past half its rotation interval and starts a fresh failure run.
     timer.advanceTime(10_000);
-    expect(processes[1].killed).toContain("SIGINT");
+    expect(processes[1].killSignals).toContain("SIGINT");
     processes[1].simulateExit(0, "SIGINT");
     await drainSegmentStart();
     expect(processes).toHaveLength(3);

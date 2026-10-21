@@ -11,7 +11,7 @@ import {
   forceStopVideoRecording,
   interruptVideoRecording,
   listActiveVideoRecordings,
-} from "./videoRecordingManager";
+} from "../daemon/videoRecordingManager";
 
 export interface VideoRecordingIncarnationDependencies {
   listActiveVideoRecordings(filter: { deviceId: string }): Promise<VideoRecordingRecord[]>;

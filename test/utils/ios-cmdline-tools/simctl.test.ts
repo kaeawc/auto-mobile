@@ -1,31 +1,23 @@
+import { SimCtlInventory } from "../../../src/utils/ios-cmdline-tools/SimCtlInventory";
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
-import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import {
+  Simctl,
+  SimulatorStillShuttingDownError,
+} from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice, ExecResult } from "../../../src/models";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { createExecResult } from "../../../src/utils/execResult";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
+import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline-tools/SimCtlSharedState";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimulatorDeviceTypeProfiles } from "../../fakes/FakeSimulatorDeviceTypeProfiles";
 import { logger } from "../../../src/utils/logger";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 
 function resetSimctlCaches(): void {
-  const simctlClass = Simctl as unknown as {
-    deviceListCache: { devices: unknown[]; timestamp: number } | null;
-    lastGoodDeviceList: { devices: unknown[]; timestamp: number } | null;
-    inFlightDeviceList: Promise<unknown[]> | null;
-    inFlightDeviceListRequestSequence: number | null;
-    simulatorBoots: Map<string, unknown>;
-    bootPresentationGenerations: Map<string, string>;
-    simulatorAppPresentations: Map<string, unknown>;
-  };
-  simctlClass.deviceListCache = null;
-  simctlClass.lastGoodDeviceList = null;
-  simctlClass.inFlightDeviceList = null;
-  simctlClass.inFlightDeviceListRequestSequence = null;
-  simctlClass.simulatorBoots.clear();
-  simctlClass.bootPresentationGenerations.clear();
-  simctlClass.simulatorAppPresentations.clear();
+  Simctl.invalidateDeviceListCache();
+  resetSimCtlSharedStateForTesting();
 }
 
 async function waitForCondition(condition: () => boolean, description: string): Promise<void> {
@@ -86,6 +78,18 @@ describe("Simctl", function () {
     simctl = new Simctl(mockDevice, mockExecAsync);
   });
 
+  describe("getDeviceTypes", function () {
+    test.each([
+      ["non-array devicetypes", '{"devicetypes":{}}'],
+      ["null payload", "null"],
+      ["missing devicetypes", "{}"],
+    ])("returns [] for %s", async function (_label, stdout) {
+      mockExecAsync = async (): Promise<ExecResult> => createExecResult(stdout, "");
+      simctl = new Simctl(null, mockExecAsync);
+      expect(await simctl.getDeviceTypes()).toEqual([]);
+    });
+  });
+
   describe("isAvailable", function () {
     test("should return true when simctl is available", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
@@ -144,7 +148,7 @@ describe("Simctl", function () {
           signal?.addEventListener("abort", () => reject(new Error("probe aborted")));
         });
       };
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
 
       const caller = new AbortController();
       const availability = simctl.isAvailable({ timeoutMs: 123, signal: caller.signal });
@@ -167,7 +171,7 @@ describe("Simctl", function () {
           signal?.addEventListener("abort", () => reject(new Error("command aborted")));
         });
       };
-      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, { timer });
 
       const command = simctl.executeCommand("list devices");
       expect(timer.getPendingTimeouts()).toEqual([60_000]);
@@ -177,7 +181,7 @@ describe("Simctl", function () {
       expect(commandSignal?.aborted).toBe(true);
     });
 
-    test("preserves explicit cancellation without adding a default timeout", async function () {
+    test("preserves explicit cancellation with a default timeout", async function () {
       const timer = new FakeTimer();
       let commandSignal: AbortSignal | undefined;
       mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
@@ -186,18 +190,18 @@ describe("Simctl", function () {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
         });
       };
-      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, { timer });
 
       const caller = new AbortController();
       const command = simctl.executeCommandArgs(["list", "devices"], undefined, caller.signal);
-      expect(commandSignal).toBe(caller.signal);
-      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(commandSignal?.aborted).toBe(false);
+      expect(timer.getPendingTimeouts()).toEqual([60_000]);
 
       caller.abort(new Error("caller cancelled"));
       await expect(command).rejects.toThrow("caller cancelled");
     });
 
-    test("preserves ambient cancellation without adding a default timeout", async function () {
+    test("preserves ambient cancellation with a default timeout", async function () {
       const timer = new FakeTimer();
       let commandSignal: AbortSignal | undefined;
       mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
@@ -206,14 +210,14 @@ describe("Simctl", function () {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
         });
       };
-      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, { timer });
 
       const caller = new AbortController();
       const command = runWithAbortSignal(caller.signal, () =>
         simctl.executeCommand("list devices"),
       );
-      expect(commandSignal).toBe(caller.signal);
-      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(commandSignal?.aborted).toBe(false);
+      expect(timer.getPendingTimeouts()).toEqual([60_000]);
 
       caller.abort(new Error("request cancelled"));
       await expect(command).rejects.toThrow("request cancelled");
@@ -236,7 +240,7 @@ describe("Simctl", function () {
       mockExecAsync = async (): Promise<ExecResult> => {
         throw new Error('xcrun: error: unable to find utility "simctl", not a developer tool');
       };
-      simctl = new Simctl(mockDevice, mockExecAsync, undefined, "darwin");
+      simctl = new Simctl(mockDevice, mockExecAsync, { platform: "darwin" });
 
       await expect(simctl.executeCommandArgs(["list", "devices"])).rejects.toThrow(
         "Please install Xcode command line tools",
@@ -293,18 +297,14 @@ describe("Simctl", function () {
         execCalls += 1;
         return createExecResult("", "");
       };
-      simctl = new Simctl(
-        mockDevice,
-        mockExecAsync,
-        undefined,
-        undefined,
-        (command, args, options) => {
+      simctl = new Simctl(mockDevice, mockExecAsync, {
+        spawnProcess: (command, args, options) => {
           started.command = command;
           started.args = args;
           started.options = options;
           return child;
         },
-      );
+      });
 
       const result = await simctl.startCommandArgs(
         ["io", "test-ios-device-id", "recordVideo", "/tmp/a path;$(safe).mov"],
@@ -361,7 +361,7 @@ describe("Simctl", function () {
 
       const childProcess = await simctl.startSimulator("test-ios-device-id");
 
-      expect(childProcess.exitCode).toBe(0);
+      expect(childProcess.exitCode).toBeNull();
       expect(commands).toContainEqual([
         "xcrun",
         "simctl",
@@ -382,12 +382,25 @@ describe("Simctl", function () {
         if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
           return createExecResult("", "");
         }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: "test-ios-device-id",
+                name: "Test iOS Device",
+                state: "Shutdown",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        }
         return new Promise<ExecResult>((resolve) => {
           resolveCommand = resolve;
         });
       };
 
-      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, { timer });
 
       const bootPromise = simctl.startSimulator("test-ios-device-id", 1234);
       await waitForCondition(() => resolveCommand !== undefined, "boot command dispatch");
@@ -409,12 +422,25 @@ describe("Simctl", function () {
         if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
           return createExecResult("", "");
         }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: "test-ios-device-id",
+                name: "Test iOS Device",
+                state: "Shutdown",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        }
         return new Promise<ExecResult>((resolve) => {
           resolveCommand = resolve;
         });
       };
 
-      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, { timer });
 
       const bootPromise = simctl.startSimulator("test-ios-device-id");
       await waitForCondition(() => resolveCommand !== undefined, "boot command dispatch");
@@ -441,7 +467,22 @@ describe("Simctl", function () {
         if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
           return createExecResult("", "");
         }
-        capturedSignal = signal;
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: "test-ios-device-id",
+                name: "Test iOS Device",
+                state: "Shutdown",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        }
+        if (args.includes("bootstatus")) {
+          capturedSignal = signal;
+        }
         // Simulate a long-running child that only settles when aborted, mirroring
         // execFile rejecting with an AbortError once its signal fires.
         return new Promise<ExecResult>((_resolve, reject) => {
@@ -451,11 +492,11 @@ describe("Simctl", function () {
         });
       };
 
-      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, { timer });
 
       const bootPromise = simctl.startSimulator("test-ios-device-id", 1234);
       await waitForCondition(() => capturedSignal !== undefined, "boot abort signal");
-      expect(capturedSignal.aborted).toBe(false);
+      expect(capturedSignal?.aborted).toBe(false);
 
       timer.advanceTime(1234);
 
@@ -463,7 +504,7 @@ describe("Simctl", function () {
         "Command timed out after 1234ms: xcrun simctl bootstatus test-ios-device-id -b",
       );
       // The timeout must abort the child rather than leave it running orphaned.
-      expect(capturedSignal.aborted).toBe(true);
+      expect(capturedSignal?.aborted).toBe(true);
     });
   });
 
@@ -589,18 +630,10 @@ describe("Simctl", function () {
         throw new Error(`Unexpected command: ${file} ${args.join(" ")}`);
       };
 
-      simctl = new Simctl(
-        null,
-        mockExecAsync,
-        undefined,
-        "darwin",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        new FakeSimulatorDeviceTypeProfiles(),
-      );
+      simctl = new Simctl(null, mockExecAsync, {
+        platform: "darwin",
+        deviceTypeProfiles: new FakeSimulatorDeviceTypeProfiles(),
+      });
 
       const devices = await simctl.listSimulatorImages();
 
@@ -682,18 +715,10 @@ describe("Simctl", function () {
             : "",
           "",
         );
-      simctl = new Simctl(
-        null,
-        mockExecAsync,
-        undefined,
-        "darwin",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        profiles,
-      );
+      simctl = new Simctl(null, mockExecAsync, {
+        platform: "darwin",
+        deviceTypeProfiles: profiles,
+      });
 
       const [device] = await simctl.listSimulatorImages();
 
@@ -724,18 +749,10 @@ describe("Simctl", function () {
             : "",
           "",
         );
-      simctl = new Simctl(
-        null,
-        mockExecAsync,
-        undefined,
-        "darwin",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        profiles,
-      );
+      simctl = new Simctl(null, mockExecAsync, {
+        platform: "darwin",
+        deviceTypeProfiles: profiles,
+      });
 
       const [device] = await simctl.listSimulatorImages();
 
@@ -770,7 +787,7 @@ describe("Simctl", function () {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
 
       expect(await simctl.listSimulatorImages()).toEqual([]);
       const devices = await simctl.listSimulatorImages();
@@ -842,7 +859,7 @@ describe("Simctl", function () {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
       let settled = false;
       const deletion = simctl
         .deleteSimulator("test-ios-device-id", { timeoutMs: 10 })
@@ -853,7 +870,7 @@ describe("Simctl", function () {
 
       timer.advanceTime(10);
       await Promise.resolve();
-      expect(deleteSignal.aborted).toBe(true);
+      expect(deleteSignal?.aborted).toBe(true);
       expect(settled).toBe(false);
 
       settleDelete(createExecResult("", ""));
@@ -881,7 +898,7 @@ describe("Simctl", function () {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
       const deletion = simctl.deleteSimulator("test-ios-device-id");
       const deletionOutcome = deletion.then(
         () => undefined,
@@ -928,7 +945,7 @@ describe("Simctl", function () {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
       let settled = false;
       const shutdown = simctl
         .killSimulator(
@@ -946,7 +963,7 @@ describe("Simctl", function () {
 
       timer.advanceTime(10);
       await Promise.resolve();
-      expect(shutdownSignal.aborted).toBe(true);
+      expect(shutdownSignal?.aborted).toBe(true);
       expect(settled).toBe(false);
 
       settleShutdown(createExecResult("", ""));
@@ -1122,6 +1139,184 @@ describe("Simctl", function () {
       expect(secondDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
     });
 
+    test.each(["Booted", "Shutting Down", "Creating"])(
+      "confirms shutdown after three initial %s reads",
+      async function (initialState) {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        let reads = 0;
+        mockExecAsync = async (file, args) => {
+          if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+            reads++;
+            return createExecResult(
+              simulatorListPayload([
+                {
+                  udid: mockDevice.deviceId,
+                  name: mockDevice.name,
+                  state: reads <= 3 ? initialState : "Shutdown",
+                  isAvailable: true,
+                },
+              ]),
+              "",
+            );
+          }
+          return createExecResult("", "");
+        };
+        simctl = new Simctl(null, mockExecAsync, { timer });
+        await expect(simctl.killSimulator(mockDevice)).resolves.toBeUndefined();
+        expect(reads).toBe(10);
+        expect(timer.getSleepHistory()).toEqual(Array(10).fill(1_000));
+      },
+    );
+
+    test.each(["pid", "empty", "failed", "timeout"])(
+      "reports still shutting down with a bounded %s process probe",
+      async function (probe) {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const commands: string[][] = [];
+        const debug = spyOn(logger, "debug");
+        const warn = spyOn(logger, "warn");
+        mockExecAsync = async (file, args) => {
+          commands.push([file, ...args]);
+          if (file === "pgrep") {
+            if (probe === "failed") {
+              throw new Error("pgrep exited 1");
+            }
+            if (probe === "timeout") {
+              return await new Promise<ExecResult>(() => {});
+            }
+            return createExecResult(probe === "pid" ? "4321\n" : "", "");
+          }
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: mockDevice.deviceId,
+                name: mockDevice.name,
+                state: "Booted",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        };
+        simctl = new Simctl(null, mockExecAsync, { timer });
+        try {
+          const error = await simctl.killSimulator(mockDevice, { timeoutMs: 25 }).then(
+            () => undefined,
+            (failure: unknown) => failure,
+          );
+          expect(error).toBeInstanceOf(SimulatorStillShuttingDownError);
+          if (!(error instanceof SimulatorStillShuttingDownError)) {
+            throw new Error("Expected typed shutdown failure");
+          }
+          expect(error.udid).toBe(mockDevice.deviceId);
+          expect(error.deviceName).toBe(mockDevice.name);
+          expect(error.lastState).toBe("Booted");
+          expect(error.waitedMs).toBe(10_000);
+          expect(error.launchdSimPid).toBe(probe === "pid" ? 4321 : undefined);
+          expect(error.message).toContain("still Booted after 10000 ms");
+          expect(error.message).toContain("shutdown may still complete");
+          expect(error.message).toContain("Retrying is safe");
+          expect(error.message).toContain("xcrun simctl list devices");
+          expect(error.message).toContain("application displaying the device");
+          expect(error.message).not.toContain("revived");
+          if (probe === "pid") {
+            expect(error.message).toContain("launchd_sim process is pid 4321");
+            expect(error.message).toContain("did not signal it, CoreSimulator may respawn it");
+          }
+          expect(commands).toEqual([
+            ["xcrun", "simctl", "shutdown", mockDevice.deviceId],
+            ...Array.from({ length: 10 }, () => ["xcrun", "simctl", "list", "devices", "--json"]),
+            [
+              "pgrep",
+              "-f",
+              `launchd_sim .*CoreSimulator/Devices/${mockDevice.deviceId}/data/var/run/launchd_bootstrap[.]plist`,
+            ],
+          ]);
+          expect(timer.getSleepHistory()).toEqual(Array(10).fill(1_000));
+          expect(timer.now()).toBe(probe === "timeout" ? 12_000 : 10_000);
+          if (probe === "timeout") {
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining("process probe timed out"));
+          }
+          if (probe === "failed") {
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("pgrep exited 1"));
+          }
+        } finally {
+          debug.mockRestore();
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test.each(["sleep", "read", "pid"])(
+      "propagates caller abort during shutdown %s",
+      async function (phase) {
+        const timer = new FakeTimer();
+        const controller = new AbortController();
+        const reason = new Error("caller cancelled shutdown");
+        if (phase === "pid") {
+          timer.setTimeout(() => controller.abort(reason), 10_500);
+        }
+        const commands: string[] = [];
+        mockExecAsync = async (file, args) => {
+          commands.push(file);
+          if ((phase === "read" && args.includes("list")) || file === "pgrep") {
+            return await new Promise<ExecResult>(() => {});
+          }
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: mockDevice.deviceId,
+                name: mockDevice.name,
+                state: "Booted",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        };
+        simctl = new Simctl(null, mockExecAsync, { timer });
+        const shutdown = simctl.killSimulator(mockDevice, { signal: controller.signal });
+        const rejection = shutdown.then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        if (phase !== "pid") {
+          await drainUntil(
+            () => (phase === "sleep" ? timer.getPendingSleepCount() > 0 : commands.length > 1),
+            { description: "shutdown poll" },
+          );
+          timer.advanceTime(500);
+          controller.abort(reason);
+        }
+        const rejected =
+          phase === "pid"
+            ? await settleByFakeEvents(timer, rejection, { description: "shutdown pid abort" })
+            : await rejection;
+        expect(rejected).toBe(reason);
+        expect(timer.now()).toBe(phase === "pid" ? 10_500 : 500);
+        expect(commands.includes("pgrep")).toBe(phase === "pid");
+      },
+    );
+
+    test("a simulator no longer listed keeps the existing unknown-state failure", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      mockExecAsync = async () => createExecResult(simulatorListPayload([]), "");
+      simctl = new Simctl(null, mockExecAsync, { timer });
+      const error = await simctl.killSimulator(mockDevice).then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      expect(error).not.toBeInstanceOf(SimulatorStillShuttingDownError);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(
+        "did not remain Shutdown after shutdown (state: unknown)",
+      );
+      expect(timer.now()).toBe(10_000);
+    });
+
     test("settled shutdown never reads with an exhausted timeout budget", async function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -1137,11 +1332,11 @@ describe("Simctl", function () {
           ]),
           "",
         );
-      simctl = new Simctl(null, mockExecAsync, timer);
-      const reads = spyOn(simctl, "listSimulatorImages");
+      simctl = new Simctl(null, mockExecAsync, { timer });
+      const reads = spyOn(simctl, "readSimulatorTarget");
       try {
         await expect(simctl.killSimulator(mockDevice)).resolves.toBeUndefined();
-        expect(reads.mock.calls.map(([timeoutMs]) => timeoutMs)).toEqual([
+        expect(reads.mock.calls.map(([_udid, timeoutMs]) => timeoutMs)).toEqual([
           10_000, 9_000, 8_000, 7_000, 6_000, 5_000, 4_000, 3_000, 2_000, 1_000,
         ]);
         expect(timer.getSleepHistory()).toEqual(Array(10).fill(1_000));
@@ -1156,14 +1351,19 @@ describe("Simctl", function () {
         const timer = new FakeTimer();
         timer.enableAutoAdvance();
         mockExecAsync = async (): Promise<ExecResult> => createExecResult("", "");
-        simctl = new Simctl(null, mockExecAsync, timer);
+        simctl = new Simctl(null, mockExecAsync, { timer });
         const failure = new Error("state probe unavailable");
-        const reads = spyOn(simctl, "listSimulatorImages").mockImplementation(async () => {
+        const reads = spyOn(simctl, "readSimulatorTarget").mockImplementation(async () => {
           if (timer.now() >= 9_000) {
             timer.advanceTime(1_000 - remainingMs);
             throw failure;
           }
-          return [{ ...mockDevice, state: "Shutdown", isRunning: false }];
+          return {
+            name: mockDevice.name,
+            udid: mockDevice.deviceId,
+            state: "Shutdown",
+            isAvailable: true,
+          };
         });
         const debug = spyOn(logger, "debug");
         try {
@@ -1185,14 +1385,19 @@ describe("Simctl", function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       mockExecAsync = async (): Promise<ExecResult> => createExecResult("", "");
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
       const failure = new Error("state probe unavailable");
-      const reads = spyOn(simctl, "listSimulatorImages").mockImplementation(async () => {
+      const reads = spyOn(simctl, "readSimulatorTarget").mockImplementation(async () => {
         if (timer.now() >= failAtMs) {
           timer.advanceTime(advanceMs);
           throw failure;
         }
-        return [{ ...mockDevice, state: "Shutdown", isRunning: false }];
+        return {
+          name: mockDevice.name,
+          udid: mockDevice.deviceId,
+          state: "Shutdown",
+          isAvailable: true,
+        };
       });
       try {
         await expect(simctl.killSimulator(mockDevice)).rejects.toBe(failure);
@@ -1225,7 +1430,7 @@ describe("Simctl", function () {
         }
         return createExecResult("", "");
       };
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
       expect(await simctl.getBootedSimulatorsChecked()).toHaveLength(1);
       timer.enableAutoAdvance();
       await simctl.killSimulator({
@@ -1234,7 +1439,8 @@ describe("Simctl", function () {
         name: "iPhone 17",
       });
       expect(await simctl.getBootedSimulatorsChecked()).toEqual([]);
-      expect(reads).toBe(11);
+      // Initial inventory + ten raw shutdown probes + refreshed inventory.
+      expect(reads).toBe(12);
       expect(timer.now()).toBe(10_000);
     });
 
@@ -1267,7 +1473,7 @@ describe("Simctl", function () {
         }
         return createExecResult("", "");
       };
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
       await expect(
         simctl.killSimulator({
           deviceId: "test-ios-device-id",
@@ -1301,7 +1507,7 @@ describe("Simctl", function () {
         }
         return createExecResult("", "");
       };
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
 
       const booted = await simctl.getBootedSimulatorsChecked();
       expect(booted.map((device) => device.deviceId)).toEqual(["omitted-availability-udid"]);
@@ -1322,7 +1528,7 @@ describe("Simctl", function () {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
 
       await simctl.listSimulatorImages();
       expect(listCalls).toBe(1);
@@ -1350,7 +1556,7 @@ describe("Simctl", function () {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
 
       const firstDevices = await simctl.listSimulatorImages();
       expect(firstDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
@@ -1385,7 +1591,7 @@ describe("Simctl", function () {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
 
       expect(await simctl.listSimulatorImages()).toHaveLength(1);
 
@@ -1417,7 +1623,7 @@ describe("Simctl", function () {
         }
         return createExecResult("", "");
       };
-      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+      simctl = new Simctl(null, mockExecAsync, { timer: new FakeTimer() });
 
       await simctl.listSimulatorImages();
       await expect(
@@ -1460,12 +1666,7 @@ describe("Simctl", function () {
       await expect(inFlight).resolves.toHaveLength(1);
       expect(listCalls).toBe(1);
 
-      const simctlClass = Simctl as unknown as {
-        deviceListCache: { devices: unknown[]; timestamp: number } | null;
-        lastGoodDeviceList: { devices: unknown[]; timestamp: number } | null;
-      };
-      expect(simctlClass.deviceListCache).toBeNull();
-      expect(simctlClass.lastGoodDeviceList).toBeNull();
+      expect(SimCtlInventory.deviceListSnapshots()).toEqual({ cached: null, lastGood: null });
 
       // The stale-generation resolution must not have satisfied the cache: the
       // next call re-invokes simctl instead of trusting a phantom cache entry.
@@ -1503,7 +1704,7 @@ describe("Simctl", function () {
       };
 
       const timer = new FakeTimer();
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
 
       // Caller A is unbounded; caller B bounds itself to 100ms. Both must
       // collapse onto the same shared `simctl list devices` invocation.
@@ -1586,7 +1787,7 @@ describe("Simctl", function () {
             requests.push({ resolve, reject });
           });
         };
-        simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+        simctl = new Simctl(null, mockExecAsync, { timer: new FakeTimer() });
         const old = simctl.listSimulatorImages().catch(() => []);
         await waitForCondition(() => requests.length === 1, "old listing");
         Simctl.invalidateDeviceListCache();
@@ -1633,7 +1834,7 @@ describe("Simctl", function () {
           }
           throw new Error("transient failure");
         };
-        simctl = new Simctl(null, mockExecAsync, timer);
+        simctl = new Simctl(null, mockExecAsync, { timer });
         const old = simctl.listSimulatorImages();
         await waitForCondition(() => oldResolve !== undefined, "old listing");
         const fresh = await simctl.listSimulatorImages(undefined, { bypassCache: true });
@@ -1668,7 +1869,7 @@ describe("Simctl", function () {
           }
           throw new Error("simctl list devices exploded");
         };
-        simctl = new Simctl(null, mockExecAsync, timer);
+        simctl = new Simctl(null, mockExecAsync, { timer });
 
         const older = simctl.listSimulatorImages(undefined, { bypassCache: true });
         await waitForCondition(() => requests.length === 1, "older bypass listing");
@@ -1697,7 +1898,7 @@ describe("Simctl", function () {
           requests.push({ resolve });
         });
       };
-      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+      simctl = new Simctl(null, mockExecAsync, { timer: new FakeTimer() });
 
       const firstShared = simctl.listSimulatorImages();
       const bypass = simctl.listSimulatorImages(undefined, { bypassCache: true });
@@ -1726,7 +1927,7 @@ describe("Simctl", function () {
         }
         return createExecResult(bootedListPayload("post-invalidation"), "");
       };
-      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+      simctl = new Simctl(null, mockExecAsync, { timer: new FakeTimer() });
 
       const stale = simctl.listSimulatorImages(undefined, { bypassCache: true });
       await waitForCondition(() => resolveBypass !== undefined, "pre-invalidation bypass listing");
@@ -1765,7 +1966,7 @@ describe("Simctl", function () {
         }
         throw new Error("simctl list devices exploded");
       };
-      simctl = new Simctl(null, mockExecAsync, timer);
+      simctl = new Simctl(null, mockExecAsync, { timer });
 
       const shared = simctl.listSimulatorImages();
       await waitForCondition(() => sharedResolve !== undefined, "shared listing");
@@ -1805,7 +2006,7 @@ describe("Simctl", function () {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
         );
       };
-      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+      simctl = new Simctl(null, mockExecAsync, { timer: new FakeTimer() });
       const controller = new AbortController();
       const result = simctl
         .listSimulatorImages(undefined, { bypassCache: true, signal: controller.signal })
@@ -1832,12 +2033,12 @@ describe("Simctl", function () {
           recordInvocation();
           return new Promise<ExecResult>(() => {});
         };
-        simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+        simctl = new Simctl(null, mockExecAsync, { timer: new FakeTimer() });
         const controller = new AbortController();
         const reason = new Error(`${method} request cancelled`);
 
         try {
-          const result = runWithAbortSignal(controller.signal, () =>
+          const result = runWithAbortSignal(controller.signal, async () =>
             method === "getBootedSimulators"
               ? simctl.getBootedSimulators()
               : simctl.getDeviceInfo("some-udid"),
@@ -1856,7 +2057,7 @@ describe("Simctl", function () {
       mockExecAsync = async () => {
         throw new Error("simctl discovery failed");
       };
-      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+      simctl = new Simctl(null, mockExecAsync, { timer: new FakeTimer() });
 
       await expect(simctl.getBootedSimulators()).resolves.toEqual([]);
       await expect(simctl.getDeviceInfo("some-udid")).resolves.toBeNull();
@@ -2182,7 +2383,10 @@ describe("Simctl", function () {
           process.env[HEADLESS_ENV] = row.override;
         }
         try {
-          simctl = new Simctl(null, recordingExec(row.manager), new FakeTimer(), row.platform);
+          simctl = new Simctl(null, recordingExec(row.manager), {
+            timer: new FakeTimer(),
+            platform: row.platform,
+          });
           await simctl.openSimulatorApp();
           expect(openCalls()).toHaveLength(row.expectedOpens);
           expect(launchctlCalls()).toHaveLength(row.expectedProbes);
@@ -2197,24 +2401,36 @@ describe("Simctl", function () {
     // "already opened" flag on it, and latching on a headless no-op would make
     // this client's cache TTL unreachable from that path (PR #6830 review).
     test("reports whether the Simulator GUI launch was actually performed", async function () {
-      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
+      simctl = new Simctl(null, recordingExec("Aqua"), {
+        timer: new FakeTimer(),
+        platform: "darwin",
+      });
       expect(await simctl.openSimulatorApp()).toBe(true);
 
       calls = [];
-      simctl = new Simctl(null, recordingExec("System"), new FakeTimer(), "darwin");
+      simctl = new Simctl(null, recordingExec("System"), {
+        timer: new FakeTimer(),
+        platform: "darwin",
+      });
       expect(await simctl.openSimulatorApp()).toBe(false);
       expect(openCalls()).toHaveLength(0);
     });
 
     test("opening a specific simulator does not activate the app twice", async function () {
-      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
+      simctl = new Simctl(null, recordingExec("Aqua"), {
+        timer: new FakeTimer(),
+        platform: "darwin",
+      });
       expect(await simctl.openSimulatorApp("device-udid")).toBe(true);
       expect(openCalls()).toHaveLength(1);
       expect(calls.filter((call) => call.file === "osascript")).toHaveLength(0);
     });
 
     test("caches the headless detection so launchctl is probed at most once", async function () {
-      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
+      simctl = new Simctl(null, recordingExec("Aqua"), {
+        timer: new FakeTimer(),
+        platform: "darwin",
+      });
       await simctl.openSimulatorApp();
       await simctl.openSimulatorApp();
       await simctl.openSimulatorApp();
@@ -2224,7 +2440,7 @@ describe("Simctl", function () {
 
     test("re-probes launchctl once the headless-session cache TTL elapses (issue #6372)", async function () {
       const fakeTimer = new FakeTimer();
-      simctl = new Simctl(null, recordingExec("Aqua"), fakeTimer, "darwin");
+      simctl = new Simctl(null, recordingExec("Aqua"), { timer: fakeTimer, platform: "darwin" });
 
       await simctl.openSimulatorApp();
       expect(launchctlCalls()).toHaveLength(1);
@@ -2257,7 +2473,7 @@ describe("Simctl", function () {
         }
         return createExecResult("", "");
       };
-      simctl = new Simctl(null, controlledExec, fakeTimer, "darwin");
+      simctl = new Simctl(null, controlledExec, { timer: fakeTimer, platform: "darwin" });
 
       // Both probes begin at t=0, as concurrent device starts can do.
       const callA = simctl.openSimulatorApp();

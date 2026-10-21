@@ -1,12 +1,21 @@
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
+import type {
+  BootedDevice,
+  Element,
+  ElementBounds,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
-import type { TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
+import type { TapBoundsClip, TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
+import { resolveIosObserveRotation } from "../../observe/iosObserveRotation";
 import { IOSCtrlProxyClient } from "../../observe/ios";
+import { clipIosChromeBounds } from "../swipeon/iosChromeInsets";
+import { isUsableScreenSize } from "../../utility/ElementGeometry";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 
 /**
  * iOS implementation of {@link TapStrategy}. Filters the response
@@ -17,11 +26,24 @@ import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 export class IosTapStrategy implements TapStrategy {
   readonly longPressDurationMs = 1000;
   readonly retryTapIfNoChange = false;
+  readonly warnsOnDisabledElement = false;
+  readonly settlesPostTapChange = false;
+  readonly verifiesRefreshedDisplay = false;
+  readonly promotesClickableAncestor = false;
+  readonly settlesFocusChangeAfterTap = true;
+  readonly rethrowsKeyboardOcclusion = false;
+
+  applyRefreshedObservationRotation(
+    observation: ObserveResult,
+    hierarchyRotation: number | undefined,
+  ): void {
+    observation.rotation = resolveIosObserveRotation(hierarchyRotation, observation.screenSize);
+  }
 
   constructor(
     private readonly device: BootedDevice,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector = defaultIosVoiceOverDetector,
-    private readonly featureFlags?: FeatureFlagService,
+    private readonly featureFlags?: FeatureFlagReader,
   ) {}
 
   prepareViewHierarchyForResponse(
@@ -39,6 +61,25 @@ export class IosTapStrategy implements TapStrategy {
     );
     attachRawViewHierarchy(filtered, rawHierarchy);
     return filtered;
+  }
+
+  clipNavigationTapBounds(
+    bounds: ElementBounds,
+    hierarchy: ViewHierarchyResult,
+    screenSize: ObserveResult["screenSize"] | undefined,
+    elements: readonly Element[],
+  ): TapBoundsClip {
+    if (!isUsableScreenSize(screenSize)) {
+      return { bounds };
+    }
+    return clipIosChromeBounds({
+      bounds,
+      hierarchy,
+      screen: screenSize,
+      elements,
+      regions: ["navigation bar"],
+      forTapTarget: true,
+    });
   }
 
   async isAccessibilityServiceEnabled(): Promise<boolean> {

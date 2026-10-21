@@ -1,14 +1,9 @@
 import type { ElementBounds } from "../../../models/ElementBounds";
 
 export const RASTER_SCALE_TOLERANCE = 0.02;
-export interface ImagePoint {
-  x: number;
-  y: number;
-}
-export interface ImageSize {
-  width: number;
-  height: number;
-}
+import type { ImagePoint, ImageSize } from "../../../models/ImageGeometry";
+
+export type { ImagePoint, ImageSize };
 
 /** Interface-native to raw framebuffer coordinates, matching the iOS crop convention. */
 export function nativeToRasterPoint(

@@ -1,10 +1,11 @@
+import { ENV, readEnvRaw } from "../../config/env";
 import { existsSync } from "node:fs";
 import { ActionableError } from "../../models/ActionableError";
 
 /** Absolute path to a locally built `screen-capture-helper`, for development. */
-export const IOS_SCREEN_CAPTURE_HELPER_ENV = "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER";
+export const IOS_SCREEN_CAPTURE_HELPER_ENV = ENV.IOS_SCREEN_CAPTURE_HELPER.name;
 /** Legacy spelling of {@link IOS_SCREEN_CAPTURE_HELPER_ENV}, still honored. */
-export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER";
+export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = ENV.IOS_SCREEN_CAPTURE_HELPER.legacyName;
 
 export interface IosScreenCaptureHelperPathResolverOptions {
   env?: NodeJS.ProcessEnv;
@@ -19,7 +20,7 @@ export interface IosScreenCaptureHelperPathResolverOptions {
 export function readScreenCaptureHelperEnvOverride(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  return env[IOS_SCREEN_CAPTURE_HELPER_ENV] ?? env[IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS];
+  return readEnvRaw(ENV.IOS_SCREEN_CAPTURE_HELPER, env);
 }
 
 /**

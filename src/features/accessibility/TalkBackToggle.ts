@@ -8,8 +8,8 @@ import type {
 } from "../../models/AccessibilityResult";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AccessibilityDetector } from "./interfaces/AccessibilityDetector";
-import { accessibilityDetector } from "./AccessibilityDetector";
+import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { type SecureSettingsRpc, CtrlProxySecureSettingsRpc } from "./SecureSettingsRpc";
 import {
@@ -472,10 +472,9 @@ export class TalkBackToggle {
    */
   private async dumpWindowHierarchy(): Promise<string> {
     const remotePath = "/sdcard/window_dump.xml";
-    await this.adb.executeCommand(
-      `shell uiautomator dump ${remotePath}`,
-      UIAUTOMATOR_DUMP_TIMEOUT_MS,
-    );
+    await this.adb.executeCommand(`shell uiautomator dump ${remotePath}`, {
+      timeoutMs: UIAUTOMATOR_DUMP_TIMEOUT_MS,
+    });
     const catResult = await this.adb.executeCommand(`shell cat ${remotePath}`);
     return catResult.stdout;
   }

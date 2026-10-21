@@ -4,7 +4,6 @@ import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
-export { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
 import { setHierarchyNodeSource } from "../observe/output/elementProvenance";
 
 type WindowSearchOrder = "topmost-first" | "bottommost-first";
@@ -18,7 +17,7 @@ export class DefaultElementParser extends ViewHierarchyParser implements Element
    * @param node - The node to parse
    * @returns The node with parsed bounds or null
    */
-  parseNodeBounds(node: ViewHierarchyNode): Element | null {
+  parseNodeBounds(node: ViewHierarchyNode | null): Element | null {
     if (!node) {
       return null;
     }
@@ -45,7 +44,7 @@ export class DefaultElementParser extends ViewHierarchyParser implements Element
    * @returns Array of elements with their indices and depth in hierarchy
    */
   flattenViewHierarchy(
-    viewHierarchy: ViewHierarchyResult,
+    viewHierarchy: ViewHierarchyResult | null,
     options: { includeWindows?: boolean; windowOrder?: WindowSearchOrder } = {},
   ): Array<{ element: Element; index: number; depth: number; text?: string }> {
     const searchHierarchy = resolveViewHierarchyForSearch(viewHierarchy);

@@ -19,6 +19,8 @@ enum PrototypeAgentProtocol {
         "put_prototype_asset",
         "remove_prototype_asset",
         "get_prototype_status",
+        patchRequest,
+        patchCapability,
         showInPlaceCapability,
         anchorCapability,
         hideForCaptureRequest,
@@ -26,13 +28,39 @@ enum PrototypeAgentProtocol {
         screenshotHideCapability,
         inspectCapability,
         themeModesCapability,
+        flowGridCapability,
+        pagerOptionsCapability,
         appearanceCapability,
         windowChromeCapability,
+        iconSfSymbolsCapability,
+        dataModelCapability,
+        dataActionsCapability,
+        networkCapability,
+        networkDeviceCapability,
+        textFieldOptionsCapability,
+        gesturesCapability,
+        swipeActionsCapability,
+        textFieldActionsCapability,
+        carouselCapability,
+        textFieldLeadingIconCapability,
+        refreshCapability,
+        searchBarCapability,
+        richTextCapability,
+        menusCapability,
+        stackCapability,
+        emitContextCapability,
+        checksCapability,
+        identifierTestTagOnlyCapability,
+        bottomSheetDragCapability,
+        clearStorageRequest,
+        storageCapability,
     ]
-    /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
+    /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
     /// `reset` on an agent that does not advertise it.
     static let showInPlaceCapability = "prototype_show_in_place_v1"
+    /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
+    static let stackCapability = "prototype_stack_v1"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.
@@ -56,6 +84,11 @@ enum PrototypeAgentProtocol {
     /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
     /// capability.
     static let themeModesCapability = "prototype_theme_modes_v1"
+    /// Eager wrapping flow and equal-width spanning grid containers (#12070).
+    static let flowGridCapability = "prototype_flow_grid_v1"
+    /// Draws pager axis, pageSpacing, peek and pageSize natively. The host refuses a spec that
+    /// uses one on an agent that does not advertise it. Same name as the CtrlProxy capability.
+    static let pagerOptionsCapability = "prototype_pager_options_v1"
     /// Appearance (#11222): `show_prototype` takes `appearance` (`device`, `light` or `dark`), the
     /// show result and `get_prototype_status` report `appearance: {mode, source, deviceDark}`, and
     /// any change of the shown prototype's mode (the device flipping, or state moving the inferred
@@ -66,6 +99,64 @@ enum PrototypeAgentProtocol {
     /// Fullscreen `window.chrome` (#12064): `none` (default) fills the window with a hidden and
     /// accessible escape; `bar` reserves the host dismiss bar. Same name as the CtrlProxy capability.
     static let windowChromeCapability = "prototype_window_chrome_v1"
+    /// Read-only data (#11673): resolves path repeats, authored text and data conditions once per
+    /// show before repeat expansion. Status reports the shown data alongside state.
+    static let checksCapability = "prototype_checks_v1"
+    static let dataModelCapability = "prototype_data_model_v1"
+    /// `setData`, `appendData` and `removeData` change `/data` from a tap and report each write as a
+    /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
+    /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
+    static let dataActionsCapability = "prototype_data_actions_v1"
+    /// The `request` action (#12529): host-proxied calls (`via: "host"`, the default) through
+    /// `prototype_request` / `prototype_response` frames, and the `/data`, `__meta`, `statusKey` and
+    /// `prototype_request` event semantics of `applyPrototypeRequestOutcome`. Same name as the CtrlProxy
+    /// capability.
+    static let networkCapability = "prototype_network_v1"
+    /// `via: "device"`: the agent makes the call itself through its own HTTP client. Same name as the
+    /// CtrlProxy capability.
+    static let networkDeviceCapability = "prototype_network_device_v1"
+    /// Text field options (#12066): keyboard, secure and multiline input, drawn labels and chrome,
+    /// supporting text and a UTF-16 length limit with counter. Same name as the CtrlProxy capability.
+    static let textFieldOptionsCapability = "prototype_text_field_options_v1"
+    /// Long press and double tap action lists on generic nodes, matching CtrlProxy (#12065).
+    static let gesturesCapability = "prototype_gestures_v1"
+    /// Swipe-revealed row actions with accessibility actions (#12065).
+    static let swipeActionsCapability = "prototype_swipe_actions_v1"
+    /// Text field `trailingIcon`, `imeAction` and `onSubmit` (#12066).
+    static let textFieldActionsCapability = "prototype_text_field_actions_v1"
+    /// The `carousel` node and the pager `indicator` option (#12071).
+    static let carouselCapability = "prototype_carousel_v1"
+    /// Text field `leadingIcon` drawn as an SF Symbol (#12066).
+    static let textFieldLeadingIconCapability = "prototype_text_field_leading_icon_v1"
+    /// Pull-to-refresh on a vertical scroll bound to a boolean state key (#12065).
+    static let refreshCapability = "prototype_refresh_v1"
+    /// Drawn search field with authored expansion, submit actions and in-window results (#12069).
+    static let searchBarCapability = "prototype_search_bar_v1"
+    /// Styled text runs with optional inline actions.
+    static let richTextCapability = "prototype_rich_text_v1"
+    /// In-window menus and exposed select option lists.
+    static let menusCapability = "prototype_menus_v1"
+    // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
+    static let emitContextCapability = "prototype_emit_context_v1"
+    /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined
+    /// icon variants where the table has those forms.
+    static let iconSfSymbolsCapability = "prototype_icon_sf_symbols_v1"
+    /// Node and composite-part accessibility identifiers use only `testTag`, as on Android.
+    static let identifierTestTagOnlyCapability = "prototype_identifier_test_tag_only_v1"
+    /// Bottom sheets drag between detents and optionally dismiss on a downward swipe.
+    static let bottomSheetDragCapability = "prototype_bottom_sheet_drag_v1"
+    /// Persisted `storage` (#12526): the spec's `storage` block is restored on a show and saved after
+    /// writes, `get_prototype_status` reports `storage`, and `clear_prototype_storage` is handled.
+    /// Same name as the CtrlProxy capability; the host refuses `storage` on an agent without it.
+    static let storageCapability = "prototype_storage_v1"
+    /// Wipes the values stored for `{id}`; the reply carries `cleared`, the number of keys removed. Listed
+    /// beside `storageCapability` because the host checks request types against `capabilities`.
+    static let clearStorageRequest = "clear_prototype_storage"
+    /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts
+    /// (#11675). Same name as the CtrlProxy capability; the host sends `patch_prototype` only to an agent
+    /// that advertises it.
+    static let patchCapability = "prototype_patch_v1"
+    static let patchRequest = "patch_prototype"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_PROTOTYPE_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.
@@ -157,6 +248,7 @@ struct PrototypeConnectionGate {
         case notJSON
         case notHello
         case badToken
+        case hostBusy
         case frameTooLarge
         case helloTimeout
     }

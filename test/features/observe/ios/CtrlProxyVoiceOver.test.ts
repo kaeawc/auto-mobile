@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
-import { CtrlProxyServicePortChangedError } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { CtrlProxyServicePortChangedError } from "../../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import { ActionableError } from "../../../../src/models/ActionableError";
-import type { CtrlProxyActionResult, IOSCtrlProxy } from "../../../../src/features/observe/ios";
+import type { CtrlProxyActionResult, IosCtrlProxy } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";
 import {
   FakeWebSocket,
@@ -572,8 +572,8 @@ describe("CtrlProxyVoiceOver", function () {
     // `CtrlProxyVoiceOverActionResult`, these mutual assignments stop compiling
     // and the typecheck gate fails.
     test("returns the same CtrlProxyActionResult type as requestAction (compile-time guard)", function () {
-      type ActivateResult = Awaited<ReturnType<IOSCtrlProxy["requestVoiceOverActivate"]>>;
-      type ActionResult = Awaited<ReturnType<IOSCtrlProxy["requestAction"]>>;
+      type ActivateResult = Awaited<ReturnType<IosCtrlProxy["requestVoiceOverActivate"]>>;
+      type ActionResult = Awaited<ReturnType<IosCtrlProxy["requestAction"]>>;
 
       // Both directions must hold → the two shapes are identical.
       const fromAction: ActivateResult = {} as ActionResult;
@@ -756,17 +756,15 @@ describe("CtrlProxyVoiceOver", function () {
         const controller = new AbortController();
         let dispatchCount = 0;
         try {
-          const pending = client.requestActivateAccessibilityLink(
-            "Terms",
-            0,
-            undefined,
-            5000,
-            undefined,
-            controller.signal,
-            () => {
+          const pending = client.requestActivateAccessibilityLink({
+            text: "Terms",
+            occurrence: 0,
+            timeoutMs: 5000,
+            signal: controller.signal,
+            onDispatch: () => {
               dispatchCount++;
             },
-          );
+          });
           const socket = await waitForSocket(getSocket);
           await waitForSocketOpen(socket);
           await waitForSentMessages(socket);
@@ -774,7 +772,10 @@ describe("CtrlProxyVoiceOver", function () {
           if (mode === "timeout") {
             timer.advanceTime(5000);
           } else if (mode === "transport") {
-            client["requestManager"].cancelAll("WebSocket connection closed");
+            if (!socket) {
+              throw new Error("Expected connected socket");
+            }
+            socket.terminate();
           } else if (mode === "abort after dispatch") {
             controller.abort(new Error("cancelled"));
             for (let i = 0; i < 30; i++) {
@@ -821,14 +822,12 @@ describe("CtrlProxyVoiceOver", function () {
         });
       const controller = new AbortController();
       const reason = new Error("cancelled before connection");
-      const pending = new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink(
-        "Terms",
-        0,
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-      );
+      const pending = new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink({
+        text: "Terms",
+        occurrence: 0,
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
       controller.abort(reason);
       finish(true);
       // An unfixed delegate sends despite cancellation; settle it so the regression fails promptly.
@@ -854,7 +853,11 @@ describe("CtrlProxyVoiceOver", function () {
       );
 
       try {
-        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const resultPromise = client.requestActivateAccessibilityLink({
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -886,14 +889,18 @@ describe("CtrlProxyVoiceOver", function () {
       );
 
       try {
-        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const resultPromise = client.requestActivateAccessibilityLink({
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
         const sentMsg = commandPayloads(socket!)[0];
-        // ios/control-proxy/Sources/CtrlProxyRewrite/CommandError.swift:28.
+        // ios/control-proxy/Sources/CtrlProxy/CommandError.swift:28.
         socket!.simulateMessage(
           JSON.stringify({
             type: "error",
@@ -924,7 +931,11 @@ describe("CtrlProxyVoiceOver", function () {
       );
 
       try {
-        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const resultPromise = client.requestActivateAccessibilityLink({
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -978,7 +989,11 @@ describe("CtrlProxyVoiceOver", function () {
           }),
         );
 
-        const result = await client.requestActivateAccessibilityLink("T", 0, "x");
+        const result = await client.requestActivateAccessibilityLink({
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
         expect(result.success).toBe(false);
         expect(result.error).toContain(
           "runner does not support request_activate_accessibility_link",

@@ -8,17 +8,19 @@
  * prototype message names as newline-delimited JSON: requests answered by `prototype_result`, and
  * unsolicited `prototype_event` pushes. Same-id `show_prototype` is the update path.
  */
-import { LineFramer } from "../../../daemon/socketServer/LineFramer";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../prototypeSpec";
-import { createConnection, type Socket } from "node:net";
+import { createConnection } from "node:net";
 import { ActionableError } from "../../../models/ActionableError";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import type { PrototypeRequestHost } from "../prototypeRequestHandler";
+import { NodePrototypeAgentSocket } from "./NodePrototypeAgentSocket";
+import { LOOPBACK_HOST, SocketPrototypeAgentClient } from "./SocketPrototypeAgentClient";
+export { PROTOTYPE_AGENT_PROTOCOL_VERSION } from "./SocketPrototypeAgentClient";
+export { PrototypeAgentRequestTimeoutError } from "./PrototypeAgentRequestTimeoutError";
+export { PrototypeAgentFrameTooLargeError } from "./PrototypeAgentFrameTooLargeError";
 
-/** Must equal `PrototypeAgentProtocol.protocolVersion` in the agent. */
-export const PROTOTYPE_AGENT_PROTOCOL_VERSION = 1;
 /**
  * Status and events carry state capped at MAX_PROTOTYPE_SPEC_BYTES (1 MiB) by
  * PrototypeStateValidator's JSONEncoder without slash escaping. JSONSerialization
@@ -30,23 +32,16 @@ export const PROTOTYPE_AGENT_PROTOCOL_VERSION = 1;
  */
 export const PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES = 8 * MAX_PROTOTYPE_SPEC_BYTES;
 
-export class PrototypeAgentFrameTooLargeError extends ActionableError {
-  constructor(readonly limitBytes: number) {
-    super(
-      `Prototype agent response frame exceeded ${limitBytes} bytes; the connection was closed. ` +
-        "Relaunch the app with prototype injection; the agent build may not match this host.",
-    );
-    this.name = "PrototypeAgentFrameTooLargeError";
-  }
-}
-const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
 /** Request types the host may send; the agent lists the ones it handles in `capabilities`. */
 export type PrototypeAgentRequestType =
   | "show_prototype"
+  | "patch_prototype"
   | "dismiss_prototype"
+  // Wipes a prototype's stored `storage` values (#12522), advertised as `prototype_storage_v1`.
+  | "clear_prototype_storage"
   | "put_prototype_asset"
   | "remove_prototype_asset"
   | "get_prototype_status"
@@ -77,11 +72,17 @@ export interface PrototypeAgentClient {
   request(
     type: PrototypeAgentRequestType,
     body?: PrototypeAgentMessage,
+    options?: { timeoutMs?: number },
   ): Promise<PrototypeAgentResult>;
   /** Subscribes to `prototype_event` pushes; returns an unsubscribe function. */
   onEvent(listener: (event: PrototypeAgentMessage) => void): () => void;
   /** Called once when the connection ends; returns an unsubscribe function. */
   onClosed(listener: (error: Error) => void): () => void;
+  /**
+   * Routes the agent's `prototype_request` frames (`via: "host"`, #12529) to the host proxy and
+   * cancels its running requests when the connection ends. Replaces any earlier host.
+   */
+  attachRequestHost?(host: PrototypeRequestHost | undefined): void;
   close(): void;
 }
 
@@ -166,286 +167,16 @@ export async function connectPrototypeAgent(
   return client;
 }
 
-interface Waiter {
+export interface Waiter {
   resolve: (message: PrototypeAgentResult) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
 }
 
-interface PendingHandshake {
+export interface PendingHandshake {
   resolve: (handshake: PrototypeAgentHandshake) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
-}
-
-function isObject(value: unknown): value is PrototypeAgentMessage {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseHandshake(message: PrototypeAgentMessage): PrototypeAgentHandshake | undefined {
-  const { agentVersion, protocolVersion, capabilities } = message;
-  if (
-    message.type !== "hello_result" ||
-    typeof agentVersion !== "string" ||
-    typeof protocolVersion !== "number" ||
-    !Array.isArray(capabilities) ||
-    !capabilities.every((capability): capability is string => typeof capability === "string")
-  ) {
-    return undefined;
-  }
-  return { agentVersion, protocolVersion, capabilities };
-}
-
-function isResult(message: PrototypeAgentMessage): message is PrototypeAgentResult {
-  return (
-    message.type === "prototype_result" &&
-    typeof message.requestId === "string" &&
-    typeof message.success === "boolean"
-  );
-}
-
-class SocketPrototypeAgentClient implements PrototypeAgentClient {
-  private readonly framer: LineFramer;
-  private nextRequestId = 1;
-  private readonly waiters = new Map<string, Waiter>();
-  private readonly eventListeners = new Set<(event: PrototypeAgentMessage) => void>();
-  private readonly closedListeners = new Set<(error: Error) => void>();
-  private pendingHandshake: PendingHandshake | undefined;
-  private agentHandshake: PrototypeAgentHandshake | undefined;
-  private closedError: Error | undefined;
-
-  constructor(
-    private readonly socket: PrototypeAgentSocket,
-    private readonly port: number,
-    private readonly timer: Timer,
-    private readonly requestTimeoutMs: number,
-    maxFrameBytes: number,
-  ) {
-    this.framer = new LineFramer(maxFrameBytes, {
-      onLine: (line) => {
-        // LineFramer can emit several lines in a push; fail() closes dispatch immediately.
-        if (this.closedError === undefined && line.trim()) {
-          this.receiveLine(line.trim());
-        }
-      },
-      onOverflow: () => this.fail(new PrototypeAgentFrameTooLargeError(maxFrameBytes)),
-    });
-    socket.onData((chunk) => this.receive(chunk));
-    socket.onClose((error) => this.handleClose(error));
-  }
-
-  get handshake(): PrototypeAgentHandshake {
-    if (this.agentHandshake === undefined) {
-      throw new ActionableError("Prototype agent handshake has not completed.");
-    }
-    return this.agentHandshake;
-  }
-
-  authenticate(token: string, timeoutMs: number): Promise<PrototypeAgentHandshake> {
-    return new Promise((resolve, reject) => {
-      const timeout = this.timer.setTimeout(() => {
-        this.fail(
-          new ActionableError(
-            `Prototype agent on ${LOOPBACK_HOST}:${this.port} did not answer the handshake within ` +
-              `${timeoutMs} ms. Another process may hold the port; relaunch the app with prototype injection.`,
-          ),
-        );
-      }, timeoutMs);
-      this.pendingHandshake = { resolve, reject, timeout };
-      this.send({ type: "hello", token, protocolVersion: PROTOTYPE_AGENT_PROTOCOL_VERSION });
-    });
-  }
-
-  request(
-    type: PrototypeAgentRequestType,
-    body: PrototypeAgentMessage = {},
-  ): Promise<PrototypeAgentResult> {
-    if (this.closedError !== undefined) {
-      return Promise.reject(this.closedError);
-    }
-    if (!this.handshake.capabilities.includes(type)) {
-      return Promise.reject(
-        new ActionableError(
-          `Prototype agent ${this.handshake.agentVersion} does not support ${type}. ` +
-            `Supported: ${this.handshake.capabilities.join(", ")}.`,
-        ),
-      );
-    }
-    const requestId = `r${this.nextRequestId++}`;
-    return new Promise((resolve, reject) => {
-      const timeout = this.timer.setTimeout(() => {
-        this.waiters.delete(requestId);
-        reject(
-          new ActionableError(
-            `Prototype agent did not answer ${type} within ${this.requestTimeoutMs} ms.`,
-          ),
-        );
-      }, this.requestTimeoutMs);
-      this.waiters.set(requestId, { resolve, reject, timeout });
-      this.send({ ...body, type, requestId });
-    });
-  }
-
-  onEvent(listener: (event: PrototypeAgentMessage) => void): () => void {
-    this.eventListeners.add(listener);
-    return () => this.eventListeners.delete(listener);
-  }
-
-  onClosed(listener: (error: Error) => void): () => void {
-    this.closedListeners.add(listener);
-    return () => this.closedListeners.delete(listener);
-  }
-
-  close(): void {
-    this.fail(new ActionableError("Prototype agent connection was closed by the host."));
-  }
-
-  private send(message: PrototypeAgentMessage): void {
-    this.socket.write(`${JSON.stringify(message)}\n`);
-  }
-
-  private receive(chunk: string): void {
-    if (this.closedError === undefined) {
-      this.framer.push(chunk);
-    }
-  }
-
-  private receiveLine(line: string): void {
-    let message: unknown;
-    try {
-      message = JSON.parse(line);
-    } catch (error) {
-      this.fail(
-        new ActionableError(`Prototype agent sent a line that is not JSON: ${errorMessage(error)}`),
-      );
-      return;
-    }
-    if (!isObject(message)) {
-      this.fail(new ActionableError("Prototype agent sent a frame that is not a JSON object."));
-      return;
-    }
-    if (this.pendingHandshake !== undefined) {
-      this.completeHandshake(this.pendingHandshake, message);
-      return;
-    }
-    this.dispatch(message);
-  }
-
-  private completeHandshake(pending: PendingHandshake, message: PrototypeAgentMessage): void {
-    const handshake = parseHandshake(message);
-    if (handshake === undefined) {
-      this.fail(
-        new ActionableError(
-          `Prototype agent answered the handshake with ${JSON.stringify(message.type)} instead of ` +
-            "hello_result. Rebuild the prototype agent from this AutoMobile version and relaunch the app.",
-        ),
-      );
-      return;
-    }
-    if (handshake.protocolVersion !== PROTOTYPE_AGENT_PROTOCOL_VERSION) {
-      this.fail(
-        new ActionableError(
-          `Prototype agent ${handshake.agentVersion} speaks protocol ${handshake.protocolVersion}, ` +
-            `but this AutoMobile host speaks protocol ${PROTOTYPE_AGENT_PROTOCOL_VERSION}. Use the ` +
-            "prototype agent built for this AutoMobile version and relaunch the app.",
-        ),
-      );
-      return;
-    }
-    this.pendingHandshake = undefined;
-    this.timer.clearTimeout(pending.timeout);
-    this.agentHandshake = handshake;
-    pending.resolve(handshake);
-  }
-
-  private dispatch(message: PrototypeAgentMessage): void {
-    if (isResult(message)) {
-      const waiter = this.waiters.get(message.requestId);
-      if (waiter !== undefined) {
-        this.waiters.delete(message.requestId);
-        this.timer.clearTimeout(waiter.timeout);
-        waiter.resolve(message);
-        return;
-      }
-    }
-    if (message.type === "prototype_event") {
-      this.eventListeners.forEach((listener) => listener(message));
-      return;
-    }
-    // A reply that arrives after its request timed out has nobody waiting; dropping it is safe.
-    logger.debug(`[prototype-agent] ignoring unmatched frame: ${JSON.stringify(message)}`);
-  }
-
-  private handleClose(error: Error | undefined): void {
-    if (this.pendingHandshake !== undefined) {
-      this.fail(
-        new ActionableError(
-          `Prototype agent on ${LOOPBACK_HOST}:${this.port} closed the connection during the ` +
-            "handshake. The auth token does not match this launch (or another app holds the port); " +
-            "relaunch the app with prototype injection.",
-          { cause: error },
-        ),
-      );
-      return;
-    }
-    const detail = error === undefined ? "" : ` (${errorMessage(error)})`;
-    this.fail(
-      new ActionableError(
-        `Prototype agent closed the connection; the app may have exited${detail}.`,
-        {
-          cause: error,
-        },
-      ),
-    );
-  }
-
-  /** Settles everything still waiting, closes the socket and notifies once. */
-  private fail(error: Error): void {
-    if (this.closedError !== undefined) {
-      return;
-    }
-    this.closedError = error;
-    const pending = this.pendingHandshake;
-    this.pendingHandshake = undefined;
-    if (pending !== undefined) {
-      this.timer.clearTimeout(pending.timeout);
-      pending.reject(error);
-    }
-    for (const waiter of this.waiters.values()) {
-      this.timer.clearTimeout(waiter.timeout);
-      waiter.reject(error);
-    }
-    this.waiters.clear();
-    this.socket.end();
-    this.closedListeners.forEach((listener) => listener(error));
-    this.closedListeners.clear();
-  }
-}
-
-class NodePrototypeAgentSocket implements PrototypeAgentSocket {
-  constructor(private readonly socket: Socket) {
-    socket.setEncoding("utf8");
-  }
-
-  write(data: string): void {
-    this.socket.write(data);
-  }
-
-  end(): void {
-    this.socket.end();
-  }
-
-  onData(listener: (chunk: string) => void): void {
-    this.socket.on("data", (chunk: string) => listener(chunk));
-  }
-
-  onClose(listener: (error?: Error) => void): void {
-    let lastError: Error | undefined;
-    this.socket.on("error", (error) => {
-      lastError = error;
-    });
-    this.socket.on("close", () => listener(lastError));
-  }
 }
 
 /** Connects over node:net to the agent's loopback listener. */

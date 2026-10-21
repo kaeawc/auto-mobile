@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import {
   DeviceState,
@@ -10,8 +10,8 @@ import {
   NETWORK_FILTER_INSTALL_COMMAND,
   type NetworkFilterBridge,
   type NetworkFilterState,
-} from "../../../src/features/network-filter/NetworkFilterBridge";
-import type { IosAppNetworkRuleCommandContext } from "../../../src/features/network-filter/IosAppNetworkRuleClient";
+} from "../../../src/features/networkFilter/NetworkFilterBridge";
+import type { IosAppNetworkRuleCommandContext } from "../../../src/features/networkFilter/IosAppNetworkRuleClient";
 import {
   getDeviceStateResultSchema,
   setDeviceStateResultSchema,
@@ -19,6 +19,10 @@ import {
 import { logger } from "../../../src/utils/logger";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeNetworkFilterBridge } from "../../fakes/FakeNetworkFilterBridge";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const iosSimulator: BootedDevice = {
   name: "iPhone 16",

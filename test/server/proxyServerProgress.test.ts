@@ -1,6 +1,6 @@
-import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
@@ -14,31 +14,17 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
  * client's `_meta.progressToken` across the daemon round trip.
  */
 describe("Proxy tools/call relays progress tagged with the client's own token (issue #6205)", () => {
-  let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
+  let isAvailableSpy: ReturnType<typeof spyOn>;
 
-  beforeAll(() => {
-    // `createProxyMcpServer` registers its ping/prompts handlers via
-    // `require("@modelcontextprotocol/sdk/types.js")` rather than the static
-    // ESM import used for the other schemas in that file (`ListToolsRequestSchema`
-    // et al.) — tsgo cannot resolve `PingRequestSchema` / `ListPromptsRequestSchema`
-    // as named exports of that deep path, so the source works around it with a
-    // runtime `require()`. That `require()`'s FIRST call in a process JIT-links a
-    // CJS-interop wrapper for the module (~25-30ms) even though the identical
-    // module is already ESM-imported elsewhere — a one-time cost that otherwise
-    // lands inside whichever test calls `createProxyMcpServer` first. Absorb it
-    // here, in setup, rather than letting it push that test over the 100ms/test
-    // CI budget (`scripts/validate-bun-test-timings.sh`) — same class of flake
-    // fixed for the storage tools' Ajv2020 cold-start, see #6313.
-    require("@modelcontextprotocol/sdk/types.js");
+  beforeEach(() => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   });
 
   afterEach(() => {
-    isAvailableSpy?.mockRestore();
-    isAvailableSpy = null;
+    isAvailableSpy.mockRestore();
   });
 
   async function setup(fakeClient: FakeDaemonClient) {
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     const { server, proxy } = createProxyMcpServer({
@@ -77,11 +63,14 @@ describe("Proxy tools/call relays progress tagged with the client's own token (i
     };
 
     try {
-      await client.callTool({ name: "someTool", arguments: {} }, undefined, {
-        onprogress: (notification) => {
-          received.push(notification as unknown as { progress: number; total?: number });
+      await client.callTool(
+        { name: "someTool", arguments: {} },
+        {
+          onprogress: (notification) => {
+            received.push(notification);
+          },
         },
-      });
+      );
 
       expect(received).toHaveLength(1);
       expect(received[0].progress).toBe(1);

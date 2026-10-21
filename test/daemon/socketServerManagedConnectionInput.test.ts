@@ -1,9 +1,6 @@
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { ManagedConnectionBinding } from "../../src/daemon/managedSlots/managedConnectionScope";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { BrokerConnectionBinding } from "../../src/daemon/sessionBroker/connectionScope";
+import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -13,72 +10,45 @@ import {
   createFakeDeviceManager,
   createFakeSession,
 } from "./helpers/inputSocketHarness";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
+import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
- * #11178: `input/*` frames are control. A socket bound to managed slots drives only its own slot
+ * #11178: `input/*` frames are control. A socket bound to broker bindings drives only its own slot
  * devices; the binding ends with the socket. Generic sockets are unaffected by this gate.
  */
 
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const SLOT_SESSION = "slot-exec";
 
-let internals: Internals;
+let server: UnixSocketServerHarness;
 let sockets: FakeSocket[];
-let binding: ManagedConnectionBinding | undefined;
+let binding: BrokerConnectionBinding | undefined;
 let unbound: string[];
 
 function useServer(): void {
   const session = createFakeSession(SLOT_SESSION, androidDevice.deviceId, "android");
   const state = {
     ...createFakeDaemonState(new Map([[SLOT_SESSION, session]])),
-    getManagedConnectionScopes: () => ({
+    getBrokerConnectionScopes: () => ({
+      bind: () => {},
       get: (mcpSessionId: string | undefined) => (mcpSessionId ? binding : undefined),
       unbind: (mcpSessionId: string) => {
         unbound.push(mcpSessionId);
       },
     }),
   };
-  const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, new FakeTimer());
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  server = createHarnessServer("unused", state, new FakeTimer());
+  server.allowRequests();
 }
 
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   sockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  server.connect(socket);
   return socket;
 }
 
@@ -86,7 +56,7 @@ async function drain(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...server.state.activeRequestHandlers]);
 }
 
 function tap(id: string): DaemonRequest {
@@ -104,20 +74,17 @@ function tap(id: string): DaemonRequest {
   };
 }
 
-const ack = async () => ({ success: true });
+const ack = async () => ({ success: true, totalTimeMs: 0 });
 
 beforeEach(() => {
   sockets = [];
   unbound = [];
   binding = undefined;
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: ack,
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOnAndroidClientInstance(androidDevice, {
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: ack,
+  });
 });
 
 afterEach(() => {
@@ -129,7 +96,7 @@ afterEach(() => {
 });
 
 describe("input/* from a managed connection (#11178)", () => {
-  test("a managed socket drives its own slot device", async () => {
+  test("a managed socket drives its own binding device", async () => {
     binding = { scopeKey: "scope-a", sessionUuids: new Set([SLOT_SESSION]) };
     useServer();
     const socket = connect();
@@ -150,7 +117,7 @@ describe("input/* from a managed connection (#11178)", () => {
 
     expect(socket.responses.find((frame) => frame.id === "foreign")).toMatchObject({
       success: false,
-      code: "device_outside_managed_slots",
+      code: "device_outside_broker_grant",
     });
   });
 
@@ -166,82 +133,5 @@ describe("input/* from a managed connection (#11178)", () => {
 
     socket.destroy();
     expect(unbound).toHaveLength(1);
-  });
-});
-
-describe("daemon/acquireManagedSlots binds the requesting socket (#11178)", () => {
-  test("a ready acquisition binds the socket session that asked, until that socket closes", async () => {
-    const bound: Array<[string, { scopeKey: string; sessionUuids: string[] }]> = [];
-    const state = {
-      ...createFakeDaemonState(),
-      getManagedSlotAcquisition: () => ({
-        acquire: async () => ({
-          contractVersion: 1 as const,
-          scope: {
-            managedHostScope: "host-a",
-            runnerNamespace: "ns",
-            runnerIncarnation: "inc-1",
-            scopeKey: "scope-a",
-          },
-          outcome: "ready" as const,
-          slots: [{ sessionUuid: SLOT_SESSION }],
-        }),
-      }),
-      getManagedConnectionScopes: () => ({
-        bind: (
-          mcpSessionId: string,
-          granted: { scopeKey: string; sessionUuids: Iterable<string> },
-        ) => {
-          bound.push([
-            mcpSessionId,
-            { scopeKey: granted.scopeKey, sessionUuids: [...granted.sessionUuids] },
-          ]);
-        },
-        get: () => undefined,
-        unbind: (mcpSessionId: string) => {
-          unbound.push(mcpSessionId);
-        },
-      }),
-    };
-    const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, new FakeTimer());
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
-    const socket = connect();
-
-    socket.send({
-      id: "acquire",
-      type: "mcp_request",
-      method: "daemon/acquireManagedSlots",
-      params: {
-        config: {
-          contractVersion: 1,
-          managedHostScope: "host-a",
-          runnerNamespace: "ns",
-          runnerIncarnation: "inc-1",
-          localSlotCapacity: 1,
-          requests: [
-            {
-              slotIndex: 0,
-              role: "app",
-              platform: "android",
-              requestedSpec: {
-                runtime: "system-images;android-35;google_apis;arm64-v8a",
-                deviceType: "pixel_8",
-              },
-            },
-          ],
-        },
-        livenessOwnerToken: "proxy-token",
-      },
-    });
-    await drain();
-
-    expect(socket.responses.find((frame) => frame.id === "acquire")).toMatchObject({
-      success: true,
-    });
-    expect(bound).toHaveLength(1);
-    expect(bound[0]![1]).toEqual({ scopeKey: "scope-a", sessionUuids: [SLOT_SESSION] });
-    socket.destroy();
-    expect(unbound).toEqual([bound[0]![0]]);
   });
 });

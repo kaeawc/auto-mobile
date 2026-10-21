@@ -4,6 +4,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.snapshots.SnapshotStateObserver
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.layout.HierarchyUpdateOptions
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorMockData
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
 import dev.jasonpearson.automobile.desktop.core.layout.buildParsedHierarchy
@@ -43,9 +44,102 @@ import kotlinx.coroutines.test.runTest
  * no real device, socket or timer.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class DeviceControlSessionTest {
+internal abstract class DeviceControlSessionFixture {
 
-  private val point = DevicePoint(x = 360, y = 780, inBounds = true)
+  protected val point = DevicePoint(x = 360, y = 780, inBounds = true)
+
+  protected fun kotlinx.coroutines.test.TestScope.session(
+    scope: CoroutineScope,
+    client: FakeAutoMobileClient,
+    publishError: (String?) -> Unit = {},
+  ) =
+    DeviceControlSession(
+      DeviceControlSessionOptions(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = publishError,
+        uiContext = UnconfinedTestDispatcher(testScheduler),
+        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+      ),
+    )
+
+  /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
+  protected fun streamingSession(
+    scope: CoroutineScope,
+    client: FakeAutoMobileClient,
+    scheduler: TestCoroutineScheduler,
+    publishError: (String?) -> Unit = {},
+  ) =
+    DeviceControlSession(
+      DeviceControlSessionOptions(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = publishError,
+        uiContext = UnconfinedTestDispatcher(scheduler),
+        ioDispatcher = UnconfinedTestDispatcher(scheduler),
+        streamingEnabled = true,
+      ),
+    )
+
+  protected data class PairedFrameSpec(
+    val captureSequence: Long,
+    val sourceSequence: Long,
+    val width: Int = 1080,
+    val height: Int = 2340,
+    val data: ByteArray? = null,
+    val receivedAtMs: Long = 1_000L,
+    val coordinateSpace: CoordinateSpace? = null,
+    val nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 1.0 else null,
+    val frameContext: String = "epoch:$captureSequence",
+  )
+
+  protected fun paired(spec: PairedFrameSpec) =
+    with(spec) {
+      DeviceControlInputs(
+        enabled = true,
+        realDeviceMode = true,
+        selectedDeviceId = "emulator-5554",
+        transportSupportsInput = true,
+        observationStreamConnected = true,
+        screenshot =
+          ScreenshotFrameFacts(
+            deviceId = "emulator-5554",
+            sequence = sourceSequence,
+            captureSequence = captureSequence,
+            receivedAtMs = receivedAtMs,
+            width = width,
+            height = height,
+            data = data,
+            coordinateSpace = coordinateSpace,
+            nativeScale = nativeScale,
+            frameContext = frameContext,
+            rotation = 0,
+          ),
+        hierarchy =
+          HierarchyFrameFacts(
+            deviceId = "emulator-5554",
+            sequence = sourceSequence,
+            captureSequence = captureSequence,
+            receivedAtMs = receivedAtMs,
+            hierarchy = null,
+            rootWidth = width,
+            rootHeight = height,
+            coordinateSpace = coordinateSpace,
+            nativeScale = nativeScale,
+            frameContext = frameContext,
+            rotation = 0,
+          ),
+        liveFrame = null,
+      )
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+internal class DeviceControlSessionTest : DeviceControlSessionFixture() {
 
   @Test
   fun `a tap is dispatched against the snapshot it was clicked on, not the newest one`() = runTest {
@@ -53,16 +147,18 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { client },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = UnconfinedTestDispatcher(testScheduler),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = UnconfinedTestDispatcher(testScheduler),
+          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        ),
       )
 
-    val clicked = testSnapshot(deviceId = "emulator-5554", sequence = 5L)
+    val clicked = testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554", sequence = 5L))
     session.tap(clicked, point)
     advanceUntilIdle()
 
@@ -81,7 +177,7 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val session = session(scope, FakeAutoMobileClient())
 
-    session.tap(testSnapshot(sequence = 5L), point)
+    session.tap(testSnapshot(TestSnapshotSpec(sequence = 5L)), point)
     advanceUntilIdle()
 
     assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
@@ -98,7 +194,7 @@ class DeviceControlSessionTest {
       val published = mutableListOf<String?>()
       val session = session(scope, client, publishError = { published.add(it) })
 
-      session.tap(testSnapshot(sequence = 5L), point)
+      session.tap(testSnapshot(TestSnapshotSpec(sequence = 5L)), point)
       advanceUntilIdle()
 
       // Cleared on attempt, then the daemon's own message — never a generic invented one.
@@ -119,8 +215,8 @@ class DeviceControlSessionTest {
 
     // Two clicks in quick succession: the first is dispatched, then a newer one claims the slot
     // before the first's failure is published.
-    session.tap(testSnapshot(sequence = 5L), point)
-    session.tap(testSnapshot(sequence = 6L), point)
+    session.tap(testSnapshot(TestSnapshotSpec(sequence = 5L)), point)
+    session.tap(testSnapshot(TestSnapshotSpec(sequence = 6L)), point)
     advanceUntilIdle()
 
     // Only the newest attempt's error may show. Both fail here, so the banner holds the newest —
@@ -144,7 +240,7 @@ class DeviceControlSessionTest {
             )
         }
       val session = session(scope, client)
-      val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+      val initial = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
       val rejected = assertNotNull(session.evaluate(initial).snapshotOrNull)
 
       session.tap(rejected, point)
@@ -159,14 +255,20 @@ class DeviceControlSessionTest {
       )
 
       val delayedSameContext =
-        paired(captureSequence = 8L, sourceSequence = 12L, frameContext = rejected.frameContext)
+        paired(
+          PairedFrameSpec(
+            captureSequence = 8L,
+            sourceSequence = 12L,
+            frameContext = rejected.frameContext,
+          ),
+        )
       assertNotNull(session.evaluate(delayedSameContext).snapshotOrNull)
       assertNull(
         session.interactionSnapshot,
         "a later capture under the rejected context must not restore control",
       )
 
-      val fresh = paired(captureSequence = 9L, sourceSequence = 13L)
+      val fresh = paired(PairedFrameSpec(captureSequence = 9L, sourceSequence = 13L))
       val freshSnapshot = assertNotNull(session.evaluate(fresh).snapshotOrNull)
 
       assertEquals(freshSnapshot, session.interactionSnapshot)
@@ -189,15 +291,17 @@ class DeviceControlSessionTest {
     val published = mutableListOf<String?>()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { client },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = { published += it },
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = { published += it },
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
-    val snapshot = testSnapshot(sequence = 7L)
+    val snapshot = testSnapshot(TestSnapshotSpec(sequence = 7L))
 
     session.tap(snapshot, point)
     session.tap(snapshot, point)
@@ -235,22 +339,28 @@ class DeviceControlSessionTest {
     var clientIndex = 0
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { clients[clientIndex++] },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { clients[clientIndex++] },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
     val staleSnapshot =
       assertNotNull(
-        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull,
+        session
+          .evaluate(paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L)))
+          .snapshotOrNull,
       )
     assertTrue(session.tap(staleSnapshot, point))
     val freshSnapshot =
       assertNotNull(
-        session.evaluate(paired(captureSequence = 8L, sourceSequence = 12L)).snapshotOrNull,
+        session
+          .evaluate(paired(PairedFrameSpec(captureSequence = 8L, sourceSequence = 12L)))
+          .snapshotOrNull,
       )
 
     assertTrue(session.tap(freshSnapshot, point))
@@ -268,7 +378,7 @@ class DeviceControlSessionTest {
     var banner: String? = "something"
     val session = session(scope, FakeAutoMobileClient(), publishError = { banner = it })
 
-    session.tap(testSnapshot(sequence = 5L), point)
+    session.tap(testSnapshot(TestSnapshotSpec(sequence = 5L)), point)
     advanceUntilIdle()
     assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
 
@@ -277,21 +387,6 @@ class DeviceControlSessionTest {
     assertEquals(PostInputRefreshState.Idle, session.refreshState)
     scope.cancel()
   }
-
-  private fun kotlinx.coroutines.test.TestScope.session(
-    scope: CoroutineScope,
-    client: FakeAutoMobileClient,
-    publishError: (String?) -> Unit = {},
-  ) =
-    DeviceControlSession(
-      scope = scope,
-      clientProvider = { client },
-      platform = { "android" },
-      nowMs = { 1_000L },
-      publishError = publishError,
-      uiContext = UnconfinedTestDispatcher(testScheduler),
-      ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-    )
 
   @Test
   fun `a reset session drains nothing through the old client`() = runTest {
@@ -309,16 +404,18 @@ class DeviceControlSessionTest {
     var banner: String? = "stale"
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { provider() },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = { banner = it },
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { provider() },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = { banner = it },
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
 
-    repeat(4) { session.tap(testSnapshot(sequence = it.toLong()), point) }
+    repeat(4) { session.tap(testSnapshot(TestSnapshotSpec(sequence = it.toLong())), point) }
     assertEquals(4, oldClients.size, "each tap mints a client from the provider in force")
 
     // The host reconnects: reset, then the provider swaps.
@@ -345,7 +442,8 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
 
-    val dispatched = session.tap(testSnapshot(), DevicePoint(x = -5, y = 4000, inBounds = false))
+    val dispatched =
+      session.tap(testSnapshot(TestSnapshotSpec()), DevicePoint(x = -5, y = 4000, inBounds = false))
     advanceUntilIdle()
 
     assertFalse(dispatched, "an out-of-bounds point is reported as not dispatched")
@@ -362,7 +460,7 @@ class DeviceControlSessionTest {
 
     val dragged =
       session.swipe(
-        testSnapshot(deviceId = "emulator-5554", sequence = 5L),
+        testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554", sequence = 5L)),
         DevicePoint(x = 540, y = 1800, inBounds = true),
         DevicePoint(x = 540, y = 400, inBounds = true),
       )
@@ -392,7 +490,7 @@ class DeviceControlSessionTest {
 
       val dragged =
         session.swipe(
-          testSnapshot(),
+          testSnapshot(TestSnapshotSpec()),
           DevicePoint(x = 540, y = 1800, inBounds = true),
           DevicePoint(x = 542, y = 1803, inBounds = true),
         )
@@ -417,7 +515,7 @@ class DeviceControlSessionTest {
 
     val dragged =
       session.swipe(
-        testSnapshot(),
+        testSnapshot(TestSnapshotSpec()),
         DevicePoint(x = -30, y = 1800, inBounds = false),
         DevicePoint(x = 540, y = 400, inBounds = true),
       )
@@ -436,7 +534,7 @@ class DeviceControlSessionTest {
     val session = session(scope, client)
 
     session.swipe(
-      testSnapshot(deviceWidth = 1080, deviceHeight = 2340),
+      testSnapshot(TestSnapshotSpec(deviceWidth = 1080, deviceHeight = 2340)),
       DevicePoint(x = 540, y = 1800, inBounds = true),
       DevicePoint(x = 540, y = 9_000, inBounds = false),
     )
@@ -454,7 +552,7 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
-    val snapshot = testSnapshot()
+    val snapshot = testSnapshot(TestSnapshotSpec())
 
     session.tap(snapshot, point)
     session.swipe(
@@ -471,7 +569,10 @@ class DeviceControlSessionTest {
     )
     scope.cancel()
   }
+}
 
+@OptIn(ExperimentalCoroutinesApi::class)
+internal class DeviceControlSessionFramePairingTest : DeviceControlSessionFixture() {
   @Test
   fun `a failed swipe publishes the daemon's error and settles without waiting`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
@@ -482,7 +583,7 @@ class DeviceControlSessionTest {
     val session = session(scope, client, publishError = { published.add(it) })
 
     session.swipe(
-      testSnapshot(),
+      testSnapshot(TestSnapshotSpec()),
       DevicePoint(x = 540, y = 1800, inBounds = true),
       DevicePoint(x = 540, y = 400, inBounds = true),
     )
@@ -503,7 +604,7 @@ class DeviceControlSessionTest {
     val session = session(scope, FakeAutoMobileClient())
 
     val withMirror =
-      paired(captureSequence = 7L, sourceSequence = 10L)
+      paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
         .copy(
           liveFrame =
             LiveFrameFacts(
@@ -524,7 +625,7 @@ class DeviceControlSessionTest {
     advanceUntilIdle()
     assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
 
-    val withoutMirror = paired(captureSequence = 8L, sourceSequence = 11L)
+    val withoutMirror = paired(PairedFrameSpec(captureSequence = 8L, sourceSequence = 11L))
     val next = assertNotNull(session.evaluate(withoutMirror).snapshotOrNull)
     assertTrue(next.sequence > mirrored.sequence, "the sequence never goes backwards")
     assertNull(next.liveFrameSequence)
@@ -543,7 +644,8 @@ class DeviceControlSessionTest {
     val session = session(scope, FakeAutoMobileClient())
 
     val clickedPixels = byteArrayOf(1, 1, 1)
-    val clicked = paired(captureSequence = 7L, sourceSequence = 10L, data = clickedPixels)
+    val clicked =
+      paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L, data = clickedPixels))
     assertNotNull(session.evaluate(clicked).snapshotOrNull)
     val retained = assertNotNull(session.renderSnapshot)
     assertSame(clickedPixels, retained.screenshotData)
@@ -584,11 +686,13 @@ class DeviceControlSessionTest {
     // what is rendered.
     val superseding =
       paired(
-        captureSequence = 8L,
-        sourceSequence = 21L,
-        width = 720,
-        height = 1560,
-        data = newPixels,
+        PairedFrameSpec(
+          captureSequence = 8L,
+          sourceSequence = 21L,
+          width = 720,
+          height = 1560,
+          data = newPixels,
+        ),
       )
     val next = assertNotNull(session.evaluate(superseding).snapshotOrNull)
     assertEquals(PostInputRefreshState.Settled, session.refreshState)
@@ -608,16 +712,19 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { FakeAutoMobileClient() },
-        platform = { "android" },
-        nowMs = { now },
-        publishError = {},
-        uiContext = UnconfinedTestDispatcher(testScheduler),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { FakeAutoMobileClient() },
+          platform = { "android" },
+          nowMs = { now },
+          publishError = {},
+          uiContext = UnconfinedTestDispatcher(testScheduler),
+          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        ),
       )
 
-    val clicked = paired(captureSequence = 7L, sourceSequence = 10L, data = byteArrayOf(1))
+    val clicked =
+      paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L, data = byteArrayOf(1)))
     assertNotNull(session.evaluate(clicked).snapshotOrNull)
     val retained = assertNotNull(session.renderSnapshot)
 
@@ -654,7 +761,7 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
 
-    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    val clicked = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     assertNotNull(session.evaluate(clicked).snapshotOrNull)
     val retained = assertNotNull(session.interactionSnapshot)
 
@@ -685,7 +792,7 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val session = session(scope, FakeAutoMobileClient())
 
-    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    val clicked = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     session.evaluate(clicked)
     session.tap(assertNotNull(session.interactionSnapshot), point)
     advanceUntilIdle()
@@ -709,7 +816,8 @@ class DeviceControlSessionTest {
       val session = session(scope, client)
 
       // Clicked while the device was still publishing legacy point-space frames.
-      val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+      val legacy =
+        paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null))
       assertNotNull(session.evaluate(legacy).snapshotOrNull)
       val retained = assertNotNull(session.interactionSnapshot)
       assertNull(retained.coordinateSpace, "the clicked frame's space is bound to the snapshot")
@@ -750,7 +858,8 @@ class DeviceControlSessionTest {
       val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
       val session = session(scope, FakeAutoMobileClient())
 
-      val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+      val legacy =
+        paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null))
       assertNotNull(session.evaluate(legacy).snapshotOrNull)
       val retained = assertNotNull(session.interactionSnapshot)
       session.tap(retained, point)
@@ -791,16 +900,19 @@ class DeviceControlSessionTest {
     val clients = mutableListOf<FakeAutoMobileClient>()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { FakeAutoMobileClient().also { clients.add(it) } },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { FakeAutoMobileClient().also { clients.add(it) } },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
 
-    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    val legacy =
+      paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null))
     assertNotNull(session.evaluate(legacy).snapshotOrNull)
     assertTrue(session.tap(assertNotNull(session.interactionSnapshot), point))
     assertEquals(1, clients.size, "the tap is queued, with its client captured")
@@ -827,7 +939,10 @@ class DeviceControlSessionTest {
     assertEquals(PostInputRefreshState.Idle, session.refreshState)
     scope.cancel()
   }
+}
 
+@OptIn(ExperimentalCoroutinesApi::class)
+internal class DeviceControlSessionProvenanceTest : DeviceControlSessionFixture() {
   @Test
   fun `a flip is caught at stream receipt, inside the hierarchy debounce window`() = runTest {
     // The window the fact-level check cannot cover. LayoutInspectorState debounces hierarchy
@@ -844,7 +959,8 @@ class DeviceControlSessionTest {
     val state = LayoutInspectorState(StandardTestDispatcher(testScheduler))
 
     // Control is live on a legacy point-space frame.
-    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    val legacy =
+      paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null))
     session.onObservationSpaceDeclared(null, captureSequence = 7L)
     assertNotNull(session.evaluate(legacy).snapshotOrNull)
     val clicked = assertNotNull(session.interactionSnapshot)
@@ -857,11 +973,14 @@ class DeviceControlSessionTest {
       nativeScale = 1.0,
     )
     state.applyHierarchyUpdate(
-      buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy),
-      emptySet(),
-      deviceId = "emulator-5554",
-      captureSequence = 8L,
-      coordinateSpace = CoordinateSpace.Pixels,
+      parsed = buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy),
+      changedIds = emptySet(),
+      options =
+        HierarchyUpdateOptions(
+          deviceId = "emulator-5554",
+          captureSequence = 8L,
+          coordinateSpace = CoordinateSpace.Pixels,
+        ),
     )
 
     // INSIDE the debounce window. The facts still hold the OLD declaration — evaluate() has nothing
@@ -889,7 +1008,7 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
-    val current = paired(captureSequence = 7L, sourceSequence = 10L)
+    val current = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
 
     session.onObservationFrameContextDeclared("epoch:7", captureSequence = 7L)
     assertNotNull(session.evaluate(current).snapshotOrNull)
@@ -926,7 +1045,9 @@ class DeviceControlSessionTest {
 
       session.onObservationSpaceDeclared(null, captureSequence = 7L)
       assertNotNull(
-        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull,
+        session
+          .evaluate(paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L)))
+          .snapshotOrNull,
       )
       assertNotNull(session.interactionSnapshot)
 
@@ -989,14 +1110,17 @@ class DeviceControlSessionTest {
       // The session must still consider PIXELS current: a px frame dispatches, a legacy one does
       // not. If the stale observation had been recorded, both answers would be inverted.
       assertTrue(
-        session.tap(testSnapshot(coordinateSpace = CoordinateSpace.Pixels), point),
+        session.tap(
+          testSnapshot(TestSnapshotSpec(coordinateSpace = CoordinateSpace.Pixels)),
+          point,
+        ),
         "the newer declared space must still be the current one",
       )
       advanceUntilIdle()
       assertEquals(1, client.inputTapCalls.size)
 
       assertFalse(
-        session.tap(testSnapshot(coordinateSpace = null), point),
+        session.tap(testSnapshot(TestSnapshotSpec(coordinateSpace = null)), point),
         "the space the device already left must not be resurrected by a late frame",
       )
       advanceUntilIdle()
@@ -1005,7 +1129,7 @@ class DeviceControlSessionTest {
       // And an IN-ORDER observation still advances the tracker, so this is an ordering guard and
       // not a freeze: capture 9 goes back to legacy and legacy becomes dispatchable again.
       session.onObservationSpaceDeclared(null, captureSequence = 9L)
-      assertTrue(session.tap(testSnapshot(coordinateSpace = null), point))
+      assertTrue(session.tap(testSnapshot(TestSnapshotSpec(coordinateSpace = null)), point))
       advanceUntilIdle()
       assertEquals(2, client.inputTapCalls.size)
       scope.cancel()
@@ -1029,12 +1153,12 @@ class DeviceControlSessionTest {
     session.onObservationSpaceDeclared(null, captureSequence = null)
 
     assertTrue(
-      session.tap(testSnapshot(coordinateSpace = CoordinateSpace.Pixels), point),
+      session.tap(testSnapshot(TestSnapshotSpec(coordinateSpace = CoordinateSpace.Pixels)), point),
       "the sequenced coordinate space remains current",
     )
     advanceUntilIdle()
     assertFalse(
-      session.tap(testSnapshot(coordinateSpace = null), point),
+      session.tap(testSnapshot(TestSnapshotSpec(coordinateSpace = null)), point),
       "an unsequenced legacy declaration cannot resurrect the old space",
     )
     advanceUntilIdle()
@@ -1050,7 +1174,9 @@ class DeviceControlSessionTest {
 
     session.onObservationSpaceDeclared(null, captureSequence = 7L)
     assertNotNull(
-      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull,
+      session
+        .evaluate(paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L)))
+        .snapshotOrNull,
     )
     val clickedBeforeFlip = assertNotNull(session.interactionSnapshot)
 
@@ -1077,7 +1203,7 @@ class DeviceControlSessionTest {
     val session = session(scope, client)
 
     session.onObservationSpaceDeclared(null, captureSequence = null)
-    assertTrue(session.tap(testSnapshot(coordinateSpace = null), point))
+    assertTrue(session.tap(testSnapshot(TestSnapshotSpec(coordinateSpace = null)), point))
     advanceUntilIdle()
 
     // Legacy runners never provide a capture sequence, so their later declaration must still
@@ -1087,8 +1213,10 @@ class DeviceControlSessionTest {
       captureSequence = null,
       nativeScale = 1.0,
     )
-    assertTrue(session.tap(testSnapshot(coordinateSpace = CoordinateSpace.Pixels), point))
-    assertFalse(session.tap(testSnapshot(coordinateSpace = null), point))
+    assertTrue(
+      session.tap(testSnapshot(TestSnapshotSpec(coordinateSpace = CoordinateSpace.Pixels)), point),
+    )
+    assertFalse(session.tap(testSnapshot(TestSnapshotSpec(coordinateSpace = null)), point))
     advanceUntilIdle()
 
     assertEquals(2, client.inputTapCalls.size)
@@ -1107,7 +1235,9 @@ class DeviceControlSessionTest {
 
     session.onObservationSpaceDeclared(null, captureSequence = 7L)
     assertNotNull(
-      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull,
+      session
+        .evaluate(paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L)))
+        .snapshotOrNull,
     )
     val clickedBeforeFlip = assertNotNull(session.interactionSnapshot)
 
@@ -1136,7 +1266,7 @@ class DeviceControlSessionTest {
     assertTrue(client.inputSwipeCalls.isEmpty())
 
     // A frame in the CURRENT space still dispatches, so this is a units gate and not a freeze.
-    val current = testSnapshot(coordinateSpace = CoordinateSpace.Pixels)
+    val current = testSnapshot(TestSnapshotSpec(coordinateSpace = CoordinateSpace.Pixels))
     assertTrue(session.tap(current, point))
     advanceUntilIdle()
     assertEquals(1, client.inputTapCalls.size)
@@ -1151,7 +1281,8 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val session = session(scope, FakeAutoMobileClient())
 
-    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    val legacy =
+      paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null))
     assertNotNull(session.evaluate(legacy).snapshotOrNull)
     val retained = assertNotNull(session.interactionSnapshot)
     session.tap(retained, point)
@@ -1188,7 +1319,8 @@ class DeviceControlSessionTest {
     val short = DevicePoint(124, 100, inBounds = true) // 24 units
     val long = DevicePoint(172, 100, inBounds = true) // 72 units
 
-    val px = testSnapshot(coordinateSpace = CoordinateSpace.Pixels, nativeScale = 3.0)
+    val px =
+      testSnapshot(TestSnapshotSpec(coordinateSpace = CoordinateSpace.Pixels, nativeScale = 3.0))
     assertFalse(session.swipe(px, start, short), "24px is below the canonical-pixel threshold")
     advanceUntilIdle()
     assertTrue(client.inputSwipeCalls.isEmpty(), "and nothing reached the device")
@@ -1198,7 +1330,7 @@ class DeviceControlSessionTest {
     assertEquals(1, client.inputSwipeCalls.size)
 
     // The legacy path keeps its 24-unit behavior exactly.
-    val legacy = testSnapshot(coordinateSpace = null)
+    val legacy = testSnapshot(TestSnapshotSpec(coordinateSpace = null))
     assertTrue(session.swipe(legacy, start, short), "24 units is still a swipe in point space")
     advanceUntilIdle()
     assertEquals(2, client.inputSwipeCalls.size)
@@ -1214,7 +1346,13 @@ class DeviceControlSessionTest {
     val session = session(scope, client)
 
     val px =
-      paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = CoordinateSpace.Pixels)
+      paired(
+        PairedFrameSpec(
+          captureSequence = 7L,
+          sourceSequence = 10L,
+          coordinateSpace = CoordinateSpace.Pixels,
+        ),
+      )
     assertNotNull(session.evaluate(px).snapshotOrNull)
     val retained = assertNotNull(session.interactionSnapshot)
     assertEquals(CoordinateSpace.Pixels, retained.coordinateSpace)
@@ -1231,7 +1369,10 @@ class DeviceControlSessionTest {
     assertEquals(2, client.inputTapCalls.size)
     scope.cancel()
   }
+}
 
+@OptIn(ExperimentalCoroutinesApi::class)
+internal class DeviceControlSessionRetentionTest : DeviceControlSessionFixture() {
   @Test
   fun `a native-scale transition retires the retained pixel snapshot`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
@@ -1239,10 +1380,12 @@ class DeviceControlSessionTest {
     val session = session(scope, client)
     val pixelFrame =
       paired(
-        captureSequence = 7L,
-        sourceSequence = 10L,
-        coordinateSpace = CoordinateSpace.Pixels,
-        nativeScale = 3.0,
+        PairedFrameSpec(
+          captureSequence = 7L,
+          sourceSequence = 10L,
+          coordinateSpace = CoordinateSpace.Pixels,
+          nativeScale = 3.0,
+        ),
       )
 
     session.onObservationSpaceDeclared(
@@ -1279,19 +1422,23 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { client },
-        platform = { "android" },
-        nowMs = { now },
-        publishError = {},
-        uiContext = UnconfinedTestDispatcher(testScheduler),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          nowMs = { now },
+          publishError = {},
+          uiContext = UnconfinedTestDispatcher(testScheduler),
+          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        ),
       )
 
     // A frame received 4.9s ago: still inside the 5s screenshot bound, so control is available.
     val receivedAtMs = now - 4_900L
     val nearlyStale =
-      paired(captureSequence = 7L, sourceSequence = 10L, receivedAtMs = receivedAtMs)
+      paired(
+        PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L, receivedAtMs = receivedAtMs),
+      )
     assertNotNull(session.evaluate(nearlyStale).snapshotOrNull)
     val retained = assertNotNull(session.interactionSnapshot)
 
@@ -1318,7 +1465,7 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
 
-    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    val clicked = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     assertNotNull(session.evaluate(clicked).snapshotOrNull)
     val retained = assertNotNull(session.interactionSnapshot)
 
@@ -1348,7 +1495,7 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val session = session(scope, FakeAutoMobileClient())
 
-    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    val clicked = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     assertNotNull(session.evaluate(clicked).snapshotOrNull)
     val retained = assertNotNull(session.interactionSnapshot)
 
@@ -1379,13 +1526,13 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
-    val base = paired(captureSequence = 8L, sourceSequence = 11L)
+    val base = paired(PairedFrameSpec(captureSequence = 8L, sourceSequence = 11L))
     val conflictingRotations = base.copy(screenshot = base.screenshot?.copy(rotation = 1))
 
     session.evaluate(conflictingRotations)
 
     assertFalse(
-      session.tap(testSnapshot().copy(rotation = 0), point),
+      session.tap(testSnapshot(TestSnapshotSpec()).copy(rotation = 0), point),
       "the stale hierarchy cannot make the disagreement dispatchable",
     )
     advanceUntilIdle()
@@ -1398,13 +1545,13 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
-    val base = paired(captureSequence = 8L, sourceSequence = 11L)
+    val base = paired(PairedFrameSpec(captureSequence = 8L, sourceSequence = 11L))
     val conflictingRotations = base.copy(hierarchy = base.hierarchy?.copy(rotation = 1))
 
     session.evaluate(conflictingRotations)
 
     assertFalse(
-      session.tap(testSnapshot().copy(rotation = 1), point),
+      session.tap(testSnapshot(TestSnapshotSpec()).copy(rotation = 1), point),
       "the newer hierarchy cannot make the disagreement dispatchable",
     )
     advanceUntilIdle()
@@ -1417,7 +1564,7 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
-    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val initial = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     val clicked = assertNotNull(session.evaluate(initial).snapshotOrNull)
     val conflictingRotations =
       initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
@@ -1436,15 +1583,17 @@ class DeviceControlSessionTest {
     val clients = mutableListOf<FakeAutoMobileClient>()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { FakeAutoMobileClient().also { clients += it } },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { FakeAutoMobileClient().also { clients += it } },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
-    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val initial = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
 
     assertTrue(session.tap(snapshot, point))
@@ -1476,7 +1625,7 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
-    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val initial = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
     val disagreement =
       initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
@@ -1514,15 +1663,17 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { client },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(ioScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(ioScheduler),
+        ),
       )
-    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val initial = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
 
     assertTrue(session.tap(snapshot, point))
@@ -1549,7 +1700,7 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
-    val singleSourceBase = paired(captureSequence = 8L, sourceSequence = 11L)
+    val singleSourceBase = paired(PairedFrameSpec(captureSequence = 8L, sourceSequence = 11L))
     val singleSource =
       singleSourceBase.copy(
         screenshot = singleSourceBase.screenshot?.copy(rotation = 1),
@@ -1557,17 +1708,17 @@ class DeviceControlSessionTest {
       )
 
     session.evaluate(singleSource)
-    assertTrue(session.tap(testSnapshot().copy(rotation = 1), point))
+    assertTrue(session.tap(testSnapshot(TestSnapshotSpec()).copy(rotation = 1), point))
     advanceUntilIdle()
 
-    val unanimousBase = paired(captureSequence = 9L, sourceSequence = 12L)
+    val unanimousBase = paired(PairedFrameSpec(captureSequence = 9L, sourceSequence = 12L))
     val unanimous =
       unanimousBase.copy(
         screenshot = unanimousBase.screenshot?.copy(rotation = 2),
         hierarchy = unanimousBase.hierarchy?.copy(rotation = 2),
       )
     session.evaluate(unanimous)
-    assertTrue(session.tap(testSnapshot().copy(rotation = 2), point))
+    assertTrue(session.tap(testSnapshot(TestSnapshotSpec()).copy(rotation = 2), point))
     advanceUntilIdle()
 
     assertEquals(2, client.inputTapCalls.size)
@@ -1584,13 +1735,13 @@ class DeviceControlSessionTest {
     val session = session(scope, client)
 
     // Proven rotation 0 from a coherent observation pair.
-    session.evaluate(paired(captureSequence = 8L, sourceSequence = 11L))
-    assertTrue(session.tap(testSnapshot().copy(rotation = 0), point))
+    session.evaluate(paired(PairedFrameSpec(captureSequence = 8L, sourceSequence = 11L)))
+    assertTrue(session.tap(testSnapshot(TestSnapshotSpec()).copy(rotation = 0), point))
     advanceUntilIdle()
 
     // The device rotates to 1; only the live frame attests it (the observation sources report no
     // rotation yet).
-    val liveProvesRotation = paired(captureSequence = 9L, sourceSequence = 12L)
+    val liveProvesRotation = paired(PairedFrameSpec(captureSequence = 9L, sourceSequence = 12L))
     session.evaluate(
       liveProvesRotation.copy(
         screenshot = liveProvesRotation.screenshot?.copy(rotation = null),
@@ -1608,40 +1759,27 @@ class DeviceControlSessionTest {
     )
 
     // Orientation is re-proven to 1 from the live frame alone: a rotation-1 tap dispatches,
-    assertTrue(session.tap(testSnapshot().copy(rotation = 1), point))
+    assertTrue(session.tap(testSnapshot(TestSnapshotSpec()).copy(rotation = 1), point))
     advanceUntilIdle()
     // and the stale rotation-0 orientation is no longer dispatchable.
-    assertFalse(session.tap(testSnapshot().copy(rotation = 0), point))
+    assertFalse(session.tap(testSnapshot(TestSnapshotSpec()).copy(rotation = 0), point))
     scope.cancel()
   }
-
-  /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
-  private fun streamingSession(
-    scope: CoroutineScope,
-    client: FakeAutoMobileClient,
-    scheduler: TestCoroutineScheduler,
-    publishError: (String?) -> Unit = {},
-  ) =
-    DeviceControlSession(
-      scope = scope,
-      clientProvider = { client },
-      platform = { "android" },
-      nowMs = { 1_000L },
-      publishError = publishError,
-      uiContext = UnconfinedTestDispatcher(scheduler),
-      ioDispatcher = UnconfinedTestDispatcher(scheduler),
-      streamingEnabled = true,
-    )
 
   @Test
   fun `the streaming flag off means no gesture stream is begun`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     // The default session() helper leaves streamingEnabled off.
-    val handle = session(scope, FakeAutoMobileClient()).beginGestureStream(testSnapshot(), point)
+    val handle =
+      session(scope, FakeAutoMobileClient())
+        .beginGestureStream(testSnapshot(TestSnapshotSpec()), point)
     assertNull(handle, "with the flag off the caller falls back to the atomic swipe")
     scope.cancel()
   }
+}
 
+@OptIn(ExperimentalCoroutinesApi::class)
+internal class DeviceControlSessionGestureStreamTest : DeviceControlSessionFixture() {
   @Test
   fun `a streamed drag relays start, moves, and the release over one persistent stream`() =
     runTest {
@@ -1649,7 +1787,10 @@ class DeviceControlSessionTest {
       val client = FakeAutoMobileClient()
       val session = streamingSession(scope, client, testScheduler)
 
-      val handle = assertNotNull(session.beginGestureStream(testSnapshot(sequence = 5L), point))
+      val handle =
+        assertNotNull(
+          session.beginGestureStream(testSnapshot(TestSnapshotSpec(sequence = 5L)), point),
+        )
       handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
       handle.move(DevicePoint(x = 360, y = 1200, inBounds = true))
       handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -1679,7 +1820,10 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient().apply { gestureStreamSupported = false }
     val session = streamingSession(scope, client, testScheduler)
 
-    val handle = assertNotNull(session.beginGestureStream(testSnapshot(sequence = 5L), point))
+    val handle =
+      assertNotNull(
+        session.beginGestureStream(testSnapshot(TestSnapshotSpec(sequence = 5L)), point),
+      )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
     advanceUntilIdle()
@@ -1700,7 +1844,10 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient().apply { gestureStreamSupported = false }
     val session = streamingSession(scope, client, testScheduler)
 
-    val handle = assertNotNull(session.beginGestureStream(testSnapshot(sequence = 5L), point))
+    val handle =
+      assertNotNull(
+        session.beginGestureStream(testSnapshot(TestSnapshotSpec(sequence = 5L)), point),
+      )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true), cancel = true)
     advanceUntilIdle()
@@ -1709,52 +1856,4 @@ class DeviceControlSessionTest {
     assertTrue(client.inputSwipeCalls.isEmpty())
     scope.cancel()
   }
-
-  private fun paired(
-    captureSequence: Long,
-    sourceSequence: Long,
-    width: Int = 1080,
-    height: Int = 2340,
-    data: ByteArray? = null,
-    receivedAtMs: Long = 1_000L,
-    coordinateSpace: CoordinateSpace? = null,
-    nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 1.0 else null,
-    frameContext: String = "epoch:$captureSequence",
-  ) =
-    DeviceControlInputs(
-      enabled = true,
-      realDeviceMode = true,
-      selectedDeviceId = "emulator-5554",
-      transportSupportsInput = true,
-      observationStreamConnected = true,
-      screenshot =
-        ScreenshotFrameFacts(
-          deviceId = "emulator-5554",
-          sequence = sourceSequence,
-          captureSequence = captureSequence,
-          receivedAtMs = receivedAtMs,
-          width = width,
-          height = height,
-          data = data,
-          coordinateSpace = coordinateSpace,
-          nativeScale = nativeScale,
-          frameContext = frameContext,
-          rotation = 0,
-        ),
-      hierarchy =
-        HierarchyFrameFacts(
-          deviceId = "emulator-5554",
-          sequence = sourceSequence,
-          captureSequence = captureSequence,
-          receivedAtMs = receivedAtMs,
-          hierarchy = null,
-          rootWidth = width,
-          rootHeight = height,
-          coordinateSpace = coordinateSpace,
-          nativeScale = nativeScale,
-          frameContext = frameContext,
-          rotation = 0,
-        ),
-      liveFrame = null,
-    )
 }

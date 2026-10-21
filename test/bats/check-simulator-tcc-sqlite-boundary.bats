@@ -5,7 +5,7 @@
 # serial-tagged files in a dedicated serial pass (scripts/ci/run-bats.sh);
 # the tag is enforced by test/scripts/batsSerialTags.test.ts.
 
-SCRIPT="scripts/check-simulator-tcc-sqlite-boundary.sh"
+SCRIPT="scripts/check-simulator-tcc-sqlite-boundary.ts"
 FIXTURE="src/utils/ios-cmdline-tools/SimulatorTccSqliteBoundaryFixture.ts"
 
 teardown() {
@@ -13,7 +13,7 @@ teardown() {
 }
 
 @test "allows SimulatorTccSqliteClient to own production sqlite3 execution" {
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production sqlite3 invocations"* ]]
@@ -25,7 +25,7 @@ teardown() {
     'executor.executeCommand("sqlite3", ["-json"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SimulatorTccSqliteBoundaryFixture.ts"* ]]
@@ -37,7 +37,7 @@ teardown() {
     'execFile("sqlite3", ["-json"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SimulatorTccSqliteBoundaryFixture.ts"* ]]
@@ -52,7 +52,7 @@ teardown() {
     'Bun.spawn(["sqlite3", "-json"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SimulatorTccSqliteBoundaryFixture.ts"* ]]
@@ -66,7 +66,7 @@ teardown() {
     echo 'execFile("/bin/sh", ["-c", `sqlite3 ${db} "SELECT 1"`]);'
   } > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SimulatorTccSqliteBoundaryFixture.ts"* ]]

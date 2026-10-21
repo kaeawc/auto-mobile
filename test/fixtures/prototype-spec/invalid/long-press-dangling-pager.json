@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "gestures",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "picked": "",
+      "liked": false
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "onLongPress": [
+        {
+          "type": "setPage",
+          "pager": "missing",
+          "page": 0
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onLongPress[0].pager"
+}

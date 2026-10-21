@@ -12,7 +12,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): FakeDeviceManager {
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [...devices];
-  Object.assign(devicePool, { deviceManager });
+  devicePool.testHooks.deviceManager = deviceManager;
   return deviceManager;
 }
 
@@ -37,7 +37,14 @@ describe("Daemon identity fence at the session-release commit (#7031 round 2)", 
     // that await must stop the stale eviction from retiring the live session.
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const device = stamped(
@@ -51,7 +58,11 @@ describe("Daemon identity fence at the session-release commit (#7031 round 2)", 
       const deviceManager = stubPoolDiscovery(devicePool, [device]);
       await devicePool.initializeWithDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const pooled = devicePool.getDevice(device.deviceId);
       const session = sessionManager.getSession("owner-session");
       if (!pooled || !session) {

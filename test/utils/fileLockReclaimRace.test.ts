@@ -143,30 +143,37 @@ test("T3: exclusive restore copy leaves a third acquirer untouched and removes t
 });
 
 test.each(["openError", "writeError", "closeError"] as const)(
-  "T3: failed exclusive copy (%s) restores by last-resort rename without partial litter",
+  "T3: failed exclusive copy (%s) retains the displaced lock without partial litter",
   (operation) => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const f = unsupportedRestore();
       f.fs[operation] = "EIO";
       f.fs.writeFileError = "EIO";
-      expect(f.reclaimer.finish()).toBe(false);
-      expect(f.fs.readText(PATH)).toBe(f.raw);
-      expect(f.fs.paths()).toEqual([PATH]);
+      const rename = spyOn(f.fs, "rename");
+      try {
+        expect(f.reclaimer.finish()).toBe(false);
+        expect(rename).not.toHaveBeenCalledWith(expect.anything(), PATH);
+      } finally {
+        rename.mockRestore();
+      }
+      expect(f.fs.exists(PATH)).toBe(false);
+      expect(f.fs.readText(`${PATH}.displaced`)).toBe(f.raw);
+      expect(f.fs.paths()).toEqual([`${PATH}.displaced`]);
       expect(f.fs.operations.some((step) => step.op === "rename" && step.path === f.marker)).toBe(
         true,
       );
       expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("exclusive copy"),
-        expect.anything(),
+        `Displaced lock restore failed at ${PATH}; retained at ${PATH}.displaced; lock state is held-unknown`,
       );
+      expect(f.reclaimer.trace.some((step) => step.op === "exists")).toBe(false);
     } finally {
       warn.mockRestore();
     }
   },
 );
 
-test("T3: failed last-resort rename warns and retains the only displaced copy", () => {
+test("T3: failed retained rename warns and retains the only displaced copy", () => {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
     const f = unsupportedRestore();
@@ -181,7 +188,10 @@ test("T3: failed last-resort rename warns and retains the only displaced copy", 
       expect(f.reclaimer.finish()).toBe(false);
       expect(f.fs.paths()).toEqual([f.marker]);
       expect(f.fs.readText(f.marker)).toBe(f.raw);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("last-resort"), expect.anything());
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("retention failed"),
+        expect.anything(),
+      );
     } finally {
       rename.mockRestore();
     }

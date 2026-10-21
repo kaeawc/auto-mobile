@@ -1,4 +1,7 @@
+import type { AndroidCtrlProxyClient } from "../../observe/android";
+import type { TalkBackSwipeCtrlProxy } from "./TalkBackSwipeExecutor";
 import type { FencedGestureOptions } from "../ExecuteGesture";
+import type { ActionCall } from "../ActionCall";
 import type { Timer } from "../../../utils/SystemTimer";
 import {
   Element,
@@ -11,16 +14,39 @@ import {
 import { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
-import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import type { DisplayFenceDependencies } from "../BaseVisualChange";
 import type { RenderedObservationReader } from "../TargetDisplayAction";
+import type { AccessibilityHierarchyRequest } from "../../observe/hierarchyReadArgs";
 
 export type SwipeOnResolvedOptions = SwipeOnOptions & { direction: SwipeDirection };
 
 export type SwipeInterval = { start: number; end: number; length: number };
 
 export type BoomerangConfig = { apexPauseMs: number; returnSpeed: number };
+
+export type SwipeGestureRequest = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  direction: SwipeDirection;
+  containerElement: Element | null;
+  gestureOptions?: FencedGestureOptions;
+  perf?: PerformanceTracker;
+  boomerang?: BoomerangConfig;
+  signal?: AbortSignal;
+};
+
+export type BoomerangGestureRequest = Omit<
+  SwipeGestureRequest,
+  "direction" | "containerElement" | "boomerang"
+> & { boomerang: BoomerangConfig };
+
+export type AnnounceSwipeableRequest = Omit<SwipeGestureRequest, "direction" | "boomerang">;
+
+export type AndroidAccessibilitySwipeRequest = Omit<SwipeGestureRequest, "boomerang">;
 
 export type OverlayCandidate = {
   bounds: Element["bounds"];
@@ -30,18 +56,7 @@ export type OverlayCandidate = {
 };
 
 export interface VoiceOverSwipeRunner {
-  executeSwipeGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    direction: SwipeDirection,
-    containerElement: Element | null,
-    gestureOptions?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-    boomerang?: BoomerangConfig,
-    signal?: AbortSignal,
-  ): Promise<SwipeResult>;
+  executeSwipeGesture(request: SwipeGestureRequest): Promise<SwipeResult>;
 }
 
 export interface AutoTargetSelectorService {
@@ -62,18 +77,7 @@ export interface AutoTargetSelectorService {
 }
 
 export interface TalkBackSwipeRunner {
-  executeSwipeGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    direction: SwipeDirection,
-    containerElement: Element | null,
-    gestureOptions?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-    boomerang?: BoomerangConfig,
-    signal?: AbortSignal,
-  ): Promise<SwipeResult>;
+  executeSwipeGesture(request: SwipeGestureRequest): Promise<SwipeResult>;
 }
 
 export interface OverlayAnalyzer {
@@ -96,8 +100,7 @@ export interface GestureExecutor {
     x2: number,
     y2: number,
     options?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    call?: ActionCall,
   ): Promise<SwipeResult>;
 }
 
@@ -111,12 +114,22 @@ export interface ScrollAccessibilityService {
 
   getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
+    request?: AccessibilityHierarchyRequest,
   ): Promise<ViewHierarchyResult | null>;
 }
+
+/** The CtrlProxy surface SwipeOn itself and its swipe/scroll/drag collaborators call. */
+export type SwipeOnCtrlProxy = TalkBackSwipeCtrlProxy &
+  ScrollAccessibilityService &
+  Pick<
+    AndroidCtrlProxyClient,
+    | "requestSwipe"
+    | "requestDrag"
+    | "requestDeviceInfo"
+    | "supportsCommand"
+    | "getSdkScreenIdentityReceivedAtMs"
+    | "awaitSdkScreenIdentityAfter"
+  >;
 
 export interface SwipeOnDependencies extends DisplayFenceDependencies {
   timer?: Timer;
@@ -136,7 +149,7 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   parser?: import("../../../utils/interfaces/ElementParser").ElementParser;
   accessibilityDetector?: AccessibilityDetector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagService;
+  featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagReader;
   voiceOverExecutor?: VoiceOverSwipeRunner;
   autoTargetSelector?: AutoTargetSelectorService;
   visionConfig?: import("../../../vision/VisionTypes").VisionFallbackConfig;

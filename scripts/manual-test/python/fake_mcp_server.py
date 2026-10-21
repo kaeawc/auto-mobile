@@ -1,11 +1,17 @@
 """Bounded fake stdio server using the installed SDK's server API."""
 from __future__ import annotations
+import argparse
 import asyncio
+import json
 import os
 import signal
 import threading
 import time
 from typing import Any
+try:
+    from mcp.types import CallToolResult, TextContent
+except ImportError:
+    from mcp_types import CallToolResult, TextContent
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
@@ -97,6 +103,21 @@ def sendKeys(commands: list[dict[str, Any]], device: str = "") -> dict[str, Any]
 def observe(deviceId: str = "", device: str = "") -> dict[str, str]:
     return {"deviceId": deviceId, "device": device, "status": "fake editor focused"}
 
+# Mirrors DeviceOutsideBrokerGrantError.toPayload() in
+# src/daemon/sessionBroker/connectionRefusal.ts: a broker connection controls only
+# its granted devices. FAKE_GRANTED_DEVICES is a comma list; unset disables the check.
+GRANT_CODE = "device_outside_broker_grant"
+
+@server.tool()
+def tapOn(deviceId: str = "", text: str = "") -> CallToolResult:
+    granted = os.environ.get("FAKE_GRANTED_DEVICES")
+    if granted is not None and deviceId not in [d for d in granted.split(",") if d]:
+        payload = {"code": GRANT_CODE, "action": "tapOn", "reason": "device", "scopeKey": "fake",
+                   "deviceId": deviceId, "retryable": False}
+        # The SDK hides raised exception text; a returned error result keeps the code on the wire.
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))], isError=True)
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps({"deviceId": deviceId, "tapped": text}))])
+
 @server.resource("automobile:devices/booted")
 def booted() -> str:
     return "fake device booted"
@@ -106,6 +127,25 @@ def status() -> str:
     return "ready"
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--advertise-session", type=json.loads)
+    args = parser.parse_args()
+    if args.advertise_session is not None:
+        if not isinstance(args.advertise_session, dict):
+            parser.error("--advertise-session requires a JSON object")
+        # Preserve the installed SDK's normal capability calculation and add the
+        # same experimental key used by the broker proxy at initialize.
+        # MCPServer (SDK 2.x) renamed FastMCP's low-level server attribute.
+        lowlevel_server = getattr(server, "_lowlevel_server", None)
+        if lowlevel_server is None:
+            lowlevel_server = server._mcp_server
+        original_capabilities = lowlevel_server.get_capabilities
+        def capabilities(*positional: Any, **keyword: Any) -> Any:
+            result = original_capabilities(*positional, **keyword)
+            result.experimental = dict(result.experimental or {})
+            result.experimental["automobile/session"] = args.advertise_session
+            return result
+        lowlevel_server.get_capabilities = capabilities
     try:
         server.run()
     finally:

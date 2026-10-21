@@ -1,13 +1,14 @@
+import { BrokerDeviceLedger } from "../../scripts/manual-test/brokerDeviceLedger";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { createHash, createHmac } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   getAndroidSchema,
   getAppleSchema,
@@ -24,6 +25,8 @@ import {
   recordOwnershipManifest,
   runCoordinateOrientationCheck,
   runAcceptanceMatrix,
+  runBrokerAcceptance,
+  type BrokerAcceptanceArgs,
   runTapAtMultiDeviceRefusalCheck,
   runTapAtReliabilityLoop,
   normalizeMcpTransportDiagnostic,
@@ -35,6 +38,10 @@ import {
   type MatrixDependencies,
   type McpSessionClient,
 } from "../../scripts/live-device-acceptance";
+
+import { createFakeBrokerScenarioContext } from "../helpers/fakeBrokerScenarioContext";
+import { createFakeBrokerDaemon } from "../helpers/fakeBrokerDaemon";
+import { stableStringify } from "../../src/utils/stableStringify";
 
 interface ToolCall {
   owner: string;
@@ -78,6 +85,10 @@ const androidArgs: AcceptanceArgs = {
   timeoutMs: 10_000,
   confirmLive: false,
   testOwnedDevices: false,
+  operatorKey: Buffer.from("test-only-operator-key-material-32-bytes"),
+  operatorKeyPath: "test-only.key",
+  ownershipManifestPath: "test-only.manifest",
+  build: { entryScript: "/test/dist/src/index.js", buildId: "test-build" },
 };
 
 const iosArgs: AcceptanceArgs = {
@@ -244,6 +255,8 @@ function deviceDescriptionFixture({
 
 function createHarness(
   options: {
+    activeSessions?: number;
+    activeExecutions?: number;
     failObserveFor?: string;
     failReleaseFor?: string;
     failClientCloseFor?: string[];
@@ -779,13 +792,13 @@ function createHarness(
           androidSiblingPresent = !(options.removeAndroidSiblingAfterDuplicateCleanup ?? false);
         } else if (device.deviceId === androidTargetSerial && !options.unchangedAndroidIdentity) {
           if (restartedSessionUuid) {
-            persistedStates.set(restartedSessionUuid, "absent");
+            persistedStates.set(restartedSessionUuid, "target-absent");
             androidTargetPresent = false;
           } else {
             androidTargetSerial = "emulator-5560";
           }
         } else if (device.deviceId === IOS_UDID && restartedSessionUuid) {
-          persistedStates.set(restartedSessionUuid, "absent");
+          persistedStates.set(restartedSessionUuid, "target-absent");
           iosTargetPresent = false;
         }
         return { structuredContent: { killed: true } };
@@ -1026,22 +1039,12 @@ describe("live device acceptance harness", () => {
     expect(commands).toHaveLength(0);
   });
 
-  test("rejects the unsupported recovery scenario before any device mutation", async () => {
+  // `AcceptanceArgs.scenario` is the literal "full", so runAcceptanceMatrix can only see another
+  // value if parseArgs let it through; this is the boundary that has to refuse it.
+  test("parseArgs rejects the unsupported recovery scenario before any device work", () => {
     expect(() => parseArgs(["--platform", "android", "--scenario", "recovery"])).toThrow(
       "--scenario must be full; recovery is not implemented",
     );
-
-    const harness = createHarness();
-    const unsupportedArgs = {
-      ...androidArgs,
-      scenario: "recovery",
-    } as unknown as AcceptanceArgs;
-    await expect(runAcceptanceMatrix(unsupportedArgs, harness.dependencies)).rejects.toThrow(
-      "--scenario must be full; recovery is not implemented",
-    );
-    expect(harness.calls).toHaveLength(0);
-    expect(harness.cliCommands).toHaveLength(0);
-    expect(harness.evidence).toHaveLength(0);
   });
 
   test.each([
@@ -1737,6 +1740,19 @@ describe("live device acceptance harness", () => {
     ]);
   });
 
+  test.each([
+    ["no prefix (SDK v2 client, server message unprefixed)", "Error: "],
+    ["one prefix (SDK v2 client)", "Error: MCP error -32603: "],
+    ["two prefixes (SDK v1 client and server)", "Error: MCP error -32603: MCP error -32603: "],
+    ["two prefixes without the Error rendering", "MCP error -32603: MCP error -32603: "],
+  ])("strips the transport rendering with %s", (_form, rendering) => {
+    const diagnostic = ownerDiagnostic("emulator-5556");
+
+    expect(normalizeMcpTransportDiagnostic(`${rendering}${diagnostic}`)).toBe(
+      rendering === "Error: " ? `${rendering}${diagnostic}` : diagnostic,
+    );
+  });
+
   test.each(["unknown", "-32603.0"])("leaves non-standard MCP code %s unchanged", (code) => {
     const diagnostic = `Error: MCP error ${code}: ${ownerDiagnostic("emulator-5556")}`;
 
@@ -2178,7 +2194,7 @@ describe("live device acceptance harness", () => {
       writeFile: async (_path, _content, signal) => {
         started.resolve();
         await new Promise<void>((resolve) => {
-          signal.addEventListener("abort", resolve, { once: true });
+          signal.addEventListener("abort", () => resolve(), { once: true });
         });
         lateSuccess = !signal.aborted;
       },
@@ -3376,5 +3392,370 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
         platform === "android" ? "Android screenshot raster" : "iOS Simulator framebuffer",
       );
     }
+  });
+});
+
+describe("private broker acceptance lane", () => {
+  const brokerBatchDir = resolve("/private-batch");
+  function brokerArgs(extra: string[] = []): BrokerAcceptanceArgs {
+    const args = parseArgs(["--scenario", "broker", "--broker-batch", brokerBatchDir, ...extra]);
+    if (args.scenario !== "broker") {
+      throw new Error("Expected broker arguments");
+    }
+    return args;
+  }
+  beforeAll(async () => {
+    const host = await createFakeBrokerDaemon();
+    await host.close();
+    // Load the lane's lazily imported modules and warm the fake broker outside the timed tests.
+    const warm = await laneFixture();
+    try {
+      await runBrokerAcceptance(
+        brokerArgs(["--confirm-live", "--test-owned-devices"]),
+        warm.dependencies,
+      );
+    } finally {
+      await warm.close();
+    }
+  });
+  async function laneFixture() {
+    const files = new Map<string, string>();
+    const fs = {
+      mkdir: () => {},
+      writeFile: (path: string, text: string) => {
+        files.set(path, text);
+      },
+    };
+    const harness = await createFakeBrokerScenarioContext(
+      {
+        name: "acceptance",
+        class: "fake",
+        capacity: 2,
+        deviceOnlyAssertions: [],
+        run: async () => {},
+      },
+      brokerBatchDir,
+      fs,
+    );
+    const context = harness.context;
+    let stops = 0,
+      starts = 0,
+      crashes = 0,
+      permits = 0;
+    // A killed disposable owner ends its own grant with the broker's typed owner-exit receipt.
+    const killed = new Set<string>();
+    const hostClient = context.daemonClient;
+    context.daemonClient = {
+      ...hostClient,
+      status: async (requestId, token) => {
+        const receipt = await hostClient.status(requestId, token);
+        return receipt && killed.has(requestId)
+          ? {
+              ...receipt,
+              outcome: "failed",
+              failure: { code: "session_owner_exited", message: "owner exited", retryable: false },
+            }
+          : receipt;
+      },
+    };
+    context.preflight = async () => true;
+    context.probe = async () => true;
+    context.privateDaemon = {
+      stop: async () => {
+        stops++;
+      },
+      start: async () => {
+        starts++;
+      },
+      crash: async () => {
+        crashes++;
+        throw new Error("simulated recorded-pid crash boundary");
+      },
+    };
+    context.deviceOps = {
+      totalDeviceCap: 2,
+      bootGate: async (_name, _cap, action) => {
+        permits++;
+        return action();
+      },
+      acquire: async (c, options) => {
+        if (!options.resume) {
+          c.config = { ...c.config, requestId: context.ids.next() };
+        }
+        return harness.host.prepare(c.config, c.token);
+      },
+      observe: async (c) => {
+        const status = await context.daemonClient.status(c.config.requestId, c.token);
+        if (status?.outcome !== "ready") {
+          throw new Error("broker_session_ended");
+        }
+        await harness.host.controls.tool("observe", status.sessionUuid!);
+      },
+      close: async () => {},
+      foreignControl: async (c, foreign) => {
+        const [own, other] = await Promise.all(
+          [c, foreign].map((x) => context.daemonClient.status(x.config.requestId, x.token)),
+        );
+        // Scripted refusal: the real connection gate is only exercised on a device.
+        return {
+          code:
+            own?.outcome === "ready" && other?.outcome === "ready"
+              ? "device_outside_bound_session"
+              : null,
+        };
+      },
+      ownerKill: async (c) => {
+        const receipt = await hostClient.status(c.config.requestId, c.token);
+        await hostClient.release(receipt!.sessionUuid!, c.token);
+        killed.add(c.config.requestId);
+      },
+      proxyClosed: async (c) => killed.has(c.config.requestId),
+      tools: async (c) =>
+        harness.host.controls.tools(
+          (await context.daemonClient.status(c.config.requestId, c.token))!,
+        ),
+      devicesView: harness.host.controls.inventory,
+      resources: async () => ({ unavailable: "No read-only broker resource-state RPC" }),
+    };
+    const key = Buffer.alloc(32, 7);
+    const dependencies = {
+      env: { AUTOMOBILE_ACCEPTANCE_LIVE: "1" },
+      createContext: async () => ({ context, close: async () => {} }),
+      evidence: { key, binding: { buildId: "fake", batch: "private" }, write: fs.writeFile },
+    };
+    return {
+      files,
+      key,
+      dependencies,
+      context,
+      counters: () => ({ stops, starts, crashes, permits }),
+      close: harness.close,
+    };
+  }
+  const firstHalf = [
+    "parallel-acquire",
+    "release-destroy-verification",
+    "multi-client-crash-isolation",
+  ];
+  const secondHalf = [
+    "cross-client-isolation-live",
+    "capacity-refusal-and-replay",
+    "daemon-restart-with-live-sessions",
+  ];
+  // The full six-scenario run costs ~2x the 100ms unit budget on a CI runner, so the lane contract is
+  // verified in two halves that each run the real scenarios, signing, and ledger checks.
+  async function runHalf(only: string[]) {
+    const f = await laneFixture();
+    try {
+      const args = brokerArgs(["--confirm-live", "--test-owned-devices", "--only", only.join(",")]);
+      await runBrokerAcceptance(args, f.dependencies);
+      const bytes = f.files.get(args.evidencePath)!;
+      const evidence = JSON.parse(bytes);
+      expect(evidence).toMatchObject({
+        schemaVersion: 11,
+        scenario: "broker",
+        outcome: { passed: true },
+      });
+      expect(evidence.steps.map((s: { name: string }) => s.name)).toEqual(only);
+      expect(bytes).not.toContain("private-token-");
+      const { mac, ...authentication } = evidence.authentication;
+      expect(mac).toBe(
+        createHmac("sha256", f.key)
+          .update(stableStringify({ ...evidence, authentication }))
+          .digest("hex"),
+      );
+      expect(
+        evidence.scenarios.some((s: { assertions: unknown[] }) => s.assertions.length > 0),
+      ).toBe(true);
+      expect(
+        f.context.ledger
+          .devices()
+          .every(
+            (d) =>
+              f.context.ledger.hasEvent(d, "released") && f.context.ledger.hasEvent(d, "absent"),
+          ),
+      ).toBe(true);
+      return f.counters();
+    } finally {
+      await f.close();
+    }
+  }
+  test("runs the first three live scenario contracts and signs one redacted broker evidence file", async () => {
+    const counters = await runHalf(firstHalf);
+    expect(counters).toMatchObject({ stops: 0, starts: 0, crashes: 0 });
+    expect(counters.permits).toBeGreaterThan(0);
+  });
+  test("runs the last three live scenario contracts including the daemon restart and signs the evidence", async () => {
+    const counters = await runHalf(secondHalf);
+    expect(counters).toMatchObject({ stops: 1, starts: 1, crashes: 0 });
+    expect(counters.permits).toBeGreaterThan(0);
+  });
+  test("signed ownership includes ledger rows appended by another writer during cleanup", async () => {
+    const f = await laneFixture();
+    const fs = {
+      exists: (path: string) => f.files.has(path),
+      readFile: (path: string) => f.files.get(path)!,
+      mkdir: () => {},
+      appendFile: (path: string, text: string) => {
+        f.files.set(path, (f.files.get(path) ?? "") + text);
+      },
+    };
+    const options = {
+      batchDir: brokerBatchDir,
+      fs,
+      timer: f.context.timer,
+      tokenFor: (name: string) => f.context.clients.find((c) => c.name === name)!.token,
+    };
+    f.context.ledger = new BrokerDeviceLedger(options);
+    const writer = new BrokerDeviceLedger(options);
+    const args = brokerArgs([
+      "--confirm-live",
+      "--test-owned-devices",
+      "--only",
+      "parallel-acquire",
+    ]);
+    try {
+      await runBrokerAcceptance(args, {
+        ...f.dependencies,
+        createContext: async () => ({
+          context: f.context,
+          close: async () => {
+            const grant = writer.acquired("cleanup-client", {
+              session: {
+                outcome: "ready",
+                requestId: "cleanup-request",
+                sessionUuid: "cleanup-session",
+              },
+            });
+            writer.record("released", grant);
+          },
+        }),
+      });
+      const evidence = JSON.parse(f.files.get(args.evidencePath)!);
+      const cleanup = evidence.ownership.ledger.at(-1);
+      expect(cleanup.client).toBe(
+        `hmac-sha256:${createHmac("sha256", f.key).update("cleanup-client").digest("hex").slice(0, 20)}`,
+      );
+      expect(cleanup).toHaveProperty("absence");
+      const { mac, ...authentication } = evidence.authentication;
+      expect(mac).toBe(
+        createHmac("sha256", f.key)
+          .update(stableStringify({ ...evidence, authentication }))
+          .digest("hex"),
+      );
+    } finally {
+      await f.close();
+    }
+  });
+  test("crash opt-in adds a separate restart variant and a failed boundary cannot yield passing evidence", async () => {
+    const f = await laneFixture();
+    try {
+      await expect(
+        runBrokerAcceptance(
+          brokerArgs([
+            "--confirm-live",
+            "--test-owned-devices",
+            "--only",
+            "daemon-restart-with-live-sessions",
+            "--allow-crash",
+          ]),
+          f.dependencies,
+        ),
+      ).rejects.toThrow("Broker acceptance failed");
+      expect(f.counters()).toMatchObject({ stops: 1, starts: 1, crashes: 1 });
+      const evidence = JSON.parse(
+        [...f.files.entries()].find(([path]) => path.includes("acceptance-broker-"))![1],
+      );
+      expect(evidence.outcome.passed).toBe(false);
+      expect(evidence.steps.at(-1)).toMatchObject({
+        name: "daemon-restart-with-live-sessions-crash",
+        passed: false,
+      });
+    } finally {
+      await f.close();
+    }
+  });
+  test("parses platform-agnostic broker options without requiring full targets or keys", () => {
+    const args = brokerArgs([
+      "--clients",
+      "a,b",
+      "--max-devices",
+      "4",
+      "--allow-crash",
+      "--only",
+      "parallel-acquire",
+      "--confirm-live",
+      "--test-owned-devices",
+    ]);
+    expect(args).toMatchObject({
+      scenario: "broker",
+      clients: ["a", "b"],
+      maxDevices: 4,
+      allowCrash: true,
+      only: ["parallel-acquire"],
+      confirmLive: true,
+      testOwnedDevices: true,
+    });
+    expect(brokerArgs().maxDevices).toBe(2);
+  });
+  test.each(["0", "5", "2.5", "2oops", "NaN"])("refuses invalid max-devices %s", (cap) => {
+    expect(() => brokerArgs(["--max-devices", cap])).toThrow("hard cap 4");
+  });
+  test("rejects missing batch, unknown scenarios, malformed client selection and duplicate flags", () => {
+    expect(() => parseArgs(["--scenario", "broker"])).toThrow("broker-batch");
+    for (const flags of [
+      ["--only", "full"],
+      ["--clients", "a,a"],
+      ["--clients", "../a"],
+      ["--allow-crash", "--allow-crash"],
+      ["--max-devices"],
+    ]) {
+      expect(() => brokerArgs(flags)).toThrow();
+    }
+  });
+  test("requires every live confirmation before creating a context or touching evidence", async () => {
+    for (const flags of [[], ["--confirm-live"], ["--test-owned-devices"]]) {
+      await expect(
+        runBrokerAcceptance(brokerArgs(flags), {
+          env: { AUTOMOBILE_ACCEPTANCE_LIVE: "1" },
+          createContext: async () => {
+            throw new Error("must not touch host");
+          },
+        }),
+      ).rejects.toThrow("live mutation requires");
+    }
+    await expect(
+      runBrokerAcceptance(brokerArgs(["--confirm-live", "--test-owned-devices"]), { env: {} }),
+    ).rejects.toThrow("AUTOMOBILE_ACCEPTANCE_LIVE");
+  });
+  test("dry-run prints graceful and opted-in crash plans without host I/O", async () => {
+    const logs: string[] = [];
+    const result = await runBrokerAcceptance(brokerArgs(["--dry-run", "--allow-crash"]), {
+      log: (text) => {
+        logs.push(text);
+      },
+      env: {},
+      createContext: async () => {
+        throw new Error("must not construct context");
+      },
+      evidence: {
+        key: Buffer.alloc(32),
+        binding: {},
+        write: () => {
+          throw new Error("must not write");
+        },
+      },
+    });
+    expect("dryRun" in result && result.dryRun).toBe(true);
+    expect(JSON.parse(logs[0]).plan.filter((p: { crash: boolean }) => p.crash)).toEqual([
+      { name: "daemon-restart-with-live-sessions", crash: true },
+    ]);
+    logs.length = 0;
+    await runBrokerAcceptance(brokerArgs(["--dry-run"]), {
+      log: (text) => {
+        logs.push(text);
+      },
+    });
+    expect(JSON.parse(logs[0]).plan.every((p: { crash: boolean }) => !p.crash)).toBe(true);
   });
 });

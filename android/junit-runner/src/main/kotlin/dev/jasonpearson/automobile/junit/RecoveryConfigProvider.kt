@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.junit
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -38,6 +39,12 @@ internal constructor(
     cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
     clock: () -> Long = System::currentTimeMillis,
   ) : this(cacheTtlMs, clock, RecoveryConfigResourceReader(DaemonSocketClientManager::readResource))
+
+  internal constructor(
+    daemon: DaemonToolClient,
+    cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
+    clock: () -> Long = System::currentTimeMillis,
+  ) : this(cacheTtlMs, clock, RecoveryConfigResourceReader(daemon::readResource))
 
   private data class CachedEntry(val config: CachedConfig, val fetchedAt: Long)
 
@@ -95,11 +102,7 @@ internal constructor(
       body["enabled"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: DEFAULT_ENABLED
     val configObj = body["config"]?.jsonObject
     val maxToolCalls =
-      try {
-        configObj?.get("maxToolCalls")?.jsonPrimitive?.intOrNull ?: DEFAULT_MAX_TOOL_CALLS
-      } catch (_: Exception) {
-        DEFAULT_MAX_TOOL_CALLS
-      }
+      (configObj?.get("maxToolCalls") as? JsonPrimitive)?.intOrNull ?: DEFAULT_MAX_TOOL_CALLS
     return CachedConfig(enabled, maxToolCalls)
   }
 

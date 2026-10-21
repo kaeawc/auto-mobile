@@ -4,7 +4,7 @@ import { raceWithDeadline } from "./utils/raceWithDeadline";
 
 /**
  * What started a shutdown. `stdin` means the client input closed; `stdout` means a transport
- * write failed (#11710). `execution-owner-lost` is a managed slot proxy whose execution owner
+ * write failed (#11710). `execution-owner-lost` is a broker binding proxy whose execution owner
  * exited or which was re-parented (#11176).
  */
 export type ShutdownSignal =
@@ -81,7 +81,7 @@ type ProcessShutdownTimeoutHandler = () =>
   | undefined;
 
 export type FatalProcessEvent =
-  | { type: "uncaughtException"; error: Error }
+  | { type: "uncaughtException"; error: unknown }
   | { type: "unhandledRejection"; reason: unknown; promise: Promise<unknown> };
 
 export type FatalProcessHandler = (event: FatalProcessEvent) => Promise<void> | void;

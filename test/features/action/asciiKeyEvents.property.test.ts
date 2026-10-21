@@ -3,7 +3,7 @@ import fc from "fast-check";
 import {
   buildAsciiKeyEventPlan,
   type KeyEventPlan,
-} from "../../../src/features/action/asciiKeyEvents";
+} from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import { buildAndroidInputTextCommand } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import { decodeInputTextCommand } from "./SendKeysTestHarness";
 

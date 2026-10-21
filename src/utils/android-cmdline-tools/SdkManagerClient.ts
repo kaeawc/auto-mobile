@@ -3,11 +3,10 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
-import { runAndroidCommand } from "./runAndroidCommand";
+import { runAndroidCommand, type AndroidCommandChild } from "./runAndroidCommand";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   DefaultHostCommandExecutor,
-  type HostChildProcess as ChildProcess,
   type HostProcessExecutor,
   type HostSpawnOptions as SpawnOptions,
 } from "../HostCommandExecutor";
@@ -21,6 +20,7 @@ import {
   validateRequiredTools,
   type AndroidToolsLocation,
 } from "./detection";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 const SDK_ROOT_MARKERS = ["system-images", "platforms", "platform-tools", "build-tools"];
 const DEFAULT_MAX_OUTPUT_CHARS = 16_384;
@@ -49,8 +49,8 @@ export interface SdkManagerCommandResult {
 }
 
 export interface SdkManagerClientDependencies {
-  spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-  existsSync: typeof existsSync;
+  spawn: (command: string, args: string[], options: SpawnOptions) => AndroidCommandChild;
+  existsSync: (path: string) => boolean;
   logger: Pick<typeof logger, "info" | "warn" | "error">;
   detectAndroidCommandLineTools: typeof detectAndroidCommandLineTools;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
@@ -359,7 +359,7 @@ export class SdkManagerClient {
     }
     const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
     return {
-      command: environment.ComSpec ?? environment.COMSPEC ?? "cmd.exe",
+      command: readEnvRaw(AMBIENT_ENV.COMSPEC, environment) ?? "cmd.exe",
       args: ["/d", "/v:off", "/s", "/c", command],
     };
   }

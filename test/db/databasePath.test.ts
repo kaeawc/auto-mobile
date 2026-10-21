@@ -178,6 +178,12 @@ describe("database path resolution", () => {
       expect(resolved).toBe(path.join(defaultDir, "auto-mobile.db"));
     });
 
+    test("AUTOMOBILE_DATA_DIR does not move the default database", () => {
+      expect(resolveDatabasePathFromEnvironment({ AUTOMOBILE_DATA_DIR: "/x" }, defaultDir)).toBe(
+        path.join(defaultDir, "auto-mobile.db"),
+      );
+    });
+
     test("the canonical AUTOMOBILE_DB_PATH wins over the legacy AUTO_MOBILE_DB_PATH alias", () => {
       const legacyPath = path.resolve("/legacy/old.db");
       const resolved = resolveDatabasePathFromEnvironment(

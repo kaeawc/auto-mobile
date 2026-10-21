@@ -1,6 +1,11 @@
 import type { BootedDevice, DisplayRef, ObserveResult } from "../../models";
-import { POSTURE_PANEL_ROLES } from "../../models/DisplayPanel";
-import { DaemonState } from "../../daemon/daemonState";
+import { actionClockSkewCache } from "../action/ActionClockSkewCache";
+import {
+  POSTURE_PANEL_ROLES,
+  panelKeyForFingerprint,
+  type PanelFingerprint,
+} from "../../models/DisplayPanel";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
@@ -43,6 +48,7 @@ export interface PushedDisplayTransition {
   change: "added" | "changed" | "removed" | "device_state";
   displayId: number;
   panelUniqueId?: string;
+  panelFingerprint?: PanelFingerprint;
   width?: number;
   height?: number;
   deviceState?: number;
@@ -89,19 +95,29 @@ function samePanelAndGeometry(
   );
 }
 
-function pushedPanelKey(event: PushedDisplayTransition): string | undefined {
-  return event.panelUniqueId?.includes(":")
+function pushedPanelKey(
+  event: PushedDisplayTransition,
+  deviceId: string,
+  resolveFingerprint: (deviceId: string, fingerprint: PanelFingerprint) => string | undefined,
+): string | undefined {
+  const uniqueKey = event.panelUniqueId?.includes(":")
     ? event.panelUniqueId.split(":").slice(1).join(":")
     : event.panelUniqueId;
+  return (
+    uniqueKey ??
+    (event.change !== "device_state" && event.panelFingerprint
+      ? resolveFingerprint(deviceId, event.panelFingerprint)
+      : undefined)
+  );
 }
 
 function samePushedPanel(
   event: PushedDisplayTransition,
   previous: Pick<PanelGeometry, "key" | "width" | "height">,
+  key: string | undefined,
 ): boolean {
-  const key = pushedPanelKey(event);
   return (
-    (!key || key === previous.key) &&
+    (!key || previous.key === "0" || key === previous.key) &&
     (event.width === undefined ||
       event.height === undefined ||
       (event.width === previous.width && event.height === previous.height) ||
@@ -154,6 +170,10 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
      * tool call re-reads it. Injected so this tracker never imports the provider.
      */
     private readonly invalidateInventory: (deviceId: string) => void = () => {},
+    private readonly resolveFingerprint: (
+      deviceId: string,
+      fingerprint: PanelFingerprint,
+    ) => string | undefined = () => undefined,
   ) {}
 
   revision(deviceId: string): number {
@@ -423,6 +443,8 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
 
   /** A push fences actions before the next observe, which then reconciles the new stamp. */
   notifyAndroidTransition(deviceId: string, event: PushedDisplayTransition): void {
+    // Resolve before any transition drops the inventory that identifies this panel.
+    const key = pushedPanelKey(event, deviceId, this.resolveFingerprint);
     if (inventoryChangedByPush(event)) {
       this.dropInventory(deviceId);
     }
@@ -441,22 +463,21 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
       }
       this.deviceStates.set(deviceId, event.deviceState);
     } else if (event.change === "changed" && previous) {
-      if (samePushedPanel(event, previous)) {
+      if (samePushedPanel(event, previous, key)) {
         this.markPendingCallbackSeen(deviceId, "displayCallbackSeen");
         return;
       }
     }
-    if (this.reconcilePendingPush(deviceId, event)) {
+    if (this.reconcilePendingPush(deviceId, event, key)) {
       return;
     }
     this.notifyTransition(deviceId, `CtrlProxy ${event.change}`);
-    const key = pushedPanelKey(event);
     this.emitPanel(deviceId, key ? { key, role: "unknown" } : undefined);
     this.pendingPushes.set(deviceId, {
       revision: this.revision(deviceId),
       displayCallbackSeen: event.change !== "device_state",
       stateCallbackSeen: event.change === "device_state",
-      panel: this.panelFromPush(deviceId, event),
+      panel: this.panelFromPush(deviceId, event, key),
     });
   }
 
@@ -482,8 +503,8 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   private panelFromPush(
     deviceId: string,
     event: PushedDisplayTransition,
+    key: string | undefined,
   ): Pick<PanelGeometry, "key" | "width" | "height"> | undefined {
-    const key = pushedPanelKey(event);
     if (!key) {
       return undefined;
     }
@@ -495,7 +516,11 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
     };
   }
 
-  private reconcilePendingPush(deviceId: string, event: PushedDisplayTransition): boolean {
+  private reconcilePendingPush(
+    deviceId: string,
+    event: PushedDisplayTransition,
+    key: string | undefined,
+  ): boolean {
     const pending = this.pendingPushes.get(deviceId);
     if (pending?.revision !== this.revision(deviceId)) {
       return false;
@@ -505,7 +530,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
       // determines whether this is the complementary display callback.
       const corroboratesState = !pending.displayCallbackSeen;
       pending.displayCallbackSeen = true;
-      pending.panel = this.panelFromPush(deviceId, event);
+      pending.panel = this.panelFromPush(deviceId, event, key);
       return corroboratesState;
     }
     if (event.change !== "device_state") {
@@ -519,6 +544,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   }
 
   reset(deviceId: string): void {
+    actionClockSkewCache.invalidate(deviceId);
     this.panels.delete(deviceId);
     this.observationIds.delete(deviceId);
     this.panelRevisions.delete(deviceId);
@@ -557,9 +583,8 @@ export function createDisplayCacheInvalidator(
     if (ios) {
       ios.clearDisplayProvenance();
     }
-    const daemon = DaemonState.getInstance();
-    if (daemon.isInitialized()) {
-      const sessions = daemon.getSessionManager();
+    const sessions = defaultDaemonContext.sessionManager();
+    if (sessions) {
       const sessionId = sessions.getSessionForDevice(deviceId);
       if (sessionId) {
         sessions.clearSessionCache(sessionId, "lastHierarchy");
@@ -575,4 +600,6 @@ export const invalidateDisplayCaches = createDisplayCacheInvalidator();
 export const displayTransitions: DisplayTransitionTracker = new DisplayTransitionTracker(
   invalidateDisplayCaches,
   (deviceId) => defaultDisplayInventoryProvider.invalidate(deviceId),
+  (deviceId, fingerprint) =>
+    panelKeyForFingerprint(defaultDisplayInventoryProvider.cachedPanels(deviceId), fingerprint),
 );

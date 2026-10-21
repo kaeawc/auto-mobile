@@ -5,7 +5,11 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
+import { parseDaemonResponseLine } from "./helpers/parseDaemonResponseLine";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -14,7 +18,13 @@ const isWindows = platform() === "win32";
 function createFakeDaemonState(refreshDevices: () => Promise<number> = async () => 0) {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -26,19 +36,14 @@ function createFakeDaemonState(refreshDevices: () => Promise<number> = async () 
 describe("UnixSocketServer close", () => {
   let socketPath: string;
   let socketDir: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let timer: FakeTimer;
 
   beforeEach(async () => {
     socketDir = await mkdtemp(join(tmpdir(), "socket-close-"));
     socketPath = join(socketDir, "daemon.sock");
     timer = new FakeTimer();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      timer,
-    );
+    server = createHarnessServer(socketPath, createFakeDaemonState(), timer);
     await server.start();
   });
 
@@ -78,7 +83,7 @@ describe("UnixSocketServer close", () => {
   (isWindows ? test.skip : test)(
     "does not remove a successor socket bound during close",
     async () => {
-      const listener = (server as unknown as { server: NetServer | null }).server;
+      const listener = server.netListener;
       expect(listener).not.toBeNull();
 
       const replacementServer = createServer();
@@ -121,7 +126,7 @@ describe("UnixSocketServer close", () => {
   (isWindows ? test.skip : test)(
     "delivers a real response when an in-flight request settles during the drain",
     async () => {
-      let releaseRefresh: () => void;
+      let releaseRefresh: () => void = () => {};
       const refreshComplete = new Promise<number>((resolve) => {
         releaseRefresh = () => {
           resolve(0);
@@ -134,9 +139,8 @@ describe("UnixSocketServer close", () => {
 
       await server.close();
       timer = new FakeTimer();
-      server = new UnixSocketServer(
+      server = createHarnessServer(
         socketPath,
-        "http://localhost:0/mcp",
         createFakeDaemonState(async () => {
           signalRefreshStarted();
           return refreshComplete;
@@ -187,7 +191,7 @@ describe("UnixSocketServer close", () => {
     "gives a stalled request and its queued successor one shutdown frame each",
     async () => {
       let refreshStarts = 0;
-      let releaseRefresh: () => void;
+      let releaseRefresh: () => void = () => {};
       const refreshComplete = new Promise<number>((resolve) => {
         releaseRefresh = () => {
           resolve(0);
@@ -200,9 +204,8 @@ describe("UnixSocketServer close", () => {
 
       await server.close();
       timer = new FakeTimer();
-      server = new UnixSocketServer(
+      server = createHarnessServer(
         socketPath,
-        "http://localhost:0/mcp",
         createFakeDaemonState(async () => {
           refreshStarts += 1;
           signalRefreshStarted();
@@ -271,7 +274,7 @@ function collectResponses(client: Socket): () => DaemonResponse[] {
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (line) {
-        frames.push(JSON.parse(line) as DaemonResponse);
+        frames.push(parseDaemonResponseLine(line));
       }
     }
   });

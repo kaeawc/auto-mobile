@@ -65,16 +65,28 @@ extension PrototypeNode {
 
     /// The `children` a container lays out, each with its position among all of them (a stable
     /// identity across show and hide); those that do not draw in place are left out.
-    func drawnChildren(holds: (Condition) -> Bool) -> [(offset: Int, node: PrototypeNode)] {
-        Array((children ?? []).enumerated()).filter { $0.element.drawsInPlace(holds: holds) }
+    func drawnChildren(
+        holds: (Condition) -> Bool, stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> [(offset: Int, node: PrototypeNode)]
+    {
+        let nodes = type == "stack" ? currentChildEntries(path: "root", pages: [:], stacks: stacks)
+            .map(\.node) : children ?? []
+        return Array(nodes.enumerated()).filter { $0.element.drawsInPlace(holds: holds) }
             .map { (offset: $0.offset, node: $0.element) }
     }
 
     /// What decides a container's size from its direct children: whether each one is shown and the
     /// width and height its style resolves to under the current state. The renderer animates size
     /// changes only when this changes, so text edits and other content updates stay unanimated.
-    func containerLayoutSignature(state: [String: JSONValue], holds: (Condition) -> Bool) -> [String] {
-        (children ?? []).map { child in
+    func containerLayoutSignature(
+        state: [String: JSONValue], stacks: [String: PrototypeStackSnapshot] = [:], holds: (Condition) -> Bool
+    )
+        -> [String]
+    {
+        let nodes = type == "stack" ? currentChildEntries(path: "root", pages: [:], stacks: stacks, state: state)
+            .map(\.node) : children ?? []
+        return nodes.map { child in
             let shown = child.visibleWhen.map(holds) ?? true
             let style = child.resolvedStyle(state: state)
             let bounds = [

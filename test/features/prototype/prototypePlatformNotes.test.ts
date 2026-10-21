@@ -1,3 +1,4 @@
+import { PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
@@ -14,17 +15,15 @@ import {
 
 const swift = readFileSync(
   new URL(
-    "../../../ios/prototype-agent/Sources/AutoMobilePrototypeAgent/PrototypeRenderer.swift",
+    "../../../ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     import.meta.url,
   ),
   "utf8",
 );
-const symbolBody = swift.match(/private let sfSymbols: \[String: String\] = \[([\s\S]*?)\n\]/)![1];
-const swiftKeys = [...symbolBody.matchAll(/"([^"]+)"\s*:/g)].map((match) => match[1]);
 const noCapabilities = () => false;
 const specFor = (root: PrototypeNode): PrototypeSpec => ({
   id: "panel",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root,
 });
 const spec = specFor({
@@ -89,13 +88,19 @@ describe("prototype platform notes", () => {
     ).toEqual([]);
   });
   test.each(
-    PROTOTYPE_PLATFORM_DIFFERENCES.map(
+    PROTOTYPE_PLATFORM_DIFFERENCES.filter(({ capability }) => capability !== undefined).map(
       ({ construct, capability }) => [construct, capability] as const,
     ),
   )("%s is lifted by its capability", (construct, capability) => {
     const notes = prototypePlatformNotes(spec, "ios", (name) => name === capability);
     expect(notes.some((note) => note.construct === construct)).toBe(false);
-    expect(notes.length).toBe(capability === "prototype_bottom_sheet_drag_v1" ? 3 : 4);
+    expect(notes.length).toBe(
+      capability === "prototype_bottom_sheet_drag_v1"
+        ? 3
+        : capability === "prototype_text_field_material_style_v1"
+          ? 5
+          : 4,
+    );
   });
   test("testTag, mapped names, disabled swipe and a single detent need no notes", () => {
     const clean = specFor({
@@ -110,9 +115,14 @@ describe("prototype platform notes", () => {
     expect(prototypePlatformNotes(clean, "ios", noCapabilities)).toEqual([]);
     expect(prototypePlatformNotes(spec, "ios", () => true)).toEqual([]);
   });
-  test("pins exactly the 55 iOS mapped names to the Swift source", () => {
+  test("pins the SF Symbols capability to the agent without advertising Material parity", () => {
     expect(IOS_PROTOTYPE_MAPPED_ICON_NAMES.size).toBe(55);
-    expect(new Set(swiftKeys)).toEqual(IOS_PROTOTYPE_MAPPED_ICON_NAMES);
+    expect(swift).toContain(
+      `static let iconSfSymbolsCapability = "${PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY}"`,
+    );
+    expect(swift).toContain("        iconSfSymbolsCapability,");
+    expect(swift).not.toContain("prototype_icon_set_material_v1");
+    expect(swift).not.toContain("prototype_icon_variant_v1");
   });
   test("caps paths at 20, keeps total and all distinct sorted icon values", () => {
     const many = specFor({
@@ -202,7 +212,12 @@ describe("prototype platform notes", () => {
       type: "column",
       id: "outer",
       children: [
-        { type: "scroll", id: "scroll", child: { type: "text", id: "inner", text: "Hi" } },
+        {
+          type: "scroll",
+          axis: "vertical",
+          id: "scroll",
+          child: { type: "text", id: "inner", text: "Hi" },
+        },
         { type: "text", id: "last", text: "Last" },
       ],
     });
@@ -215,14 +230,176 @@ describe("prototype platform notes", () => {
     ]);
     expect(JSON.stringify(nested)).toBe(before);
   });
-  test("guide generates all five platform differences from the table", () => {
+  test("guide generates every platform difference from the table", () => {
     const guide = renderPrototypeGuide();
     expect(guide).toContain("## Platform differences");
     expect(guide).toContain("platformNotes");
+    expect(guide).toContain("iOS draws SF Symbols:");
+    expect(guide).toContain("filled/outlined map where a form exists");
+    expect(guide).toContain("rounded/sharp/twoTone");
     for (const difference of PROTOTYPE_PLATFORM_DIFFERENCES) {
       expect(guide).toContain(`\`${difference.construct}\``);
-      expect(guide).toContain(difference.detail);
-      expect(guide).toContain(difference.capability);
+      if (!difference.construct.startsWith("icon.")) {
+        if (difference.capability) {
+          expect(
+            difference.detail.startsWith(`An iOS agent without ${difference.capability} `),
+          ).toBe(true);
+        }
+        expect(guide).toContain(difference.detail);
+      }
+      if (difference.capability) {
+        expect(guide).toContain(difference.capability);
+      }
     }
   });
+});
+
+const currentAgent = (name: string) => name === PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY;
+describe("SF Symbols agent platform notes", () => {
+  test("notes unmapped names with values and leaves mapped defaults alone", () => {
+    const notes = prototypePlatformNotes(
+      specFor({ type: "icon", name: "android" }),
+      "ios",
+      currentAgent,
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({
+      construct: "icon.name",
+      effect: "substituted",
+      paths: ["root.name"],
+      values: ["android"],
+    });
+    expect(notes[0].detail).toContain("no SF Symbol equivalent");
+    expect(
+      prototypePlatformNotes(specFor({ type: "icon", name: "ac_unit" }), "ios", currentAgent),
+    ).toEqual([]);
+  });
+  test.each(["filled", "outlined"] as const)("%s with a form needs no note", (variant) => {
+    expect(
+      prototypePlatformNotes(specFor({ type: "icon", name: "home", variant }), "ios", currentAgent),
+    ).toEqual([]);
+  });
+  test.each(["filled", "outlined", "rounded", "sharp", "twoTone"] as const)(
+    "%s without an SF form substitutes the default",
+    (variant) => {
+      const notes = prototypePlatformNotes(
+        specFor({ type: "icon", name: "wifi", variant }),
+        "ios",
+        currentAgent,
+      );
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatchObject({
+        construct: "icon.variant",
+        effect: "substituted",
+        paths: ["root.variant"],
+      });
+    },
+  );
+  test.each(["rounded", "sharp", "twoTone"] as const)(
+    "%s substitutes even for a fill/outline pair",
+    (variant) => {
+      expect(
+        prototypePlatformNotes(
+          specFor({ type: "icon", name: "home", variant }),
+          "ios",
+          currentAgent,
+        )[0]?.construct,
+      ).toBe("icon.variant");
+    },
+  );
+  test("an unmapped variant is covered only by the name note", () => {
+    const notes = prototypePlatformNotes(
+      specFor({ type: "icon", name: "android", variant: "filled" }),
+      "ios",
+      currentAgent,
+    );
+    expect(notes.map((note) => note.construct)).toEqual(["icon.name"]);
+  });
+  test("container variants are not icon variants", () => {
+    expect(
+      prototypePlatformNotes(
+        specFor({ type: "iconButton", icon: "wifi", variant: "outlined" }),
+        "ios",
+        currentAgent,
+      ),
+    ).toEqual([]);
+  });
+  test("Material parity capabilities still lift both notes", () => {
+    const notes = prototypePlatformNotes(
+      specFor({ type: "icon", name: "android", variant: "sharp" }),
+      "ios",
+      (name) =>
+        currentAgent(name) ||
+        name === "prototype_icon_set_material_v1" ||
+        name === "prototype_icon_variant_v1",
+    );
+    expect(notes).toEqual([]);
+    expect(
+      prototypePlatformNotes(
+        specFor({ type: "icon", name: "wifi", variant: "sharp" }),
+        "ios",
+        (name) => currentAgent(name) || name === "prototype_icon_variant_v1",
+      ),
+    ).toEqual([]);
+  });
+  test("caps current-agent paths and keeps all distinct names", () => {
+    const root: PrototypeNode = {
+      type: "column",
+      children: Array.from({ length: 22 }, (_, index) => ({
+        type: "icon",
+        name: index === 21 ? "facebook" : "android",
+      })),
+    };
+    const notes = prototypePlatformNotes(specFor(root), "ios", currentAgent);
+    expect(notes[0]).toMatchObject({ total: 22, values: ["android", "facebook"] });
+    expect(notes[0].paths).toHaveLength(20);
+  });
+});
+
+describe("text field platform notes", () => {
+  test("outlined and label substitute; maxLength and filled do not", () => {
+    const fields = specFor({
+      type: "textField",
+      stateKey: "name",
+      variant: "outlined",
+      label: "Name",
+      maxLength: 20,
+    });
+    const notes = prototypePlatformNotes(fields, "ios", noCapabilities);
+    expect(notes.map(({ construct, effect, paths }) => ({ construct, effect, paths }))).toEqual([
+      { construct: "textField.variant", effect: "substituted", paths: ["root.variant"] },
+      { construct: "textField.label", effect: "substituted", paths: ["root.label"] },
+    ]);
+    expect(
+      prototypePlatformNotes(
+        fields,
+        "ios",
+        (name) => name === "prototype_text_field_material_style_v1",
+      ),
+    ).toEqual([]);
+    expect(prototypePlatformNotes(fields, "android", noCapabilities)).toEqual([]);
+    expect(
+      prototypePlatformNotes(
+        specFor({ type: "textField", stateKey: "name", variant: "filled", maxLength: 20 }),
+        "ios",
+        noCapabilities,
+      ),
+    ).toEqual([]);
+  });
+});
+
+test("stack back gesture remains a platform difference on capable devices", () => {
+  const stackSpec = specFor({
+    type: "stack",
+    id: "nav",
+    start: "home",
+    screens: { home: { type: "text", text: "Home" } },
+  });
+  expect(prototypePlatformNotes(stackSpec, "ios", () => true)).toEqual([
+    expect.objectContaining({
+      construct: "stack",
+      paths: ["root"],
+      detail: expect.stringContaining("left-edge swipe"),
+    }),
+  ]);
 });

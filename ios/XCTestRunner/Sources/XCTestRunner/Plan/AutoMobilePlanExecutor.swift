@@ -256,18 +256,7 @@ public final class AutoMobilePlanExecutor: Sendable {
         try Task.checkCancellation()
         PerfTimer
             .log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
-        let planContent: String
-        do {
-            planContent = try PerfTimer.measure("loadPlan") {
-                try planLoader.loadPlan(at: configuration.planPath, bundle: configuration.planBundle)
-            }
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as PlanLoaderError {
-            throw ExecutorError.planNotFound(error.description)
-        } catch {
-            throw ExecutorError.planNotFound(error.localizedDescription)
-        }
+        let planContent = try loadPlanContent()
         PerfTimer.log("planContent loaded, length=\(planContent.count) chars")
 
         let substituted = try PerfTimer.measure("substituteParameters") {
@@ -284,7 +273,7 @@ public final class AutoMobilePlanExecutor: Sendable {
         // own substitution — the single source of truth for what actually landed — so the scrub target
         // always equals the recovery context. The `substituted` string keeps the real values for the
         // daemon.
-        let secretValues = SecretRedaction.secretValues(
+        let secretValues = try SecretRedaction.secretValues(
             resolveSecretValues(rawPlan: planContent)
         )
         PerfTimer
@@ -388,6 +377,20 @@ public final class AutoMobilePlanExecutor: Sendable {
         } catch {
             PerfTimer.log("executeAttempt ERROR: \(error.localizedDescription)")
             throw ExecutorError.executionFailed(error.localizedDescription)
+        }
+    }
+
+    private func loadPlanContent() throws -> String {
+        do {
+            return try PerfTimer.measure("loadPlan") {
+                try planLoader.loadPlan(at: configuration.planPath, bundle: configuration.planBundle)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as PlanLoaderError {
+            throw ExecutorError.planNotFound(error.description)
+        } catch {
+            throw ExecutorError.planNotFound(error.localizedDescription)
         }
     }
 
@@ -641,8 +644,8 @@ public final class AutoMobilePlanExecutor: Sendable {
     /// `${...}` inside a key name is resolved with the same substitution; and for each key both its raw
     /// parameter value and its actual substituted value (`PlanParameterSubstitutor.substituteText` applied to the bare
     /// `${key}`, matching the ordered single pass exactly) are collected.
-    private func resolveSecretValues(rawPlan: String) -> [String] {
-        let declaredKeys = configuration.secretParameterKeys
+    private func resolveSecretValues(rawPlan: String) throws -> [String] {
+        let declaredKeys = try configuration.secretParameterKeys
             .union(PlanMetadataParser.parseSecretParameterKeys(from: rawPlan))
         guard !declaredKeys.isEmpty else {
             return []

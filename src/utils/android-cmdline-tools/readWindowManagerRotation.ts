@@ -1,5 +1,5 @@
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
-import type { AdbExecutor } from "./interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { parseWindowManagerRotation } from "./parseWindowManagerRotation";
 import { throwIfAborted } from "../toolUtils";
 import { logger } from "../logger";
@@ -12,7 +12,7 @@ export const WINDOW_MANAGER_ROTATION_TIMEOUT_MS = 5_000;
 export const WINDOW_MANAGER_ROTATION_MAX_BUFFER = DUMPSYS_MAX_BUFFER;
 
 export async function readWindowManagerRotation(
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   options: { displayId?: number; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<number | null> {
   const timeoutMs = options.timeoutMs ?? WINDOW_MANAGER_ROTATION_TIMEOUT_MS;
@@ -20,13 +20,11 @@ export async function readWindowManagerRotation(
   let fallbackReason = "display 0 rotation is missing";
   let fallbackError: unknown;
   try {
-    const { stdout } = await adb.executeCommand(
-      WINDOW_MANAGER_ROTATION_COMMAND,
+    const { stdout } = await adb.executeCommand(WINDOW_MANAGER_ROTATION_COMMAND, {
       timeoutMs,
-      WINDOW_MANAGER_ROTATION_MAX_BUFFER,
-      undefined,
-      options.signal,
-    );
+      maxBuffer: WINDOW_MANAGER_ROTATION_MAX_BUFFER,
+      signal: options.signal,
+    });
     const rotation = parseWindowManagerRotation(stdout, { displayId: options.displayId });
     if (rotation !== null || !defaultDisplay) {
       return rotation;
@@ -48,12 +46,10 @@ export async function readWindowManagerRotation(
     `[readWindowManagerRotation] Falling back to legacy WindowManager rotation: ${fallbackReason}`,
     fallbackError,
   );
-  const { stdout } = await adb.executeCommand(
-    WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+  const { stdout } = await adb.executeCommand(WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND, {
     timeoutMs,
-    WINDOW_MANAGER_ROTATION_MAX_BUFFER,
-    undefined,
-    options.signal,
-  );
+    maxBuffer: WINDOW_MANAGER_ROTATION_MAX_BUFFER,
+    signal: options.signal,
+  });
   return parseWindowManagerRotation(stdout);
 }

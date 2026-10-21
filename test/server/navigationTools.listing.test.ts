@@ -3,11 +3,13 @@ import { registerNavigationTools } from "../../src/server/navigationTools";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const NAVIGATION_TOOLS = ["explore", "navigateTo", "getNavigationGraph"];
 
-const registered = (name: string): RegisteredTool =>
-  (ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }).tools.get(name)!;
+const registered = (name: string): RegisteredTool => ToolRegistry.getRegisteredTool(name)!;
 
 describe("navigation tools listing (#4459)", () => {
   const originalDebug = isDebugModeEnabled();

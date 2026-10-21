@@ -14,7 +14,7 @@
 # directory it would be created in) resolves under ~/.auto-mobile or
 # /tmp/auto-mobile-daemon-*.
 #
-#   bash scripts/prepush-integration-safe.sh
+#   bash scripts/prepush-integration-safe.sh [safe-test-path ...]
 #
 # Environment:
 #   AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE  Override the tier list (tests).
@@ -26,7 +26,7 @@ cd "$ROOT"
 
 tier_file="${AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE:-$ROOT/test/integration-safe-tier.txt}"
 
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$ROOT/scripts/lib/bun-unit-test.sh"
 
 ISOLATION_VARS=(
@@ -83,12 +83,28 @@ if [[ ! -f "$tier_file" ]]; then
   exit 2
 fi
 
-# shellcheck source=scripts/lib/integration-safe-tier.sh disable=SC1091
+# shellcheck source=scripts/lib/integration-safe-tier.sh
 source "$ROOT/scripts/lib/integration-safe-tier.sh"
 safe_files=()
 while IFS= read -r path; do
   safe_files+=("$path")
 done < <(integration_tier_paths "$tier_file" safe)
+
+if [[ "$#" -gt 0 ]]; then
+  requested_files=()
+  for requested in "$@"; do
+    found=0
+    for safe in ${safe_files[@]+"${safe_files[@]}"}; do
+      if [[ "$requested" == "$safe" ]]; then found=1; break; fi
+    done
+    if [[ "$found" -eq 0 ]]; then
+      echo "Not in safe integration tier: $requested" >&2
+      exit 2
+    fi
+    requested_files+=("$requested")
+  done
+  safe_files=(${requested_files[@]+"${requested_files[@]}"})
+fi
 
 if [[ "${#safe_files[@]}" -eq 0 ]]; then
   echo "No safe integration files listed in ${tier_file}." >&2
@@ -107,11 +123,7 @@ tmp_base="${tmp_base%/}"
 refuse_shared_location TMPDIR "$tmp_base"
 
 work_dir="$(mktemp -d "${tmp_base}/am-int-safe.XXXXXX")"
-# shellcheck disable=SC2317,SC2329 # invoked via the EXIT trap
-cleanup() {
-  rm -rf "$work_dir"
-}
-trap cleanup EXIT
+trap 'rm -rf "$work_dir"' EXIT
 
 # Variables that would override or bypass the isolation above (the DB path wins
 # over DB_DIR; the AUTO_MOBILE_ aliases are read as fallbacks) or point at other

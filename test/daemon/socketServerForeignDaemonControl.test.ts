@@ -1,20 +1,24 @@
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+} from "../../src/models/deviceAcquisitionRefusals";
+import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   androidDevice,
   createFakeDaemonState,
+  createFakeDeviceManager,
   createFakeSession,
 } from "./helpers/inputSocketHarness";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
+import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * #11349: `input/*` and mutating `ide/*` frames are control. On a device no session of this daemon
@@ -22,43 +26,10 @@ import {
  * claims it, before anything reaches the device.
  */
 
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const FOREIGN_PID = 4242;
 const LOCAL_SESSION = "local-session";
 
-let internals: Internals;
+let internals: UnixSocketServerHarness;
 let sockets: FakeSocket[];
 /** Device ids another daemon claims, as the pool's foreign-ownership view reports them. */
 let foreignClaimed: Set<string>;
@@ -85,23 +56,21 @@ function useServer(localSessionHoldsDevice = false): void {
       },
     }),
   };
-  const server = new UnixSocketServer(
+  internals = createHarnessServer(
     "unused",
-    "http://localhost:0/mcp",
     state,
     new FakeTimer(),
     null,
     // The storage tool is enabled, so the frame reaches the ownership gate.
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  internals.allowRequests();
 }
 
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   sockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  internals.connect(socket);
   return socket;
 }
 
@@ -109,7 +78,7 @@ async function drain(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...internals.state.activeRequestHandlers]);
 }
 
 async function answer(method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
@@ -144,33 +113,21 @@ beforeEach(() => {
   foreignClaimed = new Set();
   claimChecks = [];
   deviceCalls = [];
-  PlatformDeviceManagerFactory.setInstance({
-    getBootedDevices: async () => [androidDevice],
-    getBootedDevicesDetailed: async () => ({
-      devices: [androidDevice],
-      succeededPlatforms: new Set(["android", "ios"]),
-    }),
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: async (
-          ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-        ) => {
-          args[6]?.();
-          deviceCalls.push("tap");
-          return { success: true };
-        },
-        setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-          if (typeof args[5] === "object") {
-            args[5].onDispatch?.();
-          }
-          deviceCalls.push("setPreference");
-          return { success: true };
-        },
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+  spyOnAndroidClientInstance(androidDevice, {
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: async (...args) => {
+      args[0].onDispatch?.();
+      deviceCalls.push("tap");
+      return { success: true, totalTimeMs: 0 };
+    },
+    setPreference: async (...args) => {
+      if (typeof args[5] === "object") {
+        args[5].onDispatch?.();
+      }
+      deviceCalls.push("setPreference");
+    },
+  });
 });
 
 afterEach(() => {

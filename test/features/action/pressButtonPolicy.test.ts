@@ -28,7 +28,7 @@ describe("pressButtonPolicy", () => {
 
   // Issue #4187: the keycode map was a `{}` guarded by `!keyCode`, so a button named
   // after an `Object.prototype` member resolved to the truthy inherited member and
-  // flowed into `shell input keyevent <function Object() { [native code] }>`.
+  // flowed into `shell input keyevent <constructor>`.
   test.each([
     ["constructor"],
     ["toString"],

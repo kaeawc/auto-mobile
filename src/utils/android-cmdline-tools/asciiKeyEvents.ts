@@ -18,6 +18,8 @@ import { shellQuote } from "../shellQuote";
 /** A sequence of `adb shell input ...` commands that types a single character. */
 export interface KeyEventPlan {
   commands: string[];
+  /** Longest input-text command length; omitted for single-character key-event plans. */
+  textLength?: number;
 }
 
 /** API level at which `input keycombination` (used for SHIFT chords) is available. */
@@ -154,4 +156,84 @@ export function buildAndroidInputTextCommand(text: string): string {
     throw new Error("input text cannot carry an empty value or a literal %s");
   }
   return `shell input text ${shellQuote(text.replaceAll(" ", "%s"))}`;
+}
+
+/** Longest `input text` command on API 31+, so a cancel stops between commands (#12599). */
+export const ANDROID_INPUT_TEXT_CHUNK_CHARS = 32;
+
+/**
+ * Longest `input text` command on API 30 and older. The host `adb shell` process types, so a
+ * cancel needs no short commands, but one adb argv element must stay far below the OS argument
+ * limit (about 128 KiB per argument on Linux, smaller on some adb transports); single-quote
+ * escaping can quadruple the length, so the argv is not the binding limit here.
+ *
+ * The binding limit is time: `input text` types about 13 ms per character on an API 30 emulator
+ * (1000 chars took 13 s, 4096 took 47 s) and one command must finish inside the 15 s ADB command
+ * timeout. 512 characters take about 6.7 s, under half the timeout, so slower devices still fit (#13172).
+ */
+export const ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS = 512;
+
+/**
+ * Plan for a run of printable ASCII.
+ *
+ * On API 30 and older the host `adb shell` process is the one typing, so killing the host
+ * client stops typing immediately and one `input text` command per run is enough (#12733).
+ * Chunking there only adds per-process overhead, so it is bounded only by
+ * {@link ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS} to keep each argv below OS limits. On API 31+ (and when the level is unknown)
+ * the host `cmd` client exits once the events are handed to the system, long before the app
+ * consumes them, so only a short command bounds how much typing a cancel can leave behind:
+ * one command per {@link ANDROID_INPUT_TEXT_CHUNK_CHARS} characters.
+ *
+ * @param apiLevel - Device API level, or null when it could not be read.
+ */
+export function buildAndroidInputTextPlan(text: string, apiLevel: number | null): KeyEventPlan {
+  const chunks = splitAndroidInputText(text, apiLevel);
+  return {
+    commands: chunks.map(buildAndroidInputTextCommand),
+    textLength: Math.min(text.length, androidInputTextChunkChars(apiLevel)),
+  };
+}
+
+/**
+ * The `input text` chunks {@link buildAndroidInputTextPlan} sends, in order. A caller that
+ * dispatches them one at a time knows exactly how many characters a failed run had delivered.
+ */
+export function splitAndroidInputText(text: string, apiLevel: number | null): string[] {
+  const chunkChars = androidInputTextChunkChars(apiLevel);
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = chunkEnd(text, start, chunkChars);
+    chunks.push(text.slice(start, end));
+    start = end;
+  }
+  return chunks;
+}
+
+function androidInputTextChunkChars(apiLevel: number | null): number {
+  return apiLevel !== null && apiLevel <= 30
+    ? ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS
+    : ANDROID_INPUT_TEXT_CHUNK_CHARS;
+}
+
+/**
+ * End of the chunk starting at `start`. A space must travel in the same process as the
+ * character after it: a keyboard re-capitalises a letter that follows a space delivered by an
+ * earlier process (#9888), so a boundary that would strand trailing spaces moves in front of them.
+ */
+function chunkEnd(text: string, start: number, chunkChars: number): number {
+  const hardEnd = start + chunkChars;
+  if (hardEnd >= text.length) {
+    return text.length;
+  }
+  let end = hardEnd;
+  while (end > start + 1 && text[end - 1] === " ") {
+    end--;
+  }
+  if (text[end - 1] !== " ") {
+    return end;
+  }
+  // The whole chunk is spaces: leave the last one for the next chunk when a non-space follows,
+  // so that character is not typed right after a space delivered by an earlier process.
+  return chunkChars > 1 && text[hardEnd] !== " " ? hardEnd - 1 : hardEnd;
 }

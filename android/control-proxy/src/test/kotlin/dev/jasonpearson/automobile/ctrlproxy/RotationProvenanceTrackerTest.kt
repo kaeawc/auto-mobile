@@ -10,26 +10,32 @@ import org.junit.Test
 
 class RotationProvenanceTrackerTest {
 
-  interface TestStateCallback {
-    fun onStateChanged(state: Int)
-  }
-
   @Test
-  fun `device state proxy has identity semantics and ignores the initial state`() {
-    val states = mutableListOf<Int>()
-    val callback =
-      DeviceStateTransitions.callback(TestStateCallback::class.java) { states += it }
-        as TestStateCallback
-    assertTrue(callback == callback)
-    assertFalse(callback == Any())
-    assertEquals(System.identityHashCode(callback), callback.hashCode())
-    assertTrue(callback.toString().startsWith("DeviceStateCallback@"))
-
-    callback.onStateChanged(0)
-    callback.onStateChanged(0)
-    assertTrue(states.isEmpty())
-    callback.onStateChanged(1)
-    assertEquals(listOf(1), states)
+  fun `fingerprint-only changes emit and transition frames omit absent fingerprints`() {
+    var fingerprint: PanelFingerprint? = PanelFingerprint(1080, 2364)
+    val frames = mutableListOf<DisplayTransition>()
+    val signal =
+      DisplayRotationChangeSignal(
+        null,
+        onTransition = { frames += it },
+        snapshotOverride = { id, change ->
+          DisplayTransition(change, id, null, 1080, 2364, 2, panelFingerprint = fingerprint)
+        },
+      )
+    signal.handleDisplayCallback("added", 4)
+    signal.handleDisplayCallback("changed", 4)
+    assertEquals(1, frames.size)
+    fingerprint = PanelFingerprint(2076, 2152)
+    signal.handleDisplayCallback("changed", 4)
+    assertEquals(2, frames.size)
+    assertTrue(
+      displayTransitionFrame(frames.last())
+        .contains("\"panelFingerprint\":{\"width\":2076,\"height\":2152}"),
+    )
+    fingerprint = null
+    signal.handleDisplayCallback("changed", 4)
+    assertEquals(3, frames.size)
+    assertFalse(displayTransitionFrame(frames.last()).contains("panelFingerprint"))
   }
 
   @Test
@@ -203,18 +209,26 @@ class RotationProvenanceTrackerTest {
 
   @Test
   fun `all capture routes use rotation provenance instead of endpoint equality`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+    val ctrlProxySource =
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateCtrlProxySource("HierarchyController.kt").readText(),
+      )
+    val screenshotSource =
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateCtrlProxySource("ScreenshotController.kt").readText(),
+      )
 
-    for (route in
+    for ((route, source) in
       listOf(
-        "private fun extractHierarchyDirect",
-        "private fun extractHierarchy(",
-        "private suspend fun takeScreenshotAsync",
+        "private fun extractHierarchyDirect" to ctrlProxySource,
+        "internal fun extractHierarchy(" to ctrlProxySource,
+        "suspend fun takeScreenshotAsync" to screenshotSource,
       )) {
       val start = source.indexOf(route)
-      assertTrue("$route not found in CtrlProxy.kt", start >= 0)
+      assertTrue("$route not found", start >= 0)
       val bodyOpen = source.indexOf('{', start)
-      val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      val entry = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      val body = rotationCaptureBody(source, route, entry)
       assertTrue(
         "$route must capture the display-change generation before acquiring capture inputs",
         "rotationProvenance.beginCapture(targetDisplayId)" in body,
@@ -236,13 +250,23 @@ class RotationProvenanceTrackerTest {
 
   @Test
   fun `screenshot capture passes the requested display to the platform`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
-    val start = source.indexOf("private suspend fun takeScreenshotAsync")
+    val source =
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateCtrlProxySource("ScreenshotController.kt").readText(),
+      )
+    val start = source.indexOf("suspend fun takeScreenshotAsync")
     assertTrue(start >= 0)
     val bodyOpen = source.indexOf('{', start)
-    val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
-    assertTrue(body.contains("takeScreenshot(\n              targetDisplayId,"))
-    assertFalse(body.contains("takeScreenshot(\n              Display.DEFAULT_DISPLAY,"))
+    val entry = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+    assertTrue(entry.contains("captureBitmap(targetDisplayId)"))
+    val captureStart = source.indexOf("private suspend fun captureBitmap(")
+    val captureOpen = source.indexOf('{', captureStart)
+    val body =
+      source
+        .substring(captureOpen, KotlinSourceScan.matchBrace(source, captureOpen))
+        .replace(Regex("\\s+"), "")
+    assertTrue(body.contains("host.takeScreenshot(targetDisplayId,"))
+    assertFalse(body.contains("host.takeScreenshot(Display.DEFAULT_DISPLAY,"))
   }
 
   private class FakeRotationChangeSignal(private val synchronizeResult: Boolean = true) :
@@ -282,8 +306,8 @@ class RotationProvenanceTrackerTest {
     }
   }
 
-  private fun locateCtrlProxySource(): File {
-    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+  private fun locateCtrlProxySource(fileName: String = "CtrlProxy.kt"): File {
+    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
     val direct =
       listOf(File(rel), File("control-proxy/$rel"), File("android/control-proxy/$rel"))
         .firstOrNull { it.isFile }
@@ -301,7 +325,32 @@ class RotationProvenanceTrackerTest {
       }
       directory = directory.parentFile
     }
-    fail("Could not locate CtrlProxy.kt from user.dir=${System.getProperty("user.dir")}")
+    fail("Could not locate $fileName from user.dir=${System.getProperty("user.dir")}")
     error("unreachable")
+  }
+}
+
+private fun rotationCaptureBody(source: String, route: String, entry: String): String {
+  return if (route.contains("Screenshot")) {
+    assertTrue(entry.contains("captureBitmap(targetDisplayId)"))
+    val captureStart = source.indexOf("private suspend fun captureBitmap(")
+    val captureOpen = source.indexOf('{', captureStart)
+    source.substring(captureOpen, KotlinSourceScan.matchBrace(source, captureOpen))
+  } else {
+    val suffix = if (route.contains("Direct")) "Direct" else "Fallback"
+    assertTrue(entry.contains("HierarchyCapture("))
+    assertTrue(entry.contains(".extract$suffix("))
+    val captureStart = source.indexOf("private inner class HierarchyCapture(")
+    val captureOpen = source.indexOf('{', captureStart)
+    val capture = source.substring(captureOpen, KotlinSourceScan.matchBrace(source, captureOpen))
+    val extractStart = capture.indexOf("fun extract$suffix(")
+    val extractOpen = capture.indexOf('{', extractStart)
+    val extraction =
+      capture.substring(extractOpen, KotlinSourceScan.matchBrace(capture, extractOpen))
+    assertTrue(extraction.contains("enrich$suffix(hierarchy)"))
+    val enrichStart = capture.indexOf("private fun enrich$suffix(")
+    val enrichOpen = capture.indexOf('{', enrichStart)
+    capture.substring(0, capture.indexOf("fun walkDirect(")) +
+      capture.substring(enrichOpen, KotlinSourceScan.matchBrace(capture, enrichOpen))
   }
 }

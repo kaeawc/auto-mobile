@@ -7,6 +7,7 @@ import {
 } from "../../src/daemon/releaseReasons";
 import {
   DeviceSessionRepository,
+  DeviceSessionNotActiveError,
   DeviceSessionRowNotRewritableError,
   DeviceSessionRowNotReleasableError,
   DeviceSessionTerminallyReleasedError,
@@ -16,7 +17,7 @@ import {
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
-import type { Database } from "../../src/db/types";
+import type { Database, DeviceSession } from "../../src/db/types";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -81,8 +82,219 @@ const implementations: Array<[string, () => Promise<DeviceSessionPersistence>]> 
 
 describe.each(implementations)("device-session persistence contract: %s", (_name, create) => {
   async function rowOf(persistence: DeviceSessionPersistence) {
-    return await persistence.getSession?.(SESSION);
+    return await persistence.getSession(SESSION);
   }
+
+  const methodKeys = {
+    upsertActiveSession: true,
+    getSession: true,
+    listRecoverableSessions: true,
+    recordActivity: true,
+    recordRestartRecoveryActivity: true,
+    claimRecoverableSession: true,
+    releaseRecoverableSessionClaim: true,
+    recordLivenessOwnership: true,
+    replaceLivenessOwnership: true,
+    markReleased: true,
+  } satisfies Record<keyof DeviceSessionPersistence, true>;
+
+  test.each(Object.keys(methodKeys) as Array<keyof DeviceSessionPersistence>)(
+    "%s is an always-present function",
+    async (key: keyof DeviceSessionPersistence) => {
+      const persistence = await create();
+      expect(typeof persistence[key]).toBe("function");
+    },
+  );
+
+  test.each(["missing", "present"])("getSession: %s row", async (state: string) => {
+    const persistence = await create();
+    expect(await persistence.getSession(SESSION)).toBeUndefined();
+    if (state === "present") {
+      await persistence.upsertActiveSession(record());
+      expect(await persistence.getSession(SESSION)).toMatchObject({
+        session_uuid: SESSION,
+        status: "active",
+        device_id: "emulator-5554",
+      });
+    }
+  });
+
+  test.each(
+    (["recordLivenessOwnership", "replaceLivenessOwnership"] as const).flatMap((method) =>
+      (["active", "released", "missing"] as const).map((state) => ({ method, state })),
+    ),
+  )(
+    "$method: $state row",
+    async ({
+      method,
+      state,
+    }: {
+      method: "recordLivenessOwnership" | "replaceLivenessOwnership";
+      state: "active" | "released" | "missing";
+    }) => {
+      const persistence = await create();
+      if (state !== "missing") {
+        await persistence.upsertActiveSession(record());
+      }
+      if (state === "released") {
+        await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
+      }
+      const before = structuredClone(await persistence.getSession(SESSION));
+      if (state === "active") {
+        await persistence[method](SESSION, "owner-token");
+        expect(await persistence.getSession(SESSION)).toMatchObject({
+          liveness_owner_token: "owner-token",
+        });
+        await persistence[method](SESSION, null);
+        expect(await persistence.getSession(SESSION)).toMatchObject({ liveness_owner_token: null });
+      } else {
+        await expect(persistence[method](SESSION, "owner-token")).rejects.toBeInstanceOf(
+          DeviceSessionNotActiveError,
+        );
+        expect(await persistence.getSession(SESSION)).toEqual(before);
+      }
+    },
+  );
+
+  test.each(["missing", "active", "daemon-shutdown", "device-restart:Pixel_8"])(
+    "recordRestartRecoveryActivity: %s",
+    async (state: string) => {
+      const persistence = await create();
+      if (state !== "missing") {
+        await persistence.upsertActiveSession(record());
+      }
+      if (state !== "missing" && state !== "active") {
+        await persistence.markReleased(SESSION, "released", 2_000, state);
+      }
+      const before = structuredClone(await persistence.getSession(SESSION));
+      await persistence.recordRestartRecoveryActivity(SESSION, 4_000);
+      if (state === "device-restart:Pixel_8") {
+        expect(await persistence.getSession(SESSION)).toMatchObject({
+          expires_at_ms: 4_000 + IDLE_WINDOW_MS,
+        });
+        await persistence.recordRestartRecoveryActivity(SESSION, 3_000);
+        expect((await persistence.getSession(SESSION))?.expires_at_ms).toBe(4_000 + IDLE_WINDOW_MS);
+      } else {
+        expect(await persistence.getSession(SESSION)).toEqual(before);
+      }
+    },
+  );
+
+  test.each(["success", "stale-generation", "stale-owner"])(
+    "claim and release recoverable incarnation: %s",
+    async (state: string) => {
+      const persistence = await create();
+      const generation = Number(await persistence.upsertActiveSession(record()));
+      await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
+      const expected = {
+        rowGeneration: generation + (state === "stale-generation" ? 1 : 0),
+        daemonSessionId: state === "stale-owner" ? "other" : "daemon-a",
+      };
+      const before = structuredClone(await persistence.getSession(SESSION));
+      const claimed = await persistence.claimRecoverableSession(SESSION, expected, "daemon-b");
+      if (state !== "success") {
+        expect(claimed).toBeUndefined();
+        expect(await persistence.releaseRecoverableSessionClaim(SESSION, expected, null)).toBe(
+          false,
+        );
+        expect(await persistence.getSession(SESSION)).toEqual(before);
+        return;
+      }
+      expect(claimed).toBe(generation + 1);
+      expect(await persistence.getSession(SESSION)).toMatchObject({
+        daemon_session_id: "daemon-b",
+        stable_identity_generation: claimed,
+        release_reason: "daemon-shutdown",
+      });
+      expect(await persistence.releaseRecoverableSessionClaim(SESSION, expected, null)).toBe(false);
+      expect(
+        await persistence.releaseRecoverableSessionClaim(
+          SESSION,
+          { rowGeneration: claimed!, daemonSessionId: "daemon-b" },
+          "daemon-a",
+        ),
+      ).toBe(true);
+      expect(await persistence.getSession(SESSION)).toMatchObject({
+        daemon_session_id: "daemon-a",
+        stable_identity_generation: generation + 2,
+      });
+    },
+  );
+
+  test("listRecoverableSessions returns only recoverable rows", async () => {
+    const persistence = await create();
+    for (const [sessionUuid, reason] of [
+      ["recoverable", "daemon-shutdown"],
+      ["terminal", "explicit-release"],
+      ["active", null],
+    ] as const) {
+      await persistence.upsertActiveSession(record({ sessionUuid }));
+      if (reason) {
+        await persistence.markReleased(sessionUuid, "released", 2_000, reason);
+      }
+    }
+    expect(
+      (await persistence.listRecoverableSessions(3_000)).map(
+        (row: DeviceSession) => row.session_uuid,
+      ),
+    ).toEqual(["recoverable"]);
+  });
+
+  test("activity sequence accepts a backward wall step and rejects a delayed older write", async () => {
+    const persistence = await create();
+    await persistence.upsertActiveSession(record({ activitySeq: 1_000 }));
+    await persistence.recordActivity(
+      SESSION,
+      record({
+        lastUsedAtMs: 500,
+        activitySeq: 2_000,
+        expiresAtMs: 60_500,
+        livenessPolicy: "managed-execution",
+      }),
+    );
+    await persistence.recordActivity(
+      SESSION,
+      record({
+        lastUsedAtMs: 3_000,
+        activitySeq: 1_500,
+        expiresAtMs: 63_000,
+      }),
+    );
+    expect(await rowOf(persistence)).toMatchObject({
+      activity_seq: 2_000,
+      last_used_at_ms: 500,
+      expires_at_ms: 60_500,
+      liveness_policy: "managed-execution",
+    });
+    // Strict >: a policy rewrite at the same activity instant still applies.
+    await persistence.recordActivity(
+      SESSION,
+      record({
+        lastUsedAtMs: 500,
+        activitySeq: 2_000,
+        expiresAtMs: 70_500,
+      }),
+    );
+    expect(await rowOf(persistence)).toMatchObject({
+      expires_at_ms: 70_500,
+      liveness_policy: null,
+    });
+  });
+
+  test("omitted sequences use lastUsedAtMs and an upsert resets the daemon-local sequence", async () => {
+    const persistence = await create();
+    await persistence.upsertActiveSession(record());
+    await persistence.recordActivity(SESSION, record({ lastUsedAtMs: 2_000 }));
+    await persistence.recordActivity(SESSION, record({ lastUsedAtMs: 1_500, expiresAtMs: 1_501 }));
+    expect(await rowOf(persistence)).toMatchObject({
+      activity_seq: 2_000,
+      last_used_at_ms: 2_000,
+      expires_at_ms: 5_000,
+    });
+    await persistence.upsertActiveSession(record({ activitySeq: 1 }));
+    await persistence.recordActivity(SESSION, record({ activitySeq: 2, lastUsedAtMs: 500 }));
+    expect(await rowOf(persistence)).toMatchObject({ activity_seq: 2, last_used_at_ms: 500 });
+  });
 
   test.each(["managed-execution", "heartbeat"])(
     "expired idle deadline recovery for %s",
@@ -383,7 +595,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       const persistence = await create();
       await persistence.upsertActiveSession(record({ expiresAtMs: 5_000 }));
       await persistence.markReleased(SESSION, "released", 2_000, "device-restart:Pixel_8");
-      await persistence.recordRestartRecoveryActivity?.(SESSION, 4_900);
+      await persistence.recordRestartRecoveryActivity(SESSION, 4_900);
 
       await persistence.markReleased(SESSION, "expired", 6_000, "expired", {
         onlyIfExpiredAtMs: 6_000,

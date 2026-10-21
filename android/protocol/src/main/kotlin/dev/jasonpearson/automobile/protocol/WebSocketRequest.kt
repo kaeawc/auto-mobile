@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 
 /**
  * Sealed class hierarchy for all inbound WebSocket messages from MCP server to Android.
@@ -107,6 +108,12 @@ data class RequestTwoFingerSwipe(
   val duration: Long = 300L,
   val offset: Int = 100,
   val displayId: Int? = null,
+  /**
+   * Number of simultaneous fingers, 2-5 (default 2). Finger `i` starts at `x1 + i * offset`. A
+   * service without the `multi_finger_gesture_v1` flag ignores this field and performs two fingers,
+   * so hosts must not send a value above 2 to it.
+   */
+  val fingerCount: Int = 2,
 ) : WebSocketRequest()
 
 @Serializable
@@ -451,6 +458,10 @@ data class AddHighlight(
  * display it is on (ignoring [displayId]) and each pager's page. [reset] true starts it fresh
  * instead. Hosts send `reset` only when true; an older device ignores it and always starts fresh.
  *
+ * [replaceOthers] defaults to true, preserving the original single-window behavior. Hosts send it
+ * only when false and only to a device advertising `prototype_multi_surface_v1`; an older device
+ * ignores this field and always replaces every prototype already on screen.
+ *
  * [appearance] pins what "the system setting" means for this show (`prototype_appearance_v1`), so a
  * spec with `theme.mode: "system"` or no mode can be previewed in either mode without flipping the
  * device. Absent means [PrototypeAppearanceOverride.DEVICE]. Every show states it afresh: a same-id
@@ -465,6 +476,7 @@ data class ShowPrototype(
   val displayId: Int? = null,
   val reset: Boolean = false,
   val appearance: PrototypeAppearanceOverride? = null,
+  val replaceOthers: Boolean = true,
 ) : WebSocketRequest()
 
 @Serializable
@@ -484,6 +496,57 @@ data class DismissPrototype(
 @Serializable
 @SerialName("inspect_prototypes")
 data class InspectPrototypes(override val requestId: String? = null) : WebSocketRequest()
+
+/**
+ * Applies [ops] to the shown prototype [id] (#11675): the RFC 6902 subset add/replace/remove/test
+ * rooted at /data and /state, plus replaceNode {id, node}. [baseRevision] guards /state ops.
+ * Answered by one `prototype_result`. Hosts only send it to a device advertising
+ * `prototype_patch_v1`.
+ */
+@Serializable
+@SerialName("patch_prototype")
+data class PatchPrototype(
+  override val requestId: String? = null,
+  val id: String,
+  val baseRevision: Long? = null,
+  val ops: JsonArray,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("save_prototype")
+data class SavePrototype(
+  override val requestId: String? = null,
+  val spec: PrototypeSpec,
+  val label: String,
+  val icon: String? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("pin_saved_prototype")
+data class PinSavedPrototype(
+  override val requestId: String? = null,
+  val id: String,
+  val icon: String? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("list_saved_prototypes")
+data class ListSavedPrototypes(override val requestId: String? = null) : WebSocketRequest()
+
+@Serializable
+@SerialName("delete_saved_prototype")
+data class DeleteSavedPrototype(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
+
+/**
+ * Wipes every stored value the device keeps for prototype [id] (`prototype_storage_v1`). Answered
+ * by one `prototype_result` whose `cleared` counts the stored keys removed; an id with nothing
+ * stored succeeds with 0. The prototype on screen is not changed.
+ */
+@Serializable
+@SerialName("clear_prototype_storage")
+data class ClearPrototypeStorage(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
 
 /**
  * Uploads one prototype image asset, replacing any asset with the same [id]. [dataBase64] is the

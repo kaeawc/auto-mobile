@@ -5,6 +5,7 @@
 site_name: AutoMobile
 repo_name: AutoMobile
 repo_url: https://github.com/kaeawc/auto-mobile
+site_url: https://kaeawc.github.io/auto-mobile/
 site_description: "Mobile interaction automation"
 site_author: Jason Pearson
 remote_branch: gh-pages
@@ -28,6 +29,7 @@ plugins:
 
 theme:
   name: "material"
+  custom_dir: overrides
   favicon: img/favicon.ico
   logo: img/auto_mobile_sticker_splash.png
   palette:
@@ -103,9 +105,16 @@ not_in_nav: |
   /design-docs/mcp/daemon/screen-control-mapping.md
   /design-docs/plat/android/system-tray-lookfor.md
   /design-docs/plat/android/accessibility-data-sensitive-windows.md
+  /design-docs/plat/android/android-17-target-sdk-audit.md
+  /design-docs/plat/android/android17-playground-audit.md
+  /design-docs/plat/android/dependency-injection.md
   /release/ios-simulator-continuity.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
+  /decisions/mcp-sdk-v2-split-packages.md
+  /decisions/prototype-embedded-request-routing.md
+  /decisions/prototype-request-retrofit.md
+  /decisions/types-bun-test-typecheck.md
 
 nav:
   - "Overview": index.md
@@ -125,7 +134,6 @@ nav:
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
       - "Device ownership": using/device-ownership.md
-      - "Managed device slots": using/managed-slots.md
       - "Managed Macs and CI runners": using/managed-macs.md
       - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":
@@ -133,24 +141,36 @@ nav:
       - "Device-description audit": design-docs/device-description-audit.md
       - "Device resources": design-docs/device-resources.md
       - "Host toolchain resource": design-docs/host-toolchain-resource.md
+      - "Session broker experiment": design-docs/session-broker-experiment.md
+      - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
+      - "iOS Photos full access": design-docs/plat/ios/photos-full-access.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
       - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
+      - "ProtoViewer": design-docs/protoviewer.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
+      - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
+      - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
+      - "Stylus, pressure and hover injection": design-docs/mcp/stylus-pressure-hover-injection.md
       - "Daemon": design-docs/mcp/daemon.md
+      - "Push-stream backpressure": push-stream-backpressure.md
+      - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
+      - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
+      - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
+      - "Pressure, hover and stylus input": design-docs/plat/pressure-hover-stylus-input.md
   - "Contributing": contributing.md
   - "Usage Data": metrics/usage-data.md
   - "FAQ": faq.md

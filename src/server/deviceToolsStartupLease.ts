@@ -1,5 +1,5 @@
 import { ActionableError } from "../models";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool } from "../daemon/devicePool";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
@@ -8,11 +8,10 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import {
-  getStartDevicePool,
+  StartDeviceArgs,
   isUnknownAndroidRuntimeName,
   runWithinShutdownDeadline,
-} from "./deviceTools";
-import type { StartDeviceArgs } from "./deviceTools";
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 
 /**
  * A `deviceId`-targeted acquisition owns exactly one AVD, so it must not take the
@@ -125,7 +124,7 @@ export async function reserveAndroidStartupLease(
   if (args.platform !== "android") {
     return undefined;
   }
-  const devicePool = getStartDevicePool(DaemonState.getInstance());
+  const devicePool = defaultDaemonContext.fullDevicePool();
   if (!devicePool) {
     return undefined;
   }

@@ -315,9 +315,16 @@ describe("PerformanceTracker", function () {
   });
 
   describe("Global debug-perf state", function () {
+    let previousDebugPerfEnabled: boolean;
+
     beforeEach(function () {
+      previousDebugPerfEnabled = isDebugPerfEnabled();
       // Reset state before each test
       setDebugPerfEnabled(false);
+    });
+
+    afterEach(function () {
+      setDebugPerfEnabled(previousDebugPerfEnabled);
     });
 
     test("should default to false", function () {
@@ -367,6 +374,18 @@ describe("PerformanceTracker", function () {
         end(): PerformanceTracker {
           this.calls.push({ method: "end", name: "" });
           return this;
+        }
+
+        trackSync<T>(name: string, fn: () => T): T {
+          this.calls.push({ method: "trackSync", name });
+          return fn();
+        }
+
+        addExternalTiming(): void {}
+        startOperation(): void {}
+        endOperation(): void {}
+        fork(): PerformanceTracker {
+          return new FakePerformanceTracker();
         }
 
         getTimings(): TimingData | null {

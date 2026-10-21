@@ -3,6 +3,11 @@ import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
 
+/** The slice of an ADB executor this read needs; `getAndroidApiLevel` is the optional fast path. */
+export type ApiLevelProbeExecutor = Pick<AdbExecutor, "executeCommand"> & {
+  getAndroidApiLevel?: (timeoutMs?: number, signal?: AbortSignal) => Promise<number | null>;
+};
+
 /**
  * Reads `ro.build.version.sdk` from the device, or null if unavailable.
  *
@@ -14,15 +19,13 @@ import { defaultTimer, type Timer } from "../SystemTimer";
  *   injectable so tests stay deterministic.
  */
 export async function readAndroidDeviceApiLevel(
-  adb: AdbExecutor,
+  adb: ApiLevelProbeExecutor,
   timeoutMs?: number,
   timer: Timer = defaultTimer,
   signal?: AbortSignal,
 ): Promise<number | null> {
   throwIfAborted(signal);
-  const extended = adb as AdbExecutor & {
-    getAndroidApiLevel?: (timeoutMs?: number, signal?: AbortSignal) => Promise<number | null>;
-  };
+  const extended = adb;
   // Single deadline for the whole read. The fallback is charged against what is
   // LEFT after the primary probe, never a fresh full budget.
   const deadline = timeoutMs === undefined ? undefined : timer.now() + timeoutMs;
@@ -59,13 +62,11 @@ export async function readAndroidDeviceApiLevel(
 
     throwIfAborted(signal);
     const r = await awaitWhileRequestIsLive(
-      adb.executeCommand(
-        "shell getprop ro.build.version.sdk",
-        fallbackTimeoutMs,
-        undefined,
-        true,
+      adb.executeCommand("shell getprop ro.build.version.sdk", {
+        timeoutMs: fallbackTimeoutMs,
+        noRetry: true,
         signal,
-      ),
+      }),
       signal,
     );
     const n = parseInt(r.stdout.trim(), 10);

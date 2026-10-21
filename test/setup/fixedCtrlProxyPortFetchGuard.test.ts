@@ -27,10 +27,13 @@ describe("fixed CtrlProxy port fetch guard (#11106)", () => {
   test("rejects a unit-test dial without reaching the real fetch, passes others through", async () => {
     const calls: string[] = [];
     const target = {
-      fetch: (async (input: unknown) => {
-        calls.push(String(input));
-        return new Response("ok");
-      }) as unknown as typeof fetch,
+      fetch: Object.assign(
+        async (input: Parameters<typeof fetch>[0]) => {
+          calls.push(String(input));
+          return new Response("ok");
+        },
+        { preconnect: () => {} },
+      ),
     };
     installFixedCtrlProxyPortFetchGuard(target, () => "test/x.test.ts");
 
@@ -44,10 +47,13 @@ describe("fixed CtrlProxy port fetch guard (#11106)", () => {
   test("integration files keep the real fetch", async () => {
     const calls: string[] = [];
     const target = {
-      fetch: (async (input: unknown) => {
-        calls.push(String(input));
-        return new Response("ok");
-      }) as unknown as typeof fetch,
+      fetch: Object.assign(
+        async (input: Parameters<typeof fetch>[0]) => {
+          calls.push(String(input));
+          return new Response("ok");
+        },
+        { preconnect: () => {} },
+      ),
     };
     installFixedCtrlProxyPortFetchGuard(target, () => "test/x.integration.test.ts");
     await target.fetch("http://127.0.0.1:8765/health");

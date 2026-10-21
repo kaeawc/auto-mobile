@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir, userInfo } from "node:os";
+import { describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   adbServerScope,
@@ -15,6 +16,10 @@ import type {
   ForwardLeaseOwnerProbe,
   ForwardLeaseOwnerReport,
 } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
+import type {
+  ForeignCtrlProxyForwardEvidence,
+  ForeignCtrlProxyForwardVerdict,
+} from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import {
   readExclusiveLockContent,
   releaseExclusiveLock,
@@ -24,7 +29,13 @@ import {
 } from "../../src/utils/fileLock";
 import { ensureSecureDirectorySync } from "../../src/utils/tempDir";
 import { logger } from "../../src/utils/logger";
+import {
+  DefaultForeignCtrlProxyForwardEvidence,
+  resetForeignCtrlProxyForwardEvidenceForTesting,
+} from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createExecResult } from "../../src/utils/execResult";
 
 const SELF_PID = 100;
 const FOREIGN_PID = 4242;
@@ -95,7 +106,9 @@ const status = (
   status: { pid, deviceId: "d", sessionId, activeExecutions, idleForMs: null },
 });
 
-function harness() {
+function harness(
+  forwardVerdict?: ForeignCtrlProxyForwardVerdict | ForeignCtrlProxyForwardEvidence,
+) {
   const files = new FakeOwnershipFiles();
   const probe = new FakeOwnerProbe();
   const timer = new FakeTimer();
@@ -107,6 +120,11 @@ function harness() {
     probe,
     () => SELF_SOCKET,
     timer,
+    forwardVerdict === undefined
+      ? undefined
+      : "read" in forwardVerdict
+        ? forwardVerdict
+        : ({ read: async () => forwardVerdict } satisfies ForeignCtrlProxyForwardEvidence),
   );
   const ownerOf = async (deviceId: string) => {
     await ownership.refresh([deviceId]);
@@ -116,6 +134,105 @@ function harness() {
 }
 
 describe("ForwardLeaseForeignDeviceOwnership", () => {
+  test("F4c refresh shares one forward listing across all Android devices", async () => {
+    const adb = new FakeAdbExecutor();
+    const ids = ["a", "b", "c", "d"];
+    adb.setCommandResponse(
+      "forward --list",
+      createExecResult(ids.map((id) => `${id} tcp:8767 tcp:8765`).join("\n"), ""),
+    );
+    const evidence = new DefaultForeignCtrlProxyForwardEvidence({
+      adbFactory: { create: () => adb },
+      clientProbe: { findClientPids: async () => [FOREIGN_PID] },
+      ownership: () => ({ ownsForward: () => false }),
+      isProcessRunning: () => true,
+      timer: new FakeTimer(),
+    });
+    const { ownership } = harness(evidence);
+    try {
+      await ownership.refresh(ids);
+      expect(adb.getExecutedCommands()).toEqual(["forward --list"]);
+      for (const id of ids) {
+        expect(ownership.foreignOwnerPid(id)).toBe(FOREIGN_PID);
+      }
+      await ownership.refresh(ids);
+      expect(adb.getExecutedCommands()).toEqual(["forward --list", "forward --list"]);
+    } finally {
+      resetForeignCtrlProxyForwardEvidenceForTesting();
+    }
+  });
+
+  test("#12220 retains a live foreign forward PID with no claim or lease", async () => {
+    const { ownership, ownerOf } = harness({
+      kind: "foreign",
+      ports: [19001],
+      clientPids: [FOREIGN_PID],
+      message: "foreign forward",
+    });
+    expect(await ownerOf("d")).toBe(FOREIGN_PID);
+    expect(ownership.foreignClaimUnreadable("d")).toBe(false);
+  });
+
+  test("#12220 keeps a file owner's PID without probing host forwards", async () => {
+    let forwardReads = 0;
+    const { files, ownerOf } = harness({
+      read: async () => {
+        forwardReads++;
+        return { kind: "foreign", ports: [19001], clientPids: [5151], message: "forward" };
+      },
+    });
+    files.files.set("/leases/d.lock", { pid: FOREIGN_PID, token: "lease" });
+    expect(await ownerOf("d")).toBe(FOREIGN_PID);
+    expect(forwardReads).toBe(0);
+  });
+
+  test("#12220 leaves direct claim behavior independent of forward evidence", async () => {
+    let forwardReads = 0;
+    const { ownership } = harness({
+      read: async () => {
+        forwardReads++;
+        return { kind: "foreign", ports: [19001], clientPids: [FOREIGN_PID], message: "forward" };
+      },
+    });
+    expect(await ownership.claim("d")).toBe(true);
+    expect(forwardReads).toBe(0);
+  });
+
+  test("#12220 clears the forward owner after a fresh no-forward verdict", async () => {
+    let verdict: ForeignCtrlProxyForwardVerdict = {
+      kind: "foreign",
+      ports: [19001],
+      clientPids: [FOREIGN_PID],
+      message: "foreign forward",
+    };
+    const { ownerOf } = harness({ read: async () => verdict });
+    expect(await ownerOf("d")).toBe(FOREIGN_PID);
+    verdict = { kind: "none" };
+    expect(await ownerOf("d")).toBeUndefined();
+  });
+
+  test("#12220 treats a forward with unknown ownership as unreadable", async () => {
+    const { ownership, ownerOf } = harness({
+      kind: "unknown",
+      ports: [19001],
+      reason: "process identity unavailable",
+      message: "unknown forward",
+    });
+    expect(await ownerOf("d")).toBeUndefined();
+    expect(ownership.foreignClaimUnreadable("d")).toBe(true);
+  });
+
+  test("#12220 allows an unknown verdict without ports to leave the device free", async () => {
+    const { ownership, ownerOf } = harness({
+      kind: "unknown",
+      ports: [],
+      reason: "adb list unavailable",
+      message: "could not inspect forwards",
+    });
+    expect(await ownerOf("d")).toBeUndefined();
+    expect(ownership.foreignClaimUnreadable("d")).toBe(false);
+  });
+
   test("reports the live PID of an older-build lease holder that records no socket", async () => {
     const { files, ownerOf } = harness();
     files.files.set("/leases/d.lock", { pid: FOREIGN_PID, token: "t" });
@@ -531,12 +648,7 @@ describe("deviceAllocationClaimPath", () => {
 });
 
 describe("daemons in different coordination directories on one adb server (#10708)", () => {
-  const roots: string[] = [];
-  afterEach(() => {
-    for (const root of roots.splice(0)) {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+  const scratch = useScratchRoot("foreign-ownership-");
 
   /** Real lock files: each daemon's lease lives in its own coordination dir, claims are shared. */
   function daemon(home: string, coordinationDir: string, alive: Set<number>) {
@@ -560,8 +672,7 @@ describe("daemons in different coordination directories on one adb server (#1070
   }
 
   test("a second daemon sees and loses to the first daemon's claim", async () => {
-    const root = mkdtempSync(join(tmpdir(), "foreign-ownership-10708-"));
-    roots.push(root);
+    const root = scratch.next();
     const home = join(root, "home");
     const alive = new Set<number>([SELF_PID, FOREIGN_PID]);
     const probe = new FakeOwnerProbe();
@@ -597,8 +708,7 @@ describe("daemons in different coordination directories on one adb server (#1070
   });
 
   test("a session claim is written and withdrawn at the ADB-server location, never the legacy one (#10708, #10709)", async () => {
-    const root = mkdtempSync(join(tmpdir(), "foreign-ownership-10709-"));
-    roots.push(root);
+    const root = scratch.next();
     const home = join(root, "home");
     const coordinationDir = join(root, "coord");
     const ownership = new ForwardLeaseForeignDeviceOwnership(

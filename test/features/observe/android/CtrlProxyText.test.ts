@@ -1,10 +1,11 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
+import { createExecResult } from "../../../../src/utils/execResult";
 import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
 import {
   runWithTextRequestContext,
   TextRequestState,
 } from "../../../../src/features/action/textTransportTimeout";
 import { describe, expect, spyOn, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import {
   CtrlProxyText,
@@ -253,7 +254,7 @@ describe("Android CtrlProxyText", () => {
     await waitForSocketOpen(socket);
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
-      getWebSocket: () => socket as unknown as WebSocket,
+      getWebSocket: () => socket,
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -327,7 +328,9 @@ describe("Android CtrlProxyText", () => {
     const sent: Record<string, unknown>[] = [];
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+        new FakeOpenSocket((data) => {
+          sent.push(JSON.parse(data));
+        }),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -355,7 +358,9 @@ describe("Android CtrlProxyText", () => {
     const manager = new RequestManager(timer);
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+        new FakeOpenSocket((data) => {
+          sent.push(JSON.parse(data));
+        }),
       requestManager: manager,
       timer,
       ensureConnected: async () => true,
@@ -392,7 +397,7 @@ describe("Android CtrlProxyText", () => {
       await waitForSocketOpen(socket);
       const manager = new RequestManager(timer);
       const context: DelegateContext = {
-        getWebSocket: () => socket as unknown as WebSocket,
+        getWebSocket: () => socket,
         requestManager: manager,
         timer,
         ensureConnected: async () => true,
@@ -444,10 +449,9 @@ describe("Android CtrlProxyText", () => {
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({
-          readyState: 1,
-          send: (data: string) => sent.push(data),
-        }) as any,
+        new FakeOpenSocket((data) => {
+          sent.push(data);
+        }),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -474,7 +478,10 @@ describe("Android CtrlProxyText", () => {
     const sent: string[] = [];
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
-      getWebSocket: () => ({ readyState: 1, send: (data: string) => sent.push(data) }) as any,
+      getWebSocket: () =>
+        new FakeOpenSocket((data) => {
+          sent.push(data);
+        }),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -508,33 +515,32 @@ describe("Android CtrlProxyText", () => {
   test("resolves commitViaIme from a commit_text_result frame", async () => {
     const timer = new FakeTimer();
     const fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     fakeAdb.setScreenState(true);
     const device: BootedDevice = {
       deviceId: "test-device-commit-text",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
-    let socket: CapturingWebSocket | null = null;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      fakeAdb,
-      (url: string) => {
-        socket = new CapturingWebSocket(url, "none", 0, timer);
+    const created: CapturingWebSocket[] = [];
+    const client = AndroidCtrlProxyClient.createForTesting(device, fakeAdb, {
+      webSocketFactory: (url: string) => {
+        const socket = new CapturingWebSocket(url, "none", 0, timer);
+        created.push(socket);
         return socket;
       },
       timer,
-    );
+    });
 
     try {
       expect(await client.ensureConnected()).toBe(true);
+      const socket = created[0];
       if (!socket) {
         throw new Error("Expected the WebSocket factory to create a socket");
       }
       await waitForSocketOpen(socket);
 
-      const textDelegate = (client as unknown as { text: CtrlProxyText }).text;
+      const textDelegate = client.testHooks.text();
       const resultPromise = textDelegate.commitViaIme("value", "prior-ime");
       const request = await waitForRequest(socket, "request_commit_text");
       expect(request).toMatchObject({
@@ -580,6 +586,26 @@ describe("Android CtrlProxyText", () => {
           expect(result).toHaveProperty("insertedText", insertedText);
         } else {
           expect(result).not.toHaveProperty("insertedText");
+        }
+        socket.sentMessages.length = 0;
+      }
+
+      for (const editorConsumed of [true, false, undefined, null, 1, "true"]) {
+        const promise = textDelegate.commitViaIme("value", "prior-ime");
+        const nextRequest = await waitForRequest(socket, "request_commit_text");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "commit_text_result",
+            requestId: nextRequest.requestId,
+            success: true,
+            editorConsumed,
+          }),
+        );
+        const result = await promise;
+        if (editorConsumed === true) {
+          expect(result).toHaveProperty("editorConsumed", true);
+        } else {
+          expect(result).not.toHaveProperty("editorConsumed");
         }
         socket.sentMessages.length = 0;
       }
@@ -665,26 +691,25 @@ describe("Android CtrlProxyText", () => {
   test("resolves setKeyboardProfile from a set_keyboard_profile_result frame", async () => {
     const timer = new FakeTimer();
     const fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     fakeAdb.setScreenState(true);
     const device: BootedDevice = {
       deviceId: "test-device-profile",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
-    let socket: CapturingWebSocket | null = null;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      fakeAdb,
-      (url: string) => {
-        socket = new CapturingWebSocket(url, "none", 0, timer);
+    const created: CapturingWebSocket[] = [];
+    const client = AndroidCtrlProxyClient.createForTesting(device, fakeAdb, {
+      webSocketFactory: (url: string) => {
+        const socket = new CapturingWebSocket(url, "none", 0, timer);
+        created.push(socket);
         return socket;
       },
       timer,
-    );
+    });
     try {
       expect(await client.ensureConnected()).toBe(true);
+      const socket = created[0];
       if (!socket) {
         throw new Error("Expected the WebSocket factory to create a socket");
       }
@@ -717,26 +742,25 @@ describe("Android CtrlProxyText", () => {
   test("resolves listKeyboardProfiles from a versioned catalog result", async () => {
     const timer = new FakeTimer();
     const fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     fakeAdb.setScreenState(true);
     const device: BootedDevice = {
       deviceId: "test-device-profile-catalog",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
-    let socket: CapturingWebSocket | null = null;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      fakeAdb,
-      (url: string) => {
-        socket = new CapturingWebSocket(url, "none", 0, timer);
+    const created: CapturingWebSocket[] = [];
+    const client = AndroidCtrlProxyClient.createForTesting(device, fakeAdb, {
+      webSocketFactory: (url: string) => {
+        const socket = new CapturingWebSocket(url, "none", 0, timer);
+        created.push(socket);
         return socket;
       },
       timer,
-    );
+    });
     try {
       expect(await client.ensureConnected()).toBe(true);
+      const socket = created[0];
       if (!socket) {
         throw new Error("Expected the WebSocket factory to create a socket");
       }
@@ -791,7 +815,7 @@ test("sends expectedSuffix only when provided and resolves insert metadata", asy
   await waitForSocketOpen(socket);
   const requestManager = new RequestManager(timer);
   const context: DelegateContext = {
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => socket,
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -815,6 +839,7 @@ test("sends expectedSuffix only when provided and resolves insert metadata", asy
       warning: "caret warning",
       caretPlaced: false,
       resultingTextLength: 5,
+      totalTimeMs: 1,
     };
     requestManager.resolve(request.requestId as string, metadata);
     expect(await resultPromise).toEqual(metadata);
@@ -825,25 +850,25 @@ test("sends expectedSuffix only when provided and resolves insert metadata", asy
 test("client insert_text_result projection preserves optional fields and old APK responses", async () => {
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setScreenState(true);
   const device: BootedDevice = {
     deviceId: "insert-projection",
     platform: "android",
     name: "Test Device",
   };
-  let socket: CapturingWebSocket | null = null;
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url: string) => {
-      socket = new CapturingWebSocket(url, "none", 0, timer);
+  const created: CapturingWebSocket[] = [];
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url: string) => {
+      const socket = new CapturingWebSocket(url, "none", 0, timer);
+      created.push(socket);
       return socket;
     },
     timer,
-  );
+  });
   try {
     expect(await client.ensureConnected()).toBe(true);
+    const socket = created[0];
     if (!socket) {
       throw new Error("Expected a socket");
     }
@@ -892,7 +917,7 @@ test("insert caret-warning acceptance defaults on and can explicitly opt out for
   await waitForSocketOpen(socket);
   const requestManager = new RequestManager(timer);
   const delegate = new CtrlProxyText({
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => socket,
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -914,8 +939,14 @@ test("insert caret-warning acceptance defaults on and can explicitly opt out for
             success: false,
             partialApplication: true,
             error: "Text was inserted, but ACTION_SET_SELECTION returned false; do not retry",
+            totalTimeMs: 1,
           }
-        : { success: true, warning: "caret could not be placed", caretPlaced: false };
+        : {
+            success: true,
+            warning: "caret could not be placed",
+            caretPlaced: false,
+            totalTimeMs: 1,
+          };
     requestManager.resolve(request.requestId as string, response);
     expect(await pending).toEqual(response);
   }
@@ -925,24 +956,24 @@ test("insert caret-warning acceptance defaults on and can explicitly opt out for
 test("pre-dispatch state read round-trips and insert baseline is optional", async () => {
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward tcp:9008 tcp:9008", "");
+  adb.setCommandResponse("forward tcp:9008 tcp:9008", createExecResult("", ""));
   const device: BootedDevice = {
     deviceId: "baseline-device",
     platform: "android",
     name: "Test Device",
   };
-  let socket: CapturingWebSocket | null = null;
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url: string) => {
-      socket = new CapturingWebSocket(url, "none", 0, timer);
+  const created: CapturingWebSocket[] = [];
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url: string) => {
+      const socket = new CapturingWebSocket(url, "none", 0, timer);
+      created.push(socket);
       return socket;
     },
     timer,
-  );
+  });
   try {
     expect(await client.ensureConnected()).toBe(true);
+    const socket = created[0];
     if (!socket) {
       throw new Error("Expected a socket");
     }
@@ -1119,10 +1150,12 @@ test("Android client forwards appended transport controls for insert and IME", a
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "text-transport-controls", platform: "android", name: "Fake" },
     new FakeAdbExecutor(),
-    (url) => new CapturingWebSocket(url, "none", 0, timer),
-    timer,
+    {
+      webSocketFactory: (url) => new CapturingWebSocket(url, "none", 0, timer),
+      timer,
+    },
   );
-  const text = (client as unknown as { text: CtrlProxyText }).text;
+  const text = client.testHooks.text();
   const insert = spyOn(text, "requestInsertText").mockResolvedValue({
     success: true,
     totalTimeMs: 1,
@@ -1195,7 +1228,7 @@ describe("semantic IME dispatch outcomes", () => {
 });
 
 describe("IME commit trace wire response", () => {
-  test.each([
+  test.each<{ optIn: boolean | undefined; wire: unknown; expected: string[] | undefined }>([
     { optIn: true, wire: ["seq=1 t=0 event=complete"], expected: ["seq=1 t=0 event=complete"] },
     { optIn: undefined, wire: undefined, expected: undefined },
     { optIn: false, wire: undefined, expected: undefined },
@@ -1209,26 +1242,25 @@ describe("IME commit trace wire response", () => {
   ])("validates trace arrays for opt-in=$optIn", async ({ optIn, wire, expected }) => {
     const timer = new FakeTimer();
     const fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     fakeAdb.setScreenState(true);
     const device: BootedDevice = {
       deviceId: "trace-wire-fake",
       platform: "android",
-      isEmulator: true,
       name: "Fake",
     };
-    let socket: CapturingWebSocket | null = null;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      fakeAdb,
-      (url) => {
-        socket = new CapturingWebSocket(url, "none", 0, timer);
+    const created: CapturingWebSocket[] = [];
+    const client = AndroidCtrlProxyClient.createForTesting(device, fakeAdb, {
+      webSocketFactory: (url) => {
+        const socket = new CapturingWebSocket(url, "none", 0, timer);
+        created.push(socket);
         return socket;
       },
       timer,
-    );
+    });
     try {
       expect(await client.ensureConnected()).toBe(true);
+      const socket = created[0];
       if (!socket) {
         throw new Error("Expected fake socket");
       }
@@ -1264,5 +1296,50 @@ describe("IME commit trace wire response", () => {
       await client.close();
       expect(timer.getPendingTimeoutCount()).toBe(0);
     }
+  });
+});
+
+describe("device-confirmed consumed editor input", () => {
+  const confirmed = { deviceSucceeded: true, editorConsumed: true };
+  test.each([
+    ["three long lines", Array.from({ length: 3 }, () => "a".repeat(50)).join("\n"), 51],
+    ["long single line", "a".repeat(200), 150],
+    ["forty lines", Array.from({ length: 40 }, () => "abcd").join("\n"), 60],
+  ] as const)("accepts a restart after a long prefix: %s", (_name, sent, start) => {
+    expect(imeInsertedTextMatches(sent.slice(start), sent, confirmed)).toBe(true);
+  });
+  test.each([
+    ["!", "hello world!"],
+    ["4", "555-1234"],
+    ["\n", "abc\n"],
+  ])("rejects insufficient restart evidence %j from %j", (inserted, sent) => {
+    expect(imeInsertedTextMatches(inserted, sent, confirmed)).toBe(false);
+  });
+  test("rejects a miss at the 4096-character limit", () => {
+    expect(imeInsertedTextMatches("b", "a".repeat(4096), confirmed)).toBe(false);
+  });
+  test.each([
+    ["helloworld", "hello\nworld"],
+    ["cd", "ab cd"],
+    ["cdEF", "ab cd\nef"],
+    ["(123)", "prefix 123"],
+  ])("accepts consumed input %j from %j only with both flags", (inserted, sent) => {
+    expect(imeInsertedTextMatches(inserted, sent, confirmed)).toBe(true);
+    expect(imeInsertedTextMatches(inserted, sent, { deviceSucceeded: true })).toBe(false);
+    expect(imeInsertedTextMatches(inserted, sent, { editorConsumed: true })).toBe(false);
+    expect(
+      imeInsertedTextMatches(inserted, sent, { deviceSucceeded: false, editorConsumed: true }),
+    ).toBe(false);
+  });
+  test.each([
+    ["ab", "ab cd"],
+    ["", "ab cd"],
+    ["hello", "hello\nworld"],
+    ["abc", "a\nb\nc"],
+    ["abc", "a\nbc\n"],
+    ["helloworld", "hello\r\nworld"],
+    ["cd", "x".repeat(4097) + "cd"],
+  ])("rejects incomplete or unbounded input %j from %j", (inserted, sent) => {
+    expect(imeInsertedTextMatches(inserted, sent, confirmed)).toBe(false);
   });
 });

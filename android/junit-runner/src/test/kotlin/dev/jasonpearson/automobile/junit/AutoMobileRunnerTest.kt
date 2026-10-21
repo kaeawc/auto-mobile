@@ -16,7 +16,6 @@ class AutoMobileRunnerTest {
   fun cleanUp() {
     System.clearProperty("automobile.debug")
     SystemPropertyCache.clear()
-    PlanCache.clear()
     RegexCache.clear()
     TestTimingCache.clear()
   }

@@ -8,7 +8,7 @@ import org.junit.Test
 
 class IcTraceRecorderTest {
   private fun record(recorder: IcTraceRecorder, args: String = "") {
-    recorder.record("commitText", args, 0, 1, -1, -1)
+    recorder.record("commitText", args, IcTraceSelection(0, 1, -1, -1))
   }
 
   @Test
@@ -98,7 +98,12 @@ class IcTraceRecorderTest {
       ),
     )
     repeat(501) { index ->
-      recorder.record("setSelection", "start=$index", 0, 0, -1, -1, result = index % 2 == 0)
+      recorder.record(
+        "setSelection",
+        "start=$index",
+        IcTraceSelection(0, 0, -1, -1),
+        result = index % 2 == 0,
+      )
     }
 
     assertEquals(1, recorder.droppedEventCount())
@@ -108,7 +113,7 @@ class IcTraceRecorderTest {
     assertEquals("2.4", recorder.snapshot().last().metadata.keyboardVersion)
 
     recorder.updateMetadata(IcTraceMetadata(keyboardId = "com.example.next/.Ime"))
-    recorder.record("setSelection", "", 0, 0, -1, -1)
+    recorder.record("setSelection", "", IcTraceSelection(0, 0, -1, -1))
     assertEquals("mid-word replacement", recorder.snapshot().last().metadata.scenario)
   }
 

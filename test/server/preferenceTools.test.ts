@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   getPreferenceSchema,
   registerPreferenceTools,
-  resetPreferenceToolsDependencies,
   setPreferenceSchema,
 } from "../../src/server/preferenceTools";
 import { formatToolParamError } from "../../src/server/index";
@@ -15,13 +14,11 @@ isolateToolRegistry();
 describe("preference tools", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
-    resetPreferenceToolsDependencies();
     registerPreferenceTools();
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
-    resetPreferenceToolsDependencies();
   });
 
   test("registers getPreference and setPreference as device-aware tools", () => {
@@ -249,7 +246,6 @@ describe("issue #6348: preference schemas reject undeclared arguments", () => {
   // at the schema seam means that verified:true is never produced.
   test("setPreference dispatch does not reach the verified:true handler for a bad fileName", async () => {
     let handlerReached = false;
-    resetPreferenceToolsDependencies();
     ToolRegistry.clearTools();
     registerPreferenceTools();
     const setTool = ToolRegistry.getTool("setPreference");

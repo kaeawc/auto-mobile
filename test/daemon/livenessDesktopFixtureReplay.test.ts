@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { PIXEL, PIXEL_FOLD, type WireFixture } from "./helpers/desktopWireHarness";
 
@@ -25,6 +25,7 @@ const RESTART_MISMATCHES = [
 const ROWS = [
   { name: "no-click-start", holders: [null, null] },
   { name: "bind-error-not-ownership", holders: [null, null], missingPixel: true },
+  { name: "bound-device-control", holders: [DESKTOP_1, null] },
   { name: "close-pane-releases-device", holders: [DESKTOP_2, null] },
   { name: "daemon-restart", holders: [DESKTOP_2, null] },
   { name: "first-tap-binds-device", holders: [DESKTOP_1, null] },
@@ -85,6 +86,8 @@ describe("started daemon desktop fixture replay", () => {
     expect(
       readdirSync(FIXTURE_DIR)
         .filter((name) => name.endsWith(".json"))
+        // Not a liveness scenario: statelessWireParity.test.ts owns this handshake fixture.
+        .filter((name) => name !== "stateless-handshake.json")
         .sort(),
     ).toEqual(ROWS.map(({ name }) => `${name}.json`).sort());
   });
@@ -121,6 +124,35 @@ describe("started daemon desktop fixture replay", () => {
     expect(replay.unclaimedControls).toEqual([]);
     expect(replay.mismatches).toEqual([
       'held#0: {"success":true,"result":{"activeSessions":0,"activeExecutions":0,"sessions":[]}}',
+    ]);
+    expect(live.poolState().sessionId).toBeNull();
+  });
+
+  test("a control with the desktop's bind removed is refused: no unclaimed control succeeds (K3 negative control)", async () => {
+    const live = await start();
+    const captured = fixture("bound-device-control");
+    // Drop captured frames only: do not synthesize or modify a request.
+    captured.exchanges = captured.exchanges.filter(
+      (frame) => frame.actor !== "desktop" || frame.request.params.name !== "setActiveDevice",
+    );
+    const replay = await live.replayDesktopFixture(captured);
+    expect(replay.skipped).toEqual([]);
+    // sessionManager.ts:5113-5122 keeps an observer registration from becoming an active session until bound.
+    expect(replay.unclaimedControls).toEqual([]);
+    expect(replay.unclaimedInputs).toEqual([]);
+    expect(replay.mismatches).toEqual([
+      `rotate#0: ${JSON.stringify({
+        success: true,
+        result: {
+          content: [
+            {
+              type: "text",
+              text: `Error: Session ${DESKTOP_1} is not an active daemon session (not found). Acquire a device with getAndroid or getApple before using its sessionUuid.`,
+            },
+          ],
+          isError: true,
+        },
+      })}`,
     ]);
     expect(live.poolState().sessionId).toBeNull();
   });

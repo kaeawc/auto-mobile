@@ -1,72 +1,55 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
-import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.RequestCommitText
+import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+import dev.jasonpearson.automobile.protocol.RequestGlobalAction
+import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.RequestImeAction
+import dev.jasonpearson.automobile.protocol.RequestInsertText
+import dev.jasonpearson.automobile.protocol.RequestPinch
+import dev.jasonpearson.automobile.protocol.RequestScreenshot
+import dev.jasonpearson.automobile.protocol.RequestSetText
+import dev.jasonpearson.automobile.protocol.RequestSwipe
+import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
+import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
+import dev.jasonpearson.automobile.protocol.SetPreference
+import kotlinx.serialization.json.JsonArray
 
 /**
  * The device actions a decoded [dev.jasonpearson.automobile.protocol.WebSocketRequest] can trigger.
  *
  * [CtrlProxyMessageHandler] dispatches each sealed request to exactly one of these methods. The
  * on-device [CtrlProxy] service implements them (mostly by delegating to its `perform*`/`handle*`
- * methods); tests provide a recording fake. Every method is abstract and non-null so the compiler
- * guarantees each action is wired — replacing the previous bag of ~43 nullable callback lambdas.
+ * methods); tests provide a recording fake. Every typed request method is abstract, so the compiler
+ * guarantees each action is wired. Legacy optional hooks below retain their defaults.
  *
  * `add_highlight` takes the Android render-model [HighlightShape]; the handler converts the wire
  * type before calling it. `set_network_mock_rules` receives pre-encoded JSON because the SDK store
  * consumes a JSON string.
  */
 interface CtrlProxyActions {
-  suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?)
+  suspend fun requestHierarchy(request: RequestHierarchy)
 
-  suspend fun requestHierarchy(
-    disableAllFiltering: Boolean,
-    maxDepth: Int?,
-    maxNodes: Int?,
-    displayId: Int? = null,
-    requestId: String? = null,
-  ) = requestHierarchy(disableAllFiltering, requestId)
+  suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?)
 
-  fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?)
-
-  fun setHierarchyInterval(intervalMs: Long?)
-
-  fun requestScreenshot(requestId: String?)
-
-  fun requestScreenshot(requestId: String?, displayId: Int?) = requestScreenshot(requestId)
+  suspend fun setHierarchyInterval(intervalMs: Long?)
 
   /**
-   * [hidePrototypes] hides CtrlProxy's prototype for this capture and restores it after, whatever
-   * the capture's outcome (#9305).
+   * [RequestScreenshot.hidePrototypes] hides CtrlProxy's prototype for this capture and restores it
+   * afterward, whatever the capture's outcome (#9305).
    */
-  fun requestScreenshot(requestId: String?, displayId: Int?, hidePrototypes: Boolean) =
-    requestScreenshot(requestId, displayId)
+  suspend fun requestScreenshot(request: RequestScreenshot)
 
-  // Coordinate params are `Double` so fractional wire values pass through untruncated to the
-  // gesture engine (which builds float `Path`s). `offset`, durations, and `rotationDegrees` are not
-  // coordinates and stay their original types. Symmetric to iOS; see #2927 / WebSocketRequest.kt.
-  fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-  )
+  // Typed request coordinates are Double so fractional wire values reach the float Path engine
+  // untruncated. Durations, offset, and rotationDegrees retain their protocol types (#2927).
+  suspend fun requestSwipe(request: RequestSwipe)
 
-  fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    frameContext: String?,
-  ) = requestSwipe(requestId, x1, y1, x2, y2, duration)
-
-  fun requestDoubleTapCoordinates(
+  suspend fun requestDoubleTapCoordinates(
     requestId: String?,
     x: Double,
     y: Double,
@@ -76,143 +59,21 @@ interface CtrlProxyActions {
     throw UnsupportedOperationException("Atomic double tap is not supported")
   }
 
-  fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long)
+  suspend fun requestTapCoordinates(request: RequestTapCoordinates)
 
-  fun requestTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    duration: Long,
-    frameContext: String?,
-  ) = requestTapCoordinates(requestId, x, y, duration)
+  suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe)
 
-  fun requestTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-  )
+  suspend fun requestDrag(request: RequestDrag)
 
-  fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-  )
+  suspend fun requestPinch(request: RequestPinch)
 
-  fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-    frameContext: String?,
-  ) = requestDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+  // One live drag arrives as a start, incremental moves sharing a gestureId, and an end. The
+  // runner chains them into one continued AccessibilityService gesture.
+  suspend fun requestGestureStart(request: RequestGestureStart)
 
-  fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-  )
+  suspend fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double)
 
-  fun requestTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    duration: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) = requestTapCoordinates(requestId, x, y, duration, frameContext)
-
-  fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) = requestSwipe(requestId, x1, y1, x2, y2, duration, frameContext)
-
-  fun requestTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-    displayId: Int?,
-  ) = requestTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset)
-
-  fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) =
-    requestDrag(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      frameContext,
-    )
-
-  fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-    displayId: Int?,
-  ) =
-    requestPinch(requestId, centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration)
-
-  fun requestGestureStart(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-    displayId: Int?,
-  ) = requestGestureStart(requestId, gestureId, x, y)
-
-  // Streaming gesture input: one live drag arrives as a start, incremental moves sharing a
-  // `gestureId`, and an end. The runner chains them into a single continued AccessibilityService
-  // gesture so the device tracks the pointer in real time. Coordinates are `Double` for the same
-  // reason swipe/tap are — fractional wire values reach the float `Path` engine untruncated.
-  fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double)
-
-  fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double)
-
-  fun requestGestureEnd(
+  suspend fun requestGestureEnd(
     requestId: String?,
     gestureId: String,
     x: Double,
@@ -220,122 +81,61 @@ interface CtrlProxyActions {
     cancel: Boolean,
   )
 
-  suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-  )
+  suspend fun requestSetText(request: RequestSetText)
 
-  suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-    frameContext: String?,
-  ) = requestSetText(requestId, text, resourceId, dismissKeyboard)
+  suspend fun requestInsertTextState(requestId: String?) {}
 
-  fun requestInsertTextState(requestId: String?) {}
+  suspend fun requestInsertText(request: RequestInsertText)
 
-  fun requestInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-    precedingState: dev.jasonpearson.automobile.protocol.InsertTextState?,
-  ) = requestInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced)
+  suspend fun requestCommitText(request: RequestCommitText)
 
-  fun requestInsertText(requestId: String?, text: String)
+  suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {}
 
-  fun requestInsertText(requestId: String?, text: String, expectedSuffix: String?) =
-    requestInsertText(requestId, text)
+  suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String)
 
-  fun requestInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-  ) = requestInsertText(requestId, text, expectedSuffix)
+  suspend fun requestListKeyboardProfiles(requestId: String?, supportedCatalogVersions: List<Int>)
 
-  fun requestCommitText(requestId: String?, text: String, priorImeId: String?)
+  suspend fun requestImeAction(request: RequestImeAction)
 
-  fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: ImeTextDelivery,
-  ) = requestCommitText(requestId, text, priorImeId)
+  suspend fun requestSelectAll(requestId: String?)
 
-  fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: ImeTextDelivery,
-    timeoutMs: Long?,
-  ) = requestCommitText(requestId, text, priorImeId, delivery)
+  suspend fun requestClickFocusedInput(requestId: String?)
 
-  fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: ImeTextDelivery,
-    timeoutMs: Long?,
-    trace: Boolean,
-  ) = requestCommitText(requestId, text, priorImeId, delivery, timeoutMs)
-
-  fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {}
-
-  fun requestSetKeyboardProfile(requestId: String?, profileId: String)
-
-  fun requestListKeyboardProfiles(requestId: String?, supportedCatalogVersions: List<Int>)
-
-  fun requestImeAction(requestId: String?, action: String)
-
-  fun requestImeAction(requestId: String?, action: String, frameContext: String?) =
-    requestImeAction(requestId, action)
-
-  fun requestSelectAll(requestId: String?)
-
-  fun requestClickFocusedInput(requestId: String?)
-
-  fun requestAction(
+  suspend fun requestAction(
     requestId: String?,
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
   )
 
-  fun requestActivateAccessibilityLink(
+  suspend fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
     occurrence: Int,
     selector: NodeSelector?,
   )
 
-  fun requestClipboard(requestId: String?, action: String, text: String?)
+  suspend fun requestClipboard(requestId: String?, action: String, text: String?)
 
-  fun installCaCert(requestId: String?, certificate: String)
+  suspend fun installCaCert(requestId: String?, certificate: String)
 
-  fun installCaCertFromPath(requestId: String?, devicePath: String)
+  suspend fun installCaCertFromPath(requestId: String?, devicePath: String)
 
-  fun removeCaCert(requestId: String?, alias: String?, certificate: String?)
+  suspend fun removeCaCert(requestId: String?, alias: String?, certificate: String?)
 
-  fun requestGlobalAction(requestId: String?, action: String)
+  suspend fun requestGlobalAction(request: RequestGlobalAction)
 
-  fun requestGlobalAction(requestId: String?, action: String, frameContext: String?) =
-    requestGlobalAction(requestId, action)
+  suspend fun validateFrameContext(requestId: String?, frameContext: String) = Unit
 
-  fun validateFrameContext(requestId: String?, frameContext: String) = Unit
+  suspend fun requestDeviceInfo(requestId: String?)
 
-  fun requestDeviceInfo(requestId: String?)
+  suspend fun getDeviceOwnerStatus(requestId: String?)
 
-  fun getDeviceOwnerStatus(requestId: String?)
+  suspend fun getPermission(requestId: String?, permission: String?, requestPermission: Boolean?)
 
-  fun getPermission(requestId: String?, permission: String?, requestPermission: Boolean?)
+  suspend fun setRecompositionTracking(enabled: Boolean)
 
-  fun setRecompositionTracking(enabled: Boolean)
-
-  fun setAccessibilityFlags(
+  suspend fun setAccessibilityFlags(
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
@@ -347,9 +147,9 @@ interface CtrlProxyActions {
    * `set_network_mock_rules_result` reply reporting the rules the device engine rejected
    * (issue #10101); null keeps the fire-and-forget broadcast.
    */
-  fun setNetworkMockRules(requestId: String?, rulesJson: String)
+  suspend fun setNetworkMockRules(requestId: String?, rulesJson: String)
 
-  fun setNetworkErrorSimulation(
+  suspend fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
@@ -357,72 +157,88 @@ interface CtrlProxyActions {
     remainingMs: Long?,
   )
 
-  fun getCurrentFocus(requestId: String?)
+  suspend fun getCurrentFocus(requestId: String?)
 
-  fun getTraversalOrder(requestId: String?)
+  suspend fun getTraversalOrder(requestId: String?)
 
-  fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?)
+  suspend fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?)
 
   /** [reset] starts a same-id show fresh instead of replacing the prototype in place. */
-  fun showPrototype(
+  suspend fun showPrototype(
     requestId: String?,
     spec: PrototypeSpec,
     displayId: Int?,
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
+    replaceOthers: Boolean = true,
   )
 
-  fun dismissPrototype(requestId: String?, id: String?, all: Boolean?)
+  suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?)
 
-  fun inspectPrototypes(requestId: String?)
+  suspend fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray)
 
-  fun putPrototypeAsset(requestId: String?, id: String, mimeType: String, dataBase64: String)
+  suspend fun inspectPrototypes(requestId: String?)
 
-  fun removePrototypeAsset(requestId: String?, id: String)
+  suspend fun savePrototype(requestId: String?, spec: PrototypeSpec, label: String, icon: String?)
 
-  fun listPreferenceFiles(requestId: String?, packageName: String)
+  suspend fun pinSavedPrototype(requestId: String?, id: String, icon: String?)
 
-  fun getPreferences(requestId: String?, packageName: String, fileName: String)
+  suspend fun listSavedPrototypes(requestId: String?)
 
-  fun discoverKeystore(requestId: String?, packageName: String)
+  suspend fun deleteSavedPrototype(requestId: String?, id: String)
 
-  fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?)
+  suspend fun clearPrototypeStorage(requestId: String?, id: String)
 
-  fun listDataStores(requestId: String?, packageName: String, adapterName: String)
+  suspend fun putPrototypeAsset(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    dataBase64: String,
+  )
 
-  fun getDataStore(
+  suspend fun removePrototypeAsset(requestId: String?, id: String)
+
+  suspend fun listPreferenceFiles(requestId: String?, packageName: String)
+
+  suspend fun getPreferences(requestId: String?, packageName: String, fileName: String)
+
+  suspend fun discoverKeystore(requestId: String?, packageName: String)
+
+  suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?)
+
+  suspend fun listDataStores(requestId: String?, packageName: String, adapterName: String)
+
+  suspend fun getDataStore(
     requestId: String?,
     packageName: String,
     adapterName: String,
     storeName: String,
   )
 
-  fun subscribeStorage(requestId: String?, packageName: String, fileName: String)
+  suspend fun subscribeStorage(requestId: String?, packageName: String, fileName: String)
 
-  fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String)
+  suspend fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String)
 
-  fun getPreference(requestId: String?, packageName: String, fileName: String, key: String)
+  suspend fun getPreference(requestId: String?, packageName: String, fileName: String, key: String)
 
-  fun setPreference(
+  suspend fun setPreference(request: SetPreference)
+
+  suspend fun removePreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
-    value: String?,
-    type: String,
   )
 
-  fun removePreference(requestId: String?, packageName: String, fileName: String, key: String)
+  suspend fun clearPreferences(requestId: String?, packageName: String, fileName: String)
 
-  fun clearPreferences(requestId: String?, packageName: String, fileName: String)
+  suspend fun startRecording()
 
-  fun startRecording()
+  suspend fun stopRecording()
 
-  fun stopRecording()
+  suspend fun requestSettingsGet(requestId: String?, namespace: String, key: String)
 
-  fun requestSettingsGet(requestId: String?, namespace: String, key: String)
-
-  fun requestSettingsPut(
+  suspend fun requestSettingsPut(
     requestId: String?,
     namespace: String,
     key: String,
@@ -430,11 +246,15 @@ interface CtrlProxyActions {
     valueType: String,
   )
 
-  fun requestSettingsList(requestId: String?, namespace: String)
+  suspend fun requestSettingsList(requestId: String?, namespace: String)
 
-  fun requestInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?)
+  suspend fun requestInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?)
 
-  fun requestPackageInfo(requestId: String?, packageName: String, includePermissions: Boolean)
+  suspend fun requestPackageInfo(
+    requestId: String?,
+    packageName: String,
+    includePermissions: Boolean,
+  )
 
-  fun requestLaunchIntent(requestId: String?, packageName: String)
+  suspend fun requestLaunchIntent(requestId: String?, packageName: String)
 }

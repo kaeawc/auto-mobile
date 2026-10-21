@@ -1,75 +1,41 @@
-import { z } from "zod";
+import { prototypeCheckErrors } from "./prototypeCheckValidation";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
 import { expandPrototypeComponents } from "./prototypeComponents";
-import {
-  imageSlotUses,
-  repeatErrors,
-  repeatKeyInstances,
-  type KeyInstance,
-} from "./prototypeRepeat";
+import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
+import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
+import { prototypeDataActionsError } from "./prototypeDataActions";
+import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeRequestsError } from "./prototypeRequest";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
+import {
+  Rule,
+  PrototypeValidationError,
+  Located,
+  fail,
+  object,
+  numberValid,
+  listItemBindingErrors,
+  bindingErrors,
+  sheetBindingErrors,
+  stateActionErrors,
+  Checked,
+  bound,
+} from "./prototypeBindingValidation";
+export { type PrototypeValidationError } from "./prototypeBindingValidation";
 
-interface Rule {
-  kind: string;
-  name?: string;
-  empty?: boolean;
-  nonblank?: boolean;
-  exclusive?: string[];
-  exactlyOne?: string[];
-  dependents?: Record<string, string[]>;
-  integer?: boolean;
-  min?: number;
-  max?: number;
-  maxBytes?: number;
-  maxDepth?: number;
-  unique?: boolean;
-  binding?: boolean;
-  atLeastOne?: boolean;
-  item?: Rule;
-  options?: Rule[];
-  values?: string[];
-  fields?: Record<string, { rule: Rule; optional: boolean }>;
-  variants?: Record<string, Rule>;
-}
-export interface PrototypeValidationError {
-  path: string;
-  message: string;
-}
 export type PrototypeValidationResult =
   | { success: true; data: PrototypeSpec }
   | { success: false; error: PrototypeValidationError };
-interface Located {
-  value: Record<string, unknown>;
-  path: string;
-}
 interface Context {
   nodes: Located[];
   actions: Located[];
   images: number;
-  selectorDepth: number;
-  conditionDepth: number;
+  /** Current nesting per bounded reference (see `nestedReferences`). */
+  nesting: Record<string, number>;
 }
 const definitions: Record<string, Rule> = contract.definitions;
-const fail = (path: string, message: string): PrototypeValidationError => ({
-  path: path || "$",
-  message,
-});
-const objectSchema = z.record(z.unknown());
-function object(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value !== "object" || value === null) {
-    return undefined;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    return undefined;
-  }
-  const result = objectSchema.safeParse(value);
-  return result.success && typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
 function keyPath(path: string, key: string): string {
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
     return path ? `${path}.${key}` : key;
@@ -83,15 +49,24 @@ function refRule(rule: Rule): Rule {
   return definitions[rule.name ?? ""] ?? rule;
 }
 
-/** References whose nesting is bounded by their own contract limit. */
-const nestedReferences: Record<string, typeof visitReference | undefined> = Object.assign(
-  Object.create(null) as Record<string, typeof visitReference | undefined>,
-  { container: visitContainer, condition: visitCondition },
+/** References whose nesting is bounded by their own contract limit. A request nests actions. */
+const nestedReferences = Object.assign(
+  Object.create(null) as Record<string, { limit: number; message: string } | undefined>,
+  {
+    container: {
+      limit: contract.limits.MAX_PROTOTYPE_SELECTOR_DEPTH,
+      message: "Selector depth limit exceeded",
+    },
+    condition: {
+      limit: contract.limits.MAX_PROTOTYPE_CONDITION_DEPTH,
+      message: "Condition depth limit exceeded",
+    },
+    action: {
+      limit: contract.limits.MAX_PROTOTYPE_ACTION_DEPTH,
+      message: "Action nesting limit exceeded",
+    },
+  },
 );
-
-function nestedReference(rule: Rule): typeof visitReference | undefined {
-  return nestedReferences[rule.name ?? ""];
-}
 
 function visitReference(
   value: unknown,
@@ -100,9 +75,9 @@ function visitReference(
   context: Context,
   depth: number,
 ): PrototypeValidationError | undefined {
-  const nested = nestedReference(rule);
+  const nested = nestedReferences[String(rule.name)];
   if (nested) {
-    return nested(value, rule, path, context, depth);
+    return visitNested(value, rule, path, context, depth, nested);
   }
   const itemImages = rule.name === "item" ? imageSlotUses(object(value)?.image) : 0;
   if (itemImages > 0) {
@@ -133,34 +108,20 @@ function visitReference(
   }
   return walk(value, refRule(rule), path, context, depth + 1);
 }
-function visitContainer(
+function visitNested(
   value: unknown,
   rule: Rule,
   path: string,
   context: Context,
   depth: number,
+  nested: { limit: number; message: string },
 ): PrototypeValidationError | undefined {
-  context.selectorDepth++;
-  if (context.selectorDepth > contract.limits.MAX_PROTOTYPE_SELECTOR_DEPTH) {
-    return fail(path, "Selector depth limit exceeded");
+  const name = rule.name ?? "";
+  if (++context.nesting[name] > nested.limit) {
+    return fail(path, nested.message);
   }
   const error = walk(value, refRule(rule), path, context, depth);
-  context.selectorDepth--;
-  return error;
-}
-function visitCondition(
-  value: unknown,
-  rule: Rule,
-  path: string,
-  context: Context,
-  depth: number,
-): PrototypeValidationError | undefined {
-  context.conditionDepth++;
-  if (context.conditionDepth > contract.limits.MAX_PROTOTYPE_CONDITION_DEPTH) {
-    return fail(path, "Condition depth limit exceeded");
-  }
-  const error = walk(value, refRule(rule), path, context, depth);
-  context.conditionDepth--;
+  context.nesting[name]--;
   return error;
 }
 function visitTagged(
@@ -186,6 +147,40 @@ function visitTagged(
   }
   return walk(data, variant, path, context, depth);
 }
+/** Text's two content forms and its span count are pinned by the shared contract. */
+function textNodeConstraint(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
+  if (rule === definitions.node.variants?.text) {
+    const text = Object.hasOwn(data, "text");
+    const spans = Object.hasOwn(data, "spans");
+    if (text === spans) {
+      return fail(
+        keyPath(path, spans ? "spans" : "text"),
+        spans ? "text and spans cannot both be set" : "text node needs text or spans",
+      );
+    }
+    if (Array.isArray(data.spans) && data.spans.length > contract.limits.MAX_PROTOTYPE_TEXT_SPANS) {
+      return fail(keyPath(path, "spans"), "Text span limit exceeded");
+    }
+  }
+  return undefined;
+}
+function searchBarConstraint(
+  data: Record<string, unknown>,
+  path: string,
+): PrototypeValidationError | undefined {
+  if (
+    data.type === "searchBar" &&
+    Object.hasOwn(data, "child") &&
+    !Object.hasOwn(data, "activeKey")
+  ) {
+    return fail(keyPath(path, "child"), "Search bar child requires activeKey");
+  }
+  return undefined;
+}
 function visitObject(
   value: unknown,
   rule: Rule,
@@ -197,7 +192,15 @@ function visitObject(
   if (!data) {
     return fail(path, "Expected object");
   }
+  const textError = textNodeConstraint(data, rule, path);
+  if (textError) {
+    return textError;
+  }
   const fields = rule.fields ?? {};
+  const searchBarError = searchBarConstraint(data, path);
+  if (searchBarError) {
+    return searchBarError;
+  }
   const keys = [...new Set([...Object.keys(data), ...Object.keys(fields)])].sort();
   for (const key of keys) {
     const field = Object.hasOwn(fields, key) ? fields[key] : undefined;
@@ -252,9 +255,9 @@ function formConstraint(
   }
   for (const [trigger, dependents] of Object.entries(rule.dependents ?? {})) {
     const present = dependents.filter((key) => Object.hasOwn(data, key));
-    if (!Object.hasOwn(data, trigger)) {
+    if (!trigger.split("|").some((key) => Object.hasOwn(data, key))) {
       if (present.length > 0) {
-        return fail(keyPath(path, present[0]), `Requires ${trigger}`);
+        return fail(keyPath(path, present[0]), `Requires ${trigger.split("|").join(" or ")}`);
       }
     } else if (present.length !== 1) {
       const target = present[1] ?? dependents[0];
@@ -314,31 +317,83 @@ function visitMap(
   }
   return undefined;
 }
-function numberValid(value: unknown, rule: Rule): boolean {
-  return (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    (!rule.integer || Number.isInteger(value)) &&
-    value >= (rule.min ?? -Infinity) &&
-    value <= (rule.max ?? Infinity)
-  );
+function visitScreenMap(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
+  const screens = object(value);
+  if (!screens) {
+    return fail(path, "Expected object");
+  }
+  const names = Object.keys(screens).sort();
+  if (names.length < 1 || names.length > contract.limits.MAX_PROTOTYPE_STACK_SCREENS) {
+    return fail(path, "Screen count out of range");
+  }
+  for (const name of names) {
+    const at = `${path}[${JSON.stringify(name)}]`;
+    if (!name.length) {
+      return fail(at, "Empty screen name");
+    }
+    const error = walk(screens[name], rule.item!, at, context, depth);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+function visitRecord(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
+  const data = object(value);
+  if (!data) {
+    return fail(path, "Expected object");
+  }
+  if (Object.keys(data).length > (rule.maxEntries ?? Infinity)) {
+    return fail(path, "Record entry limit exceeded");
+  }
+  for (const [key, child] of Object.entries(data)) {
+    const at = keyPath(path, key);
+    if (key.length === 0) {
+      return fail(at, "Invalid context name");
+    }
+    const error = walk(child, rule.item ?? { kind: "json" }, at, context, depth);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
 }
 const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> = {
   string: (value, rule) =>
     typeof value === "string" &&
     (rule.empty === true || value.length > 0) &&
-    (!rule.nonblank || value.trim().length > 0),
+    (!rule.nonblank || value.trim().length > 0) &&
+    value.length <= (rule.max ?? Infinity),
+  pointer: isPrototypeDataPointer,
   key: (value) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(value),
   boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
   color: (value) => typeof value === "string" && /^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value),
   number: numberValid,
+  true: (value) => value === true,
   boolean: (value) => typeof value === "boolean",
   scalar: (value) =>
     typeof value === "string" ||
     typeof value === "boolean" ||
     (typeof value === "number" && Number.isFinite(value)),
-  enum: (value, rule) => typeof value === "string" && (rule.values ?? []).includes(value),
-  json: (value, rule) => jsonCost(value) <= (rule.maxBytes ?? Infinity),
+  enum: (value, rule) =>
+    (typeof value === "string" || typeof value === "boolean") &&
+    (rule.values ?? []).includes(value),
+  json: (value, rule) => {
+    const cost = jsonCost(value);
+    return Number.isFinite(cost) && cost <= (rule.maxBytes ?? Infinity);
+  },
 };
 // Reserve 32 bytes per finite number so lexical exponent/decimal spellings cannot
 // change payload acceptance between JavaScript and JVM JSON decoders.
@@ -373,6 +428,57 @@ function jsonCost(value: unknown, depth = 0): number {
     entries.reduce((sum, [key, child]) => sum + bytes(key) + 1 + jsonCost(child, depth + 1), 0)
   );
 }
+/** Data uses the emit payload cost after its own stricter depth-first walk. */
+export function prototypeDataError(
+  value: unknown,
+  maxBytes: number = contract.limits.MAX_PROTOTYPE_DATA_BYTES,
+): PrototypeValidationError | undefined {
+  if (!object(value)) {
+    return fail("data", "Expected object");
+  }
+  return (
+    walkDataValue(value, "data", 1) ??
+    (jsonCost(value) > maxBytes ? fail("data", "Data byte limit exceeded") : undefined)
+  );
+}
+
+function dataChildren(value: unknown, path: string): { value: unknown; path: string }[] {
+  if (Array.isArray(value)) {
+    return value.map((child, index) => ({ value: child, path: `${path}[${index}]` }));
+  }
+  const data = object(value) ?? {};
+  return Object.keys(data)
+    .sort()
+    .map((key) => ({ value: data[key], path: keyPath(path, key) }));
+}
+
+function walkDataValue(
+  value: unknown,
+  path: string,
+  depth: number,
+): PrototypeValidationError | undefined {
+  if (!Array.isArray(value) && !object(value)) {
+    return primitiveChecks.scalar(value, { kind: "scalar" })
+      ? undefined
+      : fail(path, "Invalid data value");
+  }
+  if (depth > contract.limits.MAX_PROTOTYPE_DATA_DEPTH) {
+    return fail(path, "Data depth limit exceeded");
+  }
+  if (Array.isArray(value) && value.length > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS) {
+    return fail(path, "Data array limit exceeded");
+  }
+  for (const child of dataChildren(value, path)) {
+    const error = walkDataValue(child.value, child.path, depth + 1);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+function visitData(value: unknown): PrototypeValidationError | undefined {
+  return prototypeDataError(value);
+}
 function visitChoice(
   value: unknown,
   rule: Rule,
@@ -382,6 +488,9 @@ function visitChoice(
 ): PrototypeValidationError | undefined {
   const options = rule.options ?? [];
   const candidates = options.filter((option) => {
+    if (option.kind === "array") {
+      return Array.isArray(value);
+    }
     if (option.kind === "object") {
       return object(value) !== undefined;
     }
@@ -409,11 +518,14 @@ function walk(
   depth: number,
 ): PrototypeValidationError | undefined {
   const handlers: Record<string, typeof visitObject> = {
+    data: visitData,
     ref: visitReference,
     tagged: visitTagged,
     object: visitObject,
     array: visitArray,
     map: visitMap,
+    screenMap: visitScreenMap,
+    record: visitRecord,
     choice: visitChoice,
   };
   const handler = handlers[rule.kind];
@@ -423,6 +535,79 @@ function walk(
   return primitiveChecks[rule.kind]?.(value, rule)
     ? undefined
     : fail(path, `Invalid ${rule.kind === "boundKey" ? "key" : rule.kind} value`);
+}
+function stackErrors(context: Context): PrototypeValidationError | undefined {
+  const stacks = new Map<string, Record<string, unknown>>();
+  for (const { value, path } of context.nodes) {
+    if (value.type !== "stack" || typeof value.id !== "string") {
+      continue;
+    }
+    if (stacks.has(value.id)) {
+      return fail(`${path}.id`, "Duplicate stack id");
+    }
+    const screens = object(value.screens) ?? {};
+    if (typeof value.start !== "string" || !Object.hasOwn(screens, value.start)) {
+      return fail(`${path}.start`, "Unknown start screen");
+    }
+    stacks.set(value.id, screens);
+  }
+  return stackActionErrors(context.actions, stacks);
+}
+function stackActionErrors(
+  actions: Located[],
+  stacks: Map<string, Record<string, unknown>>,
+): PrototypeValidationError | undefined {
+  for (const { value, path } of actions) {
+    if (typeof value.stack !== "string") {
+      continue;
+    }
+    const screens = stacks.get(value.stack);
+    if (!screens) {
+      return fail(`${path}.stack`, "Unknown stack id");
+    }
+    if (typeof value.screen === "string" && !Object.hasOwn(screens, value.screen)) {
+      return fail(`${path}.screen`, "Unknown stack screen");
+    }
+  }
+  return undefined;
+}
+/** Context uses the same pager-id set as setPage; only structurally valid emits carry context. */
+function emitContextPagerError(
+  { value, path }: Located,
+  pagers: ReadonlySet<string>,
+): PrototypeValidationError | undefined {
+  for (const [name, binding] of Object.entries(object(value.context) ?? {})) {
+    const page = object(binding)?.page;
+    if (typeof page === "string" && !pagers.has(page)) {
+      return fail(keyPath(`${path}.context`, name), "Unknown pager id");
+    }
+  }
+  return undefined;
+}
+/** A swipe needs an action side, and a horizontal pager or carousel would steal its drag. */
+function swipeActionsErrors(context: Context): PrototypeValidationError | undefined {
+  for (const { value, path } of context.nodes) {
+    const swipe = object(value.swipeActions);
+    if (!swipe) {
+      continue;
+    }
+    if (swipe.start === undefined && swipe.end === undefined) {
+      return fail(`${path}.swipeActions`, "swipeActions needs start or end");
+    }
+    const blocked = context.nodes.some(
+      ({ value: ancestor, path: ancestorPath }) =>
+        path.startsWith(`${ancestorPath}.`) &&
+        (ancestor.type === "carousel" ||
+          (ancestor.type === "pager" && ancestor.axis !== "vertical")),
+    );
+    if (blocked) {
+      return fail(
+        `${path}.swipeActions`,
+        "swipeActions cannot appear inside a horizontal pager or carousel",
+      );
+    }
+  }
+  return undefined;
 }
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
@@ -434,410 +619,119 @@ function pagerErrors(context: Context): PrototypeValidationError | undefined {
       return fail(`${path}.id`, "Duplicate pager id");
     }
     pagers.add(value.id);
+    if (
+      value.axis === "vertical" &&
+      context.nodes.some(
+        ({ value: ancestor, path: ancestorPath }) =>
+          ancestor.type === "scroll" &&
+          ancestor.axis !== "horizontal" &&
+          path.startsWith(`${ancestorPath}.`),
+      )
+    ) {
+      return fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll");
+    }
   }
   for (const { value, path } of [...context.nodes, ...context.actions]) {
     if (typeof value.pager === "string" && !pagers.has(value.pager)) {
       return fail(`${path}.pager`, "Unknown pager id");
     }
   }
-  return undefined;
-}
-/** A radio group or segmented button binds a string key to one of its unique option values. */
-function radioGroupErrors(
-  value: Record<string, unknown>,
-  path: string,
-  stored: unknown,
-): PrototypeValidationError | undefined {
-  const name = value.type === "segmentedButton" ? "Segmented button" : "Radio group";
-  if (typeof stored !== "string") {
-    return fail(`${path}.stateKey`, `${name} requires a string state key`);
-  }
-  const values = new Set<unknown>();
-  for (const [index, option] of (Array.isArray(value.options) ? value.options : []).entries()) {
-    const optionValue = object(option)?.value;
-    if (values.has(optionValue)) {
-      return fail(`${path}.options[${index}].value`, "Duplicate radio option value");
-    }
-    values.add(optionValue);
-  }
-  return undefined;
-}
-/** An extended FAB (one with a label) has a single size, so `size` applies only to icon FABs. */
-function fabErrors(
-  value: Record<string, unknown>,
-  path: string,
-): PrototypeValidationError | undefined {
-  return typeof value.label === "string" && value.size !== undefined
-    ? fail(`${path}.size`, "Extended FAB cannot set size")
-    : undefined;
-}
-/** A bound progress indicator is determinate over 0..max (default 1); unbound is indeterminate. */
-function progressErrors(
-  value: Record<string, unknown>,
-  path: string,
-  stored: unknown,
-): PrototypeValidationError | undefined {
-  if (typeof value.stateKey !== "string") {
-    return value.max === undefined ? undefined : fail(`${path}.max`, "Requires stateKey");
-  }
-  const max = typeof value.max === "number" ? value.max : 1;
-  if (max <= 0) {
-    return fail(`${path}.max`, "Progress max must be greater than 0");
-  }
-  if (typeof stored !== "number" || !Number.isFinite(stored) || stored < 0 || stored > max) {
-    return fail(`${path}.stateKey`, "Progress requires a numeric state key within 0 and max");
-  }
-  return undefined;
-}
-/** A time picker binds two distinct integer keys: hour 0..23 and minute 0..59. */
-function timePickerErrors(
-  value: Record<string, unknown>,
-  path: string,
-  state: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const fields = [
-    { field: "hourKey", max: 23, message: "Time picker hour requires an integer 0..23 state key" },
-    {
-      field: "minuteKey",
-      max: 59,
-      message: "Time picker minute requires an integer 0..59 state key",
-    },
-  ];
-  for (const { field, max, message } of fields) {
-    const key = value[field];
-    const stored = typeof key === "string" ? state[key] : undefined;
-    if (!numberValid(stored, { kind: "number", integer: true, min: 0, max })) {
-      return fail(`${path}.${field}`, message);
-    }
-  }
-  return value.hourKey === value.minuteKey
-    ? fail(`${path}.minuteKey`, "Time picker hour and minute keys must differ")
-    : undefined;
-}
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-/** A `YYYY-MM-DD` calendar date in 1900..2100, the Material date picker's year range. */
-function isPrototypeDate(value: unknown): boolean {
-  if (typeof value !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)) {
-    return false;
-  }
-  const [year, month, day] = value.split("-").map(Number);
-  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-  const days = month === 2 && leap ? 29 : DAYS_IN_MONTH[month - 1];
-  return year >= 1900 && year <= 2100 && days !== undefined && day >= 1 && day <= days;
-}
-/** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
-function trailingErrors(
-  value: Record<string, unknown>,
-  path: string,
-  state: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const trailing = value.type === "listItem" ? object(value.trailing) : undefined;
-  return trailing &&
-    typeof trailing.stateKey === "string" &&
-    typeof state[trailing.stateKey] !== "boolean"
-    ? fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key")
-    : undefined;
-}
-function listItemBindingErrors(
-  checked: Checked,
-  data: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const state = object(data.state) ?? {};
-  for (const { value, path, item } of checked.nodes) {
-    const error = trailingErrors(value, path, state);
+  for (const action of context.actions) {
+    const error = emitContextPagerError(action, pagers);
     if (error) {
-      return forItem(error, item);
+      return error;
     }
   }
   return undefined;
 }
-function stepFitsRange(step: number, range: number): boolean {
-  const count = range / step;
-  return step > 0 && count >= 1 && Math.abs(count - Math.round(count)) < 1e-9;
-}
-/** Slider range, step and bound-value checks; the contract only types the individual fields. */
-function sliderErrors(
-  value: Record<string, unknown>,
-  path: string,
-  stored: unknown,
-): PrototypeValidationError | undefined {
-  const { min, max, step } = value;
-  if (typeof min !== "number" || typeof max !== "number" || min >= max) {
-    return fail(`${path}.max`, "Slider max must be greater than min");
-  }
-  if (typeof step === "number" && !stepFitsRange(step, max - min)) {
-    return fail(`${path}.step`, "Slider step must be positive and divide the range evenly");
-  }
-  if (typeof stored !== "number" || !Number.isFinite(stored) || stored < min || stored > max) {
-    return fail(`${path}.stateKey`, "Slider requires a numeric state key within min and max");
-  }
-  return undefined;
-}
-/** A filter chip is a boolean toggle; an assist chip only runs its actions. */
-function chipErrors(
-  value: Record<string, unknown>,
-  path: string,
-  stored: unknown,
-): PrototypeValidationError | undefined {
-  const bound = typeof value.stateKey === "string";
-  if (value.variant === "filter" && !bound) {
-    return fail(`${path}.stateKey`, "Filter chip requires a boolean state key");
-  }
-  if (value.variant !== undefined && value.variant !== "filter" && bound) {
-    return fail(`${path}.stateKey`, "Only a filter chip can bind a state key");
-  }
-  if (bound && typeof stored !== "boolean") {
-    return fail(`${path}.stateKey`, "Filter chip requires a boolean state key");
-  }
-  return undefined;
-}
-function componentBindingErrors(
-  value: Record<string, unknown>,
-  path: string,
-  state: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const stored = typeof value.stateKey === "string" ? state[value.stateKey] : undefined;
-  if (value.type === "textField" && typeof stored !== "string") {
-    return fail(`${path}.stateKey`, "Text field requires a string state key");
-  }
-  if ((value.type === "switch" || value.type === "checkbox") && typeof stored !== "boolean") {
-    return fail(`${path}.stateKey`, "Toggle control requires a boolean state key");
-  }
-  if (value.type === "slider") {
-    return sliderErrors(value, path, stored);
-  }
-  return componentFormErrors(value, path, stored, state);
-}
-function componentFormErrors(
-  value: Record<string, unknown>,
-  path: string,
-  stored: unknown,
-  state: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  switch (value.type) {
-    case "radioGroup":
-    case "segmentedButton":
-      return radioGroupErrors(value, path, stored);
-    case "chip":
-      return chipErrors(value, path, stored);
-    case "fab":
-      return fabErrors(value, path);
-    case "progress":
-      return progressErrors(value, path, stored);
-    case "timePicker":
-      return timePickerErrors(value, path, state);
-    case "datePicker":
-      return isPrototypeDate(stored)
-        ? undefined
-        : fail(`${path}.stateKey`, "Date picker requires a YYYY-MM-DD state key in 1900..2100");
-    default:
-      return undefined;
-  }
-}
-/** A tab bar or bottom navigation bound to a state key selects a nonnegative integer index. */
-function selectionErrors(
-  value: Record<string, unknown>,
-  path: string,
-  state: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  if (
-    typeof value.stateKey !== "string" ||
-    (value.type !== "tabBar" && value.type !== "bottomNav")
-  ) {
-    return undefined;
-  }
-  return numberValid(state[value.stateKey], { kind: "number", integer: true, min: 0 })
-    ? undefined
-    : fail(`${path}.stateKey`, "Selection requires a nonnegative integer state key");
-}
-function bindingErrors(
-  checked: Checked,
-  data: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const state = object(data.state) ?? {};
-  for (const { value, path, item } of checked.nodes) {
-    const error = componentBindingErrors(value, path, state) ?? selectionErrors(value, path, state);
-    if (error) {
-      return forItem(error, item);
-    }
-  }
-  return undefined;
-}
-/** Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean. */
-const MODAL_NAMES: Record<string, string | undefined> = {
-  bottomSheet: "Sheet",
-  dialog: "Dialog",
-  snackbar: "Snackbar",
-};
-function openWhenErrors(
-  value: Record<string, unknown>,
-  path: string,
-  state: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const type = String(value.type);
-  const name = Object.hasOwn(MODAL_NAMES, type) ? MODAL_NAMES[type] : undefined;
-  const key = name === undefined ? undefined : object(value.openWhen)?.key;
-  return typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean"
-    ? fail(`${path}.openWhen.key`, `${name} requires a boolean state key`)
-    : undefined;
-}
-function sheetBindingErrors(
-  checked: Checked,
-  data: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const state = object(data.state) ?? {};
-  for (const { value, path, item } of checked.nodes) {
-    const error = openWhenErrors(value, path, state);
-    if (error) {
-      return forItem(error, item);
-    }
-  }
-  return undefined;
-}
-const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; message: string }> = {
-  toggle: {
-    check: (stored) => typeof stored === "boolean",
-    message: "Toggle requires a boolean state key",
-  },
-  increment: {
-    check: (stored) => typeof stored === "number" && Number.isFinite(stored),
-    message: "Increment requires a numeric state key",
-  },
-  decrement: {
-    check: (stored) => typeof stored === "number" && Number.isFinite(stored),
-    message: "Decrement requires a numeric state key",
-  },
-};
-/** Every state key a node binds: `stateKey`, time picker keys, a trailing control, `openWhen`. */
-function boundKeys(value: Record<string, unknown>): string[] {
-  const keys = [value.stateKey, value.hourKey, value.minuteKey, object(value.trailing)?.stateKey];
-  const openWhen = Object.hasOwn(MODAL_NAMES, String(value.type))
-    ? object(value.openWhen)
-    : undefined;
-  return [...keys, openWhen?.key].filter((key): key is string => typeof key === "string");
-}
-/** First binding rule the node breaks; the same rules that check the declared state. */
-function controlErrors(
-  value: Record<string, unknown>,
-  path: string,
-  state: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  return (
-    componentBindingErrors(value, path, state) ??
-    selectionErrors(value, path, state) ??
-    trailingErrors(value, path, state) ??
-    openWhenErrors(value, path, state)
-  );
-}
-/**
- * A `setState` must leave every control bound to its key valid, so the key is checked as if the
- * value were the declared state (#11452). A key no control binds, a key bound by controls of
- * different types, and a repeat-templated value are not checked.
- */
-function setStateBindingErrors(
-  action: Bound,
-  checked: Checked,
-  state: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const { key, value } = action.value;
-  if (typeof key !== "string" || action.operandTemplated || value === undefined) {
-    return undefined;
-  }
-  const controls = checked.nodes.filter((node) => boundKeys(node.value).includes(key));
-  if (new Set(controls.map((node) => String(node.value.type))).size !== 1) {
-    return undefined;
-  }
-  const written = { ...state, [key]: value };
-  for (const control of controls) {
-    const error = controlErrors(control.value, control.path, written);
-    if (error) {
-      return fail(
-        `${action.path}.value`,
-        `setState value does not fit the control bound to "${key}": ${error.message}`,
-      );
-    }
-  }
-  return undefined;
-}
-function stateActionErrors(
-  checked: Checked,
-  data: Record<string, unknown>,
-): PrototypeValidationError | undefined {
-  const state = object(data.state) ?? {};
-  for (const action of checked.actions) {
-    const { value, path, item } = action;
-    const rule =
-      typeof value.type === "string" && Object.hasOwn(stateActionTypes, value.type)
-        ? stateActionTypes[value.type]
-        : undefined;
-    if (rule && typeof value.key === "string" && !rule.check(state[value.key])) {
-      return forItem(fail(`${path}.key`, rule.message), item);
-    }
-    const written =
-      value.type === "setState" ? setStateBindingErrors(action, checked, state) : undefined;
-    if (written) {
-      return forItem(written, item);
-    }
-  }
-  return undefined;
-}
-/** A node or action as the state-type checks see it: keys bound for one repeat item, if any. */
-interface Bound {
-  value: Record<string, unknown>;
-  path: string;
-  item?: number;
-  /** An action whose `value` holds a repeat placeholder: its type is not known statically. */
-  operandTemplated?: boolean;
-}
-interface Checked {
-  nodes: Bound[];
-  actions: Bound[];
-}
-function forItem(
-  error: PrototypeValidationError,
-  item: number | undefined,
-): PrototypeValidationError {
-  return item === undefined
-    ? error
-    : { ...error, message: `${error.message} (repeat item ${item})` };
-}
-const bound = ({ located, value, item, operandTemplated }: KeyInstance<Located>): Bound => ({
-  value,
-  path: located.path,
-  item,
-  operandTemplated,
-});
 /** State-type checks over every repeat instance: a templated key is checked once per item. */
 function stateTypeErrors(
   value: unknown,
   context: Context,
   data: Record<string, unknown>,
+  repeats: PrototypeRepeatData,
 ): PrototypeValidationError | undefined {
   const checked: Checked = {
-    nodes: repeatKeyInstances(value, context.nodes).map(bound),
-    actions: repeatKeyInstances(value, context.actions).map(bound),
+    nodes: repeatKeyInstances(value, context.nodes, repeats).map(bound),
+    actions: repeatKeyInstances(value, context.actions, repeats).map(bound),
   };
   return (
     bindingErrors(checked, data) ??
     listItemBindingErrors(checked, data) ??
     sheetBindingErrors(checked, data) ??
-    stateActionErrors(checked, data)
+    stateActionErrors(checked, data) ??
+    prototypeCheckErrors(checked.nodes, checked.actions, object(data.state) ?? {})
   );
 }
+/** Span belongs to the immediate grid parent, including repeat templates. */
+function gridSpanErrors(context: Context): PrototypeValidationError | undefined {
+  const parents = new Map<string, Record<string, unknown>>();
+  for (const { value, path } of context.nodes) {
+    if (value.span !== undefined) {
+      const parent = parents.get(path);
+      if (parent?.type !== "grid") {
+        return fail(`${path}.span`, "span requires a direct grid parent");
+      }
+      if (
+        typeof parent.columns === "number" &&
+        typeof value.span === "number" &&
+        value.span > parent.columns
+      ) {
+        return fail(`${path}.span`, "span exceeds grid columns");
+      }
+    }
+    if (Array.isArray(value.children)) {
+      for (const index of value.children.keys()) {
+        parents.set(`${path}.children[${index}]`, value);
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Tree-shape checks that run after the schema walk, in the order the host reports them. */
+function layoutErrors(
+  value: unknown,
+  context: Context,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    gridSpanErrors(context) ??
+    swipeActionsErrors(context) ??
+    repeatErrors(value, repeats) ??
+    prototypeStorageError(value)
+  );
+}
+
+/** Action, container and state checks, after the layout checks pass. */
+function behaviourErrors(
+  value: unknown,
+  context: Context,
+  data: Record<string, unknown>,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
+    prototypeRequestsError(context.actions) ??
+    pagerErrors(context) ??
+    stackErrors(context) ??
+    stateTypeErrors(value, context, data, repeats)
+  );
+}
+
 function validateValue(value: unknown): PrototypeValidationResult {
   const context: Context = {
     nodes: [],
     actions: [],
     images: 0,
-    selectorDepth: 0,
-    conditionDepth: 0,
+    nesting: { container: 0, condition: 0, action: 0 },
   };
   const data = object(value) ?? {};
+  const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
-    repeatErrors(value) ??
-    pagerErrors(context) ??
-    stateTypeErrors(value, context, data);
+    layoutErrors(value, context, repeats) ??
+    behaviourErrors(value, context, data, repeats);
   if (error) {
     return { success: false, error };
   }

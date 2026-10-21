@@ -1,6 +1,6 @@
 import type { BootedDevice, DisplayPanel } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { ProcessExitState } from "../../utils/ChildProcessTracker";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -89,7 +89,7 @@ function resolveWithoutMultiplePanels(
 /** Resolve at capture start; Android screenrecord accepts a physical ID, not a logical ID. */
 export async function resolveAndroidRecordingDisplay(
   device: BootedDevice,
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   request?: string,
   signal?: AbortSignal,
   timer: Pick<Timer, "now"> = defaultTimer,

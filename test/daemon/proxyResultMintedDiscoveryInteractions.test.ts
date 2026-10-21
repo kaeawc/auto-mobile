@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, beforeEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   DaemonClient,
@@ -6,7 +6,7 @@ import {
   type DaemonClientLike,
 } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -29,15 +29,24 @@ function matchingDaemonManager(): FakeDaemonManager {
 // the socket after `connected` flipped but before establishment resolves.
 class HeldSubscribeClient extends FakeDaemonClient {
   subscribeReached = false;
+  subscribeSignal?: AbortSignal;
   private releaseSubscribe: () => void = () => {};
   private readonly subscribeGate = new Promise<void>((resolve) => {
     this.releaseSubscribe = resolve;
   });
 
-  override async subscribeToNotifications(): Promise<void> {
-    await super.subscribeToNotifications();
+  override async subscribeToNotifications(options?: { signal?: AbortSignal }): Promise<void> {
+    await super.subscribeToNotifications(options);
     this.subscribeReached = true;
-    await this.subscribeGate;
+    this.subscribeSignal = options?.signal;
+    options?.signal?.throwIfAborted();
+    options?.signal?.addEventListener("abort", this.releaseSubscribe, { once: true });
+    try {
+      await this.subscribeGate;
+      options?.signal?.throwIfAborted();
+    } finally {
+      options?.signal?.removeEventListener("abort", this.releaseSubscribe);
+    }
   }
 
   closeSocketThenReleaseSubscribe(): void {
@@ -86,14 +95,17 @@ function mintingClient(mintedSession: () => string): FakeDaemonClient {
 }
 
 describe("stdio proxy: keeper fence, not-delivered retry and result-minted discovery", () => {
-  let isAvailableSpy: ReturnType<typeof spyOn> | undefined;
+  let isAvailableSpy: ReturnType<typeof spyOn>;
   let proxy: DaemonMcpProxy | undefined;
 
   afterEach(async () => {
-    isAvailableSpy?.mockRestore();
-    isAvailableSpy = undefined;
+    isAvailableSpy.mockRestore();
     await proxy?.close();
     proxy = undefined;
+  });
+
+  beforeEach(() => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   });
 
   function createProxy(
@@ -101,7 +113,6 @@ describe("stdio proxy: keeper fence, not-delivered retry and result-minted disco
     clients: DaemonClientLike[],
     fallback: () => DaemonClientLike,
   ): DaemonMcpProxy {
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     proxy = new DaemonMcpProxy({
       clientFactory: () => clients.shift() ?? fallback(),
       daemonManager: matchingDaemonManager(),
@@ -378,6 +389,7 @@ describe("stdio proxy: keeper fence, not-delivered retry and result-minted disco
       await waitForSubscribe(racing);
       listChanged.length = 0;
       await target.close();
+      expect(racing.subscribeSignal?.aborted).toBe(true);
       racing.closeSocketThenReleaseSubscribe();
       await tick;
 

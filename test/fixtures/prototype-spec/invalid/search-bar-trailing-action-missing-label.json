@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "",
+      "active": true
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query",
+      "trailingActions": [
+        {
+          "icon": "close"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.trailingActions[0].label",
+  "expectedMessage": "Required property"
+}

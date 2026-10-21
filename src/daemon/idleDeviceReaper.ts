@@ -1,3 +1,4 @@
+import { isIdle, holderOf } from "./deviceBinding";
 import { logger } from "../utils/logger";
 import { didSourceSucceedForDevice } from "../utils/discoverySource";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
@@ -44,7 +45,7 @@ export class IdleDeviceReaper {
   async pruneStaleIdleIosDevices(candidates: PooledDevice[]): Promise<number> {
     const iosCandidates = candidates.filter((candidate) => {
       const device = this.pool.getDevice(candidate.id);
-      return device?.platform === "ios" && device.status === "idle" && !device.sessionId;
+      return device?.platform === "ios" && isIdle(device) && !holderOf(device);
     });
     if (iosCandidates.length === 0) {
       return 0;
@@ -61,7 +62,7 @@ export class IdleDeviceReaper {
     let removedCount = 0;
     for (const candidate of iosCandidates) {
       const device = this.pool.getDevice(candidate.id);
-      if (device !== candidate || device.status !== "idle" || device.sessionId) {
+      if (device !== candidate || !isIdle(device) || holderOf(device)) {
         continue;
       }
       if (this.getIdleDeviceLivenessStatus(device, iosLiveness) === "stale") {
@@ -72,11 +73,7 @@ export class IdleDeviceReaper {
         // Discovery completed outside the lock. Recheck the captured entry
         // under assignmentMutex before applying its snapshot to the pool.
         const removed = await this.pool.withAssignmentLock(async () => {
-          if (
-            this.pool.getDevice(device.id) !== device ||
-            device.status !== "idle" ||
-            device.sessionId
-          ) {
+          if (this.pool.getDevice(device.id) !== device || !isIdle(device) || holderOf(device)) {
             return false;
           }
           await this.pool.removeDevice(device.id, false, device);

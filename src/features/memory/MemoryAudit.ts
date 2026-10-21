@@ -10,21 +10,10 @@ import { MemoryMetricsCollector, MemoryMetrics } from "./MemoryMetricsCollector"
 import { MemoryThresholdManager } from "./MemoryThresholdManager";
 import { MemoryBaselineManager } from "./MemoryBaselineManager";
 import type { Kysely } from "kysely";
-import { getDatabase } from "../../db/database";
-import { Database, NewMemoryAuditResult } from "../../db/types";
+import { MemoryAuditResultRepository } from "../../db/memoryAuditResultRepository";
+import { Database } from "../../db/types";
+import { MemoryAuditResultStore, type MemoryViolation } from "./MemoryAuditResultStore";
 import { selectTopContributors } from "../../utils/topContributors";
-import { redactTypedTextArguments } from "../../utils/redactTypedTextArguments";
-
-/**
- * Represents a single memory threshold violation
- */
-interface MemoryViolation {
-  metric: string;
-  threshold: number;
-  actual: number;
-  severity: "warning" | "critical";
-  contributionWeight: number; // 0-1, how much this contributes to the overall issue
-}
 
 /**
  * Memory audit result
@@ -46,7 +35,7 @@ export class MemoryAudit {
   private metricsCollector: MemoryMetricsCollector;
   private thresholdManager: MemoryThresholdManager;
   private baselineManager: MemoryBaselineManager;
-  private readonly injectedDb: Kysely<Database> | null;
+  private readonly resultStore: MemoryAuditResultStore;
 
   /**
    * @param db Optional Kysely handle, resolved LAZILY (per use, via {@link db})
@@ -66,12 +55,10 @@ export class MemoryAudit {
     this.metricsCollector = new MemoryMetricsCollector(device, adbFactory);
     this.thresholdManager = new MemoryThresholdManager(db);
     this.baselineManager = new MemoryBaselineManager(db);
-    this.injectedDb = db ?? null;
-  }
-
-  /** The injected DB, or the shared singleton resolved on first use. */
-  private get db(): Kysely<Database> {
-    return this.injectedDb ?? getDatabase();
+    this.resultStore = new MemoryAuditResultStore(
+      device.deviceId,
+      new MemoryAuditResultRepository(db),
+    );
   }
 
   /**
@@ -113,7 +100,7 @@ export class MemoryAudit {
     const passed = violations.length === 0;
 
     // Store audit result in database
-    await this.storeAuditResult(
+    await this.resultStore.store({
       packageName,
       toolName,
       toolArgs,
@@ -121,7 +108,7 @@ export class MemoryAudit {
       violations,
       diagnostics,
       passed,
-    );
+    });
 
     // Update baseline with new metrics (only if passed, to avoid poisoning baseline)
     if (passed) {
@@ -181,7 +168,7 @@ export class MemoryAudit {
   /**
    * Validate metrics against thresholds
    */
-  private validateMetrics(
+  validateMetrics(
     metrics: MemoryMetrics,
     thresholds: {
       heapGrowthThresholdMb: number;
@@ -262,7 +249,7 @@ export class MemoryAudit {
   /**
    * Generate weighted diagnostic output based on violations
    */
-  private generateDiagnostics(metrics: MemoryMetrics, violations: MemoryViolation[]): string {
+  generateDiagnostics(metrics: MemoryMetrics, violations: MemoryViolation[]): string {
     if (violations.length === 0) {
       return "No memory issues detected";
     }
@@ -352,55 +339,5 @@ export class MemoryAudit {
     }
 
     return relevantLines.join("\n");
-  }
-
-  /**
-   * Store audit result in database
-   */
-  private async storeAuditResult(
-    packageName: string,
-    toolName: string,
-    toolArgs: unknown,
-    metrics: MemoryMetrics,
-    violations: MemoryViolation[],
-    diagnostics: string | null,
-    passed: boolean,
-  ): Promise<void> {
-    try {
-      const now = new Date();
-      const sessionId = now.toISOString().split("T")[0]; // YYYY-MM-DD
-
-      const auditResult: NewMemoryAuditResult = {
-        device_id: this.device.deviceId,
-        session_id: sessionId,
-        package_name: packageName,
-        tool_name: toolName,
-        tool_args: JSON.stringify(redactTypedTextArguments(toolName, toolArgs)),
-        timestamp: new Date().toISOString(),
-        passed: passed ? 1 : 0,
-        pre_java_heap_mb: metrics.preSnapshot.javaHeapMb,
-        pre_native_heap_mb: metrics.preSnapshot.nativeHeapMb,
-        pre_total_pss_mb: metrics.preSnapshot.totalPssMb,
-        post_java_heap_mb: metrics.postSnapshot.javaHeapMb,
-        post_native_heap_mb: metrics.postSnapshot.nativeHeapMb,
-        post_total_pss_mb: metrics.postSnapshot.totalPssMb,
-        java_heap_growth_mb: metrics.javaHeapGrowthMb,
-        native_heap_growth_mb: metrics.nativeHeapGrowthMb,
-        total_pss_growth_mb: metrics.totalPssGrowthMb,
-        gc_count: metrics.gcCount,
-        gc_total_duration_ms: metrics.gcTotalDurationMs,
-        unreachable_objects_count: metrics.unreachableObjects?.count || null,
-        violations_json: JSON.stringify(violations),
-        diagnostics_json: diagnostics,
-      };
-
-      await this.db.insertInto("memory_audit_results").values(auditResult).execute();
-
-      logger.info(
-        `[MemoryAudit] Stored audit result for ${packageName}/${toolName}: ${passed ? "PASSED" : "FAILED"}`,
-      );
-    } catch (error) {
-      logger.error(`[MemoryAudit] Failed to store audit result: ${error}`);
-    }
   }
 }

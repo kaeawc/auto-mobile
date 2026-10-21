@@ -220,13 +220,47 @@ a fast shard 1 must report different walls.
 Since #10644 the parent reaps attempts in completion order. It polls the live
 shard pids (`AUTOMOBILE_UNIT_SHARD_POLL_SECONDS`, default 0.2 s, because macOS
 Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
-and its retry window is judged against the lane cap at its own end time. The
-per-shard `.wall` record still excludes the end probe and the poll latency.
+and its retry window is judged against the lane cap at its own end time. A
+wall-budget timeout whose own attempt calibration reaches
+`AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN` (default 2.5x) skips the same-runner retry
+and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`, `TypeScript Code Coverage`) qualifies
+itself: its last step (`if: failure()`) runs
+`scripts/ci/rerun-contended-runner.sh dispatch` against the job's own step summary,
+and on attempt 1 only dispatches the `workflow_dispatch` Rerun contended runner
+workflow (#12758; it replaced a `workflow_run` trigger that started a run for every
+Pull Request and On Merge run). That workflow waits, bounded, for the run to finish,
+re-verifies from the fetched logs that every failed job is a unit lane carrying
+the marker, then reruns the failed jobs once. Fork PRs have a read-only token, so
+the dispatch is skipped or logs a warning and never fails the job; a log-fetch
+failure is a logged skip. The per-shard `.wall` record still excludes the end probe and the poll latency.
 
 ## 5. Change made: tier C files share processes
 
 The owner decided on 2026-10-08 to run tier C files in shared processes and
 keep everything else isolated.
+
+On 2026-10-20 (#13568 / #13854), the owner also allowed spy-only files into
+Tier C when the classifier proves **every** spy is restored. The original
+section 2 table and measurements above predate that decision. Other signals
+still force isolation. Spies must be installed directly in a test or
+`beforeEach` callback; `beforeAll`, module/describe bodies and helper-installed
+spies remain isolated, even with a restore hook.
+
+The AST proof accepts an immediate `.mockRestore()`, a `using` declaration,
+or a matching lexical variable/static field/array handle restored
+unconditionally in the same test or a covering `afterEach`/`afterAll`.
+Known `mockImplementation`/return-value chains preserve the handle. A covering
+unconditional `mock.restore()`, `restoreAllMocks()` or `jest.restoreAllMocks()`
+teardown also qualifies. Sibling/child describe hooks, conditional cleanup,
+shadowed or overwritten handles, and unknown data/control flow do not prove a
+restore. This is a bounded structural proof, not full exception-path analysis;
+use `try/finally` for cleanup that must survive a failed assertion. There is no
+blanket restore preload: it breaks suites that deliberately retain spies.
+
+`bun scripts/test/classify-shared-safe.ts --explain` prints
+`file:line:reason` for files blocked only by unproven spies. Supply a unit path
+to inspect its unproven sites even when other signals also block it. `--check`
+reports these sites if a listed file loses its restore proof.
 
 - **The list.** `test/shared-process-allowlist.txt` holds the shared files.
   `bun scripts/test/classify-shared-safe.ts` generates it from the section 2
@@ -345,3 +379,21 @@ held in both passes.
 | Biggest lever                 | Fewer isolates. Sharing processes for the 1,178 no-signal files cuts the suite by about 37%. A fully shared realm cuts it by 77% but leaks across files. |
 | Shard balancing               | Round-robin is within ±13% on CI at 3 shards. LPT gains about 6% and does not address the timeouts.                                                      |
 | Timeout and shutdown failures | Runner-wide slowness, which hits all shards together. Fewer isolates shorten the window, and a retry or infra classification handles the remainder.      |
+
+### Host coordination and cancellation
+
+Unit and changed lanes now acquire host slots before choosing their shard
+count. `AUTOMOBILE_HOST_TEST_SLOTS` defaults to ceil(logical cores / 2), minimum
+two; `off` disables it. The shared pool lives in the coordination directory's
+`test-slots` subdirectory. A sole holder of the entire pool can acquire extra
+slots up to its existing worker demand, retaining idle-host and hosted-runner
+parallelism. Other concurrent lanes use remaining base slots, or one unslotted
+worker if none are free. Explicit `AUTOMOBILE_UNIT_TEST_WORKERS` remains an
+upper bound. Targeted `--parallel` also respects the selected file count.
+
+Signal/EXIT cleanup stops shard and watchdog process groups and releases
+slots. Watchdogs notice a dead caller within a one-second poll, and chunk
+loops check the original lane owner before each group. See
+`scripts/README.md` for the environment controls and overloaded-host retry
+suppression. Changed-file selection remains Bun's responsibility; a shared
+changed-file list is deferred.

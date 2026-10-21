@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Database as BunDatabase } from "bun:sqlite";
+import { Database as BunDatabase, type SQLQueryBindings } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { runMigrations } from "../../src/db/migrator";
@@ -41,7 +41,7 @@ const TABLES = ["navigation_node_observations", "navigation_edge_observations"] 
 const indexFor = (table: string): string => `idx_${table}_seen_id`;
 const buildIndexFor = (table: string): string => `idx_${table}_build`;
 
-async function indexExists(db: Kysely<unknown>, name: string): Promise<boolean> {
+async function indexExists<DB>(db: Kysely<DB>, name: string): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'index' AND name = ${name}
   `.execute(db);
@@ -49,7 +49,7 @@ async function indexExists(db: Kysely<unknown>, name: string): Promise<boolean> 
 }
 
 /** Ordered list of column names participating in an index (PRAGMA index_info). */
-async function indexColumns(db: Kysely<unknown>, name: string): Promise<string[]> {
+async function indexColumns<DB>(db: Kysely<DB>, name: string): Promise<string[]> {
   const result = await sql<{ seqno: number; name: string }>`
     SELECT seqno, name FROM pragma_index_info(${name}) ORDER BY seqno
   `.execute(db);
@@ -66,7 +66,7 @@ async function indexColumns(db: Kysely<unknown>, name: string): Promise<string[]
  * decoupled from the full navigation migration chain; the full-replay block below
  * proves wiring against the real schema.
  */
-async function buildPreMigrationSchema(bunDb: BunDatabase, db: Kysely<unknown>): Promise<void> {
+async function buildPreMigrationSchema<DB>(bunDb: BunDatabase, db: Kysely<DB>): Promise<void> {
   for (const table of TABLES) {
     await db.schema
       .createTable(table)
@@ -102,6 +102,21 @@ async function buildPreMigrationSchema(bunDb: BunDatabase, db: Kysely<unknown>):
   bunDb.run("ANALYZE");
 }
 
+/** Narrow a kysely-compiled parameter to a value bun:sqlite can bind. */
+function toSqlBinding(parameter: unknown): SQLQueryBindings {
+  if (
+    parameter === null ||
+    typeof parameter === "string" ||
+    typeof parameter === "number" ||
+    typeof parameter === "bigint" ||
+    typeof parameter === "boolean" ||
+    parameter instanceof Uint8Array
+  ) {
+    return parameter;
+  }
+  throw new Error(`Unsupported SQL parameter: ${String(parameter)}`);
+}
+
 /** EXPLAIN QUERY PLAN detail lines (newline-joined) for a compiled kysely query. */
 function planFor(
   bunDb: BunDatabase,
@@ -109,7 +124,7 @@ function planFor(
 ): string {
   const rows = bunDb
     .query(`EXPLAIN QUERY PLAN ${compiled.sql}`)
-    .all(...(compiled.parameters as unknown[])) as Array<{ detail: string }>;
+    .all(...compiled.parameters.map(toSqlBinding)) as Array<{ detail: string }>;
   return rows.map((r) => r.detail).join("\n");
 }
 

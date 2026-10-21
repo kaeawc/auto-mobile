@@ -115,6 +115,9 @@ export const DAEMON_SHUTDOWN_STAGES = {
   "WebRTC stream socket server": writesDatabase(200),
   "video stream socket server": databaseFree(200),
   "iOS simulator capture helper pool": databaseFree(150),
+  // Helpers share TERM/KILL waits and use rolled-forward time; keep the process exit reserve.
+  "native helper registry": databaseFree(10),
+  "host adb children": databaseFree(10),
   "appearance sync scheduler": writesDatabase(25),
   "performance monitor": writesDatabase(25),
   "active HTTP sessions": writesDatabase(150),
@@ -147,7 +150,7 @@ export const DAEMON_SHUTDOWN_BUDGET_RESERVE_MS = 500;
 
 /**
  * The stdio server's shutdown stages (proxy mode and `--no-proxy` direct mode share one handler).
- * It has no control socket, session repository or managed slots, so the table is shorter, and
+ * It has no control socket, session repository or broker bindings, so the table is shorter, and
  * it sums to the same total as the daemon's. Its two long shares are the ones that can wait on a
  * device: recording finalization with the iOS CtrlProxy children (direct mode), and the proxy's
  * close, which hands its managed execution's sessions back to the daemon. What the shorter stage

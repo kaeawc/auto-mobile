@@ -1,0 +1,37 @@
+{
+  "id": "swipe",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "row",
+        "testTag": "row",
+        "children": [
+          {
+            "type": "text",
+            "text": "Row"
+          }
+        ],
+        "swipeActions": {
+          "end": [
+            {
+              "label": "Share",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "share"
+                }
+              ],
+              "color": "#336699"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

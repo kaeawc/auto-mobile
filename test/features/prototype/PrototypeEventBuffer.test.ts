@@ -78,3 +78,18 @@ describe("PrototypeEventBuffer", () => {
     expect(buffer.status().lastSequence).toBe(6);
   });
 });
+
+test("context and truncation pass through the buffer without caller mutation", () => {
+  const buffer = new PrototypeEventBuffer();
+  const pushed = {
+    ...event(1),
+    context: { id: 3, nested: [true, null] },
+    contextTruncated: true as const,
+  };
+  buffer.push(pushed);
+  pushed.context.id = 9;
+  expect(buffer.take({})).toMatchObject({
+    context: { id: 3, nested: [true, null] },
+    contextTruncated: true,
+  });
+});

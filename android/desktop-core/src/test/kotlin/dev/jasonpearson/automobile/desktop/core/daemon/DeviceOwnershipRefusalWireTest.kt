@@ -36,7 +36,15 @@ class DeviceOwnershipRefusalWireTest {
   fun `a refused tap keeps the daemon's code`() {
     val result =
       clientAnswering("tap-refused")
-        .inputTap(x = 540.0, y = 1200.0, platform = "android", deviceId = "emulator-5554")
+        .inputTap(
+          input =
+            TapInput(
+              x = 540.0,
+              y = 1200.0,
+              platform = "android",
+              deviceId = "emulator-5554",
+            ),
+        )
 
     assertFalse(result.success)
     assertEquals(DEVICE_OWNED_BY_OTHER_SESSION_CODE, result.code)
@@ -86,8 +94,7 @@ class DeviceOwnershipRefusalWireTest {
     cases.forEach { case ->
       val error = decoded(case)
       assertEquals(case.code, error.code, "${case.name}: code")
-      // Rows without a wire `retryable` (managed-slot failures carry it only in a nested
-      // acquisitionFailure) expect false.
+      // Rows without a wire `retryable` expect false.
       assertEquals(case.retryable ?: false, error.retryable ?: false, "${case.name}: retryable")
       assertEquals(case.retryAfterMs, error.retryAfterMs, "${case.name}: retryAfterMs")
       assertEquals(
@@ -121,7 +128,15 @@ class DeviceOwnershipRefusalWireTest {
         },
         sessionUuid = desktopSession,
       )
-      .inputTap(x = 1.0, y = 2.0, platform = "android", deviceId = "emulator-5554")
+      .inputTap(
+        input =
+          TapInput(
+            x = 1.0,
+            y = 2.0,
+            platform = "android",
+            deviceId = "emulator-5554",
+          ),
+      )
 
   @Test
   fun `a suspect-session input frame is retryable and keeps its remaining reservation`() {
@@ -160,7 +175,15 @@ class DeviceOwnershipRefusalWireTest {
   fun `a device-held input frame keeps retryable false and is neither suspect nor lost`() {
     val result =
       clientAnswering("tap-refused")
-        .inputTap(x = 540.0, y = 1200.0, platform = "android", deviceId = "emulator-5554")
+        .inputTap(
+          input =
+            TapInput(
+              x = 540.0,
+              y = 1200.0,
+              platform = "android",
+              deviceId = "emulator-5554",
+            ),
+        )
 
     assertEquals(false, result.retryable)
     assertFalse(result.isSessionSuspect)

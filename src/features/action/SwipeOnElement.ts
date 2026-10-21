@@ -10,6 +10,8 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 /**
  * Executes swipe gestures on specific UI elements
@@ -40,10 +42,25 @@ export class SwipeOnElement extends BaseVisualChange {
   async execute(
     element: Element,
     direction: "up" | "down" | "left" | "right",
-    options: GestureOptions = {},
+    options?: GestureOptions,
+    call?: ActionCall,
+  ): Promise<SwipeResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(
+    element: Element,
+    direction: "up" | "down" | "left" | "right",
+    options?: GestureOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<SwipeResult>;
+  async execute(
+    element: Element,
+    direction: "up" | "down" | "left" | "right",
+    options: GestureOptions = {},
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<SwipeResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     const perf = createGlobalPerformanceTracker();
     perf.serial("swipeOnElement");
 
@@ -85,8 +102,7 @@ export class SwipeOnElement extends BaseVisualChange {
               flooredEndX,
               flooredEndY,
               options,
-              perf,
-              signal,
+              { perf, signal },
             ),
           );
           if (this.device.platform === "ios" && result.success) {
@@ -102,9 +118,8 @@ export class SwipeOnElement extends BaseVisualChange {
         }
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false,
-        timeoutMs: 500,
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         progress,
         perf,
         signal,

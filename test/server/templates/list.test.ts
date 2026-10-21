@@ -1,7 +1,6 @@
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { ListResourceTemplatesRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
 
@@ -97,7 +96,7 @@ describe("MCP Templates List", () => {
     };
 
     // Mock the handler to return our test template on the existing server
-    server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    server.server.setRequestHandler("resources/templates/list", async () => ({
       resourceTemplates: [testTemplate],
     }));
 

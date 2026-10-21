@@ -3,10 +3,12 @@ import type {
   FeatureFlagDefinition,
   FeatureFlagKey,
 } from "../../src/features/featureFlags/FeatureFlagDefinitions";
-import type {
-  FeatureFlagRecord,
-  FeatureFlagRepository,
-} from "../../src/features/featureFlags/FeatureFlagRepository";
+import type { FeatureFlagRecord, FeatureFlagRepository } from "../../src/db/featureFlagRepository";
+
+/** SQLite stores config as JSON, so the fake keeps its own copy of every config it is given. */
+function cloneConfig(config: FeatureFlagConfig | null | undefined): FeatureFlagConfig | null {
+  return config ? structuredClone(config) : null;
+}
 
 export class FakeFeatureFlagRepository implements FeatureFlagRepository {
   private readonly flags = new Map<FeatureFlagKey, FeatureFlagRecord>();
@@ -18,7 +20,7 @@ export class FakeFeatureFlagRepository implements FeatureFlagRepository {
         this.flags.set(definition.key, {
           key: definition.key,
           enabled: definition.defaultValue,
-          config: definition.defaultConfig ?? null,
+          config: cloneConfig(definition.defaultConfig),
           updatedAt: now,
         });
       }
@@ -26,7 +28,11 @@ export class FakeFeatureFlagRepository implements FeatureFlagRepository {
   }
 
   async listFlags(): Promise<FeatureFlagRecord[]> {
-    return Array.from(this.flags.values());
+    // Copies, like SQLite rows: a caller mutating a listed record must not change stored state.
+    return Array.from(this.flags.values(), (record) => ({
+      ...record,
+      config: cloneConfig(record.config),
+    }));
   }
 
   async upsertFlag(
@@ -37,7 +43,8 @@ export class FakeFeatureFlagRepository implements FeatureFlagRepository {
     this.flags.set(key, {
       key,
       enabled,
-      config: config ?? this.flags.get(key)?.config ?? null,
+      // Mirrors SQLite: undefined keeps the stored config, an explicit null clears it.
+      config: config === undefined ? (this.flags.get(key)?.config ?? null) : cloneConfig(config),
       updatedAt: new Date().toISOString(),
     });
   }

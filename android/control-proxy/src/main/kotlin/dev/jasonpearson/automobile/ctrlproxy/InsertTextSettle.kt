@@ -27,7 +27,15 @@ internal fun isPrecedingInputReflected(
       return false
     }
     val expected =
-      planInsertText(before, false, baseline.selectionStart, baseline.selectionEnd, expectedSuffix)
+      planInsertText(
+        InsertTextSnapshot(
+          text = before,
+          isShowingHintText = false,
+          selectionStart = baseline.selectionStart,
+          selectionEnd = baseline.selectionEnd,
+        ),
+        textToInsert = expectedSuffix,
+      )
     val selectionAdvanced =
       s.selectionStart == expected.caret &&
         s.selectionEnd == expected.caret &&
@@ -45,18 +53,16 @@ internal fun isPrecedingInputReflected(
  * Bounds added waiting to 300ms plus a final node-refresh IPC, without extracting the hierarchy.
  * IME capitalization/correction can time out rather than falsely proving input was delivered.
  */
-internal fun awaitPrecedingInput(
-  expectedSuffix: String,
+internal suspend fun awaitPrecedingInput(
+  expectation: PrecedingInputExpectation,
   readSnapshot: () -> InsertTextSnapshot?,
   nowMs: () -> Long,
-  pause: (Long) -> Unit,
-  deadlineMs: Long = 300L,
-  pollMs: Long = 25L,
-  baseline: InsertTextSnapshot? = null,
-  matches: (InsertTextSnapshot) -> Boolean = {
-    isPrecedingInputReflected(it, expectedSuffix, baseline)
-  },
+  pause: suspend (Long) -> Unit,
 ): Boolean {
+  val deadlineMs = expectation.deadlineMs
+  val pollMs = expectation.pollMs
+  val matches = expectation.matches
+
   val start = nowMs()
   while (true) {
     val snapshot = readSnapshot() ?: return false

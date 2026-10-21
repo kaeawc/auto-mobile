@@ -1,6 +1,9 @@
+import { NativeHelperRegistry } from "../../../src/utils/nativeHelpers/NativeHelperRegistry";
+import { FakeNativeHelperRecordStore } from "../../fakes/FakeNativeHelperRecordStore";
+import { FakeNativeHelperProcessControl } from "../../fakes/FakeNativeHelperProcessControl";
+import { FakeLogger } from "../../fakes/FakeLogger";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
@@ -17,9 +20,14 @@ function withFakeSpawner(target: CaptureTarget = { kind: "simulator", windowID: 
 } {
   const fake = new FakeChildProcess();
   const helper = new IosScreenCaptureHelper({
+    nativeHelperRegistry: new NativeHelperRegistry({
+      store: new FakeNativeHelperRecordStore(),
+      control: new FakeNativeHelperProcessControl(),
+      logger: new FakeLogger(),
+    }),
     binaryPath: "/fake/screen-capture-helper",
     target,
-    spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+    spawner: () => fake,
   });
   return { fake, helper };
 }

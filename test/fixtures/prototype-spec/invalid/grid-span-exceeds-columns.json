@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "flow-grid",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "grid",
+      "columns": 2,
+      "children": [
+        {
+          "type": "text",
+          "text": "Hello",
+          "span": 3
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].span"
+}

@@ -20,6 +20,7 @@
 
 # Explicit host-addressed manifest entry points supplement AAPT's generated rules.
 -keep class dev.jasonpearson.automobile.ctrlproxy.MainActivity { *; }
+-keep class dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeActivity { *; }
 -keep class dev.jasonpearson.automobile.ctrlproxy.CtrlProxy { *; }
 -keep class dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme { *; }
 -keep class dev.jasonpearson.automobile.ctrlproxy.AutoMobileDeviceAdminReceiver { *; }
@@ -31,6 +32,9 @@
 -keep class dev.jasonpearson.automobile.** extends android.app.Activity { *; }
 
 # Ktor, coroutines, kotlinx.serialization and OkHttp supply their own consumer rules.
+# Retrofit supplies its consumer rules too; the prototype request service is only ever reached through
+# Retrofit's runtime proxy, so its annotated methods must survive shrinking.
+-keep interface dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpService { *; }
 # Missing-class suppressions (R8 diagnostics)
 # Circuit is an optional SDK compileOnly integration (consumer-kept sdk.adapters.CircuitAdapter) CtrlProxy never calls.
 -dontwarn com.slack.circuit.runtime.screen.Screen

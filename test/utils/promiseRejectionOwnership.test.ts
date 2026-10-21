@@ -9,10 +9,6 @@ import {
   test,
 } from "bun:test";
 import { logger } from "../../src/utils/logger";
-import {
-  DefaultAppLifecycleMonitor,
-  type AppLifecycleEvent,
-} from "../../src/utils/AppLifecycleMonitor";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { DefaultScreenshotBackoffScheduler } from "../../src/features/observe/ScreenshotBackoffScheduler";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
@@ -20,7 +16,6 @@ import { RecompositionTracker } from "../../src/features/performance/Recompositi
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWebSocket } from "../fakes/FakeWebSocket";
@@ -31,6 +26,7 @@ import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
 } from "../helpers/navigationTestHarness";
+import { buildObserveResult } from "../helpers/observeFixture";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 
 const device: BootedDevice = { deviceId: "promise-device", name: "Fake", platform: "android" };
@@ -96,7 +92,14 @@ describe("detached promise rejection ownership", () => {
     const error = new Error("navigation push rejected");
     await nav.manager.setCurrentApp("com.promise.navigation");
     nav.telemetrySpy.mockRejectedValue(error);
-    await nav.manager.recordNavigationEvent({ destination: "Home", timestamp: 1 });
+    await nav.manager.recordNavigationEvent({
+      destination: "Home",
+      timestamp: 1,
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 1,
+    });
     expect(nav.manager.getCurrentScreen()).toBe("Home");
     expect(warnings).toHaveBeenCalledWith(
       "[NAVIGATION_GRAPH] Navigation telemetry failed: navigation push rejected",
@@ -110,15 +113,13 @@ describe("detached promise rejection ownership", () => {
       error,
     );
     timer.advanceTime(500);
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      new FakeAdbExecutor(),
-      (url) => new FakeWebSocket(url, "none", 0, timer),
+    const client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
       timer,
-    );
+    });
     try {
-      // Omit package/hierarchy to avoid performance monitoring and navigation work.
-      client.handleHierarchyUpdate({ updatedAt: timer.now() });
+      // Empty package/hierarchy avoids performance monitoring and navigation work.
+      client.handleHierarchyUpdate({ updatedAt: timer.now(), packageName: "", hierarchy: {} });
       await timer.advanceTimersByTimeAsync(0);
       expect(warnings).toHaveBeenCalledWith(
         "[CTRL_PROXY] Layout telemetry failed: hierarchy push rejected",
@@ -136,12 +137,17 @@ describe("detached promise rejection ownership", () => {
       error,
     );
     const tracker = new RecompositionTracker(timer, () => nav.db);
-    const observation = {
-      activeWindow: { appId: "com.promise.recomposition" },
+    const observation: ObserveResult = buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 100, height: 100 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      activeWindow: { appId: "com.promise.recomposition", activityName: "Main", layoutSeqSum: 0 },
       viewHierarchy: {
-        hierarchy: { node: [{ recomposition: { id: "a", total: 1, rolling1sAverage: 1 } }] },
+        hierarchy: {
+          node: { node: [{ recomposition: { id: "a", total: 1, rolling1sAverage: 1 } }] },
+        },
       },
-    } as unknown as ObserveResult;
+    });
     try {
       await tracker.processObservation(observation, device);
       expect(observation.recompositionSummary?.totalRecompositions).toBe(1);
@@ -159,7 +165,14 @@ describe("detached promise rejection ownership", () => {
     const observation = structuredClone(loadAndroidHomeObserve().observe);
     const appId = observation.activeWindow!.appId!;
     await nav.manager.setCurrentApp(appId);
-    await nav.manager.recordNavigationEvent({ destination: "Home", timestamp: 1 });
+    await nav.manager.recordNavigationEvent({
+      destination: "Home",
+      timestamp: 1,
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 1,
+    });
     observation.backStack = { depth: 2, capturedAt: 1 } as ObserveResult["backStack"];
     const record = spyOn(nav.manager, "recordBackStack").mockRejectedValue(error);
     const fake = new FakeObserveScreen();
@@ -261,37 +274,5 @@ describe("detached promise rejection ownership", () => {
     } finally {
       remove.mockRestore();
     }
-  });
-
-  test("lifecycle listeners warn on rejection and keep duplicate/removal semantics", async () => {
-    const monitor = new DefaultAppLifecycleMonitor(new FakeAdbClientFactory());
-    const error = new Error("lifecycle rejected");
-    let calls = 0;
-    const listener = async () => {
-      calls++;
-      throw error;
-    };
-    const event: AppLifecycleEvent = {
-      type: "launch",
-      device,
-      appId: "com.promise.app",
-      timestamp: new Date(0),
-    };
-    monitor.addEventListener("launch", listener);
-    monitor.addEventListener("launch", listener);
-    monitor.addEventListener("terminate", listener);
-    monitor.removeEventListener("launch", listener);
-    monitor.emit("launch", event);
-    await timer.advanceTimersByTimeAsync(0);
-    expect(calls).toBe(1);
-    expect(warnings).toHaveBeenCalledWith(
-      "App lifecycle listener failed: lifecycle rejected",
-      error,
-    );
-    monitor.removeEventListener("launch", listener);
-    monitor.emit("launch", event);
-    expect(calls).toBe(1);
-    expect(monitor.listenerCount("terminate")).toBe(1);
-    monitor.removeAllListeners();
   });
 });

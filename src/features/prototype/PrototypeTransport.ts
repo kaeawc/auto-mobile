@@ -1,3 +1,4 @@
+import type { PrototypePatchReply, PrototypePatchRequest } from "./prototypePatchWire";
 /**
  * The narrow device-side seam the prototype tool talks through (#10568). Android
  * implements it over CtrlProxy; iOS simulators implement it over the injected prototype agent.
@@ -25,12 +26,17 @@ export interface PrototypeShowOptions {
   displayId?: number;
   /** Start a same-id show fresh instead of replacing the prototype in place. */
   reset?: boolean;
+  /** Android only: false retains the other shown ids (prototype_multi_surface_v1). */
+  replaceOthers?: boolean;
   /**
    * Pins what the system setting means for this show. The caller sets it only for a device
    * advertising `prototype_appearance_v1`; absent follows the device and sends nothing.
    */
   appearance?: PrototypeAppearanceOverride;
 }
+
+/** Show flags shared with legacy positional appearance callers in the Android client. */
+export type PrototypeShowOverrides = Pick<PrototypeShowOptions, "appearance" | "replaceOthers">;
 
 /** A device's own view of its prototype, where the platform can answer one. */
 export interface PrototypeDeviceStatus {
@@ -42,6 +48,7 @@ export interface PrototypeDeviceStatus {
 export interface PrototypeTransport {
   show(spec: PrototypeSpec, options?: PrototypeShowOptions): Promise<PrototypeResult>;
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult>;
+  patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply>;
   putAsset(
     asset: PrototypeAssetUpload,
     options?: PrototypeAssetRequestOptions,

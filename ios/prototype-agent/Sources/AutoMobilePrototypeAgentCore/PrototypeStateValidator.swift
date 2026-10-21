@@ -13,6 +13,13 @@ import Foundation
 /// raw bytes). The static slider, chip, fab, progress and radio rules are kept: they live in the
 /// same Android functions and cost nothing.
 enum PrototypeStateValidator {
+    private static func actionRejection(_ actions: [PrototypeAction], state: [String: JSONValue]) -> String? {
+        for action in actions {
+            if let message = stateActionError(action, state) { return message }
+        }
+        return nil
+    }
+
     /// The first rule `root` breaks when it holds `state`, or nil when the state is valid.
     /// `nonStateBytes` is the size of the shown spec outside its `state` (`PrototypeSession` measures it
     /// at show); the spec byte cap is checked first, as Android's `validate` does.
@@ -21,6 +28,8 @@ enum PrototypeStateValidator {
         var nodes: [PrototypeNode] = []
         var actions: [PrototypeAction] = []
         collect(root, nodes: &nodes, actions: &actions)
+        // A request's onSuccess / onError lists run state actions too.
+        actions = actions.flatMap(\.flattened)
         for node in nodes {
             if let message = bindingError(node, state) { return message }
         }
@@ -30,10 +39,10 @@ enum PrototypeStateValidator {
         for node in nodes {
             if let message = openWhenError(node, state) { return message }
         }
-        for action in actions {
-            if let message = stateActionError(action, state) { return message }
+        for node in nodes {
+            if let message = refreshError(node, state) { return message }
         }
-        return nil
+        return actionRejection(actions, state: state)
     }
 
     // MARK: Spec size
@@ -55,27 +64,43 @@ enum PrototypeStateValidator {
     private static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
         nodes.append(node)
         actions += node.onTap ?? []
+        actions += node.onLongPress ?? []
+        actions += node.onDoubleTap ?? []
+        actions += node.onSubmit ?? []
+        actions += (node.swipeActions?.entries ?? []).flatMap(\.action.onTap)
+        actions += node.trailingIcon?.onTap ?? []
+        actions += node.refresh?.onRefresh ?? []
+        actions += (node.trailingActions ?? []).flatMap { $0.onTap ?? [] }
+        actions += (node.spans ?? []).flatMap { $0.onTap ?? [] }
         actions += node.navigationIcon?.onTap ?? []
         actions += (node.actions ?? []).flatMap { $0.onTap ?? [] }
         actions += node.confirm?.onTap ?? []
         actions += node.dismiss?.onTap ?? []
         actions += node.action?.onTap ?? []
+        actions += (node.menuItems ?? []).flatMap { $0.entry?.onTap ?? [] }
         node.children?.forEach { collect($0, nodes: &nodes, actions: &actions) }
         if let child = node.child { collect(child, nodes: &nodes, actions: &actions) }
+        node.screens?.values.forEach { collect($0, nodes: &nodes, actions: &actions) }
     }
 
     // MARK: Binding rules
 
     private static func bindingError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
         if let message = componentError(node, state) { return message }
-        guard let key = node.stateKey else { return nil }
+        guard let key = node.stateKey else {
+            return node.type == "searchBar" ? "Text field requires a string state key" : nil
+        }
         let stored = state[key]
         switch node.type {
-        case "textField":
-            return stored?.stringValue == nil ? "Text field requires a string state key" : nil
+        case "textField", "searchBar":
+            if stored?.stringValue == nil { return "Text field requires a string state key" }
+            if node.type == "searchBar", let activeKey = node.activeKey, state[activeKey]?.boolValue == nil {
+                return "Search bar requires a boolean active key"
+            }
+            return nil
         case "switch", "checkbox":
             return stored?.boolValue == nil ? "Toggle control requires a boolean state key" : nil
-        case "radioGroup", "segmentedButton":
+        case "radioGroup", "segmentedButton", "select":
             return radioGroupError(node, stored)
         case "tabBar", "bottomNav":
             guard let number = stored?.numberValue, number.isFinite, number >= 0,
@@ -148,11 +173,18 @@ enum PrototypeStateValidator {
     }
 
     private static func radioGroupError(_ node: PrototypeNode, _ stored: JSONValue?) -> String? {
-        let name = node.type == "segmentedButton" ? "Segmented button" : "Radio group"
+        let name = node.type == "select" ? "Select" : node
+            .type == "segmentedButton" ? "Segmented button" : "Radio group"
         guard stored?.stringValue != nil else { return "\(name) requires a string state key" }
         var values = Set<String>()
-        for option in node.options ?? [] where !values.insert(option.value).inserted {
-            return "Duplicate radio option value"
+        var selectValues = Set<[UInt16]>()
+        for option in node.options ?? [] {
+            let inserted = node.type == "select"
+                ? selectValues.insert(Array(option.value.utf16)).inserted
+                : values.insert(option.value).inserted
+            if !inserted {
+                return node.type == "select" ? "Duplicate select option value" : "Duplicate radio option value"
+            }
         }
         return nil
     }
@@ -166,7 +198,7 @@ enum PrototypeStateValidator {
               let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
               (1900 ... 2100).contains(year), (1 ... 12).contains(month)
         else { return false }
-        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+        let leap = (year.isMultiple(of: 4) && !year.isMultiple(of: 100)) || year.isMultiple(of: 400)
         let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         return (1 ... days[month - 1]).contains(day)
     }
@@ -181,9 +213,15 @@ enum PrototypeStateValidator {
 
     /// Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean.
     private static func openWhenError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
-        let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar"]
+        let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar", "menu": "Menu"]
         guard let name = names[node.type], let key = node.openWhen?.key, let stored = state[key] else { return nil }
         return stored.boolValue == nil ? "\(name) requires a boolean state key" : nil
+    }
+
+    /// Pull-to-refresh binds a boolean key, like the other controls.
+    private static func refreshError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+        guard node.type == "scroll", let key = node.refresh?.stateKey, let stored = state[key] else { return nil }
+        return stored.boolValue == nil ? "Refresh requires a boolean state key" : nil
     }
 
     // MARK: State actions
@@ -210,7 +248,7 @@ extension Condition {
     var key: String? {
         switch self {
         case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _): key
-        case .all, .any, .not: nil
+        case .all, .any, .not, .valid: nil
         }
     }
 }

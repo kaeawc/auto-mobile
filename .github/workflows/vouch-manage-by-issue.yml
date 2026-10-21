@@ -31,11 +31,15 @@ jobs:
     name: "Apply vouch/denounce from issue comment"
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only run when a comment actually contains a management keyword.
+    # Only run when a comment actually contains a management keyword, and only
+    # for repo collaborators. The action checks roles itself, but only after it
+    # installs the latest Nushell release unverified (setup-nu `version: "*"`)
+    # in this contents: write job, so gate before any step runs.
     if: >
-      contains(github.event.comment.body, 'vouch') ||
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+      (contains(github.event.comment.body, 'vouch') ||
       contains(github.event.comment.body, 'denounce') ||
-      contains(github.event.comment.body, 'unvouch')
+      contains(github.event.comment.body, 'unvouch'))
     steps:
       - uses: actions/checkout@v6
 

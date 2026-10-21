@@ -111,7 +111,7 @@ class DeviceAvailabilityCheckerTest {
 
   @Test
   fun runnerIgnoresEveryChildWithoutSdk() {
-    AutoMobileSharedUtils.testDeviceChecker = unsetEnvironmentChecker()
+    val collaborators = PlanExecutorCollaborators(deviceChecker = unsetEnvironmentChecker())
     try {
       val ignored = mutableListOf<Description>()
       val failures = mutableListOf<Failure>()
@@ -132,7 +132,7 @@ class DeviceAvailabilityCheckerTest {
           }
         },
       )
-      val runner = AutoMobileRunner(RunnerTestTarget::class.java)
+      val runner = AutoMobileRunner(RunnerTestTarget::class.java, collaborators)
       val children = runner.description.children
       assertEquals(2, children.size)
       runner.run(notifier)
@@ -141,7 +141,6 @@ class DeviceAvailabilityCheckerTest {
       assertTrue(failures.isEmpty())
       assertTrue(started.isEmpty())
     } finally {
-      AutoMobileSharedUtils.testDeviceChecker = null
       SystemPropertyCache.clear()
       TestTimingCache.clear()
     }
@@ -158,7 +157,10 @@ class DeviceAvailabilityCheckerTest {
     assertTrue(assertNotNull(failing.getLastError()).contains("Cannot connect to ADB daemon"))
 
     val timingOut =
-      sdkChecker(commandExecutor = { _, _ -> throw RuntimeException("timed out") }, sleeper = {})
+      sdkChecker(
+        commandExecutor = { _, _ -> throw IllegalStateException("timed out") },
+        sleeper = {},
+      )
     assertTrue(timingOut.checkFailed())
 
     val empty =
@@ -174,7 +176,7 @@ class DeviceAvailabilityCheckerTest {
 
   @Test
   fun runnerFailsClassWhenDeviceCheckFailed() {
-    AutoMobileSharedUtils.testDeviceChecker =
+    val checker =
       object : DeviceChecker {
         override fun checkDeviceAvailability() = Unit
 
@@ -201,12 +203,15 @@ class DeviceAvailabilityCheckerTest {
           }
         },
       )
-      AutoMobileRunner(RunnerTestTarget::class.java).run(notifier)
+      AutoMobileRunner(
+          RunnerTestTarget::class.java,
+          PlanExecutorCollaborators(deviceChecker = checker),
+        )
+        .run(notifier)
       assertEquals(1, failures.size)
       assertTrue(failures[0].message.contains("ADB device check failed (exit code 1)"))
       assertTrue(ignored.isEmpty())
     } finally {
-      AutoMobileSharedUtils.testDeviceChecker = null
       SystemPropertyCache.clear()
       TestTimingCache.clear()
     }
@@ -532,7 +537,7 @@ class DeviceAvailabilityCheckerTest {
       sdkChecker(
         commandExecutor = { _, _ ->
           attempts++
-          throw RuntimeException(message)
+          throw IllegalStateException(message)
         },
         sleeper = { delays.add(it) },
       )
@@ -551,7 +556,7 @@ class DeviceAvailabilityCheckerTest {
       sdkChecker(
         commandExecutor = { _, _ ->
           attempts++
-          if (attempts == 1) throw RuntimeException("boom")
+          if (attempts == 1) throw IllegalStateException("boom")
           CommandResult(1, "", "protocol fault (couldn't read status)")
         },
         sleeper = { delays.add(it) },
@@ -574,7 +579,7 @@ class DeviceAvailabilityCheckerTest {
       sdkChecker(
         commandExecutor = { _, _ ->
           attempts++
-          if (attempts == 3) throw RuntimeException("final boom")
+          if (attempts == 3) throw IllegalStateException("final boom")
           CommandResult(1, "", "protocol fault (couldn't read status)")
         },
         sleeper = { delays.add(it) },
@@ -594,7 +599,7 @@ class DeviceAvailabilityCheckerTest {
       sdkChecker(
         commandExecutor = { _, _ ->
           attempts++
-          throw RuntimeException()
+          throw IllegalStateException()
         },
         sleeper = { delays.add(it) },
       )
@@ -602,7 +607,7 @@ class DeviceAvailabilityCheckerTest {
     assertEquals(0, checker.getDeviceCount())
     assertEquals(3, attempts)
     assertEquals(listOf(500L, 1000L), delays)
-    assertEquals("java.lang.RuntimeException", checker.getLastError())
+    assertEquals("java.lang.IllegalStateException", checker.getLastError())
   }
 
   @Test

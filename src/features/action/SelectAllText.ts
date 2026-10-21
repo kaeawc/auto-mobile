@@ -11,6 +11,7 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { focusedFieldLayerRefusal } from "../observe/hierarchyLayer";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 type SelectAllTextCtrlProxy = {
   requestSelectAll(): Promise<{ success: boolean; error?: string; totalTimeMs: number }>;
@@ -79,14 +80,12 @@ export class SelectAllText extends BaseVisualChange {
         }
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false,
+        ...OBSERVED_INTERACTION_PROFILES.textEdit,
         tolerancePercent: 0,
-        timeoutMs: 500,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         progress,
         signal,
         perf,
-        skipUiStability: true, // Skip UI stability wait - a11y service is fast
       },
     );
   }

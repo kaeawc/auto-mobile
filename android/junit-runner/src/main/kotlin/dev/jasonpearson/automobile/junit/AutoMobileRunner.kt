@@ -15,7 +15,25 @@ import org.junit.runners.model.FrameworkMethod
  * (heartbeat, memory monitoring). Tests use the [AutoMobilePlan] DSL inside standard @Test methods
  * to execute YAML plans with AI-assisted recovery.
  */
-class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(klass) {
+class AutoMobileRunner
+private constructor(
+  private val klass: Class<*>,
+  private val timings: TestTimingSource,
+  private val collaborators: PlanExecutorCollaborators,
+) : BlockJUnit4ClassRunner(klass) {
+
+  constructor(klass: Class<*>) : this(klass, TestTimingCache, PlanExecutorCollaborators())
+
+  internal constructor(
+    klass: Class<*>,
+    store: TestTimingStore,
+    collaborators: PlanExecutorCollaborators = PlanExecutorCollaborators(),
+  ) : this(klass, store as TestTimingSource, collaborators)
+
+  internal constructor(
+    klass: Class<*>,
+    collaborators: PlanExecutorCollaborators,
+  ) : this(klass, TestTimingStore(collaborators = collaborators) as TestTimingSource, collaborators)
 
   private val orderedChildren: List<FrameworkMethod> by lazy {
     val children = super.getChildren()
@@ -31,7 +49,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         1
       }
     val selection = resolveTimingOrderingSelection(requestedStrategy, parallelForks)
-    val timingAvailable = TestTimingCache.hasTimings()
+    val timingAvailable = timings.hasTimings()
     logTimingOrdering(selection, timingAvailable)
 
     val timingOrderingActive = selection.resolved != TimingOrderingStrategy.NONE && timingAvailable
@@ -60,8 +78,8 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
   override fun run(notifier: RunNotifier) {
     // Skip the entire class if no devices are available
-    if (!AutoMobileSharedUtils.deviceChecker.areDevicesAvailable()) {
-      val checker = AutoMobileSharedUtils.deviceChecker
+    if (!collaborators.deviceChecker.areDevicesAvailable()) {
+      val checker = collaborators.deviceChecker
       if (checker.checkFailed()) {
         // A failed adb probe is an infrastructure problem, not "no devices": fail, never skip.
         val detail = checker.getLastError() ?: "unknown adb failure"
@@ -81,7 +99,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
     }
 
     // Proceed with normal execution if devices are available
-    val heartbeat = DaemonHeartbeat.startBackground()
+    val heartbeat = collaborators.heartbeat.startBackground(DaemonHeartbeat.DEFAULT_INTERVAL_MS)
     try {
       super.run(notifier)
     } finally {
@@ -159,7 +177,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         )
         .toIntOrNull() ?: 2
     val safeConfiguredForks = if (configuredForks > 0) configuredForks else 1
-    val deviceCount = AutoMobileSharedUtils.deviceChecker.getDeviceCount()
+    val deviceCount = collaborators.deviceChecker.getDeviceCount()
     return if (deviceCount > 0) {
       safeConfiguredForks.coerceAtMost(deviceCount)
     } else {
@@ -179,7 +197,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
   /** History is keyed by fully qualified class name; pre-#10091 rows used the simple name. */
   private fun timingFor(method: FrameworkMethod): TestTimingEntry? =
-    TestTimingCache.getTiming(klass.name, method.name, legacySimpleName = klass.simpleName)
+    timings.getTiming(klass.name, method.name, legacySimpleName = klass.simpleName)
 
   private fun orderChildrenByTiming(
     children: List<FrameworkMethod>,
@@ -231,7 +249,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         )
         .toIntOrNull() ?: 2
 
-    val deviceCount = AutoMobileSharedUtils.deviceChecker.getDeviceCount()
+    val deviceCount = collaborators.deviceChecker.getDeviceCount()
     val maxParallelForks =
       if (deviceCount > 0) {
         val effectiveForks = configuredForks.coerceAtMost(deviceCount)
@@ -281,7 +299,11 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
           futures.forEach { future ->
             try {
               future.get()
-            } catch (e: Exception) {
+            } catch (e: java.util.concurrent.ExecutionException) {
+              exceptions.add(e.cause ?: e)
+            } catch (e: InterruptedException) {
+              exceptions.add(e.cause ?: e)
+            } catch (e: java.util.concurrent.CancellationException) {
               exceptions.add(e.cause ?: e)
             }
           }

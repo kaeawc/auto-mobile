@@ -45,21 +45,11 @@ public struct StorageInspectionConfiguration: Sendable {
 
 /// A stable classification for storage failures. The message is intentionally
 /// separate so transport consumers can react without parsing SQLite text.
-public struct StorageDiagnostic: Sendable, Codable, Equatable {
-    public let code: String
-    public let message: String
-
-    public init(code: String, message: String) {
-        self.code = code
-        self.message = message
-    }
-}
-
 enum StorageInspectionAccess {
     static let defaultSensitiveKeys: Set<String> = [
         "authorization", "credential", "credentials", "password", "passwd",
         "secret", "token", "access_token", "refresh_token", "api_key",
-        "apikey", "private_key", "keychain", "cookie"
+        "apikey", "private_key", "keychain", "cookie",
     ]
 
     static func isSensitive(_ column: String, configured: Set<String>) -> Bool {
@@ -72,7 +62,9 @@ enum StorageInspectionAccess {
         columns: [String],
         rows: [[String?]],
         configuredKeys: Set<String>
-    ) -> [[String?]] {
+    )
+        -> [[String?]]
+    {
         rows.map { row in
             row.enumerated().map { index, value in
                 guard index < columns.count,

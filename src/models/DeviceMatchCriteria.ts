@@ -16,18 +16,3 @@ export interface DeviceMatchCriteria {
   preferRunning?: boolean;
   timeoutMs?: number;
 }
-
-export interface StartDeviceResult {
-  deviceId: string;
-  name: string;
-  platform: Platform;
-  apiLevel?: number;
-  osVersion?: string;
-  formFactor?: FormFactor;
-  screenSize?: { width: number; height: number };
-  sessionId: string;
-  processId?: number;
-  isReady: boolean;
-  source: "booted" | "cold-boot";
-  timing: Record<string, number>;
-}

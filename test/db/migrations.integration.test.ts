@@ -12,6 +12,7 @@ import * as layoutEventsScreenNameMigration from "../../src/db/migrations/2026_0
 import * as networkEventDetailsMigration from "../../src/db/migrations/2026_03_20_000_network_event_details";
 import * as dropCustomEventsMigration from "../../src/db/migrations/2026_04_01_000_drop_custom_events";
 import * as networkCaptureFieldsMigration from "../../src/db/migrations/2026_09_30_001_network_capture_fields";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 test("network capture migration preserves older rows and is idempotent", async () => {
   const db = createDb();
@@ -46,8 +47,8 @@ function createDb(): Kysely<unknown> {
 }
 
 async function tableExists(db: Kysely<unknown>, name: string): Promise<boolean> {
-  const result = await db
-    .selectFrom("sqlite_master" as any)
+  const result = await looseKyselyTables(db)
+    .selectFrom("sqlite_master")
     .select("name")
     .where("type", "=", "table")
     .where("name", "=", name)
@@ -90,6 +91,7 @@ describe("full migration chain", () => {
       "daemon_session_id",
       "created_at_ms",
       "last_used_at_ms",
+      "activity_seq",
       "expires_at_ms",
       "released_at_ms",
       "release_reason",

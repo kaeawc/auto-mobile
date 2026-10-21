@@ -1,3 +1,10 @@
+import { PrototypeAgentSuspendedError } from "../../../../src/features/prototype/ios/prototypeAgentSuspended";
+import { PrototypeAgentRequestTimeoutError } from "../../../../src/features/prototype/ios/prototypeAgentClient";
+import { ActionableError, toActionableError } from "../../../../src/models/ActionableError";
+import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
+import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
+import { FakePrototypeAgentClient } from "../../../fakes/FakePrototypeAgentClient";
 import { describe, expect, test } from "bun:test";
 import {
   captureHideDeadlineMs,
@@ -17,10 +24,13 @@ function fakeAgent(
     success: true,
     ...(type === "restore_after_capture" ? { restored: true } : {}),
   }),
+  requestCalls?: Parameters<PrototypeAgentClient["request"]>[],
 ): PrototypeAgentClient {
   return {
     handshake: { agentVersion: "t", protocolVersion: 1, capabilities },
-    async request(type: PrototypeAgentRequestType, body?: PrototypeAgentMessage) {
+    async request(...args: Parameters<PrototypeAgentClient["request"]>) {
+      requestCalls?.push(args);
+      const [type, body] = args;
       calls.push(
         body?.deadlineMs !== undefined
           ? `${type}:${body.deadlineMs}`
@@ -171,7 +181,7 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
   describe("show reset", () => {
     const spec = {
       id: "panel",
-      window: { placement: { type: "fullscreen" as const } },
+      window: { placement: { type: "fullscreen" as const }, opacity: 1 },
       root: { type: "text" as const, text: "hi" },
     };
     function recording(capabilities: string[]) {
@@ -217,7 +227,9 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
         return request(type, body);
       };
       const transport = new IosPrototypeTransport(agent);
-      expect((await transport.show(spec, { appearance: "dark" })).appearance).toEqual(reported);
+      expect<unknown>((await transport.show(spec, { appearance: "dark" })).appearance).toEqual(
+        reported,
+      );
       // A reply that is not {mode, source, deviceDark} is dropped, not passed on.
       expect(await transport.show(spec)).not.toHaveProperty("appearance");
       expect(bodies).toEqual([{ spec, appearance: "dark" }, { spec }]);
@@ -232,4 +244,128 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
       expect(bodies).toEqual([]);
     });
   });
+});
+
+describe("iOS status suspension deadline", () => {
+  test("only status uses the 3000 ms override", async () => {
+    const requestCalls: Parameters<PrototypeAgentClient["request"]>[] = [];
+    const agent = fakeAgent([], [], undefined, requestCalls);
+    const transport = new IosPrototypeTransport(agent);
+    await transport.status();
+    expect(requestCalls[0]).toEqual(["get_prototype_status", undefined, { timeoutMs: 3000 }]);
+    await transport.show({
+      id: "test",
+      window: { placement: { type: "fullscreen" }, opacity: 1 },
+      root: { type: "text", text: "Hello" },
+    });
+    await transport.dismiss({ all: true });
+    expect(requestCalls[1]).toHaveLength(2);
+    expect(requestCalls[2]).toHaveLength(2);
+  });
+  test("status timeout gives foreground guidance and preserves its cause and inspect message", async () => {
+    const timeout = new PrototypeAgentRequestTimeoutError("get_prototype_status", 3000);
+    const transport = new IosPrototypeTransport(fakeAgent([], [], () => timeout));
+    const error = await transport.status().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toBeInstanceOf(PrototypeAgentSuspendedError);
+    expect(error).not.toHaveProperty("code");
+    expect(error).toMatchObject({
+      name: "PrototypeAgentSuspendedError",
+      cause: timeout,
+      message:
+        "Prototype agent did not answer get_prototype_status within 3000 ms. iOS suspends an app that is not in the foreground, and the prototype agent injected into it, so the prototype's app is most likely in the background. Bring that app back to the foreground with launchApp (the prototype returns with its state), then retry.",
+    });
+    expect<unknown>(toActionableError(error, "Prototype inspect failed")).toBe(error);
+  });
+  test("connection errors propagate unchanged", async () => {
+    const error = new ActionableError("connection closed");
+    const transport = new IosPrototypeTransport(fakeAgent([], [], () => error));
+    await expect(transport.status()).rejects.toBe(error);
+  });
+});
+
+describe("iOS patch transport", () => {
+  test("refuses without the capability even if the request name is advertised", async () => {
+    const agent = new FakePrototypeAgentClient({
+      agentVersion: "old",
+      protocolVersion: 1,
+      capabilities: ["patch_prototype"],
+    });
+    const transport = new IosPrototypeTransport(agent);
+    expect(await transport.patch({ id: "orders", ops: patchOps })).toEqual({
+      success: false,
+      delivery: "unsent",
+      error: prototypePatchUnsupportedMessage("ios"),
+    });
+    expect(agent.requests).toEqual([]);
+  });
+  test("request rejection is indeterminate after issuance", async () => {
+    const agent = new FakePrototypeAgentClient({
+      agentVersion: "new",
+      protocolVersion: 1,
+      capabilities: [PROTOTYPE_PATCH_CAPABILITY],
+    });
+    agent.setPatchResult(new Error("socket closed"));
+    expect(await new IosPrototypeTransport(agent).patch({ id: "orders", ops: patchOps })).toEqual({
+      success: false,
+      delivery: "indeterminate",
+      error: "socket closed",
+    });
+    expect(agent.patchRequests).toHaveLength(1);
+  });
+  test("patch frame omits absent baseRevision and sanitizes revision and conflict", async () => {
+    const agent = new FakePrototypeAgentClient({
+      agentVersion: "new",
+      protocolVersion: 1,
+      capabilities: [PROTOTYPE_PATCH_CAPABILITY],
+    });
+    const transport = new IosPrototypeTransport(agent);
+    agent.setPatchResult({ success: true, revision: 13 });
+    expect(await transport.patch({ id: "orders", ops: patchOps })).toMatchObject({
+      success: true,
+      delivery: "answered",
+      revision: 13,
+    });
+    expect(agent.patchRequests[0]).toEqual({ id: "orders", ops: patchOps });
+    const conflict = { revision: 14, state: { enabled: true } };
+    agent.setPatchResult({ success: false, error: "conflict", conflict });
+    expect(await transport.patch({ id: "orders", ops: patchOps, baseRevision: 12 })).toMatchObject({
+      success: false,
+      conflict,
+    });
+    expect(agent.patchRequests[1]).toEqual({ id: "orders", ops: patchOps, baseRevision: 12 });
+    for (const fields of [
+      { revision: -1, conflict: { revision: 2, state: { bad: null } } },
+      { revision: 1.5, conflict: { revision: 2, state: { "bad-key": 1 } } },
+      {
+        revision: Number.MAX_SAFE_INTEGER + 1,
+        conflict: { revision: 2, state: { bad: Infinity } },
+      },
+    ]) {
+      agent.setPatchResult({ success: false, ...fields });
+      const result = await transport.patch({ id: "orders", ops: patchOps });
+      expect(result).not.toHaveProperty("revision");
+      expect(result).not.toHaveProperty("conflict");
+    }
+  });
+});
+
+const patchOps: PrototypePatchOp[] = [{ op: "replace", path: "/data/cartCount", value: 2 }];
+
+test("iOS refuses stack navigation unsent without its capability", async () => {
+  const calls: string[] = [];
+  const transport = new IosPrototypeTransport(fakeAgent([], calls));
+  await expect(
+    transport.show({
+      id: "panel",
+      window: { placement: { type: "fullscreen" }, opacity: 100 },
+      root: {
+        type: "stack",
+        id: "nav",
+        start: "home",
+        screens: { home: { type: "text", text: "Home" } },
+      },
+    }),
+  ).rejects.toThrow("prototype_stack_v1");
+  expect(calls).toEqual([]);
 });

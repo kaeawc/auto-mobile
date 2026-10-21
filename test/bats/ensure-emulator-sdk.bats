@@ -61,6 +61,54 @@ MOCK
   [[ "$output" == *"installing via"* ]]
 }
 
+# sdkmanager sometimes downloads a corrupt archive ("Error on ZipFile unknown
+# archive") and installs nothing; a later attempt succeeds.
+make_flaky_sdkmanager() {
+  local failures="$1"
+  mkdir -p "${SDK_ROOT}/cmdline-tools/latest/bin"
+  cat > "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" <<MOCK
+#!/usr/bin/env bash
+count_file="${SDK_ROOT}/sdkmanager-calls"
+calls=\$(( \$(cat "\$count_file" 2>/dev/null || echo 0) + 1 ))
+echo "\$calls" > "\$count_file"
+if (( calls <= ${failures} )); then
+  echo "Warning: An error occurred while preparing SDK package Android Emulator: Error on ZipFile unknown archive." >&2
+  exit 0
+fi
+mkdir -p "${SDK_ROOT}/emulator"
+printf '#!/usr/bin/env bash\n' > "${SDK_ROOT}/emulator/emulator"
+chmod +x "${SDK_ROOT}/emulator/emulator"
+MOCK
+  chmod +x "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+}
+
+@test "retries a corrupt emulator package download until the install succeeds" {
+  make_flaky_sdkmanager 2
+
+  run env ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT= ANDROID_SDK_HOME= \
+    ENSURE_EMULATOR_SDK_RETRY_DELAY_SECONDS=0 \
+    GITHUB_ENV="$GITHUB_ENV_FILE" GITHUB_PATH="$GITHUB_PATH_FILE" \
+    bash "$SCRIPT_PATH"
+
+  [ "$status" -eq 0 ]
+  [ -x "${SDK_ROOT}/emulator/emulator" ]
+  [ "$(<"${SDK_ROOT}/sdkmanager-calls")" -eq 3 ]
+  [[ "$output" == *"install attempt 1/3"* ]]
+}
+
+@test "stops after the configured attempts and still fails closed when every download is corrupt" {
+  make_flaky_sdkmanager 99
+
+  run env ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT= ANDROID_SDK_HOME= \
+    ENSURE_EMULATOR_SDK_INSTALL_ATTEMPTS=2 ENSURE_EMULATOR_SDK_RETRY_DELAY_SECONDS=0 \
+    GITHUB_ENV="$GITHUB_ENV_FILE" GITHUB_PATH="$GITHUB_PATH_FILE" \
+    bash "$SCRIPT_PATH"
+
+  [ "$status" -eq 1 ]
+  [ "$(<"${SDK_ROOT}/sdkmanager-calls")" -eq 2 ]
+  [[ "$output" == *"binary still not executable after install attempt"* ]]
+}
+
 @test "names the resolved ANDROID_HOME and PATH when the emulator cannot be resolved" {
   run env ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT= ANDROID_SDK_HOME= \
     GITHUB_ENV="$GITHUB_ENV_FILE" GITHUB_PATH="$GITHUB_PATH_FILE" \
@@ -101,15 +149,16 @@ wiring_requires_yq() {
 }
 
 @test "reports the resolved environment when no SDK root can be found at all" {
+  # Empty fallback roots keep the run hermetic: without it the script finds the
+  # runner's real SDK and sdkmanager-installs the emulator package (~230s).
   run env -u ANDROID_HOME -u ANDROID_SDK_ROOT -u ANDROID_SDK_HOME -u HOME \
+    ENSURE_EMULATOR_SDK_FALLBACK_ROOTS= \
     bash -c 'cd / && exec "$0"' "$SCRIPT_PATH"
 
-  # Either it resolved a real SDK on this machine (status 0) or it failed with a
-  # diagnostic that names what it looked at -- never a bare failure.
-  if [ "$status" -ne 0 ]; then
-    [[ "$output" == *"ANDROID_HOME="* ]]
-    [[ "$output" == *"PATH="* ]]
-  fi
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not resolve an Android SDK root"* ]]
+  [[ "$output" == *"ANDROID_HOME="* ]]
+  [[ "$output" == *"PATH="* ]]
 }
 
 @test "the resolution tripwire fails when the product cannot find the emulator" {
@@ -250,6 +299,7 @@ MOCK
   # and pin both halves.
   script="$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh"
   product="$(pwd)/src/devices/deviceBootService.ts"
+  selection="$(pwd)/src/devices/deviceBootSelection.ts"
 
   expected="$(grep -o 'expected_diagnostic="[^"]*"' "$script" \
     | head -n 1 | sed 's/^expected_diagnostic="//; s/"$//')"
@@ -275,7 +325,8 @@ MOCK
   probe_name="$(grep -o 'expected_probe_name="[^"]*"' "$script" \
     | head -n 1 | sed 's/^expected_probe_name="//; s/"$//')"
   [ "$probe_name" = 'name=${missing_avd}' ]
-  grep -qF 'name=${request.name}' "$product"
+  # The criteria detail is built by the shared boot-selection error helper.
+  grep -qF 'name=${request.name}' "$selection"
 }
 
 @test "the resolution tripwire rejects an iOS no-match diagnostic" {

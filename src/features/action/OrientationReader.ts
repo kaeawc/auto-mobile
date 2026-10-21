@@ -1,5 +1,8 @@
 import type { BootedDevice } from "../../models";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type {
+  AdbExecutor,
+  AdbCommandRunner,
+} from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { logger } from "../../utils/logger";
 
@@ -41,7 +44,7 @@ export function rotationForOrientation(
  * Read it fresh per request: a fold or unfold changes which panel is active.
  */
 export async function readNaturalLandscape(
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
   displayId?: number,
 ): Promise<boolean | null> {
@@ -50,10 +53,7 @@ export async function readNaturalLandscape(
       displayId === undefined || displayId === 0
         ? "shell wm size"
         : `shell wm size -d ${displayId}`,
-      undefined,
-      undefined,
-      undefined,
-      signal,
+      { signal },
     );
     // `wm size` prints `Override size:` after `Physical size:` once `wm size WxH` was applied;
     // the override is the size rotation 0 actually presents, so it wins when present.
@@ -94,18 +94,5 @@ export class AndroidOrientationReader implements OrientationReader {
       logger.debug(`[OrientationReader] Failed to read Android orientation: ${error}`);
       return null;
     }
-  }
-}
-
-/**
- * CtrlProxy exposes orientation only as part of its rotate response; it has no
- * read-only orientation query, so this seam cannot safely report an iOS value yet.
- */
-export class IosOrientationReader implements OrientationReader {
-  async readOrientation(
-    _device: BootedDevice,
-    _signal?: AbortSignal,
-  ): Promise<"portrait" | "landscape" | null> {
-    return null;
   }
 }

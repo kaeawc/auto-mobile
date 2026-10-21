@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidCtrlProxyManager,
@@ -7,13 +8,15 @@ import {
   REBIND_BIND_WAIT_BUDGET_MS,
   STALE_PREFETCH_SWEEP_DEADLINE_MS,
 } from "../../src/ctrlProxy/CtrlProxyManager";
+import type { CtrlProxyApkPrefetcher } from "../../src/ctrlProxy/CtrlProxyApkPrefetcher";
+import type { FileDownloader } from "../../src/utils/FileDownloader";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AdbClient, AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { BootedDevice } from "../../src/models";
+import { BootedDevice, type ExecResult } from "../../src/models";
 import * as fs from "fs/promises";
-import type { Dirent } from "fs";
 import { readFileSync } from "fs";
+import * as os from "os";
 import * as path from "path";
 import crypto from "crypto";
 import AdmZip from "adm-zip";
@@ -26,6 +29,12 @@ import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { logger } from "../../src/utils/logger";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
+import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
+import { FakeSavedPrototypeMirror } from "../fakes/FakeSavedPrototypeMirror";
+import { NoOpPerformanceTracker } from "../../src/utils/PerformanceTracker";
+import type { SavedPrototypeRestoreReport } from "../../src/models/SavedPrototypeRestoreReport";
+import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
+import { createExecResult } from "../../src/utils/execResult";
 
 // Captured on a bound API 36 / Android 16 google_apis arm64 emulator. No older
 // API-level dumpsys captures exist in this repository; variants below are
@@ -35,10 +44,11 @@ const boundAccessibilityCapture = readFileSync(
   "utf8",
 );
 const ctrlProxyComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
-const boundLine = boundAccessibilityCapture.match(/^     Bound services:.*$/m)?.[0];
-if (!boundLine) {
+const boundLineMatch = boundAccessibilityCapture.match(/^     Bound services:.*$/m)?.[0];
+if (!boundLineMatch) {
   throw new Error("API 36 accessibility fixture lacks Bound services");
 }
+const boundLine: string = boundLineMatch;
 
 type AccessibilityFixtureState =
   | "bound-label"
@@ -81,6 +91,7 @@ function accessibilityFixture(state: AccessibilityFixtureState): string {
 }
 
 describe("CtrlProxyManager", function () {
+  useFakeCtrlProxyManagerHost();
   let accessibilityServiceClient: AndroidCtrlProxyManager;
   let fakeAdb: FakeAdbExecutor;
   let fakeAdbFactory: AdbClientFactory;
@@ -91,8 +102,265 @@ describe("CtrlProxyManager", function () {
   let originalSkipShaEnv: string | undefined;
   let originalLaunchCwdEnv: string | undefined;
   let prefetchCacheDir: string;
+  let testPrefetcher: CtrlProxyApkPrefetcher;
   let apkPayload: Buffer;
   const scratch = useScratchRoot("ctrlproxy-manager-test-");
+
+  describe("saved prototype reinstall recovery", () => {
+    function reinstallHarness() {
+      const mirror = new FakeSavedPrototypeMirror();
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
+      const order: string[] = [];
+      const warn = spyOn(logger, "warn").mockImplementation((message) => {
+        order.push(`warn:${message}`);
+      });
+      const uninstall = spyOn(adb, "executeCommand").mockImplementation(async (command) => {
+        order.push(command);
+        return createExecResult("Success", "");
+      });
+      const install = spyOn(manager, "install").mockImplementation(async () => {
+        order.push("install");
+      });
+      const enable = spyOn(manager, "enable").mockImplementation(async () => {
+        order.push("enable");
+      });
+      const binding = spyOn(manager, "waitForAccessibilityServiceBinding").mockImplementation(
+        async () => {
+          order.push("binding");
+          return "already-bound";
+        },
+      );
+      const report: SavedPrototypeRestoreReport = { restored: ["panel"], skipped: [], failed: [] };
+      let restoreCalls = 0;
+      let restorer: () => Promise<SavedPrototypeRestoreReport> = async () => {
+        restoreCalls++;
+        order.push("restore");
+        return report;
+      };
+      const setRestorer = (next: () => Promise<SavedPrototypeRestoreReport>) => {
+        restorer = next;
+      };
+      manager.setSavedPrototypeServiceForTesting({
+        list: (serial) => mirror.list(serial),
+        restore: async (device) => {
+          expect(device.deviceId).toBe(testDevice.deviceId);
+          return restorer();
+        },
+      });
+      const invoke = (installed = true, force = true) =>
+        manager.installDownloadedApkGuarded(
+          "/fake.apk",
+          { status: "not_installed" },
+          installed,
+          force,
+          new NoOpPerformanceTracker(),
+        );
+      const record = () =>
+        mirror.record(testDevice.deviceId, {
+          id: "panel",
+          label: "My panel",
+          spec: {
+            id: "panel",
+            window: { placement: { type: "fullscreen" }, opacity: 100 },
+            root: { type: "text", text: "Hello" },
+          },
+          assets: [],
+        });
+      return {
+        manager,
+        mirror,
+        report,
+        order,
+        invoke,
+        record,
+        restoreCalls: () => restoreCalls,
+        setRestorer,
+        uninstall,
+        install,
+        binding,
+        timer,
+        cleanup: () => {
+          warn.mockRestore();
+          uninstall.mockRestore();
+          install.mockRestore();
+          enable.mockRestore();
+          binding.mockRestore();
+        },
+      };
+    }
+    test("warns before uninstall and restores after enable with the report attached", async () => {
+      const h = reinstallHarness();
+      try {
+        await h.record();
+        const result = await h.invoke();
+        expect(result.status).toBe("reinstalled");
+        expect(result.savedPrototypeRestore).toEqual(h.report);
+        expect(h.order[0]).toContain("panel (My panel)");
+        expect(h.order[0]).toContain("Uninstall will delete");
+        expect(h.order[1]).toContain("pm uninstall");
+        expect(h.order.slice(2)).toEqual(["install", "enable", "binding", "restore"]);
+      } finally {
+        h.cleanup();
+      }
+    });
+    test("signature mismatch restores mirrored entries after the uninstall fallback", async () => {
+      const h = reinstallHarness();
+      try {
+        await h.record();
+        h.uninstall.mockImplementation(async (command) => {
+          h.order.push(command);
+          if (command.startsWith("install -r -d")) {
+            throw new Error(
+              "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]",
+            );
+          }
+          return createExecResult("Success", "");
+        });
+        const result = await h.invoke(true, false);
+        expect(result.status).toBe("reinstalled");
+        expect(result.savedPrototypeRestore).toEqual(h.report);
+        expect(h.restoreCalls()).toBe(1);
+        const warning = h.order.findIndex((call) => call.includes("Uninstall will delete"));
+        const uninstall = h.order.findIndex((call) => call.includes("pm uninstall"));
+        expect(warning).toBeLessThan(uninstall);
+        expect(h.order.slice(-4)).toEqual(["install", "enable", "binding", "restore"]);
+      } finally {
+        h.cleanup();
+      }
+    });
+    test.each(["throws", "failure"])(
+      "restore %s preserves reinstalled status and warns with failed IDs",
+      async (mode) => {
+        const h = reinstallHarness();
+        try {
+          await h.record();
+          h.setRestorer(async () => {
+            if (mode === "throws") {
+              throw new Error("restore exploded");
+            }
+            return {
+              restored: [],
+              skipped: [],
+              failed: [{ id: "panel", code: "asset_unavailable", reason: "missing asset" }],
+            };
+          });
+          const result = await h.invoke();
+          expect(result.status).toBe("reinstalled");
+          expect(result.savedPrototypeRestore?.failed[0]).toMatchObject(
+            mode === "throws"
+              ? { id: "*", code: "restore_failed", reason: "restore exploded" }
+              : { id: "panel", code: "asset_unavailable" },
+          );
+          expect(h.order.at(-1)).toContain(
+            mode === "throws" ? "failed for: *" : "failed for: panel",
+          );
+        } finally {
+          h.cleanup();
+        }
+      },
+    );
+    test.each(["unhealthy", "reject", "timeout"])(
+      "binding wait %s still restores and preserves reinstalled status",
+      async (mode) => {
+        const h = reinstallHarness();
+        try {
+          await h.record();
+          h.binding.mockImplementation(async () => {
+            h.order.push("binding");
+            expect(h.restoreCalls()).toBe(0);
+            if (mode === "reject") {
+              throw new Error("binding inspection failed");
+            }
+            if (mode === "timeout") {
+              return new Promise<"unhealthy">(() => {});
+            }
+            return "unhealthy";
+          });
+          const result = await settleByFakeEvents(h.timer, h.invoke(), {
+            description: "best effort binding wait",
+          });
+          expect(h.binding).toHaveBeenCalledTimes(1);
+          expect(result.status).toBe("reinstalled");
+          expect(result.savedPrototypeRestore).toEqual(h.report);
+          expect(h.restoreCalls()).toBe(1);
+          expect(h.order.at(-2)).toContain("warn:");
+          expect(h.order.at(-2)).toContain("binding");
+          expect(h.order.at(-1)).toBe("restore");
+          expect(h.timer.now()).toBe(mode === "timeout" ? REBIND_BIND_WAIT_BUDGET_MS : 0);
+          expect(h.timer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          h.cleanup();
+        }
+      },
+    );
+    test.each(["success", "failure", "none"])(
+      "setup carries the %s restore report only when restore ran",
+      async (mode) => {
+        const h = reinstallHarness();
+        const compatibility = spyOn(h.manager, "ensureCompatibleVersion").mockImplementation(() =>
+          h.invoke(),
+        );
+        const guard = spyOn(h.manager, "assertNotDrivenByOtherDaemon").mockResolvedValue();
+        try {
+          if (mode !== "none") {
+            await h.record();
+          }
+          if (mode === "failure") {
+            h.report.restored = [];
+            h.report.failed = [
+              { id: "panel", code: "service_unavailable", reason: "connection timed out" },
+            ];
+          }
+          const result = await h.manager.setup();
+          expect(result.success).toBe(true);
+          expect(result.savedPrototypeRestore).toEqual(mode === "none" ? undefined : h.report);
+          if (mode === "none") {
+            expect(result).not.toHaveProperty("savedPrototypeRestore");
+          }
+        } finally {
+          compatibility.mockRestore();
+          guard.mockRestore();
+          h.cleanup();
+        }
+      },
+    );
+    test.each(["empty", "upgrade", "fresh", "failed reinstall", "unreadable mirror"])(
+      "does not restore on %s",
+      async (mode) => {
+        const h = reinstallHarness();
+        try {
+          if (mode !== "empty") {
+            await h.record();
+          }
+          if (mode === "failed reinstall") {
+            h.install.mockRejectedValue(new Error("install failed"));
+          }
+          if (mode === "unreadable mirror") {
+            h.mirror.error = new Error("mirror unavailable");
+          }
+          const result = await h.invoke(mode !== "fresh", mode !== "upgrade");
+          expect(h.restoreCalls()).toBe(0);
+          expect(result.savedPrototypeRestore).toBeUndefined();
+          expect(result.status).toBe(
+            mode === "upgrade"
+              ? "upgraded"
+              : mode === "fresh"
+                ? "installed"
+                : mode === "failed reinstall"
+                  ? "failed"
+                  : "reinstalled",
+          );
+          if (mode === "unreadable mirror") {
+            expect(h.order[0]).toContain("Cannot inspect saved prototype mirror");
+          }
+        } finally {
+          h.cleanup();
+        }
+      },
+    );
+  });
 
   // CI's per-test time includes beforeEach/afterEach but not beforeAll, so the immutable APK
   // fixture (a deflated zip of random bytes) is built once for the whole file.
@@ -139,7 +407,6 @@ describe("CtrlProxyManager", function () {
     testDevice = {
       deviceId: "test-device",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -149,22 +416,35 @@ describe("CtrlProxyManager", function () {
     // These tests exercise download/checksum/retry behavior, not the prefetch
     // prerequisite gate (#4404). Neutralize the gate so the default detector
     // doesn't skip the prefetch on CI hosts without Android tooling (e.g. Windows).
-    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting({
-      hasAndroidPrerequisites: async () => true,
-    });
     prefetchCacheDir = scratch.next();
-    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(prefetchCacheDir);
+    testPrefetcher = AndroidCtrlProxyManager.createApkPrefetcher({
+      prerequisiteDetector: () => ({ hasAndroidPrerequisites: async () => true }),
+      cacheDirOverride: () => prefetchCacheDir,
+    });
+    AndroidCtrlProxyManager.useApkPrefetcher(testPrefetcher);
 
-    accessibilityServiceClient = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory);
+    accessibilityServiceClient = AndroidCtrlProxyManager.getInstanceForTesting(
+      testDevice,
+      fakeAdbFactory,
+    );
     accessibilityServiceClient.clearAvailabilityCache();
   });
+
+  /** Rebuild the process-wide prefetcher around `downloader`; afterEach restores the default. */
+  function usePrefetchDownloader(downloader: FileDownloader): void {
+    testPrefetcher = AndroidCtrlProxyManager.createApkPrefetcher({
+      prerequisiteDetector: () => ({ hasAndroidPrerequisites: async () => true }),
+      cacheDirOverride: () => prefetchCacheDir,
+      downloader: () => downloader,
+    });
+    AndroidCtrlProxyManager.useApkPrefetcher(testPrefetcher);
+  }
 
   afterEach(async function () {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
-    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(null);
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(null);
+    AndroidCtrlProxyManager.useApkPrefetcher(null);
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     } else {
@@ -227,14 +507,14 @@ describe("CtrlProxyManager", function () {
       async ({ method, result, ttl, commands }) => {
         const timer = new FakeTimer();
         const adb = new FakeAdbExecutor();
-        adb.setCommandResponse(installedCommand, {
-          stdout: result ? `package:${AndroidCtrlProxyManager.PACKAGE}` : "",
-          stderr: "",
-        });
-        adb.setCommandResponse(enabledCommand, {
-          stdout: result ? ctrlProxyComponent : "",
-          stderr: "",
-        });
+        adb.setCommandResponse(
+          installedCommand,
+          createExecResult(result ? `package:${AndroidCtrlProxyManager.PACKAGE}` : "", ""),
+        );
+        adb.setCommandResponse(
+          enabledCommand,
+          createExecResult(result ? ctrlProxyComponent : "", ""),
+        );
         const manager = createManager(timer, adb);
 
         await expect(manager[method]()).resolves.toBe(result);
@@ -277,9 +557,9 @@ describe("CtrlProxyManager", function () {
 
       await expect(manager.isInstalled()).resolves.toBe(false);
       adb.setCommandResponseSequence(installedCommand, [
-        { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`, stderr: "" },
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}`, ""),
       ]);
-      adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', { stdout: "Success", stderr: "" });
+      adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
       await manager.install("/tmp/ctrlproxy.apk");
 
       await expect(manager.isInstalled()).resolves.toBe(true);
@@ -292,13 +572,49 @@ describe("CtrlProxyManager", function () {
       ).toHaveLength(2);
     });
 
+    describe("ACCESS_LOCAL_NETWORK grant after install (#13018)", () => {
+      const grantCommand = `shell pm grant ${AndroidCtrlProxyManager.PACKAGE} android.permission.ACCESS_LOCAL_NETWORK`;
+
+      async function installOnApi(
+        sdk: string,
+        grantResponse?: ExecResult,
+      ): Promise<FakeAdbExecutor> {
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
+        adb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult(sdk, ""));
+        if (grantResponse) {
+          adb.setCommandResponse(grantCommand, grantResponse);
+        }
+        await createManager(new FakeTimer(), adb).install("/tmp/ctrlproxy.apk");
+        return adb;
+      }
+
+      test("grants the permission on API 37", async () => {
+        const adb = await installOnApi("37\n");
+        expect(adb.getCommandCalls().filter((c) => c.command === grantCommand)).toHaveLength(1);
+      });
+
+      test("does not grant below API 37", async () => {
+        const adb = await installOnApi("36\n");
+        expect(adb.wasCommandExecuted("pm grant")).toBe(false);
+      });
+
+      test("tolerates an unknown-permission refusal", async () => {
+        const adb = await installOnApi(
+          "37",
+          createExecResult("", "Exception occurred while executing 'grant': Unknown permission"),
+        );
+        expect(adb.wasCommandExecuted(grantCommand)).toBe(true);
+      });
+    });
+
     test("keeps a positive installation result cached", async () => {
       const timer = new FakeTimer();
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse(installedCommand, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`,
-        stderr: "",
-      });
+      adb.setCommandResponse(
+        installedCommand,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}`, ""),
+      );
       const manager = createManager(timer, adb);
 
       await expect(manager.isInstalled()).resolves.toBe(true);
@@ -313,12 +629,12 @@ describe("CtrlProxyManager", function () {
       const adb = new FakeAdbExecutor();
       const enabledCommand = "shell settings get secure enabled_accessibility_services";
       adb.setCommandResponseSequence(enabledCommand, [
-        { stdout: "", stderr: "" },
-        { stdout: "", stderr: "" },
-        { stdout: `enabled:${AndroidCtrlProxyManager.PACKAGE}`, stderr: "" },
+        createExecResult("", ""),
+        createExecResult("", ""),
+        createExecResult(`enabled:${AndroidCtrlProxyManager.PACKAGE}`, ""),
       ]);
-      adb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
-      adb.setCommandResponse("shell getprop ro.build.version.sdk", { stdout: "35", stderr: "" });
+      adb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      adb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("35", ""));
       const manager = createManager(timer, adb);
 
       await expect(manager.isEnabled()).resolves.toBe(false);
@@ -332,7 +648,7 @@ describe("CtrlProxyManager", function () {
   });
 
   test("gives a direct APK install its full transfer budget", async () => {
-    fakeAdb.setCommandResponse("install ", { stdout: "Success", stderr: "" });
+    fakeAdb.setCommandResponse("install ", createExecResult("Success", ""));
     await accessibilityServiceClient.install("/tmp/ctrlproxy.apk");
     expect(
       fakeAdb.getCommandCalls().find((call) => call.command.startsWith("install "))?.timeoutMs,
@@ -363,18 +679,36 @@ describe("CtrlProxyManager", function () {
     });
   });
 
+  test.each([
+    ["serial-qualified", "error: device 'test-device' not found", "deviceConnection"],
+    ["unqualified", "error: device not found", "deviceConnection"],
+    ["another device's serial", "error: device 'emulator-9999' not found", "unknown"],
+  ] as const)(
+    "classifies a %s missing-device compatibility failure (#13392)",
+    async (_name, error, category) => {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeAdb,
+        new FakeTimer(),
+      );
+      manager.ensureCompatibleVersion = async () => ({ status: "failed", error });
+      const result = await manager.setup();
+      expect(result).toMatchObject({ success: false, error, category });
+    },
+  );
+
   test("quotes a hostile installed APK path before sha256sum", async function () {
     const apkPath = "/data/app/base$(id).apk";
-    fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-      stdout: `package:${apkPath}\n`,
-      stderr: "",
-    });
-    fakeAdb.setCommandResponse(`shell sha256sum '/data/app/base$(id).apk'`, {
-      stdout: `${"a".repeat(64)}  ${apkPath}\n`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+      createExecResult(`package:${apkPath}\n`, ""),
+    );
+    fakeAdb.setCommandResponse(
+      `shell sha256sum '/data/app/base$(id).apk'`,
+      createExecResult(`${"a".repeat(64)}  ${apkPath}\n`, ""),
+    );
 
-    const result = await (accessibilityServiceClient as any).getInstalledApkSha256WithDetails();
+    const result = await accessibilityServiceClient.getInstalledApkSha256WithDetails();
 
     expect(result).toMatchObject({ sha256: "a".repeat(64), source: "device", apkPath });
     expect(fakeAdb.getExecutedCommands()).toContain("shell sha256sum '/data/app/base$(id).apk'");
@@ -410,8 +744,11 @@ describe("CtrlProxyManager", function () {
         async (stream) => {
           const diagnostic = `cmd: Can't find service: ${service}`;
           fakeAdb.setCommandResponseSequence(command, [
-            { stdout: "", stderr: "", [stream]: diagnostic },
-            { stdout: readyOutput, stderr: "" },
+            createExecResult(
+              stream === "stdout" ? diagnostic : "",
+              stream === "stderr" ? diagnostic : "",
+            ),
+            createExecResult(readyOutput, ""),
           ]);
 
           await expect(accessibilityServiceClient[method]()).rejects.toThrow(diagnostic);
@@ -461,9 +798,41 @@ describe("CtrlProxyManager", function () {
     });
 
     test("a genuinely absent package still reports not installed", async () => {
-      fakeAdb.setCommandResponse(listCommand, { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse(listCommand, createExecResult("", ""));
 
       expect(await accessibilityServiceClient.isInstalled()).toBe(false);
+    });
+  });
+
+  describe("cleanupApk temp-directory containment", function () {
+    test("removes an auto-mobile-* temp dir nested under a '..'-prefixed parent", async function () {
+      const parent = await fs.mkdtemp(path.join(os.tmpdir(), "..am-contain-"));
+      const tempDir = path.join(parent, "auto-mobile-apk");
+      try {
+        await fs.mkdir(tempDir);
+        const apkPath = path.join(tempDir, "ctrl.apk");
+        await fs.writeFile(apkPath, "apk");
+
+        await accessibilityServiceClient.cleanupApk(apkPath);
+
+        await expect(fs.access(tempDir)).rejects.toThrow();
+      } finally {
+        await fs.rm(parent, { recursive: true, force: true });
+      }
+    });
+
+    test("keeps a non-auto-mobile directory and removes only the file", async function () {
+      const apkPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "am-keep-")), "ctrl.apk");
+      const dir = path.dirname(apkPath);
+      try {
+        await fs.writeFile(apkPath, "apk");
+        // Not named auto-mobile-*, so only the file goes.
+        await accessibilityServiceClient.cleanupApk(apkPath);
+        expect((await fs.stat(dir)).isDirectory()).toBe(true);
+        await expect(fs.access(apkPath)).rejects.toThrow();
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -481,7 +850,6 @@ describe("CtrlProxyManager", function () {
       const otherDevice: BootedDevice = {
         deviceId: "other-device",
         platform: "android",
-        isEmulator: true,
         name: "Other Device",
       };
       const other = AndroidCtrlProxyManager.getInstance(otherDevice, fakeAdbFactory);
@@ -493,7 +861,7 @@ describe("CtrlProxyManager", function () {
 
     test("evicts stopped AVD runtime serials while preserving a same-name physical device", function () {
       const device = { ...testDevice, deviceId: "emulator-5556", name: "Deleted_AVD" };
-      const physical = { ...device, deviceId: "physical-serial", isEmulator: false };
+      const physical = { ...device, deviceId: "physical-serial" };
       const old = AndroidCtrlProxyManager.getInstance(device, fakeAdbFactory);
       const retained = AndroidCtrlProxyManager.getInstance(physical, fakeAdbFactory);
       AndroidCtrlProxyManager.evict("Deleted_AVD", "Deleted_AVD");
@@ -513,7 +881,7 @@ describe("CtrlProxyManager", function () {
   });
 
   describe("legacy package probe", () => {
-    const legacy = AndroidCtrlProxyManager.LEGACY_PACKAGE;
+    const legacy = "dev.jasonpearson.automobile.accessibilityservice";
     const probe = `shell pm list packages ${legacy}`;
     const uninstall = `shell pm uninstall ${legacy}`;
 
@@ -523,11 +891,11 @@ describe("CtrlProxyManager", function () {
         `shell pm list packages | grep ${legacy}`,
         new Error("Command failed: grep exited 1"),
       );
-      fakeAdb.setCommandResponse(probe, { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse(probe, createExecResult("", ""));
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const error = spyOn(logger, "error").mockImplementation(() => {});
       try {
-        await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+        await accessibilityServiceClient.uninstallLegacyPackageIfPresent();
         expect(warn).not.toHaveBeenCalled();
         expect(error).not.toHaveBeenCalled();
         expect(fakeAdb.getExecutedCommands()).toEqual([probe]);
@@ -542,10 +910,10 @@ describe("CtrlProxyManager", function () {
     test.each(["\n", "\r\n"])(
       "legacy present clears cache after uninstall: %j",
       async (newline) => {
-        fakeAdb.setCommandResponse(probe, { stdout: `package:${legacy}${newline}`, stderr: "" });
+        fakeAdb.setCommandResponse(probe, createExecResult(`package:${legacy}${newline}`, ""));
         const clear = spyOn(accessibilityServiceClient, "clearAvailabilityCache");
         try {
-          await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+          await accessibilityServiceClient.uninstallLegacyPackageIfPresent();
           expect(fakeAdb.getExecutedCommands()).toEqual([probe, uninstall]);
           expect(clear).toHaveBeenCalledTimes(1);
         } finally {
@@ -555,21 +923,21 @@ describe("CtrlProxyManager", function () {
     );
 
     test("similar legacy names are not uninstalled", async () => {
-      fakeAdb.setCommandResponse(probe, {
-        stdout: `package:${legacy}.debug\npackage:x.${legacy}\n`,
-        stderr: "",
-      });
-      await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+      fakeAdb.setCommandResponse(
+        probe,
+        createExecResult(`package:${legacy}.debug\npackage:x.${legacy}\n`, ""),
+      );
+      await accessibilityServiceClient.uninstallLegacyPackageIfPresent();
       expect(fakeAdb.getExecutedCommands()).toEqual([probe]);
     });
 
     test("setup continues after a legacy probe failure", async () => {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
       fakeAdb.setCommandError(probe, new Error("adb unavailable"));
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
       const enabled = spyOn(accessibilityServiceClient, "isEnabled").mockResolvedValue(true);
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
@@ -586,13 +954,13 @@ describe("CtrlProxyManager", function () {
     });
 
     test.each(["probe", "uninstall"])("legacy %s failure warns and continues", async (stage) => {
-      fakeAdb.setCommandResponse(probe, { stdout: `package:${legacy}\n`, stderr: "" });
+      fakeAdb.setCommandResponse(probe, createExecResult(`package:${legacy}\n`, ""));
       fakeAdb.setCommandError(stage === "probe" ? probe : uninstall, new Error("adb unavailable"));
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const clear = spyOn(accessibilityServiceClient, "clearAvailabilityCache");
       try {
         await expect(
-          accessibilityServiceClient["uninstallLegacyPackageIfPresent"](),
+          accessibilityServiceClient.uninstallLegacyPackageIfPresent(),
         ).resolves.toBeUndefined();
         expect(warn).toHaveBeenCalledWith(
           "[CTRL_PROXY] Failed to check/uninstall legacy package: adb unavailable",
@@ -608,29 +976,32 @@ describe("CtrlProxyManager", function () {
 
   describe("isInstalled", function () {
     test("should return true when accessibility service package is installed", async function () {
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
 
       const result = await accessibilityServiceClient.isInstalled();
       expect(result).toBe(true);
     });
 
     test("accepts installed output alongside a benign ADB startup notice", async function () {
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "* daemon not running; starting now at tcp:5037\n* daemon started successfully",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(
+          `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          "* daemon not running; starting now at tcp:5037\n* daemon started successfully",
+        ),
+      );
 
       expect(await accessibilityServiceClient.isInstalled()).toBe(true);
     });
 
     test("should return false when accessibility service package is not installed", async function () {
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("", ""),
+      );
 
       const result = await accessibilityServiceClient.isInstalled();
       expect(result).toBe(false);
@@ -645,7 +1016,7 @@ describe("CtrlProxyManager", function () {
       { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\r\n`, installed: true },
     ])("filtered installation probe matches exact names: %j", async ({ stdout, installed }) => {
       const probe = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
-      fakeAdb.setCommandResponse(probe, { stdout, stderr: "" });
+      fakeAdb.setCommandResponse(probe, createExecResult(stdout, ""));
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const error = spyOn(logger, "error").mockImplementation(() => {});
       try {
@@ -657,6 +1028,17 @@ describe("CtrlProxyManager", function () {
         warn.mockRestore();
         error.mockRestore();
       }
+    });
+
+    test("status probe preserves an exhausted transport refusal without confirming loss", async () => {
+      const typed = new AdbDeviceTransportUnavailableError(
+        testDevice.deviceId,
+        new Error("adb: device 'test-device' not found"),
+      );
+      fakeAdb.setCommandError(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, typed);
+      await expect(accessibilityServiceClient.isInstalled()).rejects.toBe(typed);
+      const setup = await accessibilityServiceClient.setup();
+      expect(setup).toMatchObject({ success: false, category: "deviceConnection", cause: typed });
     });
 
     test.each(["adb: device offline", "error: device is offline"])(
@@ -676,48 +1058,51 @@ describe("CtrlProxyManager", function () {
 
   describe("isEnabled", function () {
     test("should return true when accessibility service is enabled", async function () {
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.AutomobileAccessibilityService:other.service/SomeService`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "settings get secure",
+        createExecResult(
+          `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.AutomobileAccessibilityService:other.service/SomeService`,
+          "",
+        ),
+      );
 
       const result = await accessibilityServiceClient.isEnabled();
       expect(result).toBe(true);
     });
 
     test("accepts enabled output alongside a benign ADB startup notice", async function () {
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: "* daemon not running; starting now at tcp:5037\n* daemon started successfully",
-      });
+      fakeAdb.setCommandResponse(
+        "settings get secure",
+        createExecResult(
+          `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
+          "* daemon not running; starting now at tcp:5037\n* daemon started successfully",
+        ),
+      );
 
       expect(await accessibilityServiceClient.isEnabled()).toBe(true);
     });
 
     test("should return false when accessibility service is not enabled", async function () {
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: "other.service/SomeService",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "settings get secure",
+        createExecResult("other.service/SomeService", ""),
+      );
 
       const result = await accessibilityServiceClient.isEnabled();
       expect(result).toBe(false);
     });
 
     test("returns false when an unclassified enabled-state probe fails", async function () {
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: "",
-        stderr: "Error",
-      });
+      fakeAdb.setCommandResponse("settings get secure", createExecResult("", "Error"));
 
       expect(await accessibilityServiceClient.isEnabled()).toBe(false);
     });
 
     test("preserves missing-device failure when installation is positively cached", async function () {
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
       expect(await accessibilityServiceClient.isInstalled()).toBe(true);
       fakeAdb.setCommandError(
         "settings get secure",
@@ -745,10 +1130,10 @@ describe("CtrlProxyManager", function () {
     });
 
     test("reports healthy when CtrlProxy is bound", async function () {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
 
       expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
@@ -759,10 +1144,10 @@ describe("CtrlProxyManager", function () {
 
     test("accepts component-form and multiline nested bound entries", async () => {
       for (const state of ["bound-component", "bound-multiline"] as const) {
-        fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-          stdout: accessibilityFixture(state),
-          stderr: "",
-        });
+        fakeAdb.setCommandResponse(
+          "shell dumpsys accessibility",
+          createExecResult(accessibilityFixture(state), ""),
+        );
         expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
       }
     });
@@ -777,22 +1162,22 @@ describe("CtrlProxyManager", function () {
           `     Binding services:{{${serviceComponent}}}`,
           `     Binding services:{\n          {${serviceComponent}}\n     }`,
         );
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", { stdout: binding, stderr: "" });
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", createExecResult(binding, ""));
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
 
       const crashed = accessibilityFixture("crashed").replace(
         `     Crashed services:{{${serviceComponent}}}`,
         `     Crashed services:{\n          {${serviceComponent}}\n     }`,
       );
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", { stdout: crashed, stderr: "" });
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", createExecResult(crashed, ""));
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
     });
 
     test("waits through the binding grace period before rebinding", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("binding"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("binding"), ""),
+      );
       expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
       timer.advanceTime(REBIND_BIND_WAIT_BUDGET_MS);
@@ -808,55 +1193,55 @@ describe("CtrlProxyManager", function () {
     });
 
     test("resets binding grace after a bound observation", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("binding"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("binding"), ""),
+      );
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
       timer.advanceTime(REBIND_BIND_WAIT_BUDGET_MS + 1);
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
       expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("binding"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("binding"), ""),
+      );
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
     });
 
     test("a crash bypasses and resets the binding grace period", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("binding"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("binding"), ""),
+      );
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("crashed"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("crashed"), ""),
+      );
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
     });
 
     test("rebinds immediately when the service leaves enabled services", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("absent"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("absent"), ""),
+      );
       expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
     });
 
     test("rebinds a crashed service without removing another enabled service", async function () {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("crashed"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: `${otherService}:${serviceComponent}`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("crashed"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(`${otherService}:${serviceComponent}`, ""),
+      );
 
       expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
@@ -877,14 +1262,14 @@ describe("CtrlProxyManager", function () {
 
     test("preserves every co-listed accessibility service while re-toggling CtrlProxy", async function () {
       const secondService = "com.example.screenreader/com.example.screenreader.ScreenReader";
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("unbound"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: `${otherService}:${serviceComponent}:${secondService}`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("unbound"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(`${otherService}:${serviceComponent}:${secondService}`, ""),
+      );
 
       await accessibilityServiceClient.rebindIfUnhealthy();
 
@@ -905,14 +1290,14 @@ describe("CtrlProxyManager", function () {
 
     test("quotes a co-listed component literally when rebinding", async () => {
       const nestedService = "com.example/.Outer$Service";
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("unbound"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: `${nestedService}:${serviceComponent}`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("unbound"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(`${nestedService}:${serviceComponent}`, ""),
+      );
       await accessibilityServiceClient.rebindIfUnhealthy();
       expect(
         fakeAdb
@@ -937,14 +1322,14 @@ describe("CtrlProxyManager", function () {
     });
 
     test("tries to restore CtrlProxy after the re-add write fails and preserves the original error", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("unbound"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: `${otherService}:${serviceComponent}`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("unbound"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(`${otherService}:${serviceComponent}`, ""),
+      );
       fakeAdb.setCommandError(
         `enabled_accessibility_services '${otherService}:${serviceComponent}'`,
         new Error("re-add failed"),
@@ -968,14 +1353,14 @@ describe("CtrlProxyManager", function () {
     });
 
     test("restores enabled services when force-stop fails after removal", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("crashed"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: `${otherService}:${serviceComponent}`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("crashed"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(`${otherService}:${serviceComponent}`, ""),
+      );
       fakeAdb.setCommandError(
         `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
         new Error("force-stop failed"),
@@ -996,14 +1381,11 @@ describe("CtrlProxyManager", function () {
     });
 
     test("stops polling when the rebound service becomes healthy", async () => {
-      const crashed = {
-        stdout: accessibilityFixture("crashed"),
-        stderr: "",
-      };
+      const crashed = createExecResult(accessibilityFixture("crashed"), "");
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         crashed,
-        { stdout: accessibilityFixture("binding"), stderr: "" },
-        { stdout: accessibilityFixture("bound-label"), stderr: "" },
+        createExecResult(accessibilityFixture("binding"), ""),
+        createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
 
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
@@ -1017,12 +1399,9 @@ describe("CtrlProxyManager", function () {
 
     test("waits through six seconds of binding and observes a healthy rebound", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
-        { stdout: accessibilityFixture("unbound"), stderr: "" },
-        ...Array.from({ length: 30 }, () => ({
-          stdout: accessibilityFixture("binding"),
-          stderr: "",
-        })),
-        { stdout: accessibilityFixture("bound-label"), stderr: "" },
+        createExecResult(accessibilityFixture("unbound"), ""),
+        ...Array.from({ length: 30 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
 
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
@@ -1046,11 +1425,8 @@ describe("CtrlProxyManager", function () {
 
     test("waits for an existing bind without starting a rebind", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
-        ...Array.from({ length: 32 }, () => ({
-          stdout: accessibilityFixture("binding"),
-          stderr: "",
-        })),
-        { stdout: accessibilityFixture("bound-label"), stderr: "" },
+        ...Array.from({ length: 32 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
 
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
@@ -1064,10 +1440,10 @@ describe("CtrlProxyManager", function () {
     });
 
     test("distinguishes an already-bound service without waiting", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
 
       expect(await accessibilityServiceClient.waitForAccessibilityServiceBinding()).toBe(
         "already-bound",
@@ -1077,8 +1453,8 @@ describe("CtrlProxyManager", function () {
 
     test("fails fast when the rebound service crashes", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
-        { stdout: accessibilityFixture("unbound"), stderr: "" },
-        { stdout: accessibilityFixture("crashed"), stderr: "" },
+        createExecResult(accessibilityFixture("unbound"), ""),
+        createExecResult(accessibilityFixture("crashed"), ""),
       ]);
 
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
@@ -1093,8 +1469,8 @@ describe("CtrlProxyManager", function () {
 
     test("fails fast when the rebound service leaves enabled services", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
-        { stdout: accessibilityFixture("unbound"), stderr: "" },
-        { stdout: accessibilityFixture("absent"), stderr: "" },
+        createExecResult(accessibilityFixture("unbound"), ""),
+        createExecResult(accessibilityFixture("absent"), ""),
       ]);
 
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
@@ -1104,8 +1480,8 @@ describe("CtrlProxyManager", function () {
 
     test("stops waiting at the bind budget when binding never finishes", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
-        { stdout: accessibilityFixture("unbound"), stderr: "" },
-        { stdout: accessibilityFixture("binding"), stderr: "" },
+        createExecResult(accessibilityFixture("unbound"), ""),
+        createExecResult(accessibilityFixture("binding"), ""),
       ]);
 
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
@@ -1118,12 +1494,9 @@ describe("CtrlProxyManager", function () {
 
     test("a second recovery during a long bind shares the first force-stop", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
-        { stdout: accessibilityFixture("unbound"), stderr: "" },
-        ...Array.from({ length: 35 }, () => ({
-          stdout: accessibilityFixture("binding"),
-          stderr: "",
-        })),
-        { stdout: accessibilityFixture("bound-label"), stderr: "" },
+        createExecResult(accessibilityFixture("unbound"), ""),
+        ...Array.from({ length: 35 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
       let rearmed: Promise<boolean> | undefined;
       timer.setTimeout(() => {
@@ -1148,14 +1521,14 @@ describe("CtrlProxyManager", function () {
       // and a client's own connection-failure recovery both call this on the same
       // per-device singleton and can race. Without an in-flight guard, a second
       // caller would start its own force-stop/settings sequence mid-rebind.
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("crashed"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: `${otherService}:${serviceComponent}`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("crashed"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(`${otherService}:${serviceComponent}`, ""),
+      );
 
       const [first, second] = await Promise.all([
         accessibilityServiceClient.rebindIfUnhealthy(),
@@ -1180,10 +1553,10 @@ describe("CtrlProxyManager", function () {
       ).toHaveLength(2);
 
       // A later call after the in-flight rebind settles starts its own sequence.
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
     });
   });
@@ -1208,14 +1581,14 @@ describe("CtrlProxyManager", function () {
     });
 
     test("force-stops and re-adds the service even when dumpsys reports it already bound", async function () {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
 
       expect(await accessibilityServiceClient.forceRestartProcess()).toBe(true);
       expect(
@@ -1234,10 +1607,10 @@ describe("CtrlProxyManager", function () {
     });
 
     test("force restart bypasses a service's binding grace period", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("binding"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("binding"), ""),
+      );
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
       timer.advanceTime(REBIND_BIND_WAIT_BUDGET_MS + 1);
       expect(await accessibilityServiceClient.forceRestartProcess()).toBe(true);
@@ -1261,10 +1634,10 @@ describe("CtrlProxyManager", function () {
 
     test("does not restart a device adb no longer lists as present", async function () {
       fakeAdb.setDeviceStates([{ deviceId: testDevice.deviceId, state: "offline" }]);
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
 
       expect(await accessibilityServiceClient.forceRestartProcess()).toBe(false);
       expect(fakeAdb.wasCommandExecuted("shell dumpsys accessibility")).toBe(false);
@@ -1274,14 +1647,14 @@ describe("CtrlProxyManager", function () {
     });
 
     test("shares the single-flight guard with rebindIfUnhealthy (issue #7532)", async function () {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("crashed"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("crashed"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
 
       const [rebind, restart] = await Promise.all([
         accessibilityServiceClient.rebindIfUnhealthy(),
@@ -1300,14 +1673,14 @@ describe("CtrlProxyManager", function () {
     });
 
     test("forces a restart after an in-flight healthy binding check no-ops", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
       let releaseCheck!: () => void;
       const checkGate = new Promise<void>((resolve) => {
         releaseCheck = resolve;
@@ -1336,14 +1709,14 @@ describe("CtrlProxyManager", function () {
     });
 
     test("a same-tick check then force after an earlier force flight still restarts", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
       const forceStops = () =>
         fakeAdb
           .getExecutedCommands()
@@ -1365,14 +1738,14 @@ describe("CtrlProxyManager", function () {
     });
 
     test("claims the flight before checking device presence", async () => {
-      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("bound-label"),
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell dumpsys accessibility",
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
       let releasePresence!: () => void;
       const presenceGate = new Promise<void>((resolve) => {
         releasePresence = resolve;
@@ -1401,10 +1774,10 @@ describe("CtrlProxyManager", function () {
     });
 
     test("waits for both settings writes to settle after abort", async () => {
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
 
       expect(await accessibilityServiceClient.forceRestartProcess()).toBe(true);
       const settingsWrites = fakeAdb
@@ -1422,14 +1795,17 @@ describe("CtrlProxyManager", function () {
 
   describe("isAvailable", function () {
     test("should return true when service is both installed and enabled", async function () {
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      fakeAdb.setCommandResponse(
+        "settings get secure",
+        createExecResult(
+          `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
+          "",
+        ),
+      );
 
       const result = await accessibilityServiceClient.isAvailable();
       expect(result).toBe(true);
@@ -1445,14 +1821,14 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should return false when service is installed but not enabled", async function () {
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: "other.service/SomeService",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      fakeAdb.setCommandResponse(
+        "settings get secure",
+        createExecResult("other.service/SomeService", ""),
+      );
 
       const result = await accessibilityServiceClient.isAvailable();
       expect(result).toBe(false);
@@ -1460,14 +1836,17 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should return false when service is not installed", async function () {
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "settings get secure",
+        createExecResult(
+          `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
+          "",
+        ),
+      );
 
       const result = await accessibilityServiceClient.isAvailable();
       expect(result).toBe(false);
@@ -1477,14 +1856,14 @@ describe("CtrlProxyManager", function () {
 
   describe("getInstalledApkSha256", function () {
     test("should return SHA256 from device when sha256sum is available", async function () {
-      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "abc123 /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult("abc123 /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
 
       const result = await accessibilityServiceClient.getInstalledApkSha256();
       expect(result).toBe("abc123");
@@ -1505,7 +1884,8 @@ describe("CtrlProxyManager", function () {
 
       let pullTimeoutMs: number | undefined;
       const localFakeAdb: any = {
-        executeCommand: async (command: string, timeoutMs?: number) => {
+        executeCommand: async (command: string, options?: { timeoutMs?: number }) => {
+          const timeoutMs = options?.timeoutMs;
           if (command.includes("shell pm path")) {
             return createExecResult(`package:${expectedApkPath}\n`, "");
           }
@@ -1558,14 +1938,11 @@ describe("CtrlProxyManager", function () {
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponse(
           `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
-          {
-            stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-            stderr: "",
-          },
+          createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
         );
 
         AndroidCtrlProxyManager.resetInstances();
-        const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
+        const manager = AndroidCtrlProxyManager.getInstanceForTesting(testDevice, {
           create: () => localFakeAdb,
         });
 
@@ -1589,14 +1966,11 @@ describe("CtrlProxyManager", function () {
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponse(
           `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
-          {
-            stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-            stderr: "",
-          },
+          createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
         );
 
         AndroidCtrlProxyManager.resetInstances();
-        const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
+        const manager = AndroidCtrlProxyManager.getInstanceForTesting(testDevice, {
           create: () => localFakeAdb,
         });
 
@@ -1614,21 +1988,24 @@ describe("CtrlProxyManager", function () {
     test("should report compatible when installed SHA matches expected", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "expected-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "expected-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
 
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
+      const manager = AndroidCtrlProxyManager.getInstanceForTesting(testDevice, {
         create: () => localFakeAdb,
       });
 
@@ -1639,10 +2016,10 @@ describe("CtrlProxyManager", function () {
 
     test("preserves device loss while inspecting an installed APK checksum", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
       fakeAdb.setCommandError(
         `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
         new Error("error: device 'test-device' not found"),
@@ -1658,18 +2035,21 @@ describe("CtrlProxyManager", function () {
     test("should accept preinstalled APK when installed SHA mismatches expected by default", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
 
       let downloadCalls = 0;
       AndroidCtrlProxyManager.resetInstances();
@@ -1700,19 +2080,22 @@ describe("CtrlProxyManager", function () {
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponse(
           `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
-          {
-            stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-            stderr: "",
-          },
+          createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
         );
-        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-          stderr: "",
-        });
-        localFakeAdb.setCommandResponse("shell sha256sum", {
-          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-          stderr: "",
-        });
+        localFakeAdb.setCommandResponse(
+          `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult(
+            "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+            "",
+          ),
+        );
+        localFakeAdb.setCommandResponse(
+          "shell sha256sum",
+          createExecResult(
+            "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+            "",
+          ),
+        );
 
         let downloadCalls = 0;
         AndroidCtrlProxyManager.resetInstances();
@@ -1751,19 +2134,22 @@ describe("CtrlProxyManager", function () {
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponse(
           `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
-          {
-            stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-            stderr: "",
-          },
+          createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
         );
-        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-          stderr: "",
-        });
-        localFakeAdb.setCommandResponse("shell sha256sum", {
-          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-          stderr: "",
-        });
+        localFakeAdb.setCommandResponse(
+          `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult(
+            "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+            "",
+          ),
+        );
+        localFakeAdb.setCommandResponse(
+          "shell sha256sum",
+          createExecResult(
+            "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+            "",
+          ),
+        );
 
         AndroidCtrlProxyManager.resetInstances();
         const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
@@ -1799,26 +2185,29 @@ describe("CtrlProxyManager", function () {
     test("should upgrade when installed SHA mismatches expected and installed download is explicitly allowed", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
       localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
 
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
+      const manager = AndroidCtrlProxyManager.getInstanceForTesting(testDevice, {
         create: () => localFakeAdb,
       });
-      (manager as any).downloadApk = async () => "/tmp/fake-accessibility.apk";
-      (manager as any).cleanupApk = async () => undefined;
+      spyOn(manager, "downloadApk").mockImplementation(async () => "/tmp/fake-accessibility.apk");
+      spyOn(manager, "cleanupApk").mockImplementation(async () => undefined);
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("upgraded");
@@ -1838,22 +2227,25 @@ describe("CtrlProxyManager", function () {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
 
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "local-dev-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "local-dev-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
       localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
 
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
+      const manager = AndroidCtrlProxyManager.getInstanceForTesting(testDevice, {
         create: () => localFakeAdb,
       });
 
@@ -1867,21 +2259,24 @@ describe("CtrlProxyManager", function () {
       const tempDir = scratch.next();
       const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
       await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-      (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+      testPrefetcher.adoptCompletedPath(prefetchedApkPath);
 
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
       localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
 
       let downloadCalls = 0;
@@ -1910,7 +2305,7 @@ describe("CtrlProxyManager", function () {
       const tempDir = scratch.next();
       const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
       await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-      (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+      testPrefetcher.adoptCompletedPath(prefetchedApkPath);
 
       const packageCheckCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
       const localFakeAdb = new FakeAdbExecutor();
@@ -1918,14 +2313,17 @@ describe("CtrlProxyManager", function () {
         createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
         createExecResult("", ""),
       ]);
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
       localFakeAdb.setCommandError(
         "install -r -d",
         new Error("INSTALL_FAILED_UPDATE_INCOMPATIBLE"),
@@ -1981,7 +2379,7 @@ describe("CtrlProxyManager", function () {
         const tempDir = scratch.next();
         const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
         await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-        Reflect.set(AndroidCtrlProxyManager, "prefetchedApkPath", prefetchedApkPath);
+        testPrefetcher.adoptCompletedPath(prefetchedApkPath);
 
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponseSequence(
@@ -1991,14 +2389,20 @@ describe("CtrlProxyManager", function () {
             createExecResult("", ""),
           ],
         );
-        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-          stderr: "",
-        });
-        localFakeAdb.setCommandResponse("shell sha256sum", {
-          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-          stderr: "",
-        });
+        localFakeAdb.setCommandResponse(
+          `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult(
+            "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+            "",
+          ),
+        );
+        localFakeAdb.setCommandResponse(
+          "shell sha256sum",
+          createExecResult(
+            "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+            "",
+          ),
+        );
         localFakeAdb.setCommandError("install -r -d", new Error(upgradeMessage));
         localFakeAdb.setCommandResponse(
           `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
@@ -2028,7 +2432,7 @@ describe("CtrlProxyManager", function () {
         const tempDir = scratch.next();
         const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
         await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-        (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+        testPrefetcher.adoptCompletedPath(prefetchedApkPath);
 
         const packageCheckCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
         const localFakeAdb = new FakeAdbExecutor();
@@ -2036,14 +2440,20 @@ describe("CtrlProxyManager", function () {
           createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
           createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
         ]);
-        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-          stderr: "",
-        });
-        localFakeAdb.setCommandResponse("shell sha256sum", {
-          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-          stderr: "",
-        });
+        localFakeAdb.setCommandResponse(
+          `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult(
+            "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+            "",
+          ),
+        );
+        localFakeAdb.setCommandResponse(
+          "shell sha256sum",
+          createExecResult(
+            "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+            "",
+          ),
+        );
         localFakeAdb.setCommandError(
           "install -r -d",
           new Error("INSTALL_FAILED_UPDATE_INCOMPATIBLE"),
@@ -2080,21 +2490,19 @@ describe("CtrlProxyManager", function () {
     test("prefetch is skipped (no network) for an unknown pin (#2746)", async function () {
       const prevVersion = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "99.99.99";
-      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
       let downloadCalls = 0;
       try {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+        usePrefetchDownloader({
           download: async () => {
             downloadCalls++;
             throw new Error("download must not run for an unverifiable pin");
           },
-        };
+        });
 
         AndroidCtrlProxyManager.prefetchApk();
         expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
         expect(downloadCalls).toBe(0);
       } finally {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
         if (prevVersion === undefined) {
           delete process.env.AUTOMOBILE_VERSION;
         } else {
@@ -2106,79 +2514,69 @@ describe("CtrlProxyManager", function () {
     test("should allow background refresh to retry failed prefetches", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
       const payload = apkPayload;
-      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
       let downloadCalls = 0;
       let failedDestination: string | null = null;
 
-      try {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
-          download: async (_url: string, destination: string) => {
-            downloadCalls++;
-            if (downloadCalls === 1) {
-              failedDestination = destination;
-              throw new Error("network is unreachable");
-            }
-            await fs.mkdir(path.dirname(destination), { recursive: true });
-            await fs.writeFile(destination, payload);
-          },
-        };
+      usePrefetchDownloader({
+        download: async (_url: string, destination: string) => {
+          downloadCalls++;
+          if (downloadCalls === 1) {
+            failedDestination = destination;
+            throw new Error("network is unreachable");
+          }
+          await fs.mkdir(path.dirname(destination), { recursive: true });
+          await fs.writeFile(destination, payload);
+        },
+      });
 
-        AndroidCtrlProxyManager.prefetchApk();
-        expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
-        expect(failedDestination).not.toBeNull();
-        // REWRITE-3: a bare rejects.toThrow() passes for ANY stat error. Pin the
-        // reason to ENOENT to prove the partial prefetch dir was actually removed
-        // (not, say, an EACCES that would also "throw").
-        const statError = await fs.stat(path.dirname(failedDestination!)).then(
-          () => null,
-          (error: NodeJS.ErrnoException) => error,
-        );
-        expect(statError?.code).toBe("ENOENT");
+      AndroidCtrlProxyManager.prefetchApk();
+      expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
+      expect(failedDestination).not.toBeNull();
+      // REWRITE-3: a bare rejects.toThrow() passes for ANY stat error. Pin the
+      // reason to ENOENT to prove the partial prefetch dir was actually removed
+      // (not, say, an EACCES that would also "throw").
+      const statError = await fs.stat(path.dirname(failedDestination!)).then(
+        () => null,
+        (error: NodeJS.ErrnoException) => error,
+      );
+      expect(statError?.code).toBe("ENOENT");
 
-        AndroidCtrlProxyManager.prefetchApk();
-        const retriedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
+      AndroidCtrlProxyManager.prefetchApk();
+      const retriedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
 
-        expect(downloadCalls).toBe(2);
-        expect(retriedPath).not.toBeNull();
-      } finally {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
-      }
+      expect(downloadCalls).toBe(2);
+      expect(retriedPath).not.toBeNull();
     });
 
     test("reuses a verified cache asset and reaps stale staging directories across daemon lifecycles", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
       const payload = apkPayload;
-      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
       let downloadCalls = 0;
 
-      try {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
-          download: async (_url: string, destination: string) => {
-            downloadCalls++;
-            await fs.writeFile(destination, payload);
-          },
-        };
+      usePrefetchDownloader({
+        download: async (_url: string, destination: string) => {
+          downloadCalls++;
+          await fs.writeFile(destination, payload);
+        },
+      });
 
-        const firstPath = await AndroidCtrlProxyManager.prefetchApk();
-        await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-        const staleStagingDir = path.join(prefetchCacheDir, "auto-mobile-prefetch-orphan");
-        await fs.mkdir(staleStagingDir);
-        const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
-        await fs.utimes(staleStagingDir, staleTime, staleTime);
-        const secondPath = await AndroidCtrlProxyManager.prefetchApk();
+      const firstPath = await AndroidCtrlProxyManager.prefetchApk();
+      await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+      const staleStagingDir = path.join(prefetchCacheDir, "auto-mobile-prefetch-orphan");
+      await fs.mkdir(staleStagingDir);
+      const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      await fs.utimes(staleStagingDir, staleTime, staleTime);
+      const secondPath = await AndroidCtrlProxyManager.prefetchApk();
 
-        expect(firstPath).not.toBeNull();
-        expect(secondPath).toBe(firstPath);
-        expect(downloadCalls).toBe(1);
-        expect(await fs.stat(firstPath!)).toBeDefined();
-        const staleStatError = await fs.stat(staleStagingDir).then(
-          () => null,
-          (error: NodeJS.ErrnoException) => error,
-        );
-        expect(staleStatError?.code).toBe("ENOENT");
-      } finally {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
-      }
+      expect(firstPath).not.toBeNull();
+      expect(secondPath).toBe(firstPath);
+      expect(downloadCalls).toBe(1);
+      expect(await fs.stat(firstPath!)).toBeDefined();
+      const staleStatError = await fs.stat(staleStagingDir).then(
+        () => null,
+        (error: NodeJS.ErrnoException) => error,
+      );
+      expect(staleStatError?.code).toBe("ENOENT");
     });
 
     test("removes the successful prefetch staging directory after publishing the cache", async function () {
@@ -2188,14 +2586,13 @@ describe("CtrlProxyManager", function () {
       const stageDir = path.join(stageRoot, "auto-mobile-prefetch-stage");
       await fs.mkdir(stageDir);
       const mkdtempSpy = spyOn(fs, "mkdtemp").mockResolvedValue(stageDir);
-      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
 
       try {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+        usePrefetchDownloader({
           download: async (_url: string, destination: string) => {
             await fs.writeFile(destination, payload);
           },
-        };
+        });
 
         await expect(AndroidCtrlProxyManager.prefetchApk()).resolves.not.toBeNull();
         const statError = await fs.stat(stageDir).then(
@@ -2204,7 +2601,6 @@ describe("CtrlProxyManager", function () {
         );
         expect(statError?.code).toBe("ENOENT");
       } finally {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
         mkdtempSpy.mockRestore();
       }
     });
@@ -2213,10 +2609,10 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const fakeTimer = new FakeTimer();
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("", ""),
+      );
 
       let downloadCalls = 0;
       AndroidCtrlProxyManager.resetInstances();
@@ -2247,18 +2643,21 @@ describe("CtrlProxyManager", function () {
     test("should reinstall when upgrade install fails", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
       localFakeAdb.setCommandResponse(
         `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
         createExecResult("Success", ""),
@@ -2270,27 +2669,24 @@ describe("CtrlProxyManager", function () {
         if (strippedCommand.includes("install -r -d")) {
           throw new Error("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]");
         }
-        return localFakeAdb.executeCommand(strippedCommand, undefined, maxBuffer);
+        return localFakeAdb.executeCommand(strippedCommand, { maxBuffer });
       };
 
       // Create AdbClient with custom executor that throws on install, wrap in factory
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const localAdbClient = new AdbClient(
-        testDevice,
-        localExecAsync,
-        null,
-        new DefaultRetryExecutor(timer),
+      const localAdbClient = new AdbClient(testDevice, localExecAsync, {
+        retryExecutor: new DefaultRetryExecutor(timer),
         timer,
-      );
+      });
       const localFactory: AdbClientFactory = { create: () => localAdbClient };
 
       AndroidCtrlProxyManager.resetInstances();
       const manager = AndroidCtrlProxyManager.getInstance(testDevice, localFactory);
-      (manager as any).downloadApk = async () => "/tmp/fake-accessibility.apk";
-      (manager as any).cleanupApk = async () => undefined;
-      (manager as any).install = async () => undefined;
-      (manager as any).enable = async () => undefined;
+      spyOn(manager, "downloadApk").mockImplementation(async () => "/tmp/fake-accessibility.apk");
+      spyOn(manager, "cleanupApk").mockImplementation(async () => undefined);
+      spyOn(manager, "install").mockImplementation(async () => undefined);
+      spyOn(manager, "enable").mockImplementation(async () => undefined);
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("reinstalled");
@@ -2300,18 +2696,21 @@ describe("CtrlProxyManager", function () {
     test("does not uninstall when the upgrade fails with USER_RESTRICTED (#11134)", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
       localFakeAdb.setCommandError(
         "install -r -d",
         new Error(
@@ -2345,14 +2744,17 @@ describe("CtrlProxyManager", function () {
         createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
         createExecResult("", ""),
       ]);
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
       localFakeAdb.setCommandError(
         "install -r -d",
         new Error("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]"),
@@ -2396,18 +2798,18 @@ describe("CtrlProxyManager", function () {
       delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
       delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
 
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/base.apk\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: `${expectedSha} /data/app/base.apk\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      fakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/base.apk\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(`${expectedSha} /data/app/base.apk\n`, ""),
+      );
 
       const result = await accessibilityServiceClient.ensureCompatibleVersion();
       expect(result.status).toBe("compatible");
@@ -2426,18 +2828,18 @@ describe("CtrlProxyManager", function () {
       delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
       delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
 
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/base.apk\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: `${"0".repeat(64)} /data/app/base.apk\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      fakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/base.apk\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(`${"0".repeat(64)} /data/app/base.apk\n`, ""),
+      );
       fakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
 
       const result = await accessibilityServiceClient.ensureCompatibleVersion();
@@ -2468,14 +2870,14 @@ describe("CtrlProxyManager", function () {
       delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
       delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("programmatic-sha");
-      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/base.apk\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "programmatic-sha /data/app/base.apk\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/base.apk\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult("programmatic-sha /data/app/base.apk\n", ""),
+      );
 
       expect(await accessibilityServiceClient.isVersionCompatible()).toBe(true);
     });
@@ -2488,10 +2890,10 @@ describe("CtrlProxyManager", function () {
       delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
       delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
 
-      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/base.apk\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/base.apk\n", ""),
+      );
       let hashCalls = 0;
       const checksumCalculator = {
         computeFileSha256: async (filePath: string) => {
@@ -2506,10 +2908,10 @@ describe("CtrlProxyManager", function () {
         },
       };
       const firstSha = crypto.createHash("sha256").update("first local APK").digest("hex");
-      fakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: `${firstSha} /data/app/base.apk\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(`${firstSha} /data/app/base.apk\n`, ""),
+      );
       const firstManager = AndroidCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeAdb,
@@ -2532,10 +2934,10 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.resetInstances();
       await fs.writeFile(localApkPath, "second local APK");
       const secondSha = crypto.createHash("sha256").update("second local APK").digest("hex");
-      fakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: `${secondSha} /data/app/base.apk\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(`${secondSha} /data/app/base.apk\n`, ""),
+      );
       const secondManager = AndroidCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeAdb,
@@ -2567,7 +2969,7 @@ describe("CtrlProxyManager", function () {
         new FakeTimer(),
         undefined,
         calculator,
-      ) as unknown as { getExpectedChecksum(): Promise<string> };
+      );
       expect(
         await Promise.all([manager.getExpectedChecksum(), manager.getExpectedChecksum()]),
       ).toEqual(["first", "first"]);
@@ -2590,18 +2992,18 @@ describe("CtrlProxyManager", function () {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
 
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
 
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
+      const manager = AndroidCtrlProxyManager.getInstanceForTesting(testDevice, {
         create: () => localFakeAdb,
       });
-      (manager as any).downloadApk = async () => {
+      spyOn(manager, "downloadApk").mockImplementation(async () => {
         throw new Error("download should not be called");
-      };
+      });
 
       const result = await manager.ensureCompatibleVersion();
       expect(result.status).toBe("skipped");
@@ -2648,21 +3050,18 @@ describe("CtrlProxyManager", function () {
       // Create AdbClient with custom executor, wrap in factory
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const localAdbClient = new AdbClient(
-        testDevice,
-        localExecAsync,
-        null,
-        new DefaultRetryExecutor(timer),
+      const localAdbClient = new AdbClient(testDevice, localExecAsync, {
+        retryExecutor: new DefaultRetryExecutor(timer),
         timer,
-      );
+      });
       const localFactory: AdbClientFactory = { create: () => localAdbClient };
 
       AndroidCtrlProxyManager.resetInstances();
       const manager = AndroidCtrlProxyManager.getInstance(testDevice, localFactory);
-      (manager as any).downloadApk = async () => "/tmp/fake-accessibility.apk";
-      (manager as any).cleanupApk = async () => undefined;
-      (manager as any).install = async () => undefined;
-      (manager as any).enable = async () => undefined;
+      spyOn(manager, "downloadApk").mockImplementation(async () => "/tmp/fake-accessibility.apk");
+      spyOn(manager, "cleanupApk").mockImplementation(async () => undefined);
+      spyOn(manager, "install").mockImplementation(async () => undefined);
+      spyOn(manager, "enable").mockImplementation(async () => undefined);
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("reinstalled");
@@ -2673,18 +3072,21 @@ describe("CtrlProxyManager", function () {
     test("should mark download unavailable when offline", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
 
       AndroidCtrlProxyManager.resetInstances();
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
@@ -2707,18 +3109,21 @@ describe("CtrlProxyManager", function () {
     test("should not let forced update failures poison nonblocking readiness cache", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      localFakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
 
       AndroidCtrlProxyManager.resetInstances();
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
@@ -2822,6 +3227,196 @@ describe("CtrlProxyManager", function () {
       await accessibilityServiceClient.cleanupApk(apkPath);
     });
 
+    test("override is copied without touching the downloader or hashing", async function () {
+      const tempDir = scratch.next();
+      const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+      await fs.writeFile(localApkPath, apkPayload);
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      const hashed: string[] = [];
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async () => {
+            throw new Error("downloader must not run for an override");
+          },
+        },
+      });
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async (file: string) => {
+            hashed.push(file);
+            return { checksum: "x", source: "node" as const };
+          },
+        },
+      });
+
+      const apkPath = await accessibilityServiceClient.downloadApk();
+
+      expect((await fs.readFile(apkPath)).equals(apkPayload)).toBe(true);
+      expect(hashed).toEqual([]);
+      await accessibilityServiceClient.cleanupApk(apkPath);
+    });
+
+    test("a consumed prefetch bypasses the downloader and is still verified", async function () {
+      const expectedChecksum = crypto.createHash("sha256").update(apkPayload).digest("hex");
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
+      const prefetched = path.join(scratch.next(), "prefetched.apk");
+      await fs.writeFile(prefetched, apkPayload);
+      // A completed prefetch hands its staged APK over via consume(); stage it without a download.
+      const stagedPrefetcher: CtrlProxyApkPrefetcher = {
+        prefetch: async () => prefetched,
+        getPrefetchedPath: async () => prefetched,
+        consume: async (destination) => {
+          await fs.copyFile(prefetched, destination);
+          return true;
+        },
+        consumeCompleted: async () => false,
+        completedPath: () => prefetched,
+        adoptCompletedPath: () => undefined,
+        cleanup: async () => undefined,
+        sweepStaleDirs: async () => undefined,
+      };
+      AndroidCtrlProxyManager.useApkPrefetcher(stagedPrefetcher);
+      const hashed: string[] = [];
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async () => {
+            throw new Error("downloader must not run when a prefetch is available");
+          },
+        },
+      });
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async (file: string) => {
+            hashed.push(file);
+            return { checksum: expectedChecksum, source: "node" as const };
+          },
+        },
+      });
+
+      const apkPath = await accessibilityServiceClient.downloadApk();
+
+      expect(hashed).toEqual([apkPath]);
+      await accessibilityServiceClient.cleanupApk(apkPath);
+    });
+
+    test("a download with no checksum configured skips hashing but still checks structure", async function () {
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      const hashed: string[] = [];
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, apkPayload);
+          },
+        },
+      });
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async (file: string) => {
+            hashed.push(file);
+            return { checksum: "x", source: "node" as const };
+          },
+        },
+      });
+
+      const apkPath = await accessibilityServiceClient.downloadApk();
+      expect((await fs.readFile(apkPath)).equals(apkPayload)).toBe(true);
+      expect(hashed).toEqual([]);
+      await accessibilityServiceClient.cleanupApk(apkPath);
+
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, "tiny");
+          },
+        },
+      });
+      await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(/too small/);
+    });
+
+    test("concurrent downloads use private temp dirs, so a failed one leaves the other intact", async function () {
+      const expectedChecksum = crypto.createHash("sha256").update(apkPayload).digest("hex");
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
+      const destinations: string[] = [];
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let call = 0;
+      let bothStarted: () => void = () => undefined;
+      const started = new Promise<void>((resolve) => {
+        bothStarted = resolve;
+      });
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            const mine = ++call;
+            destinations.push(destination);
+            if (destinations.length === 2) {
+              bothStarted();
+            }
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, apkPayload);
+            await gate;
+            if (mine === 1) {
+              throw new Error("connection reset");
+            }
+          },
+        },
+      });
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async () => ({ checksum: expectedChecksum, source: "node" as const }),
+        },
+      });
+
+      // Which call reaches download() first depends on scheduling, so assert on the pair.
+      const pending = [
+        accessibilityServiceClient.downloadApk(),
+        accessibilityServiceClient.downloadApk(),
+      ];
+      const settledPair = Promise.allSettled(pending);
+      await started;
+      expect(path.dirname(destinations[0])).not.toBe(path.dirname(destinations[1]));
+      release();
+      const results = await settledPair;
+      const rejected = results.filter((result) => result.status === "rejected");
+      const fulfilled = results.filter((result) => result.status === "fulfilled");
+      expect(rejected).toHaveLength(1);
+      expect(String(rejected[0].reason)).toContain("connection reset");
+      expect(fulfilled).toHaveLength(1);
+      const apkPath = fulfilled[0].value;
+
+      expect((await fs.readFile(apkPath)).equals(apkPayload)).toBe(true);
+      await accessibilityServiceClient.cleanupApk(apkPath);
+    });
+
+    test("a checksum mismatch fails the download and leaves no APK behind", async function () {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("a".repeat(64));
+      let destination = "";
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, dest: string) => {
+            destination = dest;
+            await fs.mkdir(path.dirname(dest), { recursive: true });
+            await fs.writeFile(dest, apkPayload);
+          },
+        },
+      });
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async () => ({ checksum: "b".repeat(64), source: "node" as const }),
+        },
+      });
+
+      await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
+        /Failed to download APK: APK checksum verification failed/,
+      );
+      await expect(fs.access(destination)).rejects.toThrow();
+    });
+
     test("should download remote APK and verify checksum via injected utilities", async function () {
       // Create a valid APK structure (ZIP with AndroidManifest.xml)
       const payload = apkPayload;
@@ -2829,27 +3424,33 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
 
       // Inject fake FileDownloader that writes the APK payload
-      let downloadedPath: string | null = null;
-      (accessibilityServiceClient as any).fileDownloader = {
-        download: async (_url: string, destination: string) => {
-          downloadedPath = destination;
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, payload);
+      const downloadedPaths: string[] = [];
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            downloadedPaths.push(destination);
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          },
         },
-      };
+      });
 
       // Inject fake ChecksumCalculator that returns the expected checksum
-      (accessibilityServiceClient as any).checksumCalculator = {
-        computeFileSha256: async () => ({
-          checksum: expectedChecksum,
-          source: "node" as const,
-        }),
-      };
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async () => ({
+            checksum: expectedChecksum,
+            source: "node" as const,
+          }),
+        },
+      });
 
       const apkPath = await accessibilityServiceClient.downloadApk();
       const stats = await fs.stat(apkPath);
       expect(stats.size).toBe(payload.length);
-      expect(apkPath).toBe(downloadedPath);
+      // Downloaded to a sibling temp file, then renamed into place after verification.
+      expect(downloadedPaths).toEqual([`${apkPath}.download`]);
+      await expect(fs.access(`${apkPath}.download`)).rejects.toThrow();
       await accessibilityServiceClient.cleanupApk(apkPath);
     });
 
@@ -2862,12 +3463,14 @@ describe("CtrlProxyManager", function () {
         // No expected-checksum override and no APK-path/skip override: the pinned
         // version has no registry checksum, so the download is unverifiable and
         // must fail closed rather than install an unchecked APK (esp. from a mirror).
-        (accessibilityServiceClient as any).fileDownloader = {
-          download: async (_url: string, destination: string) => {
-            await fs.mkdir(path.dirname(destination), { recursive: true });
-            await fs.writeFile(destination, payload);
+        accessibilityServiceClient.setDownloadUtilitiesForTesting({
+          fileDownloader: {
+            download: async (_url: string, destination: string) => {
+              await fs.mkdir(path.dirname(destination), { recursive: true });
+              await fs.writeFile(destination, payload);
+            },
           },
-        };
+        });
 
         await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
           "not in the AutoMobile release",
@@ -2888,12 +3491,14 @@ describe("CtrlProxyManager", function () {
       try {
         const payload = apkPayload;
 
-        (accessibilityServiceClient as any).fileDownloader = {
-          download: async (_url: string, destination: string) => {
-            await fs.mkdir(path.dirname(destination), { recursive: true });
-            await fs.writeFile(destination, payload);
+        accessibilityServiceClient.setDownloadUtilitiesForTesting({
+          fileDownloader: {
+            download: async (_url: string, destination: string) => {
+              await fs.mkdir(path.dirname(destination), { recursive: true });
+              await fs.writeFile(destination, payload);
+            },
           },
-        };
+        });
 
         const apkPath = await accessibilityServiceClient.downloadApk();
         const stats = await fs.stat(apkPath);
@@ -2915,20 +3520,24 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
 
       // Inject fake FileDownloader that writes the APK payload
-      (accessibilityServiceClient as any).fileDownloader = {
-        download: async (_url: string, destination: string) => {
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, payload);
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          },
         },
-      };
+      });
 
       // Inject fake ChecksumCalculator that returns a mismatched checksum
-      (accessibilityServiceClient as any).checksumCalculator = {
-        computeFileSha256: async () => ({
-          checksum: "mismatched-checksum",
-          source: "node" as const,
-        }),
-      };
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async () => ({
+            checksum: "mismatched-checksum",
+            source: "node" as const,
+          }),
+        },
+      });
 
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
         "APK checksum verification failed",
@@ -2939,12 +3548,14 @@ describe("CtrlProxyManager", function () {
       const payload = Buffer.alloc(250, 5);
 
       // Inject fake FileDownloader that writes a tiny payload
-      (accessibilityServiceClient as any).fileDownloader = {
-        download: async (_url: string, destination: string) => {
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, payload);
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          },
         },
-      };
+      });
 
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
         "Downloaded APK is too small",
@@ -2953,11 +3564,13 @@ describe("CtrlProxyManager", function () {
 
     test("should fail when download errors", async function () {
       // Inject fake FileDownloader that throws
-      (accessibilityServiceClient as any).fileDownloader = {
-        download: async () => {
-          throw new Error("download failed");
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async () => {
+            throw new Error("download failed");
+          },
         },
-      };
+      });
 
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
         "Failed to download APK: download failed",
@@ -2968,14 +3581,17 @@ describe("CtrlProxyManager", function () {
   describe("setup", function () {
     test("should allow repeated setup when service is already available", async function () {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      fakeAdb.setCommandResponse(
+        "settings get secure",
+        createExecResult(
+          `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
+          "",
+        ),
+      );
 
       const firstResult = await accessibilityServiceClient.setup();
       expect(firstResult.success).toBe(true);
@@ -2990,29 +3606,20 @@ describe("CtrlProxyManager", function () {
       const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: "null",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult("null", ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${serviceComponent}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableViaSettings();
 
@@ -3033,29 +3640,20 @@ describe("CtrlProxyManager", function () {
       const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult("", ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${serviceComponent}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableViaSettings();
 
@@ -3072,29 +3670,20 @@ describe("CtrlProxyManager", function () {
       const expectedServices = `${existingServices}:${serviceComponent}`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: existingServices,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(existingServices, ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${expectedServices}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableViaSettings();
 
@@ -3109,22 +3698,16 @@ describe("CtrlProxyManager", function () {
       const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableViaSettings();
 
@@ -3144,29 +3727,20 @@ describe("CtrlProxyManager", function () {
       const expectedServices = `${existingServices}:${serviceComponent}`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: existingServices,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(existingServices, ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${expectedServices}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableViaSettings();
 
@@ -3183,29 +3757,20 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(fakeDetector);
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: "null",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult("null", ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${serviceComponent}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       // Verify cache is empty before
       expect(fakeDetector.getInvalidatedDevices()).toEqual([]);
@@ -3224,29 +3789,20 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(fakeDetector);
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: existingServices,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(existingServices, ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${expectedServices}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableViaSettings();
 
@@ -3260,22 +3816,16 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(fakeDetector);
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableViaSettings();
 
@@ -3286,14 +3836,8 @@ describe("CtrlProxyManager", function () {
 
   describe("getToggleCapabilities", function () {
     test("should detect emulator and support settings toggle", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
 
       const capabilities = await accessibilityServiceClient.getToggleCapabilities();
 
@@ -3324,7 +3868,7 @@ describe("CtrlProxyManager", function () {
       };
 
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
+      const manager = AndroidCtrlProxyManager.getInstanceForTesting(testDevice, {
         create: () => transientFakeAdb,
       });
 
@@ -3341,18 +3885,9 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should detect physical device and not support settings toggle", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.product.model", {
-        stdout: "Pixel 6",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "33",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.product.model", createExecResult("Pixel 6", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("33", ""));
 
       const capabilities = await accessibilityServiceClient.getToggleCapabilities();
 
@@ -3363,18 +3898,12 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should fallback to model detection when qemu prop is unavailable", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.product.model", {
-        stdout: "sdk_gphone64_arm64",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "35",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        "shell getprop ro.product.model",
+        createExecResult("sdk_gphone64_arm64", ""),
+      );
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("35", ""));
 
       const capabilities = await accessibilityServiceClient.getToggleCapabilities();
 
@@ -3384,14 +3913,8 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should reject devices with API level below 16", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "15",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("15", ""));
 
       const capabilities = await accessibilityServiceClient.getToggleCapabilities();
 
@@ -3402,14 +3925,11 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should handle API level parsing errors gracefully", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "invalid",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse(
+        "shell getprop ro.build.version.sdk",
+        createExecResult("invalid", ""),
+      );
 
       const capabilities = await accessibilityServiceClient.getToggleCapabilities();
 
@@ -3419,14 +3939,8 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should cache capabilities result", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
 
       // First call
       const capabilities1 = await accessibilityServiceClient.getToggleCapabilities();
@@ -3441,14 +3955,8 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should clear cache when clearAvailabilityCache is called", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
 
       // First call
       await accessibilityServiceClient.getToggleCapabilities();
@@ -3467,32 +3975,17 @@ describe("CtrlProxyManager", function () {
 
   describe("canUseSettingsToggle", function () {
     test("should return true for emulator", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
 
       const canUse = await accessibilityServiceClient.canUseSettingsToggle();
       expect(canUse).toBe(true);
     });
 
     test("should return false for physical device", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.product.model", {
-        stdout: "Pixel 6",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "33",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.product.model", createExecResult("Pixel 6", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("33", ""));
 
       const canUse = await accessibilityServiceClient.canUseSettingsToggle();
       expect(canUse).toBe(false);
@@ -3501,18 +3994,9 @@ describe("CtrlProxyManager", function () {
 
   describe("enableViaSettings with capability check", function () {
     test("should throw error when settings toggle is not supported", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.product.model", {
-        stdout: "Pixel 6",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "33",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.product.model", createExecResult("Pixel 6", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("33", ""));
 
       await expect(accessibilityServiceClient.enableViaSettings()).rejects.toThrow(
         "Settings-based accessibility toggle is not supported",
@@ -3522,29 +4006,20 @@ describe("CtrlProxyManager", function () {
     test("should succeed when settings toggle is supported", async function () {
       const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: "null",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult("null", ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${serviceComponent}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableViaSettings();
 
@@ -3556,18 +4031,9 @@ describe("CtrlProxyManager", function () {
 
   describe("disableViaSettings with capability check", function () {
     test("should throw error when settings toggle is not supported", async function () {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.product.model", {
-        stdout: "Pixel 6",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "33",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.product.model", createExecResult("Pixel 6", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("33", ""));
 
       await expect(accessibilityServiceClient.disableViaSettings()).rejects.toThrow(
         "Settings-based accessibility toggle is not supported",
@@ -3577,26 +4043,20 @@ describe("CtrlProxyManager", function () {
     test("should succeed when settings toggle is supported", async function () {
       const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse('shell settings put secure enabled_accessibility_services ""', {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
+      fakeAdb.setCommandResponse(
+        'shell settings put secure enabled_accessibility_services ""',
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 0",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.disableViaSettings();
 
@@ -3609,18 +4069,12 @@ describe("CtrlProxyManager", function () {
   describe("disableViaSettings", function () {
     test("should handle null services gracefully", async function () {
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: "null",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult("null", ""),
+      );
 
       await accessibilityServiceClient.disableViaSettings();
 
@@ -3630,18 +4084,12 @@ describe("CtrlProxyManager", function () {
 
     test("should handle empty string gracefully", async function () {
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.disableViaSettings();
 
@@ -3653,26 +4101,20 @@ describe("CtrlProxyManager", function () {
       const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse('shell settings put secure enabled_accessibility_services ""', {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
+      fakeAdb.setCommandResponse(
+        'shell settings put secure enabled_accessibility_services ""',
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 0",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.disableViaSettings();
 
@@ -3690,24 +4132,15 @@ describe("CtrlProxyManager", function () {
       const currentServices = `${serviceComponent}:${otherService}`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: currentServices,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(currentServices, ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${otherService}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
 
       await accessibilityServiceClient.disableViaSettings();
@@ -3730,24 +4163,15 @@ describe("CtrlProxyManager", function () {
       const expectedServices = `${firstService}:${lastService}`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: currentServices,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(currentServices, ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${expectedServices}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
 
       await accessibilityServiceClient.disableViaSettings();
@@ -3768,24 +4192,15 @@ describe("CtrlProxyManager", function () {
       const currentServices = `${otherService}:${serviceComponent}`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: currentServices,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(currentServices, ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${otherService}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
 
       await accessibilityServiceClient.disableViaSettings();
@@ -3804,18 +4219,12 @@ describe("CtrlProxyManager", function () {
       const otherService = "com.example.other/com.example.other.Service";
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: otherService,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(otherService, ""),
+      );
 
       await accessibilityServiceClient.disableViaSettings();
 
@@ -3832,26 +4241,20 @@ describe("CtrlProxyManager", function () {
       const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
       // Mock emulator detection
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
-        stdout: "1",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse('shell settings put secure enabled_accessibility_services ""', {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
+      fakeAdb.setCommandResponse(
+        'shell settings put secure enabled_accessibility_services ""',
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 0",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.disableViaSettings();
 
@@ -3867,11 +4270,8 @@ describe("CtrlProxyManager", function () {
     const otherService = "com.example.other/com.example.other.Service";
 
     function stubToggleSupported(): void {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
     }
 
     function enabledServicesPutCommands(): string[] {
@@ -3883,16 +4283,13 @@ describe("CtrlProxyManager", function () {
     test("preserves a trailing separator left by another surviving service", async function () {
       // "other:ours:" -> split ["other","ours",""] -> filter ["other",""] -> "other:"
       stubToggleSupported();
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: `${otherService}:${serviceComponent}:`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(`${otherService}:${serviceComponent}:`, ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${otherService}:"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
 
       await accessibilityServiceClient.disableViaSettings();
@@ -3909,16 +4306,13 @@ describe("CtrlProxyManager", function () {
     test("removes every duplicate of our service in one pass", async function () {
       // "ours:other:ours" -> split -> filter drops BOTH ours -> "other"
       stubToggleSupported();
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: `${serviceComponent}:${otherService}:${serviceComponent}`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(`${serviceComponent}:${otherService}:${serviceComponent}`, ""),
+      );
       fakeAdb.setCommandResponse(
         `shell settings put secure enabled_accessibility_services "${otherService}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
 
       await accessibilityServiceClient.disableViaSettings();
@@ -3942,11 +4336,8 @@ describe("CtrlProxyManager", function () {
 
     function stubSettingsToggleSupported(): void {
       // Emulator + API 29 => settings-based toggle is supported.
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
     }
 
     beforeEach(function () {
@@ -3964,18 +4355,18 @@ describe("CtrlProxyManager", function () {
     });
 
     test("disableViaSettings invalidates the detector cache", async function () {
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse('shell settings put secure enabled_accessibility_services ""', {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
+      fakeAdb.setCommandResponse(
+        'shell settings put secure enabled_accessibility_services ""',
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings put secure accessibility_enabled 0",
+        createExecResult("", ""),
+      );
 
       expect(fakeDetector.getInvalidatedDevices()).toEqual([]);
 
@@ -3987,10 +4378,10 @@ describe("CtrlProxyManager", function () {
     test("disableViaSettings invalidates the detector cache when no services are enabled", async function () {
       // Early-return path: the device reports no enabled services, so nothing is written.
       // A detector cache still claiming "available" is exactly the divergence in #4192.
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: "null",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult("null", ""),
+      );
 
       await accessibilityServiceClient.disableViaSettings();
 
@@ -4001,10 +4392,10 @@ describe("CtrlProxyManager", function () {
     test("disableViaSettings invalidates the detector cache when the write fails", async function () {
       // A partial failure leaves the device state uncertain, so a cached
       // "available" answer is exactly as wrong as it is after a clean disable.
-      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
-        stdout: serviceComponent,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings get secure enabled_accessibility_services",
+        createExecResult(serviceComponent, ""),
+      );
       fakeAdb.setCommandError(
         'shell settings put secure enabled_accessibility_services ""',
         new Error("device offline"),
@@ -4035,29 +4426,26 @@ describe("CtrlProxyManager", function () {
         test(`${mutation.name} invalidates the detector cache for the target device`, async function () {
           // Respond to both the default-user and --user forms so one table drives all three.
           for (const prefix of ["shell settings", "shell settings --user 10"]) {
-            fakeAdb.setCommandResponse(`${prefix} get secure enabled_accessibility_services`, {
-              stdout: serviceComponent,
-              stderr: "",
-            });
+            fakeAdb.setCommandResponse(
+              `${prefix} get secure enabled_accessibility_services`,
+              createExecResult(serviceComponent, ""),
+            );
             fakeAdb.setCommandResponse(
               `${prefix} put secure enabled_accessibility_services "${serviceComponent}"`,
-              {
-                stdout: "",
-                stderr: "",
-              },
+              createExecResult("", ""),
             );
-            fakeAdb.setCommandResponse(`${prefix} put secure enabled_accessibility_services ""`, {
-              stdout: "",
-              stderr: "",
-            });
-            fakeAdb.setCommandResponse(`${prefix} put secure accessibility_enabled 1`, {
-              stdout: "",
-              stderr: "",
-            });
-            fakeAdb.setCommandResponse(`${prefix} put secure accessibility_enabled 0`, {
-              stdout: "",
-              stderr: "",
-            });
+            fakeAdb.setCommandResponse(
+              `${prefix} put secure enabled_accessibility_services ""`,
+              createExecResult("", ""),
+            );
+            fakeAdb.setCommandResponse(
+              `${prefix} put secure accessibility_enabled 1`,
+              createExecResult("", ""),
+            );
+            fakeAdb.setCommandResponse(
+              `${prefix} put secure accessibility_enabled 0`,
+              createExecResult("", ""),
+            );
           }
 
           expect(fakeDetector.getInvalidatedDevices()).toEqual([]);
@@ -4076,33 +4464,24 @@ describe("CtrlProxyManager", function () {
     const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
     function stubSettingsToggleSupported(): void {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
     }
 
     test("enableForUser writes the service and the global toggle scoped to the target user", async function () {
       stubSettingsToggleSupported();
       fakeAdb.setCommandResponse(
         "shell settings --user 10 get secure enabled_accessibility_services",
-        {
-          stdout: "null",
-          stderr: "",
-        },
+        createExecResult("null", ""),
       );
       fakeAdb.setCommandResponse(
         `shell settings --user 10 put secure enabled_accessibility_services "${serviceComponent}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings --user 10 put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings --user 10 put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableForUser(10);
 
@@ -4127,22 +4506,16 @@ describe("CtrlProxyManager", function () {
       stubSettingsToggleSupported();
       fakeAdb.setCommandResponse(
         "shell settings --user 10 get secure enabled_accessibility_services",
-        {
-          stdout: existing,
-          stderr: "",
-        },
+        createExecResult(existing, ""),
       );
       fakeAdb.setCommandResponse(
         `shell settings --user 10 put secure enabled_accessibility_services "${existing}:${serviceComponent}"`,
-        {
-          stdout: "",
-          stderr: "",
-        },
+        createExecResult("", ""),
       );
-      fakeAdb.setCommandResponse("shell settings --user 10 put secure accessibility_enabled 1", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell settings --user 10 put secure accessibility_enabled 1",
+        createExecResult("", ""),
+      );
 
       await accessibilityServiceClient.enableForUser(10);
 
@@ -4156,10 +4529,7 @@ describe("CtrlProxyManager", function () {
     test("isEnabledForUser reads the target user's service list", async function () {
       fakeAdb.setCommandResponse(
         "shell settings --user 10 get secure enabled_accessibility_services",
-        {
-          stdout: serviceComponent,
-          stderr: "",
-        },
+        createExecResult(serviceComponent, ""),
       );
 
       expect(await accessibilityServiceClient.isEnabledForUser(10)).toBe(true);
@@ -4168,10 +4538,7 @@ describe("CtrlProxyManager", function () {
     test("isEnabledForUser reports disabled when the target user's list omits the service", async function () {
       fakeAdb.setCommandResponse(
         "shell settings --user 10 get secure enabled_accessibility_services",
-        {
-          stdout: "com.example.other/com.example.other.Service",
-          stderr: "",
-        },
+        createExecResult("com.example.other/com.example.other.Service", ""),
       );
 
       expect(await accessibilityServiceClient.isEnabledForUser(10)).toBe(false);
@@ -4183,11 +4550,8 @@ describe("CtrlProxyManager", function () {
   // timeout all collapse into the generic message.
   describe("enable/disable failure diagnoses", function () {
     function stubSettingsToggleSupported(): void {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
-      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", {
-        stdout: "29",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("29", ""));
     }
 
     type Diagnosis = { trigger: string; expected: string };
@@ -4336,12 +4700,17 @@ describe("CtrlProxyManager", function () {
         ),
       );
       const stale = await makeAgedDir("auto-mobile-prefetch-z-stale", 2 * HOUR_MS);
-      const readdirSpy = spyOn(fs, "readdir").mockResolvedValue(
-        [...freshDirs, stale].map((dir) => ({
-          name: path.basename(dir),
-          isDirectory: () => true,
-        })) as unknown as Dirent[],
+      const names = new Set([...freshDirs, stale].map((dir) => path.basename(dir)));
+      const entries = (await fs.readdir(scratchRoot, { withFileTypes: true })).filter((entry) =>
+        names.has(entry.name),
       );
+      const directoryReader: {
+        readdir: (
+          target: string,
+          options: { withFileTypes: true },
+        ) => Promise<import("node:fs").Dirent[]>;
+      } = fs;
+      const readdirSpy = spyOn(directoryReader, "readdir").mockResolvedValue(entries);
 
       try {
         await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
@@ -4358,14 +4727,15 @@ describe("CtrlProxyManager", function () {
     test("stops inspection when the stale-prefetch deadline expires", async function () {
       const first = await makeAgedDir("auto-mobile-prefetch-first", 2 * HOUR_MS);
       const second = await makeAgedDir("auto-mobile-prefetch-second", 2 * HOUR_MS);
-      const originalStat = fs.stat;
+      const statReader: { stat: (target: string) => Promise<import("node:fs").Stats> } = fs;
+      const originalStat = statReader.stat;
       let statCount = 0;
-      const statSpy = spyOn(fs, "stat").mockImplementation(async (...args) => {
+      const statSpy = spyOn(statReader, "stat").mockImplementation(async (target) => {
         statCount++;
         if (statCount === 1) {
           sweepTimer.advanceTime(STALE_PREFETCH_SWEEP_DEADLINE_MS);
         }
-        return originalStat(...args);
+        return originalStat(target);
       });
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 

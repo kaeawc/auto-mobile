@@ -1,0 +1,15 @@
+{
+  "id": "search",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "query": ""
+  },
+  "root": {
+    "type": "searchBar",
+    "stateKey": "query"
+  }
+}

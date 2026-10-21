@@ -2,13 +2,20 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   invalidateInstalledAppsCache,
   queryInstalledApps,
-  setListInstalledAppsFactoryForTests,
+  type AppResourceDependencies,
 } from "../../src/server/appResources";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { createIdentityQuarantinePool } from "../helpers/identityQuarantinePool";
+
+let deps: AppResourceDependencies = {};
+function useListInstalledAppsFactoryForTests(
+  value: AppResourceDependencies["listInstalledAppsFactory"] | null,
+): void {
+  deps = { ...deps, listInstalledAppsFactory: value ?? undefined };
+}
 
 const device: BootedDevice = {
   deviceId: "emulator-5554",
@@ -27,13 +34,13 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
   });
 
   afterEach(() => {
-    setListInstalledAppsFactoryForTests(null);
+    useListInstalledAppsFactoryForTests(null);
     PlatformDeviceManagerFactory.setInstance(null);
     invalidateInstalledAppsCache(device.deviceId);
   });
 
   test("a failed listing command (successful:false) rejects instead of reporting an empty success", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => ({
         apps: { profiles: {}, system: [] },
         successful: false,
@@ -43,13 +50,13 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
       },
     }));
 
-    await expect(queryInstalledApps({ deviceId: device.deviceId })).rejects.toThrow(
-      `Failed to list installed apps for device ${device.deviceId}`,
-    );
+    await expect(
+      queryInstalledApps({ deviceId: device.deviceId }, undefined, deps),
+    ).rejects.toThrow(`Failed to list installed apps for device ${device.deviceId}`);
   });
 
   test("a successful listing with zero apps installed is reported as success, not an error", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => ({
         apps: { profiles: {}, system: [] },
         successful: true,
@@ -59,13 +66,13 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
       },
     }));
 
-    const content = await queryInstalledApps({ deviceId: device.deviceId });
+    const content = await queryInstalledApps({ deviceId: device.deviceId }, undefined, deps);
     expect(content.observationComplete).toBe(true);
     expect(content.totalCount).toBe(0);
   });
 
   test("uses the device resolved for the query instead of rediscovering it on an uncached call", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => ({
         apps: { profiles: {}, system: [] },
         successful: true,
@@ -75,7 +82,7 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
       },
     }));
 
-    await queryInstalledApps({ deviceId: device.deviceId });
+    await queryInstalledApps({ deviceId: device.deviceId }, undefined, deps);
 
     const discoveryCalls = fakeDeviceUtils
       .getExecutedOperations()
@@ -86,7 +93,7 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
   test("cancels the caller through the shared catalog flight signal", async () => {
     const controller = new AbortController();
     let capturedSignal: AbortSignal | undefined;
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async (signal) => {
         capturedSignal = signal;
         controller.abort();
@@ -99,7 +106,7 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     }));
 
     await expect(
-      queryInstalledApps({ deviceId: device.deviceId }, controller.signal),
+      queryInstalledApps({ deviceId: device.deviceId }, controller.signal, deps),
     ).rejects.toThrow(/abort/i);
     expect(capturedSignal).toBeDefined();
     expect(capturedSignal?.aborted).toBe(true);
@@ -119,7 +126,7 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     };
 
     const controller = new AbortController();
-    const promise = queryInstalledApps({ deviceId: device.deviceId }, controller.signal);
+    const promise = queryInstalledApps({ deviceId: device.deviceId }, controller.signal, deps);
     controller.abort();
 
     await expect(promise).rejects.toThrow(/abort/i);
@@ -136,7 +143,7 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
       // through to the unmatched-device error and never reported the abort.
       fakeDeviceUtils.setBootedDevices("android", [disagreeing]);
       let listingRequests = 0;
-      setListInstalledAppsFactoryForTests(() => ({
+      useListInstalledAppsFactoryForTests(() => ({
         executeDetailedResult: async () => {
           listingRequests += 1;
           return { apps: { profiles: {}, system: [] }, successful: true };
@@ -147,7 +154,11 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
       }));
 
       await expect(
-        queryInstalledApps({ deviceId: "emulator-5556", platform: "android" }, controller.signal),
+        queryInstalledApps(
+          { deviceId: "emulator-5556", platform: "android" },
+          controller.signal,
+          deps,
+        ),
       ).rejects.toThrow(/abort/i);
       expect(listingRequests).toBe(0);
     } finally {
@@ -171,7 +182,7 @@ describe("queryInstalledApps rejects an unsupported type filter on a physical iO
     fakeDeviceUtils.setBootedDevices("android", []);
     fakeDeviceUtils.setBootedDevices("ios", [physicalIosDevice]);
     PlatformDeviceManagerFactory.setInstance(fakeDeviceUtils);
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         throw new Error("not exercised on iOS");
       },
@@ -186,28 +197,32 @@ describe("queryInstalledApps rejects an unsupported type filter on a physical iO
   });
 
   afterEach(() => {
-    setListInstalledAppsFactoryForTests(null);
+    useListInstalledAppsFactoryForTests(null);
     PlatformDeviceManagerFactory.setInstance(null);
     invalidateInstalledAppsCache(physicalIosDevice.deviceId);
   });
 
   test("an explicit type=system is rejected rather than silently returning an empty result", async () => {
     await expect(
-      queryInstalledApps({ deviceId: physicalIosDevice.deviceId, type: "system" }),
+      queryInstalledApps({ deviceId: physicalIosDevice.deviceId, type: "system" }, undefined, deps),
     ).rejects.toThrow(/classification is not available on this transport/);
   });
 
   test("an explicit type=user is also rejected (classification, not just 'system', is unreliable)", async () => {
     await expect(
-      queryInstalledApps({ deviceId: physicalIosDevice.deviceId, type: "user" }),
+      queryInstalledApps({ deviceId: physicalIosDevice.deviceId, type: "user" }, undefined, deps),
     ).rejects.toThrow(/classification is not available on this transport/);
   });
 
   test("type=all still returns every app (no rejection)", async () => {
-    const content = await queryInstalledApps({
-      deviceId: physicalIosDevice.deviceId,
-      type: "all",
-    });
+    const content = await queryInstalledApps(
+      {
+        deviceId: physicalIosDevice.deviceId,
+        type: "all",
+      },
+      undefined,
+      deps,
+    );
     expect(content.totalCount).toBe(2);
   });
 
@@ -215,7 +230,11 @@ describe("queryInstalledApps rejects an unsupported type filter on a physical iO
     // Every unclassified physical-device app already defaults to "user"
     // (round 4), so the documented "user" default is a no-op filter here —
     // over-inclusive, not misleadingly empty — and must not be rejected.
-    const content = await queryInstalledApps({ deviceId: physicalIosDevice.deviceId });
+    const content = await queryInstalledApps(
+      { deviceId: physicalIosDevice.deviceId },
+      undefined,
+      deps,
+    );
     expect(content.totalCount).toBe(2);
   });
 
@@ -226,7 +245,11 @@ describe("queryInstalledApps rejects an unsupported type filter on a physical iO
     // would let system apps straight through while the response still
     // claimed `query.type: "user"`. That is the over-inclusive-but-mislabeled
     // result Codex flagged: report the effective type honestly as "all".
-    const content = await queryInstalledApps({ deviceId: physicalIosDevice.deviceId });
+    const content = await queryInstalledApps(
+      { deviceId: physicalIosDevice.deviceId },
+      undefined,
+      deps,
+    );
     expect(content.query.type).toBe("all");
     expect(content.totalCount).toBe(2);
   });
@@ -246,7 +269,7 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     fakeDeviceUtils.setBootedDevices("android", []);
     fakeDeviceUtils.setBootedDevices("ios", [simulatorDevice]);
     PlatformDeviceManagerFactory.setInstance(fakeDeviceUtils);
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         throw new Error("not exercised on iOS");
       },
@@ -261,21 +284,25 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
   });
 
   afterEach(() => {
-    setListInstalledAppsFactoryForTests(null);
+    useListInstalledAppsFactoryForTests(null);
     PlatformDeviceManagerFactory.setInstance(null);
     invalidateInstalledAppsCache(simulatorDevice.deviceId);
   });
 
   test("an explicit type=system is honored, not rejected, when classification is reliable", async () => {
-    const content = await queryInstalledApps({
-      deviceId: simulatorDevice.deviceId,
-      type: "system",
-    });
+    const content = await queryInstalledApps(
+      {
+        deviceId: simulatorDevice.deviceId,
+        type: "system",
+      },
+      undefined,
+      deps,
+    );
     expect(content.totalCount).toBe(1);
   });
 
   test("an explicit type=launchable reports missing simctl classification", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         throw new Error("not exercised on iOS");
       },
@@ -288,10 +315,14 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
       }),
     }));
 
-    const promise = queryInstalledApps({
-      deviceId: simulatorDevice.deviceId,
-      type: "launchable",
-    });
+    const promise = queryInstalledApps(
+      {
+        deviceId: simulatorDevice.deviceId,
+        type: "launchable",
+      },
+      undefined,
+      deps,
+    );
 
     await expect(promise).rejects.toThrow(/ApplicationType.*simctl/is);
     await promise.catch((error: Error) => {
@@ -306,13 +337,17 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     // unreliable-classification case reports "all". Since #6798 the default is
     // "launchable", which on the simulator selects both the User app and the
     // System app (Safari launches; only "Hidden" bundles do not).
-    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+    const content = await queryInstalledApps(
+      { deviceId: simulatorDevice.deviceId },
+      undefined,
+      deps,
+    );
     expect(content.query.type).toBe("launchable");
     expect(content.totalCount).toBe(2);
   });
 
   test("a Hidden simulator bundle is excluded by the launchable default (#6798)", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         throw new Error("not exercised on iOS");
       },
@@ -326,13 +361,17 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     }));
     invalidateInstalledAppsCache(simulatorDevice.deviceId);
 
-    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+    const content = await queryInstalledApps(
+      { deviceId: simulatorDevice.deviceId },
+      undefined,
+      deps,
+    );
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
     expect(content.installedCount).toBe(2);
   });
 
   test("a System simulator bundle with a hidden SpringBoard tag is excluded by the launchable default", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         throw new Error("not exercised on iOS");
       },
@@ -350,13 +389,17 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     }));
     invalidateInstalledAppsCache(simulatorDevice.deviceId);
 
-    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+    const content = await queryInstalledApps(
+      { deviceId: simulatorDevice.deviceId },
+      undefined,
+      deps,
+    );
 
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
   });
 
   test("reports an individually unclassified simulator app excluded by the launchable default", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         throw new Error("not exercised on iOS");
       },
@@ -371,7 +414,11 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     }));
     invalidateInstalledAppsCache(simulatorDevice.deviceId);
 
-    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+    const content = await queryInstalledApps(
+      { deviceId: simulatorDevice.deviceId },
+      undefined,
+      deps,
+    );
 
     expect(content.query.type).toBe("launchable");
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual([
@@ -382,7 +429,7 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
   });
 
   test("does not report individually unknown launchability when type is all", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         throw new Error("not exercised on iOS");
       },
@@ -396,7 +443,11 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     }));
     invalidateInstalledAppsCache(simulatorDevice.deviceId);
 
-    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId, type: "all" });
+    const content = await queryInstalledApps(
+      { deviceId: simulatorDevice.deviceId, type: "all" },
+      undefined,
+      deps,
+    );
 
     expect(content.launchabilityUnknownApps).toBeUndefined();
   });
@@ -417,7 +468,7 @@ describe("queryInstalledApps launchable default on Android (#6798)", () => {
   });
 
   afterEach(() => {
-    setListInstalledAppsFactoryForTests(null);
+    useListInstalledAppsFactoryForTests(null);
     PlatformDeviceManagerFactory.setInstance(null);
     invalidateInstalledAppsCache(androidDevice.deviceId);
   });
@@ -426,7 +477,7 @@ describe("queryInstalledApps launchable default on Android (#6798)", () => {
     system: Array<Record<string, unknown>>,
     user: Array<Record<string, unknown>>,
   ) {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => ({
         apps: {
           profiles: {
@@ -466,7 +517,7 @@ describe("queryInstalledApps launchable default on Android (#6798)", () => {
       [{ packageName: "com.example.myapp", label: "My App", launchable: true }],
     );
 
-    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId });
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, deps);
 
     expect(content.query.type).toBe("launchable");
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual([
@@ -487,7 +538,11 @@ describe("queryInstalledApps launchable default on Android (#6798)", () => {
       [],
     );
 
-    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId, search: "clock" });
+    const content = await queryInstalledApps(
+      { deviceId: androidDevice.deviceId, search: "clock" },
+      undefined,
+      deps,
+    );
 
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual([
       "com.google.android.deskclock",
@@ -500,7 +555,7 @@ describe("queryInstalledApps launchable default on Android (#6798)", () => {
       [{ packageName: "com.example.myapp" }],
     );
 
-    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId });
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, deps);
 
     expect(content.query.type).toBe("user");
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
@@ -513,7 +568,7 @@ describe("queryInstalledApps launchable default on Android (#6798)", () => {
     );
 
     await expect(
-      queryInstalledApps({ deviceId: androidDevice.deviceId, type: "launchable" }),
+      queryInstalledApps({ deviceId: androidDevice.deviceId, type: "launchable" }, undefined, deps),
     ).rejects.toThrow(/no launchability signal/);
   });
 });
@@ -533,7 +588,7 @@ describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
   });
 
   afterEach(() => {
-    setListInstalledAppsFactoryForTests(null);
+    useListInstalledAppsFactoryForTests(null);
     PlatformDeviceManagerFactory.setInstance(null);
     invalidateInstalledAppsCache(androidDevice.deviceId);
   });
@@ -543,7 +598,7 @@ describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
    * carry no launchability at all.
    */
   function setPartiallyProbedProfiles() {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => ({
         apps: {
           profiles: {
@@ -582,18 +637,26 @@ describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
     setPartiallyProbedProfiles();
 
     await expect(
-      queryInstalledApps({ deviceId: androidDevice.deviceId, type: "launchable", profile: 10 }),
+      queryInstalledApps(
+        { deviceId: androidDevice.deviceId, type: "launchable", profile: 10 },
+        undefined,
+        deps,
+      ),
     ).rejects.toThrow(/no launchability signal/);
   });
 
   test("a probed profile still answers an explicit type=launchable", async () => {
     setPartiallyProbedProfiles();
 
-    const content = await queryInstalledApps({
-      deviceId: androidDevice.deviceId,
-      type: "launchable",
-      profile: 0,
-    });
+    const content = await queryInstalledApps(
+      {
+        deviceId: androidDevice.deviceId,
+        type: "launchable",
+        profile: 0,
+      },
+      undefined,
+      deps,
+    );
 
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
   });
@@ -601,7 +664,11 @@ describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
   test("an omitted type degrades to user for an unprobed profile rather than emptying it", async () => {
     setPartiallyProbedProfiles();
 
-    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId, profile: 10 });
+    const content = await queryInstalledApps(
+      { deviceId: androidDevice.deviceId, profile: 10 },
+      undefined,
+      deps,
+    );
 
     expect(content.query.type).toBe("user");
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.work"]);
@@ -610,7 +677,7 @@ describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
   test("a profile-less query names the profiles whose launchability is unknown", async () => {
     setPartiallyProbedProfiles();
 
-    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId });
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, deps);
 
     // The launchable default still applies device-wide, but the profiles it
     // could not judge are reported instead of being silently dropped.
@@ -620,7 +687,7 @@ describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
   });
 
   test("a fully probed device reports no unknown profiles", async () => {
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => ({
         apps: {
           profiles: {
@@ -644,7 +711,7 @@ describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
       },
     }));
 
-    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId });
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, deps);
 
     expect(content.launchabilityUnknownProfiles).toBeUndefined();
   });

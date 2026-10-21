@@ -1,3 +1,4 @@
+import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { record } from "./prototypeTemplate";
 
@@ -18,7 +19,7 @@ export function prototypeThemeModeFields(spec: unknown): string[] {
       .filter((mode) => colors?.[mode] !== undefined)
       .map((mode) => `theme.colors.${mode}`),
     ...newlyThemedColor(record(record(root.window)?.placement)?.scrim, "window.placement.scrim"),
-    ...nodeFields(root.root, "root"),
+    ...prototypeSpecNodeRoots(spec).flatMap(({ node, path }) => nodeFields(node, path)),
   ];
 }
 
@@ -66,23 +67,33 @@ function styleFields(value: unknown, path: string): string[] {
 }
 
 function nodeFields(value: unknown, path: string): string[] {
-  const node = record(value);
-  if (!node) {
-    return [];
+  const fields: string[] = [];
+  const pending = [{ node: value, path }];
+  while (pending.length) {
+    const { node: value, path } = pending.pop()!;
+    const node = record(value);
+    if (!node) {
+      continue;
+    }
+    fields.push(
+      ...styleFields(node.style, `${path}.style`),
+      ...list(node.styleWhen).flatMap((entry, index) =>
+        styleFields(record(entry)?.style, `${path}.styleWhen[${index}].style`),
+      ),
+      ...(node.type === "image" ? pairAt(node.asset, `${path}.asset`) : []),
+      ...(node.type === "bottomSheet" ? newlyThemedColor(node.scrim, `${path}.scrim`) : []),
+      ...list(node.items).flatMap((item, index) =>
+        pairAt(record(item)?.image, `${path}.items[${index}].image`),
+      ),
+    );
+    const children = prototypeNodeChildren(node).sort((left, right) => {
+      const rank = (suffix: string): number =>
+        suffix.startsWith(".children[") ? 0 : suffix === ".child" ? 1 : 2;
+      return rank(left.suffix) - rank(right.suffix);
+    });
+    for (const child of children.reverse()) {
+      pending.push({ node: child.value, path: `${path}${child.suffix}` });
+    }
   }
-  return [
-    ...styleFields(node.style, `${path}.style`),
-    ...list(node.styleWhen).flatMap((entry, index) =>
-      styleFields(record(entry)?.style, `${path}.styleWhen[${index}].style`),
-    ),
-    ...(node.type === "image" ? pairAt(node.asset, `${path}.asset`) : []),
-    ...(node.type === "bottomSheet" ? newlyThemedColor(node.scrim, `${path}.scrim`) : []),
-    ...list(node.items).flatMap((item, index) =>
-      pairAt(record(item)?.image, `${path}.items[${index}].image`),
-    ),
-    ...list(node.children).flatMap((child, index) =>
-      nodeFields(child, `${path}.children[${index}]`),
-    ),
-    ...nodeFields(node.child, `${path}.child`),
-  ];
+  return fields;
 }

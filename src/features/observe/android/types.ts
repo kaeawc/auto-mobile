@@ -1,3 +1,6 @@
+import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { PrototypeHiddenReason } from "../../prototype/prototypeHidden";
+import type { PanelFingerprint } from "../../../models/DisplayPanel";
 /**
  * Shared types for CtrlProxyClient delegates.
  *
@@ -26,14 +29,6 @@ import type { ScreenshotPerformanceMetadata } from "../ScreenshotMetadata";
 
 // Re-export shared types so existing imports from "./types" continue to work
 export type { DelegateContext } from "../shared/types";
-
-/**
- * Generate a secure ID for request IDs.
- */
-export function generateSecureId(): string {
-  const { randomBytes } = require("crypto");
-  return randomBytes(4).toString("hex");
-}
 
 /**
  * Quote a string for use in ADB shell arguments.
@@ -116,8 +111,11 @@ export interface AccessibilityNodeSelector {
  * Interface for accessibility hierarchy data from the device.
  */
 export interface AccessibilityHierarchy {
+  prototypeSuspended?: boolean;
+  prototypeHiddenReason?: PrototypeHiddenReason;
   displayId?: number | null;
   panelUniqueId?: string | null;
+  panelFingerprint?: PanelFingerprint;
   /** Daemon sequence assigned when this capture was forwarded to the observation stream. */
   captureSequence?: number;
   updatedAt: number;
@@ -280,13 +278,14 @@ export interface A11ySetTextResult extends BaseResult {
 }
 
 /** IME action result from accessibility service */
-export type A11yImeActionResult = ActionTimingResult;
+export type A11yImeActionResult = Omit<ActionTimingResult, "action"> & { action?: string };
 
 /** Select all result from accessibility service */
 export type A11ySelectAllResult = BaseResult;
 
 /** Accessibility action result */
-export type A11yActionResult = ActionTimingResult & {
+export type A11yActionResult = Omit<ActionTimingResult, "action"> & {
+  action?: string;
   /** The request was sent to the runner. */
   dispatched?: boolean;
   /** The runner replied, including an explicit refusal. False after a lost reply. */
@@ -431,4 +430,18 @@ export interface NormalizedHighlightBounds {
   height: number;
   sourceWidth?: number | null;
   sourceHeight?: number | null;
+}
+
+/** Android TalkBack two-finger swipe, including transport and display fencing. */
+export interface TwoFingerSwipeRequest {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  duration?: number;
+  offset?: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  displayId?: number;
+  beforeSend?: () => void;
 }

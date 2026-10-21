@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": "a"
+    },
+    "root": {
+      "type": "radioGroup",
+      "stateKey": "value",
+      "checks": [
+        {
+          "message": "Bad",
+          "minLength": 1
+        }
+      ],
+      "options": [
+        {
+          "value": "a",
+          "label": "A"
+        },
+        {
+          "value": "b",
+          "label": "B"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.checks[0].minLength"
+}

@@ -1,11 +1,16 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
+import { resolveGestureCtrlProxyTimeoutMs } from "../../../src/features/action/gestureTransportTimeout";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
@@ -22,7 +27,15 @@ function harness() {
     "hierarchy-source": "uiautomator",
     bounds: { left: 10, top: 20, right: 110, bottom: 70 },
   };
-  const hierarchy: ViewHierarchyResult = { hierarchy: { node: element } };
+  const hierarchy: ViewHierarchyResult = {
+    hierarchy: {
+      node: createFlatNodeForTest({
+        text: element.text,
+        clickable: element.clickable,
+        bounds: element.bounds,
+      }),
+    },
+  };
   const action = new TapOnElement(
     { name: "test-device", platform: "android", deviceId: "long-press-bound" },
     adb,
@@ -42,10 +55,16 @@ function harness() {
       elementSelector: new FakeElementSelector(element),
     },
   );
-  action.observedInteraction = (callback) =>
-    callback(
-      recordObservationRead({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
-    );
+  action.observedInteraction = runBlockWith(() =>
+    recordObservationRead(
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: hierarchy,
+        screenSize: { width: 500, height: 500 },
+      }),
+    ),
+  );
   return {
     adb,
     timer,
@@ -53,10 +72,7 @@ function harness() {
     execute: (duration?: number, signal?: AbortSignal, remainingMs?: number) =>
       action.execute(
         { text: "ListItem", action: "longPress", duration },
-        undefined,
-        signal,
-        undefined,
-        { requestDeadlineMs: remainingMs === undefined ? undefined : timer.now() + remainingMs },
+        { signal, deadlineMs: remainingMs === undefined ? undefined : timer.now() + remainingMs },
       ),
   };
 }
@@ -87,7 +103,7 @@ describe("tapOn long press safety", () => {
     expect(h.adb.getCommandCalls()).toEqual([
       expect.objectContaining({
         command: `shell input touchscreen swipe 60 45 60 45 ${effective}`,
-        timeoutMs: effective! + 2000,
+        timeoutMs: resolveGestureCtrlProxyTimeoutMs(effective!),
       }),
     ]);
   });
@@ -103,7 +119,7 @@ describe("tapOn long press safety", () => {
     expect(h.adb.getCommandCalls()).toEqual([
       expect.objectContaining({
         command: `shell input touchscreen swipe 60 45 60 45 ${duration ?? 500}`,
-        timeoutMs: (duration ?? 500) + 2000,
+        timeoutMs: resolveGestureCtrlProxyTimeoutMs(duration ?? 500),
       }),
     ]);
   });
@@ -114,11 +130,8 @@ describe("tapOn long press safety", () => {
       const h = harness();
       const observe = spyOn(h.action, "observedInteraction");
       const call = h.action.execute(
-        { text: "ListItem", action: "longPress", duration: 20000, display: 1 },
-        undefined,
-        undefined,
-        undefined,
-        { requestDeadlineMs: h.timer.now() + remaining },
+        { text: "ListItem", action: "longPress", duration: 20000, display: "1" },
+        { deadlineMs: h.timer.now() + remaining },
       );
       await expect(call).rejects.toBeInstanceOf(ActionableError);
       await expect(call).rejects.toThrow(
@@ -140,7 +153,7 @@ describe("tapOn long press safety", () => {
         if (path === "fallback" && args[0].includes("touchscreen")) {
           throw new Error("touchscreen source unavailable");
         }
-        expect(args[4]).toBe(controller.signal);
+        expect(executeCommandOptionsOf(args).signal).toBe(controller.signal);
         controller.abort();
         throw new DOMException("Operation aborted", "AbortError");
       });
@@ -170,4 +183,8 @@ describe("tapOn long press safety", () => {
     expect(result.error).toContain("press may still be held on the device for up to 1500 ms");
     expect(h.adb.getExecutedCommands()).toEqual(["shell input touchscreen swipe 60 45 60 45 1500"]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

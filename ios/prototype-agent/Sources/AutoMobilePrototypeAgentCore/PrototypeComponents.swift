@@ -6,12 +6,17 @@ import Foundation
 // so the renderer and the `simulate_tap` test hook share one implementation.
 
 /// Node types drawn above the whole author tree while their `openWhen` holds, never inline.
-let prototypeModalTypes: Set<String> = ["dialog", "snackbar"]
+let prototypeModalTypes: Set<String> = ["dialog", "snackbar", "menu"]
 
 extension PrototypeNode {
-    /// The accessibility identifier: `testTag`, else `id`.
+    /// Focus does not change expansion; only the authored boolean state does.
+    func searchBarActive(state: [String: JSONValue]) -> Bool {
+        activeKey.flatMap { state[$0]?.boolValue } ?? false
+    }
+
+    /// The accessibility identifier is only the authored `testTag`, as on Android.
     var identifier: String? {
-        testTag ?? id
+        testTag
     }
 
     /// The identifier of a part of a composite node: the node's identifier, a dot, then the part
@@ -39,51 +44,92 @@ extension PrototypeNode {
     /// Open dialogs and snackbars in tree order, as Android's `modalPrototypeSheets`: hidden subtrees
     /// and closed modals are skipped, a pager contributes only its current page, and an open
     /// modal's own content is searched too.
-    func openModals(state: [String: JSONValue], pages: [String: Int]) -> [PrototypeNode] {
+    func openModals(
+        state: [String: JSONValue],
+        pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> [PrototypeNode]
+    {
         if let visibleWhen, !visibleWhen.holds(state) { return [] }
         let modal = prototypeModalTypes.contains(type)
-        if modal, !(openWhen?.holds(state) ?? false) { return [] }
-        var nested = children ?? []
-        if type == "pager" {
-            let page = id.flatMap { pages[$0] } ?? 0
-            nested = nested.indices.contains(page) ? [nested[page]] : []
-        }
-        if let child { nested.append(child) }
-        return (modal ? [self] : []) + nested.flatMap { $0.openModals(state: state, pages: pages) }
+        if modal || type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
+        let nested = currentChildEntries(
+            path: "root", pages: pages, stacks: stacks, state: state, clampPagerPage: false
+        ).map(\.node)
+        return (modal ? [self] : []) + nested.flatMap { $0.openModals(state: state, pages: pages, stacks: stacks) }
     }
 
-    /// Whether an open dialog makes the page behind it inert (hidden from accessibility); a
+    /// Whether an open dialog or menu makes the page behind it inert (hidden from accessibility); a
     /// snackbar does not block the page, as on Android.
-    func blocksPage(state: [String: JSONValue], pages: [String: Int]) -> Bool {
-        openModals(state: state, pages: pages).contains { $0.type == "dialog" }
+    func blocksPage(
+        state: [String: JSONValue],
+        pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> Bool
+    {
+        openModals(state: state, pages: pages, stacks: stacks).contains { ["dialog", "menu"].contains($0.type) }
     }
 
     /// How the page and the anchor layer expose their nodes to accessibility under this root.
-    func layerAccessibility(state: [String: JSONValue], pages: [String: Int]) -> PrototypeLayerAccessibility {
-        PrototypeLayerAccessibility(inert: blocksPage(state: state, pages: pages))
+    func layerAccessibility(
+        state: [String: JSONValue],
+        pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> PrototypeLayerAccessibility
+    {
+        PrototypeLayerAccessibility(inert: blocksPage(state: state, pages: pages, stacks: stacks))
     }
 
     /// The node or composite part whose identifier is `identifier`, depth-first in tree order.
     /// Parts of a closed dialog or snackbar are not on screen, so they never match.
-    func tapTarget(identifier wanted: String, state: [String: JSONValue]) -> PrototypeTapTarget? {
+    func tapTarget(
+        identifier wanted: String, state: [String: JSONValue], pages: [String: Int] = [:],
+        stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> PrototypeTapTarget?
+    {
+        if let visibleWhen, !visibleWhen.holds(state) { return nil }
+        if prototypeModalTypes.contains(type) || type == "bottomSheet",
+           !(openWhen?.holds(state) ?? false) { return nil }
         if identifier == wanted { return .node(self) }
         if let part = part(named: wanted, state: state) { return part }
-        for node in (children ?? []) + [child].compactMap({ $0 }) {
-            if let match = node.tapTarget(identifier: wanted, state: state) { return match }
+        for entry in currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) {
+            if let match = entry.node
+                .tapTarget(identifier: wanted, state: state, pages: pages, stacks: stacks) { return match }
         }
         return nil
+    }
+
+    private func menuTarget(named name: String, state: [String: JSONValue]) -> PrototypeTapTarget? {
+        guard openWhen?.holds(state) ?? false, let index = Int(name), String(index) == name,
+              let menuItems, menuItems.indices.contains(index),
+              case let .item(item) = menuItems[index], item.enabled != false else { return nil }
+        return .menuItem(self, item)
     }
 
     private func part(named wanted: String, state: [String: JSONValue]) -> PrototypeTapTarget? {
         guard let identifier, wanted.hasPrefix(identifier + ".") else { return nil }
         let name = String(wanted.dropFirst(identifier.count + 1))
+        if let swipeActions, name.hasPrefix("swipe."), let index = Int(name.dropFirst("swipe.".count)) {
+            let entries = swipeActions.entries
+            return entries.indices.contains(index) ? .swipeAction(entries[index].action) : nil
+        }
         switch type {
         case "dialog", "snackbar":
             guard openWhen?.holds(state) ?? false else { return nil }
             return modalButton(named: name).map { .modalButton(self, $0) }
+        case "searchBar":
+            return indexedButton(named: name, actions: trailingActions).map { .appBarButton($0) }
+        case "menu":
+            return menuTarget(named: name, state: state)
+        case "textField":
+            return name == "trailingIcon" ? trailingIcon.map { .appBarButton($0) } : nil
         case "topAppBar":
             return appBarButton(named: name).map { .appBarButton($0) }
-        case "radioGroup", "segmentedButton":
+        case "radioGroup", "segmentedButton", "select":
             return options?.first { $0.value == name }.map { .option(self, $0) }
         default:
             return nil
@@ -103,6 +149,10 @@ extension PrototypeNode {
     /// `navigation`, or `actions.<index>`.
     private func appBarButton(named name: String) -> PrototypeAppBarAction? {
         if name == "navigation" { return navigationIcon }
+        return indexedButton(named: name, actions: actions)
+    }
+
+    private func indexedButton(named name: String, actions: [PrototypeAppBarAction]?) -> PrototypeAppBarAction? {
         guard name.hasPrefix("actions."), let index = Int(name.dropFirst("actions.".count)),
               let actions, actions.indices.contains(index) else { return nil }
         return actions[index]
@@ -114,27 +164,41 @@ enum PrototypeTapTarget {
     case node(PrototypeNode)
     /// A `dialog` confirm/dismiss button or the `snackbar` action.
     case modalButton(PrototypeNode, PrototypeDialogButton)
+    case menuItem(PrototypeNode, PrototypeMenuEntry)
     /// A `topAppBar` navigation icon or action.
     case appBarButton(PrototypeAppBarAction)
+    /// A revealed `swipeActions` button of a row or listItem.
+    case swipeAction(PrototypeSwipeAction)
     /// One `radioGroup` or `segmentedButton` option.
     case option(PrototypeNode, PrototypeOption)
 }
 
 extension PrototypeSession {
+    private mutating func activateNode(_ node: PrototypeNode) -> [PrototypeEvent]? {
+        guard isEnabled(node) else { return [] }
+        if let key = node.toggleKey { return toggle(key: key, then: node.onTap ?? []) }
+        guard let actions = node.onTap, !actions.isEmpty else { return nil }
+        return run(actions)
+    }
+
     /// A tap on `target`, as the matching Android control handles its click. Nil when the target
     /// has nothing to do (a plain node without `onTap`, an app-bar button without actions).
     mutating func activate(_ target: PrototypeTapTarget) -> [PrototypeEvent]? {
         switch target {
         case let .node(node):
-            if let key = node.toggleKey { return toggle(key: key, then: node.onTap ?? []) }
-            guard let actions = node.onTap, !actions.isEmpty else { return nil }
-            return run(actions)
+            return activateNode(node)
+        case let .menuItem(node, item):
+            guard item.enabled != false else { return nil }
+            return closeModal(node, then: item.onTap ?? [])
         case let .modalButton(node, button):
             return closeModal(node, then: button.onTap ?? [])
         case let .appBarButton(button):
             guard let actions = button.onTap, !actions.isEmpty else { return nil }
             return run(actions)
+        case let .swipeAction(action):
+            return run(action.onTap)
         case let .option(node, option):
+            guard isEnabled(node) else { return [] }
             guard let key = node.stateKey else { return nil }
             return choose(key: key, value: option.value, then: node.onTap ?? [])
         }
@@ -258,15 +322,15 @@ enum PrototypeTime {
 
     /// The 12-hour clock face (1...12) of a 24-hour `hour`.
     static func hour12(of hour: Int) -> Int {
-        let h = hour % 12
-        return h == 0 ? 12 : h
+        let hourValue = hour % 12
+        return hourValue == 0 ? 12 : hourValue
     }
 
     static func isPM(hour: Int) -> Bool { hour % 24 >= 12 }
 
     /// The 24-hour `hour` for a 12-hour face and meridiem.
-    static func hour24(hour12: Int, pm: Bool) -> Int {
-        (hour12 % 12) + (pm ? 12 : 0)
+    static func hour24(hour12: Int, pm isAfternoon: Bool) -> Int {
+        (hour12 % 12) + (isAfternoon ? 12 : 0)
     }
 
     /// Accessibility labels of the wheels, naming what each one sets as Android's picker does.

@@ -1,28 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidTapStrategy } from "../../../src/features/action/strategies/AndroidTapStrategy";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
-import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../src/ctrlProxy/constants";
-import { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { ExecResult, BootedDevice, AndroidUser } from "../../../src/models";
-import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { ExecResult } from "../../../src/models";
+import { FakeAdbExecutor as SharedFakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 /**
- * Fake ADB executor for testing
+ * Counting ADB executor: the shared fake plus a single default response, a
+ * switchable failure mode and a call counter.
  */
-class FakeAdbExecutor implements AdbExecutor {
+class CountingAdbExecutor extends SharedFakeAdbExecutor {
   private responses: Map<string, string> = new Map();
   private callCount = 0;
   private shouldError = false;
-
-  async getDeviceTimestampMs(): Promise<number> {
-    return 0;
-  }
-
-  async getDeviceTimestampMsWithSource(): Promise<{ timestampMs: number; source: "device-ms" }> {
-    return { timestampMs: 0, source: "device-ms" };
-  }
 
   setResponse(output: string): void {
     this.responses.set("default", output);
@@ -32,51 +24,14 @@ class FakeAdbExecutor implements AdbExecutor {
     this.shouldError = enabled;
   }
 
-  async executeCommand(_command: string): Promise<ExecResult> {
+  override async executeCommand(_command: string): Promise<ExecResult> {
     this.callCount++;
 
     if (this.shouldError) {
       throw new Error("ADB error");
     }
 
-    const output = this.responses.get("default") ?? "null";
-    return {
-      stdout: output,
-      stderr: "",
-      exitCode: 0,
-    };
-  }
-
-  async getBootedAndroidDevices(): Promise<BootedDevice[]> {
-    return [];
-  }
-
-  async isScreenOn(): Promise<boolean> {
-    return true;
-  }
-
-  async getWakefulness(): Promise<"Awake" | "Asleep" | "Dozing" | null> {
-    return "Awake";
-  }
-
-  async getDeviceLock(): Promise<null> {
-    return null;
-  }
-
-  async listUsers(): Promise<AndroidUser[]> {
-    return [];
-  }
-
-  async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
-    return null;
-  }
-
-  async getForegroundAppChecked(): Promise<{ state: "known"; app: null }> {
-    return { state: "known", app: null };
-  }
-
-  async getAdbPathOnly(): Promise<string> {
-    return "adb";
+    return this.createExecResult(this.responses.get("default") ?? "null", "");
   }
 
   getCallCount(): number {
@@ -111,14 +66,14 @@ class FakeFeatureFlagService {
 
 describe("AccessibilityDetector - Unit Tests", () => {
   let detector: DefaultAccessibilityDetector;
-  let fakeAdb: FakeAdbExecutor;
+  let fakeAdb: CountingAdbExecutor;
   let fakeFeatureFlags: FakeFeatureFlagService;
   let fakeTimer: FakeTimer;
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     detector = new DefaultAccessibilityDetector(fakeTimer);
-    fakeAdb = new FakeAdbExecutor();
+    fakeAdb = new CountingAdbExecutor();
     fakeFeatureFlags = new FakeFeatureFlagService();
 
     // Clear cache before each test
@@ -459,8 +414,8 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
     test("maintains separate cache per device", async () => {
       // Create two separate ADB executors for two devices
-      const fakeAdb1 = new FakeAdbExecutor();
-      const fakeAdb2 = new FakeAdbExecutor();
+      const fakeAdb1 = new CountingAdbExecutor();
+      const fakeAdb2 = new CountingAdbExecutor();
 
       fakeAdb1.setResponse(
         "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
@@ -491,19 +446,11 @@ describe("AccessibilityDetector - Unit Tests", () => {
       fakeFeatureFlags.setFlag("accessibility-auto-detect", true);
 
       // Should return true without calling ADB
-      const enabled = await detector.isAccessibilityEnabled(
-        "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
-      );
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb, fakeFeatureFlags);
       expect(enabled).toBe(true);
       expect(fakeAdb.getCallCount()).toBe(0);
 
-      const service = await detector.detectMethod(
-        "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
-      );
+      const service = await detector.detectMethod("device123", fakeAdb, fakeFeatureFlags);
       expect(service).toBe("talkback");
     });
 
@@ -512,19 +459,11 @@ describe("AccessibilityDetector - Unit Tests", () => {
       fakeFeatureFlags.setFlag("accessibility-auto-detect", false);
 
       // Should return false without calling ADB
-      const enabled = await detector.isAccessibilityEnabled(
-        "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
-      );
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb, fakeFeatureFlags);
       expect(enabled).toBe(false);
       expect(fakeAdb.getCallCount()).toBe(0);
 
-      const service = await detector.detectMethod(
-        "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
-      );
+      const service = await detector.detectMethod("device123", fakeAdb, fakeFeatureFlags);
       expect(service).toBe("unknown");
     });
 
@@ -536,8 +475,8 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
       const enabled1 = await detector.isAccessibilityEnabled(
         "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
+        fakeAdb,
+        fakeFeatureFlags,
       );
       expect(enabled1).toBe(false);
       expect(fakeAdb.getCallCount()).toBe(1);
@@ -547,8 +486,8 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
       const enabled2 = await detector.isAccessibilityEnabled(
         "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
+        fakeAdb,
+        fakeFeatureFlags,
       );
       expect(enabled2).toBe(true);
       // Should not call ADB again because force flag overrides

@@ -6,6 +6,8 @@ SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ci/classif
 setup() {
   FAKE_BIN="$BATS_TEST_TMPDIR/fake-bin"
   FIXTURE="$BATS_TEST_TMPDIR/run.json"
+  FIXTURE_DIR="$(cd "$BATS_TEST_DIRNAME/../fixtures/ci-classify-failure" && pwd)"
+  export FIXTURE_DIR
   mkdir -p "$FAKE_BIN"
   cat > "$FIXTURE" <<'JSON'
 {
@@ -79,11 +81,26 @@ case "$1 $2" in
       */check-runs/33/annotations*) annotation_response '[]' ;;
       */check-runs/34/annotations*) annotation_response '[]' ;;
       */check-runs/37/annotations*) annotation_response '[]' ;;
+      */check-runs/60/annotations*) annotation_response '[]' ;;
+      */check-runs/64/annotations*|*/check-runs/65/annotations*)
+        jq -n --arg message "$FAKE_ANNOTATION" '[{message:$message}]' | { if [[ "$gh_args" == *"--paginate"* ]]; then sed '1s/^/[/; $s/$/]/'; else cat; fi; }
+        ;;
+      */check-runs/61/annotations*|*/check-runs/62/annotations*)
+        annotation_fixture="$FIXTURE_DIR/host-integration-assertion-$( [[ "$gh_args" == *'/check-runs/61/'* ]] && printf ubuntu || printf windows ).log"
+        annotation_text="$(awk '/^.*##\[error\]Received:/ { sub(/^.*##\[error\]/, ""); print; found=1; next } found { sub(/^[0-9-]+T[^ ]+Z /, ""); if ($0 ~ /^[[:space:]]+at /) { print; exit } print }' "$annotation_fixture")"
+        jq -n --arg message "$annotation_text" '[{message:$message}]' | { if [[ "$gh_args" == *"--paginate"* ]]; then sed '1s/^/[/; $s/$/]/'; else cat; fi; }
+        ;;
       */check-runs/12/annotations*|*/check-runs/13/annotations*|*/check-runs/14/annotations*) annotation_response '[]' ;;
       */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/45/logs) printf '%s\n' "$FAKE_EMULATOR_LOG" ;;
       */actions/jobs/46/logs) printf '%s\n' "$FAKE_RUNNER_LOG" ;;
+      */actions/jobs/60/logs) cat "$FIXTURE_DIR/unit-shard-enoent-unhandled.log" ;;
+      */actions/jobs/61/logs) cat "$FIXTURE_DIR/host-integration-assertion-ubuntu.log" ;;
+      */actions/jobs/62/logs) cat "$FIXTURE_DIR/host-integration-assertion-windows.log" ;;
+      */actions/jobs/63/logs) printf '%s\n' "$FAKE_RUNNER_LOG" ;;
+      */actions/jobs/64/logs) printf '%s\n' "$FAKE_NO_TIMESTAMP_LOG" ;;
+      */actions/jobs/65/logs) cat "$FAKE_ORDINARY_EXIT_LOG" ;;
       */actions/jobs/44/logs) printf '%s\n' "$FAKE_XCTEST_LOG" ;;
       */actions/jobs/35/logs) printf 'First emulator attempt failed; captured diagnostics follow:\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=241\nStarting emulator retry attempt 2.\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=237: readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/36/logs) printf 'getAndroid automation runner readiness failed: phase=runner-health attempts=4\n' ;;
@@ -113,6 +130,100 @@ case "$1 $2" in
 esac
 SHIM
   chmod +x "$FAKE_BIN/gh"
+}
+
+@test "parses host integration frames when timestamps are absent" {
+  fixture="$BATS_TEST_TMPDIR/no-timestamp-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Node Host Integration Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run host integration","conclusion":"failure"}]}]}
+JSON
+  # Derive a timestamp-free variant of the captured Ubuntu host integration log.
+  no_timestamp_log="$(sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+Z //' "$FIXTURE_DIR/host-integration-assertion-ubuntu.log")"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_NO_TIMESTAMP_LOG="$no_timestamp_log" bash "$SCRIPT" 603
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/db/keyedJsonConfigRepository.integration.test.ts:248"* ]]
+}
+
+@test "collapses multiline annotation whitespace before truncation" {
+  fixture="$BATS_TEST_TMPDIR/annotation-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Node TypeScript Build and Test (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run unit tests","conclusion":"failure"}]}]}
+JSON
+  annotation=$'Received: {\n  nested: { value: true }\n}\n    at <anonymous>\n    more details'
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION="$annotation" bash "$SCRIPT" 604
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == *"} at <anonymous>"* ]]
+  [[ "$output" != *$'}\nat'* ]]
+}
+
+@test "Installer Minimal action-download failures from codeload.github.com classify as rerun" {
+  fixture="$BATS_TEST_TMPDIR/installer-codeload-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Installer Minimal (macos-latest)","conclusion":"failure","steps":[{"name":"Set up job","conclusion":"failure"}]}]}
+JSON
+  for message in \
+    'nodename nor servname provided, or not known (codeload.github.com:443)' \
+    'Failed to download archive https://codeload.github.com/actions/checkout/tar.gz/abc after 3 attempts.' \
+    "Action 'actions/upload-artifact@v6' download has timed out after 3 attempts."; do
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION="$message" bash "$SCRIPT" 604
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — self-hosted Mac pool cannot fetch actions"* ]]
+  done
+}
+
+@test "does not treat signal evidence as diagnosis when status is ordinary failure" {
+  fixture="$BATS_TEST_TMPDIR/ordinary-exit-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Node TypeScript Build and Test (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run unit tests","conclusion":"failure"}]}]}
+JSON
+  # Derive the contradictory signal-evidence case from the captured shard fixture's FAIL line.
+  ordinary_exit_log="$(sed -n '/^FAIL: unit shard 2 exited with status 1$/p' "$FIXTURE_DIR/unit-shard-enoent-unhandled.log")"
+  ordinary_exit_log+=$'\nKilled'
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ORDINARY_EXIT_LOG="$ordinary_exit_log" bash "$SCRIPT" 605
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [[ "$output" != *"signal evidence in log"* ]]
+}
+
+@test "diagnoses captured ENOENT unit shard fixture without calling status 1 a signal" {
+  fixture="$BATS_TEST_TMPDIR/enoent-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":60,"name":"Node TypeScript Build and Test (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run unit tests","conclusion":"failure"}]}]}
+JSON
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 600
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INVESTIGATE"*"ResourceRegistry.ts"* ]]
+  [[ "$output" == *"src/server/ResourceRegistry.ts"* ]]
+  [[ "$output" == *"test/server/deviceTools.appResourceDependencies.test.ts"* ]]
+  [[ "$output" == *"x4"*"exited with status 1 (not a signal kill)"* ]]
+  [[ "$output" != *"UNKNOWN"* && "$output" != *"signal-killed"* && "$output" != *"killed by signal"* ]]
+}
+
+@test "diagnoses captured Ubuntu and Windows host assertion fixtures on one report line" {
+  fixture="$BATS_TEST_TMPDIR/host-assertion-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":61,"name":"Node Host Integration Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run host integration","conclusion":"failure"}]},{"databaseId":62,"name":"Node Host Integration Tests (windows-latest)","conclusion":"failure","steps":[{"name":"Run host integration","conclusion":"failure"}]}]}
+JSON
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 601
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  for report_line in "${lines[@]}"; do
+    [[ "$report_line" == *"INVESTIGATE"*"device_snapshot_configs rejects invalid config"*"test/db/keyedJsonConfigRepository.integration.test.ts:248"*"expect(received).toBeNull()"* ]]
+    [[ "$report_line" != *"UNKNOWN"* ]]
+  done
+}
+
+@test "derives SIGKILL from a mutation of the captured shard fixture status" {
+  fixture="$BATS_TEST_TMPDIR/signal-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":63,"name":"Node TypeScript Build and Test (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run unit tests","conclusion":"failure"}]}]}
+JSON
+  # Mutate only the captured exit-status line; all other evidence stays real.
+  FAKE_SIGNAL_LOG="$(sed 's/exited with status 1$/exited with status 137/' "$FIXTURE_DIR/unit-shard-enoent-unhandled.log")"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_RUNNER_LOG="$FAKE_SIGNAL_LOG" bash "$SCRIPT" 602
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"killed by signal SIGKILL (status 137)"* ]]
 }
 
 @test "passes the selected attempt to gh run view and classifies its watchdog log" {
@@ -387,7 +498,7 @@ JSON
 JSON
 
   for message in \
-    "2026-10-05T02:44:15.5935830Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift:1792: error: -[CtrlProxyUITests.HierarchyIntegrationTests testPressKeyForwardDeleteRemovesFollowingCharacter] : failed: caught error: \"gestureFailed(\"Forward delete unavailable: could not verify the caret position; use text replacement instead\")\"" \
+    "2026-10-05T02:44:15.5935830Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Sources/CtrlProxy/GesturePerformer.swift:1792: error: -[CtrlProxyUITests.HierarchyIntegrationTests testPressKeyForwardDeleteRemovesFollowingCharacter] : failed: caught error: \"gestureFailed(\"Forward delete unavailable: could not verify the caret position; use text replacement instead\")\"" \
     "2026-10-05T03:49:57.4071890Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Tests/CtrlProxyUITests/HierarchyIntegrationTests.swift:354: error: -[CtrlProxyUITests.HierarchyIntegrationTests testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree] : failed - Element 'secure-field' did not gain keyboard focus" \
     "runner time budget exhausted at caret probe" \
     "Timed out while launching application via Xcode"; do
@@ -860,6 +971,28 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
 }
 
 # Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.
+@test "reruns a calibrated contended unit timeout before the both-attempts signature" {
+  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+      FAKE_RUNNER_LOG=$'RUNNER-CONTENDED: unit shard 0 hit its 720s wall-clock budget after a retry on a starved runner (probe slowdown 8x >= 4x); not retrying on the same runner. Re-run the job to get a fresh runner.\nTIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry' bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — runner starved (calibration probe slowdown above threshold), not a code regression"* ]]
+    [[ "$output" != *"INVESTIGATE"* ]]
+  done
+}
+
+@test "reruns suspected runner starvation before the plain timeout signature for both Node jobs" {
+  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+      FAKE_RUNNER_LOG=$'TIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry\nRUNNER-STARVED-SUSPECTED: all 3 unit shards hit the 720 s wall-clock budget on both attempts (worst probe slowdown 2x); every shard being slow on a retried runner points at a starved runner, not a code regression.' bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — every shard timed out on both attempts, treat as runner starvation; rerun the job once on a fresh runner; if it recurs on the rerun, investigate"* ]]
+    [[ "$output" != *"INVESTIGATE"* ]]
+  done
+}
+
 @test "investigates a unit shard that timed out on both attempts of its infra retry" {
   runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 2 hit its 720s wall-clock budget (exit 124) after 721s; retrying once with the same budget\nTIMEOUT: unit shard 2 exceeded its wall-clock budget after a retry\ntest-ts: unit shards total wall=1450s status=124 retried=1' bash "$SCRIPT" 123
@@ -887,4 +1020,37 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   [ "$status" -eq 0 ]
   [[ "$output" == *"UNKNOWN"* ]]
   [[ "$output" != *"infra retry"* ]]
+}
+
+@test "coverage unit gate preserves timing flap versus confirmed regression classification" {
+  local id verdict
+  for pair in '1 RERUN-DONT-FIX' '18 INVESTIGATE' '22 INVESTIGATE' '4 UNKNOWN'; do
+    read -r id verdict <<< "$pair"
+    jq -n --argjson id "$id" '{jobs:[{databaseId:$id,name:"TypeScript Code Coverage",conclusion:"failure",steps:[{name:"Unit gate",conclusion:"failure"}]}]}' > "$FIXTURE"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" bash "$SCRIPT" 127
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TypeScript Code Coverage → Unit gate → "*" → $verdict"* ]]
+  done
+}
+
+@test "coverage infra retries preserve investigate verdicts without weakening ordinary assertion failures" {
+  runner_shutdown_fixture "TypeScript Code Coverage"
+  for diagnostic in 'TIMEOUT: coverage shard 1 exceeded its wall-clock budget after a retry' 'FAIL: coverage shard 1 exited with status 137 after a retry'; do
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$diagnostic" bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"INVESTIGATE"* ]]
+    [[ "$output" != *"RERUN-DONT-FIX"* ]]
+  done
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG='FAIL: coverage shard 1 exited with status 1' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+}
+
+@test "coverage first samples without rerunnable identities require investigation" {
+  runner_shutdown_fixture "TypeScript Code Coverage"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+    FAKE_RUNNER_LOG=$'Test exceeded 100ms: fixture (150.00ms)\nFAIL: fixture | FAIL (not re-runnable; first sample stands) | first sample: 150.00ms | re-run samples: none | median: not computed' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INVESTIGATE — instrumented first sample has no plain isolated recheck"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }

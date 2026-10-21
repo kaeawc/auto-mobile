@@ -1,0 +1,1308 @@
+[
+  {
+    "file": "src/features/observe/TakeScreenshot.ts",
+    "line": 245,
+    "expression": "daemon.getDevicePool().getDevice(this.device.deviceId)?.sessionId",
+    "source": "daemon.getDevicePool().getDevice(this.device.deviceId)?.sessionId"
+  },
+  {
+    "file": "src/features/observe/ObservationReadServiceStart.ts",
+    "line": 47,
+    "expression": "pooled.status",
+    "source": "pooled.status === \"idle\" &&",
+    "snippet": "function fixture() { pooled.status === \"idle\" &&{} }"
+  },
+  {
+    "file": "src/features/observe/ObservationReadServiceStart.ts",
+    "line": 48,
+    "expression": "pooled.sessionId",
+    "source": "!pooled.sessionId &&",
+    "snippet": "function fixture() { !pooled.sessionId &&{} }"
+  },
+  {
+    "file": "src/features/observe/DeviceHierarchyCapture.ts",
+    "line": 180,
+    "expression": "daemon.getDevicePool().getDevice(device.deviceId)?.sessionId",
+    "source": "? !!daemon.getDevicePool().getDevice(device.deviceId)?.sessionId",
+    "snippet": "void (receiver? !!daemon.getDevicePool().getDevice(device.deviceId)?.sessionId: null);"
+  },
+  {
+    "file": "src/daemon/deviceRuntimeIdentity.ts",
+    "line": 799,
+    "expression": "pooled.sessionId",
+    "source": "await this.cancelPooledDeviceExecutions(pooled, options, pooled.sessionId);"
+  },
+  {
+    "file": "src/daemon/deviceRuntimeIdentity.ts",
+    "line": 811,
+    "expression": "pooled.sessionId",
+    "source": "await this.cancelPooledDeviceExecutions(pooled, options, deferred ? pooled.sessionId : null);"
+  },
+  {
+    "file": "src/daemon/emulatorLossIncidentLedger.ts",
+    "line": 112,
+    "expression": "device.sessionId",
+    "source": "device.sessionId ??",
+    "snippet": "function fixture() { device.sessionId ??{} }"
+  },
+  {
+    "file": "src/daemon/idleDeviceReaper.ts",
+    "line": 47,
+    "expression": "device.status",
+    "source": "return device?.platform === \"ios\" && device.status === \"idle\" && !device.sessionId;",
+    "snippet": "function fixture() { return device?.platform === \"ios\" && device.status === \"idle\" && !device.sessionId;}"
+  },
+  {
+    "file": "src/daemon/idleDeviceReaper.ts",
+    "line": 47,
+    "expression": "device.sessionId",
+    "source": "return device?.platform === \"ios\" && device.status === \"idle\" && !device.sessionId;",
+    "snippet": "function fixture() { return device?.platform === \"ios\" && device.status === \"idle\" && !device.sessionId;}"
+  },
+  {
+    "file": "src/daemon/idleDeviceReaper.ts",
+    "line": 64,
+    "expression": "device.status",
+    "source": "if (device !== candidate || device.status !== \"idle\" || device.sessionId) {",
+    "snippet": "if (device !== candidate || device.status !== \"idle\" || device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/idleDeviceReaper.ts",
+    "line": 64,
+    "expression": "device.sessionId",
+    "source": "if (device !== candidate || device.status !== \"idle\" || device.sessionId) {",
+    "snippet": "if (device !== candidate || device.status !== \"idle\" || device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/idleDeviceReaper.ts",
+    "line": 77,
+    "expression": "device.status",
+    "source": "device.status !== \"idle\" ||",
+    "snippet": "function fixture() { device.status !== \"idle\" ||{} }"
+  },
+  {
+    "file": "src/daemon/idleDeviceReaper.ts",
+    "line": 78,
+    "expression": "device.sessionId",
+    "source": "device.sessionId"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 483,
+    "expression": "device.sessionId",
+    "source": ".filter((device) => device.sessionId === null);",
+    "snippet": "const fixture = receiver.filter((device) => device.sessionId === null);"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 675,
+    "expression": "device.status",
+    "source": "candidatesBeforeDiscovery.filter((device) => device.status === \"idle\"),",
+    "snippet": "function fixture() { candidatesBeforeDiscovery.filter((device) => device.status === \"idle\"),{} }"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 681,
+    "expression": "device.status",
+    "source": "(device) => device.status === \"idle\" && device.platform === \"ios\",",
+    "snippet": "function fixture() { (device) => device.status === \"idle\" && device.platform === \"ios\",{} }"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 687,
+    "expression": "device.status",
+    "source": "device.status === \"idle\" && this.port.shouldValidatePooledDevicePresence(device),",
+    "snippet": "function fixture() { device.status === \"idle\" && this.port.shouldValidatePooledDevicePresence(device),{} }"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 855,
+    "expression": "device.sessionId",
+    "source": "device.sessionId === null &&",
+    "snippet": "function fixture() { device.sessionId === null &&{} }"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 871,
+    "expression": "entry.status",
+    "source": "entry.status !== \"idle\" ||",
+    "snippet": "function fixture() { entry.status !== \"idle\" ||{} }"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 872,
+    "expression": "entry.sessionId",
+    "source": "entry.sessionId !== null ||",
+    "snippet": "function fixture() { entry.sessionId !== null ||{} }"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 973,
+    "expression": "device.status",
+    "source": "device.status === \"idle\" &&",
+    "snippet": "function fixture() { device.status === \"idle\" &&{} }"
+  },
+  {
+    "file": "src/server/deviceDescription.ts",
+    "line": 338,
+    "expression": "pooled.status",
+    "source": "return pooled ? classifyPoolStatus(pooled.status, unlendable) : null;",
+    "snippet": "function fixture() { return pooled ? classifyPoolStatus(pooled.status, unlendable) : null;}"
+  },
+  {
+    "file": "src/server/inventoryDeviceDescription.ts",
+    "line": 69,
+    "expression": "input.pooled?.sessionId",
+    "source": "const holderId = input.pooled?.sessionId;"
+  },
+  {
+    "file": "src/server/bootedDeviceResources.ts",
+    "line": 837,
+    "expression": "pooledDevice.sessionId",
+    "source": "assignedSession: pooledDevice.sessionId || undefined,",
+    "snippet": "function fixture() { assignedSession: pooledDevice.sessionId || undefined,{} }"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 137,
+    "expression": "device.sessionId",
+    "source": "if (device.sessionId) {",
+    "snippet": "if (device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 139,
+    "expression": "device.sessionId",
+    "source": "`Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`,",
+    "snippet": "function fixture() { `Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`,{} }"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 295,
+    "expression": "device.status",
+    "source": "device.status !== \"idle\" ||",
+    "snippet": "function fixture() { device.status !== \"idle\" ||{} }"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 296,
+    "expression": "device.sessionId",
+    "source": "device.sessionId !== null"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 394,
+    "expression": "device.status",
+    "source": "device.status !== \"idle\" ||",
+    "snippet": "function fixture() { device.status !== \"idle\" ||{} }"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 395,
+    "expression": "device.sessionId",
+    "source": "device.sessionId !== null"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 468,
+    "expression": "device.sessionId",
+    "source": "device.sessionId &&",
+    "snippet": "function fixture() { device.sessionId &&{} }"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 199,
+    "expression": "this.pool.getDevice(deviceId)?.sessionId",
+    "source": "const heldBefore = this.pool.getDevice(deviceId)?.sessionId ?? null;"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 474,
+    "expression": "device.sessionId",
+    "source": "device.sessionId === session.sessionId &&",
+    "snippet": "function fixture() { device.sessionId === session.sessionId &&{} }"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 541,
+    "expression": "device.sessionId",
+    "source": "device.sessionId ?? undefined,",
+    "snippet": "function fixture() { device.sessionId ?? undefined,{} }"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 546,
+    "expression": "device.sessionId",
+    "source": "const session = device.sessionId"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 547,
+    "expression": "device.sessionId",
+    "source": "? this.pool.getSessionManager().getSession(device.sessionId)",
+    "snippet": "void (receiver? this.pool.getSessionManager().getSession(device.sessionId): null);"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 556,
+    "expression": "device.sessionId",
+    "source": "device.sessionId ?? undefined,",
+    "snippet": "function fixture() { device.sessionId ?? undefined,{} }"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 587,
+    "expression": "device.sessionId",
+    "source": "if (!sourceImage || !device.sessionId) {",
+    "snippet": "if (!sourceImage || !device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 590,
+    "expression": "device.sessionId",
+    "source": "const existingSession = this.pool.getSessionManager().getSession(device.sessionId);"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 685,
+    "expression": "device.sessionId",
+    "source": "if (device && device.autolockSessionId === id && device.sessionId === id) {",
+    "snippet": "if (device && device.autolockSessionId === id && device.sessionId === id) {}"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 828,
+    "expression": "device.sessionId",
+    "source": "device.sessionId !== sessionId ||",
+    "snippet": "function fixture() { device.sessionId !== sessionId ||{} }"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 908,
+    "expression": "expectedDevice.sessionId",
+    "source": "expectedDevice.sessionId !== null ||",
+    "snippet": "function fixture() { expectedDevice.sessionId !== null ||{} }"
+  },
+  {
+    "file": "src/daemon/explicitDeviceBind.ts",
+    "line": 266,
+    "expression": "this.port.devices.get(deviceId)?.sessionId",
+    "source": "const heldBefore = this.port.devices.get(deviceId)?.sessionId ?? null;"
+  },
+  {
+    "file": "src/daemon/explicitDeviceBind.ts",
+    "line": 327,
+    "expression": "device.sessionId",
+    "source": "if (device.sessionId) {",
+    "snippet": "if (device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/explicitDeviceBind.ts",
+    "line": 328,
+    "expression": "device.sessionId",
+    "source": "const existingSession = this.port.sessionManager.getSession(device.sessionId);"
+  },
+  {
+    "file": "src/daemon/explicitDeviceBind.ts",
+    "line": 825,
+    "expression": "replacement?.sessionId",
+    "source": "if (wasAutolocked && replacement?.sessionId === sessionId) {",
+    "snippet": "if (wasAutolocked && replacement?.sessionId === sessionId) {}"
+  },
+  {
+    "file": "src/daemon/connectionOwnership.ts",
+    "line": 33,
+    "expression": "this.port.getDevice(deviceId)?.sessionId",
+    "source": "if (!this.port.getDevice(deviceId)?.sessionId) {",
+    "snippet": "if (!this.port.getDevice(deviceId)?.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 181,
+    "expression": "expectedDevice.sessionId",
+    "source": "(preservedSession !== undefined && expectedDevice.sessionId === null);"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 217,
+    "expression": "this.port.devices.get(originalDeviceId)?.sessionId",
+    "source": "if (!this.port.devices.get(originalDeviceId)?.sessionId) {",
+    "snippet": "if (!this.port.devices.get(originalDeviceId)?.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 232,
+    "expression": "replacementDevice.sessionId",
+    "source": "replacementDevice.sessionId !== preservedSession.sessionId ||",
+    "snippet": "function fixture() { replacementDevice.sessionId !== preservedSession.sessionId ||{} }"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 233,
+    "expression": "replacementDevice.status",
+    "source": "replacementDevice.status !== \"busy\" ||",
+    "snippet": "function fixture() { replacementDevice.status !== \"busy\" ||{} }"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 287,
+    "expression": "expectedDevice.sessionId",
+    "source": "const sessionId = expectedDevice.sessionId;"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 326,
+    "expression": "replacement.status",
+    "source": "if (replacement.status !== \"idle\" || replacement.sessionId !== null) {",
+    "snippet": "if (replacement.status !== \"idle\" || replacement.sessionId !== null) {}"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 326,
+    "expression": "replacement.sessionId",
+    "source": "if (replacement.status !== \"idle\" || replacement.sessionId !== null) {",
+    "snippet": "if (replacement.status !== \"idle\" || replacement.sessionId !== null) {}"
+  },
+  {
+    "file": "src/daemon/foreignClaims.ts",
+    "line": 61,
+    "expression": "this.port.getDevice(deviceId)?.sessionId",
+    "source": "if (!ownership || this.port.getDevice(deviceId)?.sessionId) {",
+    "snippet": "if (!ownership || this.port.getDevice(deviceId)?.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/foreignClaims.ts",
+    "line": 118,
+    "expression": "device.sessionId",
+    "source": "if (device.sessionId !== null) {",
+    "snippet": "if (device.sessionId !== null) {}"
+  },
+  {
+    "file": "src/daemon/deviceAutoStart.ts",
+    "line": 448,
+    "expression": "device.status",
+    "source": ".find((device) => device.status !== \"error\" && !reservedDeviceIds.has(device.id));",
+    "snippet": "const fixture = receiver.find((device) => device.status !== \"error\" && !reservedDeviceIds.has(device.id));"
+  },
+  {
+    "file": "src/daemon/deviceRecoveryCoordinator.ts",
+    "line": 178,
+    "expression": "expectedDevice?.sessionId",
+    "source": "expectedDevice?.sessionId ??",
+    "snippet": "function fixture() { expectedDevice?.sessionId ??{} }"
+  },
+  {
+    "file": "src/daemon/deviceRecoveryCoordinator.ts",
+    "line": 231,
+    "expression": "expectedDevice?.sessionId",
+    "source": "const candidateSessionId = expectedDevice?.sessionId ?? this.pool.getSessionForDevice(deviceId);"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 99,
+    "expression": "device.status",
+    "source": "if (!device || device.platform !== \"android\" || device.status !== \"busy\" || !device.sessionId) {",
+    "snippet": "if (!device || device.platform !== \"android\" || device.status !== \"busy\" || !device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 99,
+    "expression": "device.sessionId",
+    "source": "if (!device || device.platform !== \"android\" || device.status !== \"busy\" || !device.sessionId) {",
+    "snippet": "if (!device || device.platform !== \"android\" || device.status !== \"busy\" || !device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 106,
+    "expression": "device.sessionId",
+    "source": "sessionId: device.sessionId,",
+    "snippet": "function fixture() { sessionId: device.sessionId,{} }"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 107,
+    "expression": "device.sessionId",
+    "source": "planSessionUuid: this.port.getPlanSessionUuid(device.sessionId),",
+    "snippet": "function fixture() { planSessionUuid: this.port.getPlanSessionUuid(device.sessionId),{} }"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 187,
+    "expression": "device.sessionId",
+    "source": "device.sessionId === target.sessionId &&",
+    "snippet": "function fixture() { device.sessionId === target.sessionId &&{} }"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 194,
+    "expression": "target.device.status",
+    "source": "target.device.status === \"busy\" &&",
+    "snippet": "function fixture() { target.device.status === \"busy\" &&{} }"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 339,
+    "expression": "device?.sessionId",
+    "source": "if (device?.sessionId) {",
+    "snippet": "if (device?.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 343,
+    "expression": "device.sessionId",
+    "source": "`[DevicePool] Retaining intentionally stopped device ${deviceId} until session ${device.sessionId} releases it`,",
+    "snippet": "function fixture() { `[DevicePool] Retaining intentionally stopped device ${deviceId} until session ${device.sessionId} releases it`,{} }"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 407,
+    "expression": "device.sessionId",
+    "source": "if (device.sessionId) {",
+    "snippet": "if (device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/deviceDisconnectHandler.ts",
+    "line": 414,
+    "expression": "device.sessionId",
+    "source": "`[DevicePool] Retaining disconnected device ${deviceId} until session ${device.sessionId} teardown completes`,",
+    "snippet": "function fixture() { `[DevicePool] Retaining disconnected device ${deviceId} until session ${device.sessionId} teardown completes`,{} }"
+  },
+  {
+    "file": "src/daemon/deviceReservations.ts",
+    "line": 213,
+    "expression": "device.sessionId",
+    "source": "const session = device.sessionId ? this.port.sessionManager.getSession(device.sessionId) : null;"
+  },
+  {
+    "file": "src/daemon/deviceReservations.ts",
+    "line": 213,
+    "expression": "device.sessionId",
+    "source": "const session = device.sessionId ? this.port.sessionManager.getSession(device.sessionId) : null;"
+  },
+  {
+    "file": "src/daemon/deviceReservations.ts",
+    "line": 272,
+    "expression": "device?.sessionId",
+    "source": "candidate.sessionId === device?.sessionId &&",
+    "snippet": "function fixture() { candidate.sessionId === device?.sessionId &&{} }"
+  },
+  {
+    "file": "src/daemon/sessionPreservingRecovery.ts",
+    "line": 293,
+    "expression": "device.sessionId",
+    "source": "(device.sessionId === sessionId || device.sessionId === null)"
+  },
+  {
+    "file": "src/daemon/sessionPreservingRecovery.ts",
+    "line": 293,
+    "expression": "device.sessionId",
+    "source": "(device.sessionId === sessionId || device.sessionId === null)"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 102,
+    "expression": "device.sessionId",
+    "source": "device.sessionId ??",
+    "snippet": "function fixture() { device.sessionId ??{} }"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 136,
+    "expression": "device.sessionId",
+    "source": "const sessionId = device.sessionId;"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 137,
+    "expression": "device.sessionId",
+    "source": "if (device.sessionId) {",
+    "snippet": "if (device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 138,
+    "expression": "device.sessionId",
+    "source": "const session = this.pool.getSessionManager().getSession(device.sessionId);"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 140,
+    "expression": "device.sessionId",
+    "source": "this.pool.getRecoveryCoordinator().finalizeRecoveryRecord(device.sessionId);"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 143,
+    "expression": "device.sessionId",
+    "source": "device.adbServerResetSessionId = device.sessionId;"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 177,
+    "expression": "device.sessionId",
+    "source": "if (capturedTargets.some(({ sessionId }) => sessionId === device.sessionId)) {",
+    "snippet": "if (capturedTargets.some(({ sessionId }) => sessionId === device.sessionId)) {}"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 242,
+    "expression": "device.sessionId",
+    "source": "device.sessionId && activeSessionIds.has(device.sessionId)"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 242,
+    "expression": "device.sessionId",
+    "source": "device.sessionId && activeSessionIds.has(device.sessionId)"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 282,
+    "expression": "device.sessionId",
+    "source": "!device.sessionId"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 286,
+    "expression": "device.sessionId",
+    "source": "const session = this.pool.getSessionManager().getSession(device.sessionId);"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 288,
+    "expression": "device.sessionId",
+    "source": "sessionTargets.set(device.sessionId, {",
+    "snippet": "sessionTargets.set(device.sessionId, {});"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 310,
+    "expression": "device.sessionId",
+    "source": "device.sessionId !== null ||",
+    "snippet": "function fixture() { device.sessionId !== null ||{} }"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 483,
+    "expression": "restoredDevice?.sessionId",
+    "source": "restoredDevice?.sessionId === sessionId &&",
+    "snippet": "function fixture() { restoredDevice?.sessionId === sessionId &&{} }"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 484,
+    "expression": "restoredDevice.status",
+    "source": "restoredDevice.status === \"busy\" &&",
+    "snippet": "function fixture() { restoredDevice.status === \"busy\" &&{} }"
+  },
+  {
+    "file": "src/daemon/emulatorProcessLifecycle.ts",
+    "line": 350,
+    "expression": "device.sessionId",
+    "source": "const sessionIdAtExit = device.sessionId;"
+  },
+  {
+    "file": "src/daemon/emulatorProcessLifecycle.ts",
+    "line": 365,
+    "expression": "device.sessionId",
+    "source": "device.sessionId !== sessionIdAtExit ||",
+    "snippet": "function fixture() { device.sessionId !== sessionIdAtExit ||{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 2562,
+    "expression": "existing.status",
+    "source": "if (existing.status === \"error\" && !existing.sessionId) {",
+    "snippet": "if (existing.status === \"error\" && !existing.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 2562,
+    "expression": "existing.sessionId",
+    "source": "if (existing.status === \"error\" && !existing.sessionId) {",
+    "snippet": "if (existing.status === \"error\" && !existing.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 2719,
+    "expression": "device.sessionId",
+    "source": "if (device.sessionId) {",
+    "snippet": "if (device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 2720,
+    "expression": "device.sessionId",
+    "source": "logger.warn(`Cannot remove device ${deviceId}: assigned to session ${device.sessionId}`);"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 3557,
+    "expression": "device?.sessionId",
+    "source": "return device?.sessionId === sessionId ? device : undefined;",
+    "snippet": "function fixture() { return device?.sessionId === sessionId ? device : undefined;}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 3574,
+    "expression": "device.status",
+    "source": "if (device.status === \"error\") {",
+    "snippet": "if (device.status === \"error\") {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 3771,
+    "expression": "device.status",
+    "source": "device.status !== \"error\" &&",
+    "snippet": "function fixture() { device.status !== \"error\" &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4033,
+    "expression": "device.status",
+    "source": "(device) => device.status === \"busy\" || this.isReservedForAssignment(device),",
+    "snippet": "function fixture() { (device) => device.status === \"busy\" || this.isReservedForAssignment(device),{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4070,
+    "expression": "device.status",
+    "source": "if (device.status !== \"idle\" || !matches(device)) {",
+    "snippet": "if (device.status !== \"idle\" || !matches(device)) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4109,
+    "expression": "device.sessionId",
+    "source": "const session = device.sessionId && this.sessionManager.getSession(device.sessionId);"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4109,
+    "expression": "device.sessionId",
+    "source": "const session = device.sessionId && this.sessionManager.getSession(device.sessionId);"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4133,
+    "expression": "device.sessionId",
+    "source": "const sessionId = device.sessionId;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4256,
+    "expression": "device.sessionId",
+    "source": "const sessionId = device.sessionId ?? this.sessionManager.getSessionForDevice(device.id);"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4391,
+    "expression": "device.sessionId",
+    "source": "const sessionId = device.sessionId ?? this.sessionManager.getSessionForDevice(device.id);"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4417,
+    "expression": "device.sessionId",
+    "source": "return device.sessionId === session.sessionId || session.ownership === \"awaiting-owner\";",
+    "snippet": "function fixture() { return device.sessionId === session.sessionId || session.ownership === \"awaiting-owner\";}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4461,
+    "expression": "device.sessionId",
+    "source": "const deferredUntil = this.recoveringSessionLosses.get(device.sessionId ?? \"\")?.deferredUntil;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4709,
+    "expression": "device.sessionId",
+    "source": "device.sessionId === sessionId"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4975,
+    "expression": "replacement?.sessionId",
+    "source": "if (replacement?.sessionId === preservedSessionId) {",
+    "snippet": "if (replacement?.sessionId === preservedSessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5599,
+    "expression": "device.sessionId",
+    "source": ".filter((device) => device.sessionId === null)",
+    "snippet": "const fixture = receiver.filter((device) => device.sessionId === null)"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5731,
+    "expression": "device.status",
+    "source": "if (device.status !== \"idle\" || device.sessionId) {",
+    "snippet": "if (device.status !== \"idle\" || device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5731,
+    "expression": "device.sessionId",
+    "source": "if (device.status !== \"idle\" || device.sessionId) {",
+    "snippet": "if (device.status !== \"idle\" || device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5808,
+    "expression": "device.status",
+    "source": "(device.status === \"busy\" || this.isReservedForAssignment(device)),",
+    "snippet": "function fixture() { (device.status === \"busy\" || this.isReservedForAssignment(device)),{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5890,
+    "expression": "device.sessionId",
+    "source": "(!device.sessionId || !this.sessionManager.getSession(device.sessionId))"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5890,
+    "expression": "device.sessionId",
+    "source": "(!device.sessionId || !this.sessionManager.getSession(device.sessionId))"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5920,
+    "expression": "device.sessionId",
+    "source": "if (!device || device.sessionId !== sessionId) {",
+    "snippet": "if (!device || device.sessionId !== sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5969,
+    "expression": "device.sessionId",
+    "source": "sessionId: device.sessionId,",
+    "snippet": "function fixture() { sessionId: device.sessionId,{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5970,
+    "expression": "device.status",
+    "source": "status: device.status,",
+    "snippet": "function fixture() { status: device.status,{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5982,
+    "expression": "sessionId",
+    "source": "const { sessionId, status, ...otherFields } = snapshot;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5982,
+    "expression": "status",
+    "source": "const { sessionId, status, ...otherFields } = snapshot;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 5992,
+    "expression": "device.sessionId",
+    "source": "const attemptedSessionId = device.sessionId;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6023,
+    "expression": "device.sessionId",
+    "source": "const attemptedSessionId = device.sessionId;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6027,
+    "expression": "device.sessionId",
+    "source": "if (this.isPooledEntryCurrent(device) && device.sessionId === attemptedSessionId) {",
+    "snippet": "if (this.isPooledEntryCurrent(device) && device.sessionId === attemptedSessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6069,
+    "expression": "device.sessionId",
+    "source": "if (this.isPooledEntryCurrent(device) && device.sessionId === attemptedSessionId) {",
+    "snippet": "if (this.isPooledEntryCurrent(device) && device.sessionId === attemptedSessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6081,
+    "expression": "device.sessionId",
+    "source": "device.sessionId === session.sessionId &&",
+    "snippet": "function fixture() { device.sessionId === session.sessionId &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6082,
+    "expression": "device.status",
+    "source": "device.status === \"busy\" &&",
+    "snippet": "function fixture() { device.status === \"busy\" &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6115,
+    "expression": "device.sessionId",
+    "source": "if (!device || device.sessionId !== sessionId) {",
+    "snippet": "if (!device || device.sessionId !== sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6174,
+    "expression": "device.sessionId",
+    "source": "const sessionId = device.sessionId;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6213,
+    "expression": "device.sessionId",
+    "source": "if (expectedSessionId !== undefined && device.sessionId !== expectedSessionId) {",
+    "snippet": "if (expectedSessionId !== undefined && device.sessionId !== expectedSessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6216,
+    "expression": "device.sessionId",
+    "source": "`but it is owned by ${device.sessionId ?? \"no session\"}`,",
+    "snippet": "function fixture() { `but it is owned by ${device.sessionId ?? \"no session\"}`,{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6221,
+    "expression": "device.sessionId",
+    "source": "if (!device.sessionId) {",
+    "snippet": "if (!device.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6226,
+    "expression": "device.sessionId",
+    "source": "if (device.sessionId !== expectedSessionId) {",
+    "snippet": "if (device.sessionId !== expectedSessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6228,
+    "expression": "device.sessionId",
+    "source": "`Ignoring stale release for device ${deviceId}: expected ${expectedSessionId}, owned by ${device.sessionId}`,",
+    "snippet": "function fixture() { `Ignoring stale release for device ${deviceId}: expected ${expectedSessionId}, owned by ${device.sessionId}`,{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6271,
+    "expression": "expectedDevice.sessionId",
+    "source": "if (expectedDevice.sessionId) {",
+    "snippet": "if (expectedDevice.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6274,
+    "expression": "expectedDevice.sessionId",
+    "source": "expectedDevice.sessionId,",
+    "snippet": "function fixture() { expectedDevice.sessionId,{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6618,
+    "expression": "this.devices.get(deviceId)?.sessionId",
+    "source": "const holder = this.devices.get(deviceId)?.sessionId;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6693,
+    "expression": "device.sessionId",
+    "source": "session?.sessionId !== device.sessionId ||",
+    "snippet": "function fixture() { session?.sessionId !== device.sessionId ||{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6732,
+    "expression": "device.status",
+    "source": "const base: DeviceHoldFacts = { status: device.status, sessionId: device.sessionId };"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6732,
+    "expression": "device.sessionId",
+    "source": "const base: DeviceHoldFacts = { status: device.status, sessionId: device.sessionId };"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6754,
+    "expression": "device.sessionId",
+    "source": "if (device.sessionId || device.status !== \"idle\") {",
+    "snippet": "if (device.sessionId || device.status !== \"idle\") {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6754,
+    "expression": "device.status",
+    "source": "if (device.sessionId || device.status !== \"idle\") {",
+    "snippet": "if (device.sessionId || device.status !== \"idle\") {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6812,
+    "expression": "device.status",
+    "source": "device.status !== \"error\" &&",
+    "snippet": "function fixture() { device.status !== \"error\" &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6822,
+    "expression": "device.status",
+    "source": "device.status !== \"error\" &&",
+    "snippet": "function fixture() { device.status !== \"error\" &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6836,
+    "expression": "device.status",
+    "source": "device.status === \"idle\" &&",
+    "snippet": "function fixture() { device.status === \"idle\" &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6837,
+    "expression": "device.sessionId",
+    "source": "!device.sessionId &&",
+    "snippet": "function fixture() { !device.sessionId &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 7077,
+    "expression": "device.sessionId",
+    "source": "((device.sessionId !== null && device.sessionId !== sessionId) ||",
+    "snippet": "((device.sessionId !== null && device.sessionId !== sessionId) ||null);"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 7077,
+    "expression": "device.sessionId",
+    "source": "((device.sessionId !== null && device.sessionId !== sessionId) ||",
+    "snippet": "((device.sessionId !== null && device.sessionId !== sessionId) ||null);"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 7239,
+    "expression": "device.status",
+    "source": "if (!replacement || (replacement === device && device.status === \"error\")) {",
+    "snippet": "if (!replacement || (replacement === device && device.status === \"error\")) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 7838,
+    "expression": "device?.sessionId",
+    "source": "const session = device?.sessionId ? this.sessionManager.getSession(device.sessionId) : null;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 7838,
+    "expression": "device.sessionId",
+    "source": "const session = device?.sessionId ? this.sessionManager.getSession(device.sessionId) : null;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8106,
+    "expression": "device.sessionId",
+    "source": "if (!device || device.sessionId !== sessionId) {",
+    "snippet": "if (!device || device.sessionId !== sessionId) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8211,
+    "expression": "d.sessionId",
+    "source": "return Array.from(this.devices.values()).find((d) => d.sessionId === sessionId) || null;",
+    "snippet": "function fixture() { return Array.from(this.devices.values()).find((d) => d.sessionId === sessionId) || null;}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8285,
+    "expression": "d.status",
+    "source": "(d) => d.status === \"busy\" && d.sessionId !== null,",
+    "snippet": "function fixture() { (d) => d.status === \"busy\" && d.sessionId !== null,{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8285,
+    "expression": "d.sessionId",
+    "source": "(d) => d.status === \"busy\" && d.sessionId !== null,",
+    "snippet": "function fixture() { (d) => d.status === \"busy\" && d.sessionId !== null,{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8293,
+    "expression": "d.status",
+    "source": "return Array.from(this.devices.values()).filter((d) => d.status === \"error\");",
+    "snippet": "function fixture() { return Array.from(this.devices.values()).filter((d) => d.status === \"error\");}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8501,
+    "expression": "device.sessionId",
+    "source": "!(input.requesterSessionUuid && device.sessionId === input.requesterSessionUuid) &&",
+    "snippet": "function fixture() { !(input.requesterSessionUuid && device.sessionId === input.requesterSessionUuid) &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8598,
+    "expression": "this.devices.get(input.deviceId)?.sessionId",
+    "source": "this.devices.get(input.deviceId)?.sessionId === input.requesterSessionUuid"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8742,
+    "expression": "exact.status",
+    "source": "if (exact.status === \"busy\" || this.isReservedForAssignment(exact, sessionId)) {",
+    "snippet": "if (exact.status === \"busy\" || this.isReservedForAssignment(exact, sessionId)) {}"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8759,
+    "expression": "device.status",
+    "source": "device.status === \"idle\" &&",
+    "snippet": "function fixture() { device.status === \"idle\" &&{} }"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8913,
+    "expression": "device.status",
+    "source": "const status = device.status === \"error\" ? \"❌\" : device.sessionId ? \"🔴\" : \"🟢\";"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8913,
+    "expression": "device.sessionId",
+    "source": "const status = device.status === \"error\" ? \"❌\" : device.sessionId ? \"🔴\" : \"🟢\";"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8914,
+    "expression": "device.sessionId",
+    "source": "const session = device.sessionId ? ` (${device.sessionId})` : \"\";"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8914,
+    "expression": "device.sessionId",
+    "source": "const session = device.sessionId ? ` (${device.sessionId})` : \"\";"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8916,
+    "expression": "device.status",
+    "source": "`  ${status} ${device.id}: ${device.status}${session} (${device.assignmentCount} uses, ${device.errorCount} errors)`,",
+    "snippet": "function fixture() { `  ${status} ${device.id}: ${device.status}${session} (${device.assignmentCount} uses, ${device.errorCount} errors)`,{} }"
+  },
+  {
+    "file": "src/server/activeSessionDevice.ts",
+    "line": 49,
+    "expression": "pooledDevice.sessionId",
+    "source": "if (!pooledDevice || pooledDevice.sessionId !== sessionUuid) {",
+    "snippet": "if (!pooledDevice || pooledDevice.sessionId !== sessionUuid) {}"
+  },
+  {
+    "file": "src/daemon/daemonRequestHandlers.ts",
+    "line": 1964,
+    "expression": "pool.getDevice?.(id)?.sessionId",
+    "source": "(id) => manager.getSessionForDevice?.(id) ?? pool.getDevice?.(id)?.sessionId ?? null,",
+    "snippet": "function fixture() { (id) => manager.getSessionForDevice?.(id) ?? pool.getDevice?.(id)?.sessionId ?? null,{} }"
+  },
+  {
+    "file": "src/server/lifecycleDeviceOwnership.ts",
+    "line": 340,
+    "expression": "pool.getDevice(input.device.deviceId)?.sessionId",
+    "source": "pool.getDevice(input.device.deviceId)?.sessionId === requesterSessionUuid"
+  },
+  {
+    "file": "src/server/deviceToolsSystemUiAnr.ts",
+    "line": 554,
+    "expression": "currentReplacement?.sessionId",
+    "source": "currentReplacement?.sessionId &&",
+    "snippet": "function fixture() { currentReplacement?.sessionId &&{} }"
+  },
+  {
+    "file": "src/server/deviceToolsSystemUiAnr.ts",
+    "line": 555,
+    "expression": "currentReplacement.sessionId",
+    "source": "currentReplacement.sessionId !== preservedSession.sessionId"
+  },
+  {
+    "file": "src/server/deviceToolsStartDevice.ts",
+    "line": 598,
+    "expression": "device.sessionId",
+    "source": "(device.sessionId === null",
+    "snippet": "(device.sessionId === null);"
+  },
+  {
+    "file": "src/server/deviceToolsStartDevice.ts",
+    "line": 600,
+    "expression": "device.sessionId",
+    "source": ": !callerMayReuse(device.id, device.sessionId)),",
+    "snippet": "f((true ? null : !callerMayReuse(device.id, device.sessionId)),);"
+  },
+  {
+    "file": "src/server/deviceTools.ts",
+    "line": 3771,
+    "expression": "initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId",
+    "source": "if (boot && !initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId) {",
+    "snippet": "if (boot && !initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId) {}"
+  },
+  {
+    "file": "src/server/deviceTools.ts",
+    "line": 4221,
+    "expression": "daemonState.getDevicePool().getDevice(deviceId)?.sessionId",
+    "source": "const holder = daemonState.getDevicePool().getDevice(deviceId)?.sessionId;"
+  },
+  {
+    "file": "src/server/deviceTools.ts",
+    "line": 4320,
+    "expression": "devicePool.getDevice(boot.device.deviceId)?.sessionId",
+    "source": "if (devicePool.getDevice(boot.device.deviceId)?.sessionId) {",
+    "snippet": "if (devicePool.getDevice(boot.device.deviceId)?.sessionId) {}"
+  },
+  {
+    "file": "src/server/deviceTools.ts",
+    "line": 4367,
+    "expression": "initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId",
+    "source": "const holder = initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId;"
+  },
+  {
+    "file": "src/server/deviceTools.ts",
+    "line": 4670,
+    "expression": "devicePool?.getDevice(input.boot.device.deviceId)?.sessionId",
+    "source": "const sessionId = devicePool?.getDevice(input.boot.device.deviceId)?.sessionId;"
+  },
+  {
+    "file": "src/server/deviceTools.ts",
+    "line": 4710,
+    "expression": "devicePool?.getDevice(candidate.device.deviceId)?.sessionId",
+    "source": "const sessionId = devicePool?.getDevice(candidate.device.deviceId)?.sessionId;"
+  },
+  {
+    "file": "src/server/deviceTools.ts",
+    "line": 4734,
+    "expression": "replacement.sessionId",
+    "source": "replacement.sessionId !== sessionId"
+  },
+  {
+    "file": "src/server/setActiveDevice.ts",
+    "line": 266,
+    "expression": "device.sessionId",
+    "source": "device.sessionId &&",
+    "snippet": "function fixture() { device.sessionId &&{} }"
+  },
+  {
+    "file": "src/server/setActiveDevice.ts",
+    "line": 267,
+    "expression": "device.sessionId",
+    "source": "device.sessionId !== sessionUuid &&",
+    "snippet": "function fixture() { device.sessionId !== sessionUuid &&{} }"
+  },
+  {
+    "file": "src/server/setActiveDevice.ts",
+    "line": 268,
+    "expression": "device.sessionId",
+    "source": "sessions.getSession(device.sessionId)"
+  },
+  {
+    "file": "src/server/setActiveDevice.ts",
+    "line": 270,
+    "expression": "device.sessionId",
+    "source": "throw heldDeviceBindRefusal(pool, device.id, device.sessionId, sessionUuid);"
+  },
+  {
+    "file": "src/server/planDeviceOwnership.ts",
+    "line": 31,
+    "expression": "state.getDevicePool().getDevice(deviceId)?.sessionId",
+    "source": "const poolOwner = state.getDevicePool().getDevice(deviceId)?.sessionId ?? null;"
+  },
+  {
+    "file": "src/daemon/managedSlots/freeDeviceBusyReason.ts",
+    "line": 38,
+    "expression": "runtime.status",
+    "source": "if (runtime.status !== \"idle\") {",
+    "snippet": "if (runtime.status !== \"idle\") {}"
+  },
+  {
+    "file": "src/daemon/managedSlots/freeDeviceBusyReason.ts",
+    "line": 39,
+    "expression": "runtime.status",
+    "source": "return `pooled runtime is ${runtime.status}`;",
+    "snippet": "const fixture = receiverreturn `pooled runtime is ${runtime.status}`;"
+  },
+  {
+    "file": "src/daemon/managedSlots/freeDeviceBusyReason.ts",
+    "line": 41,
+    "expression": "runtime.sessionId",
+    "source": "if (runtime.sessionId !== null) {",
+    "snippet": "if (runtime.sessionId !== null) {}"
+  },
+  {
+    "file": "src/daemon/managedSlots/managedSlotReconcilerPorts.ts",
+    "line": 415,
+    "expression": "pooled.sessionId",
+    "source": "const held = runtimes.find((pooled) => pooled.sessionId !== null);"
+  },
+  {
+    "file": "src/daemon/managedSlots/managedSlotReconcilerPorts.ts",
+    "line": 417,
+    "expression": "held.sessionId",
+    "source": "return { kind: \"held\", reason: `session ${held.sessionId} holds ${held.id}` };",
+    "snippet": "function fixture() { return { kind: \"held\", reason: `session ${held.sessionId} holds ${held.id}` };}"
+  },
+  {
+    "file": "src/daemon/managedSlots/managedSlotReconcilerPorts.ts",
+    "line": 439,
+    "expression": "pooled.sessionId",
+    "source": "pooled.sessionId ? [pooled.sessionId] : [],",
+    "snippet": "function fixture() { pooled.sessionId ? [pooled.sessionId] : [],{} }"
+  },
+  {
+    "file": "src/daemon/managedSlots/managedSlotReconcilerPorts.ts",
+    "line": 439,
+    "expression": "pooled.sessionId",
+    "source": "pooled.sessionId ? [pooled.sessionId] : [],",
+    "snippet": "function fixture() { pooled.sessionId ? [pooled.sessionId] : [],{} }"
+  },
+  {
+    "file": "src/daemon/managedSlots/managedSlotReconcilerPorts.ts",
+    "line": 450,
+    "expression": "pooled.sessionId",
+    "source": "pooled.sessionId !== null &&",
+    "snippet": "function fixture() { pooled.sessionId !== null &&{} }"
+  },
+  {
+    "file": "src/daemon/daemon.ts",
+    "line": 3144,
+    "expression": "this.devicePool.getDevice(deviceId)?.sessionId",
+    "source": "this.devicePool.getDevice(deviceId)?.sessionId;"
+  },
+  {
+    "file": "src/daemon/daemon.ts",
+    "line": 3169,
+    "expression": "pooledDevice.sessionId",
+    "source": "if (this.sessionManager.getSessionForDevice(deviceId) ?? pooledDevice.sessionId) {",
+    "snippet": "if (this.sessionManager.getSessionForDevice(deviceId) ?? pooledDevice.sessionId) {}"
+  },
+  {
+    "file": "src/daemon/daemon.ts",
+    "line": 4369,
+    "expression": "pooledDeviceAtDisconnect?.sessionId",
+    "source": "pooledDeviceAtDisconnect?.sessionId ?? this.sessionManager.getSessionForDevice(deviceId);"
+  },
+  {
+    "file": "src/daemon/daemon.ts",
+    "line": 4796,
+    "expression": "device.sessionId",
+    "source": "this.devicePool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??",
+    "snippet": "function fixture() { this.devicePool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??{} }"
+  },
+  {
+    "file": "src/daemon/daemon.ts",
+    "line": 4879,
+    "expression": "this.devicePool.getDevice(deviceId)?.sessionId",
+    "source": "return deviceId !== null && this.devicePool.getDevice(deviceId)?.sessionId === sessionId;",
+    "snippet": "function fixture() { return deviceId !== null && this.devicePool.getDevice(deviceId)?.sessionId === sessionId;}"
+  }
+]

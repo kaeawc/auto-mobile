@@ -1,7 +1,11 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { ActionableError, BootedDevice, RecentAppsResult, ObserveResult } from "../../models";
 import { PressButton } from "./PressButton";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -12,6 +16,11 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
+
+// Two reads preserve the existing recent-app verification bound.
+export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
 
 const POST_NAVIGATION_VERIFY_READS = 2;
 const POST_NAVIGATION_VERIFY_DELAY_MS = 250;
@@ -27,8 +36,13 @@ const POST_NAVIGATION_VERIFY_DELAY_MS = 250;
 export class RecentApps extends BaseVisualChange {
   private pressButton: PressButton;
 
-  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
-    super(device, adb, timer);
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    timer: Timer = defaultTimer,
+    collaborators: DisplayFenceDependencies = {},
+  ) {
+    super(device, adb, timer, undefined, collaborators);
     this.pressButton = new PressButton(device, adb);
   }
 
@@ -37,7 +51,14 @@ export class RecentApps extends BaseVisualChange {
    * @param progress - Optional progress callback
    * @returns Result of the recent apps operation
    */
-  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<RecentAppsResult> {
+  async execute(call?: ActionCall): Promise<RecentAppsResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<RecentAppsResult>;
+  async execute(
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
+  ): Promise<RecentAppsResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("recentApps");
@@ -51,7 +72,7 @@ export class RecentApps extends BaseVisualChange {
           usesObservationForResolution: false,
           changeExpected: true,
           foregroundAppMayChange: true,
-          timeoutMs: 5000,
+          timeoutMs: SETTLE_BUDGET_MS.lifecycle,
           progress,
           signal,
           perf,
@@ -63,7 +84,7 @@ export class RecentApps extends BaseVisualChange {
       usesObservationForResolution: false,
       changeExpected: true,
       foregroundAppMayChange: true,
-      timeoutMs: 3000,
+      timeoutMs: SETTLE_BUDGET_MS.systemUi,
       progress,
       signal,
       perf,
@@ -98,7 +119,7 @@ export class RecentApps extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<ObserveResult> {
     let observation: ObserveResult | undefined;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < RECENT_APPS_VERIFY_ATTEMPTS; attempt++) {
       const minTimestamp = await awaitWhileRequestIsLive(this.adb.getDeviceTimestampMs(), signal);
       observation = await awaitWhileRequestIsLive(
         this.observeScreen.execute({
@@ -165,15 +186,11 @@ export class RecentApps extends BaseVisualChange {
     if (overview?.visibleToUser !== true) {
       return false;
     }
-    return isForegroundLauncher(
-      packageName,
-      this.adb,
-      this.device.deviceId,
-      this.timer,
-      deviceIncarnationToken(this.device.deviceId),
+    return isForegroundLauncher(packageName, this.adb, this.device.deviceId, this.timer, {
+      incarnationToken: deviceIncarnationToken(this.device.deviceId),
       signal,
-      3000,
-    );
+      timeoutMs: 3000,
+    });
   }
 
   /**

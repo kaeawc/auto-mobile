@@ -187,18 +187,32 @@ runs:
 
     - name: "Debug cache key inputs"
       shell: ${{ inputs.shell }}
+      # Inputs are read through the environment: gradle-flags can carry
+      # caller-supplied text (record-screenshot-baselines' test_filter), and
+      # `${{ }}` in the run body would splice it into the shell source.
+      env:
+        DEBUG_REUSE_BUILD_CACHE: ${{ inputs.reuse-build-cache }}
+        DEBUG_TASK_HASH: ${{ steps.gradle-task-hash.outputs.digest }}
+        DEBUG_GRADLE_FLAGS: ${{ inputs.gradle-flags }}
+        DEBUG_GRADLE_TASKS: ${{ inputs.gradle-tasks }}
+        DEBUG_GRADLE_VERSION: ${{ steps.eval_gradle.outputs.version }}
+        DEBUG_GRADLE_HOME_DIRECTORY: ${{ inputs.gradle-home-directory }}
+        DEBUG_GRADLE_PROJECT_DIRECTORY: ${{ inputs.gradle-project-directory }}
+        DEBUG_REUSE_CONFIGURATION_CACHE: ${{ inputs.reuse-configuration-cache }}
+        DEBUG_DEBUG: ${{ inputs.debug }}
+        DEBUG_SHELL: ${{ inputs.shell }}
       run: |
-        echo "reuse-build-cache: ${{ inputs.reuse-build-cache }}"
-        echo "Task hash is ${{ steps.gradle-task-hash.outputs.digest }}"
-        echo "gradle-flags: ${{ inputs.gradle-flags }}"
-        echo "gradle-tasks: ${{ inputs.gradle-tasks }}"
-        echo "gradle-version: ${{ steps.eval_gradle.outputs.version }}"
-        echo "gradle-home-directory: ${{ inputs.gradle-home-directory }}"
-        echo "gradle-project-directory: ${{ inputs.gradle-project-directory }}"
-        echo "reuse-configuration-cache: ${{ inputs.reuse-configuration-cache }}"
-        echo "reuse-build-cache: ${{ inputs.reuse-build-cache }}"
-        echo "debug: ${{ inputs.debug }}"
-        echo "shell: ${{ inputs.shell }}"
+        echo "reuse-build-cache: $DEBUG_REUSE_BUILD_CACHE"
+        echo "Task hash is $DEBUG_TASK_HASH"
+        echo "gradle-flags: $DEBUG_GRADLE_FLAGS"
+        echo "gradle-tasks: $DEBUG_GRADLE_TASKS"
+        echo "gradle-version: $DEBUG_GRADLE_VERSION"
+        echo "gradle-home-directory: $DEBUG_GRADLE_HOME_DIRECTORY"
+        echo "gradle-project-directory: $DEBUG_GRADLE_PROJECT_DIRECTORY"
+        echo "reuse-configuration-cache: $DEBUG_REUSE_CONFIGURATION_CACHE"
+        echo "reuse-build-cache: $DEBUG_REUSE_BUILD_CACHE"
+        echo "debug: $DEBUG_DEBUG"
+        echo "shell: $DEBUG_SHELL"
         echo "ANDROID_HOME: $ANDROID_HOME"
 
     - name: "Setup Gradle"

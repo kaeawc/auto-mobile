@@ -36,6 +36,7 @@ import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +86,7 @@ private sealed interface AppGraphState {
 fun OfflineNavigationBrowser(
   navigationDataSourceProvider: ((String?) -> NavigationDataSource)? = null,
   screenshotLoaderProvider: ((String) -> ScreenshotLoader)? = null,
+  ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 ) {
   val graph = LocalAutoMobileGraph.current
   // Construct RealNavigationDataSource directly rather than routing through
@@ -105,7 +107,7 @@ fun OfflineNavigationBrowser(
   var selectedApp by remember { mutableStateOf<NavigationAppSummary?>(null) }
 
   if (selectedApp == null) {
-    AppListStep(provider = provider, onSelect = { selectedApp = it })
+    AppListStep(provider = provider, onSelect = { selectedApp = it }, ioDispatcher = ioDispatcher)
   } else {
     val app = selectedApp
     if (app != null) {
@@ -114,6 +116,7 @@ fun OfflineNavigationBrowser(
         provider = provider,
         screenshotLoaderProvider = screenshotLoaderProvider,
         onBack = { selectedApp = null },
+        ioDispatcher = ioDispatcher,
       )
     }
   }
@@ -123,6 +126,7 @@ fun OfflineNavigationBrowser(
 private fun AppListStep(
   provider: (String?) -> NavigationDataSource,
   onSelect: (NavigationAppSummary) -> Unit,
+  ioDispatcher: kotlinx.coroutines.CoroutineDispatcher,
 ) {
   var attempt by remember { mutableStateOf(0) }
   var state by remember { mutableStateOf<AppListState>(AppListState.Loading) }
@@ -134,7 +138,7 @@ private fun AppListStep(
     // polling). A throw becomes a retryable Error rather than crashing the Recomposer.
     state =
       try {
-        when (val result = withContext(Dispatchers.IO) { provider(null).listApps() }) {
+        when (val result = withContext(ioDispatcher) { provider(null).listApps() }) {
           is Result.Success ->
             if (result.data.isEmpty()) AppListState.Empty else AppListState.Loaded(result.data)
           is Result.Error ->
@@ -220,10 +224,12 @@ private fun AppGraphStep(
   provider: (String?) -> NavigationDataSource,
   screenshotLoaderProvider: ((String) -> ScreenshotLoader)?,
   onBack: () -> Unit,
+  ioDispatcher: kotlinx.coroutines.CoroutineDispatcher,
 ) {
   val graph = LocalAutoMobileGraph.current
   var attempt by remember(app.appId) { mutableStateOf(0) }
-  var state by remember(app.appId) { mutableStateOf<AppGraphState>(AppGraphState.Loading) }
+  val graphState = remember(app.appId) { mutableStateOf<AppGraphState>(AppGraphState.Loading) }
+  var state by graphState
   val clientProvider = remember { { graph.autoMobileClient } }
   val loaderProvider =
     screenshotLoaderProvider
@@ -234,50 +240,10 @@ private fun AppGraphStep(
       }
   val screenshotLoader = remember(app.appId, loaderProvider) { loaderProvider(app.appId) }
 
-  LaunchedEffect(app.appId, attempt) {
-    state = AppGraphState.Loading
-    state =
-      try {
-        when (
-          val result = withContext(Dispatchers.IO) { provider(app.appId).getNavigationGraph() }
-        ) {
-          is Result.Success ->
-            if (result.data.screens.isEmpty()) AppGraphState.Empty
-            else AppGraphState.Resolved(result.data)
-          is Result.Error ->
-            AppGraphState.Error(result.message ?: "Failed to load navigation graph")
-          // A one-shot read resolves to Success/Error; a stray Loading just keeps the spinner.
-          Result.Loading -> AppGraphState.Loading
-        }
-      } catch (c: CancellationException) {
-        throw c
-      } catch (e: Exception) {
-        LOG.warn("Offline app-graph load failed: ${e.message}", e)
-        AppGraphState.Error(e.message ?: "Failed to load navigation graph")
-      }
-  }
+  ObserveSavedGraph(app, provider, ioDispatcher, attempt, graphState)
 
   Column(Modifier.fillMaxSize()) {
-    Row(
-      Modifier.fillMaxWidth().padding(bottom = 8.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        "← Back",
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier =
-          Modifier.clickable(onClick = onBack)
-            .semantics { contentDescription = "Back to saved navigation graphs" }
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-      )
-      Spacer(Modifier.weight(1f))
-      Text(
-        app.displayName ?: app.appId,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-    }
+    SavedGraphHeader(app, onBack)
 
     Box(Modifier.weight(1f).fillMaxWidth()) {
       when (val current = state) {
@@ -292,12 +258,16 @@ private fun AppGraphStep(
           }
         is AppGraphState.Resolved ->
           NavigationDashboard(
-            providedGraph = current.graph,
-            screenshotLoader = screenshotLoader,
-            settingsProvider = graph.settingsProvider,
-            selectedAppId = app.appId,
-            // Offline: device-side navigate actions are unavailable; browsing/panning still work.
-            readOnly = true,
+            options =
+              NavigationDashboardOptions(
+                providedGraph = current.graph,
+                screenshotLoader = screenshotLoader,
+                settingsProvider = graph.settingsProvider,
+                selectedAppId = app.appId,
+                // Offline: device-side navigate actions are unavailable; browsing/panning still
+                // work.
+                readOnly = true,
+              ),
           )
       }
     }
@@ -331,5 +301,59 @@ private fun RetryableError(
           contentDescription = retryContentDescription
         },
     )
+  }
+}
+
+@Composable
+private fun SavedGraphHeader(app: NavigationAppSummary, onBack: () -> Unit) {
+  Row(
+    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      "← Back",
+      style = MaterialTheme.typography.labelLarge,
+      color = MaterialTheme.colorScheme.primary,
+      modifier =
+        Modifier.clickable(onClick = onBack)
+          .semantics { contentDescription = "Back to saved navigation graphs" }
+          .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+    Spacer(Modifier.weight(1f))
+    Text(
+      app.displayName ?: app.appId,
+      style = MaterialTheme.typography.labelLarge,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+  }
+}
+
+@Composable
+private fun ObserveSavedGraph(
+  app: NavigationAppSummary,
+  provider: (String?) -> NavigationDataSource,
+  ioDispatcher: kotlinx.coroutines.CoroutineDispatcher,
+  attempt: Int,
+  state: androidx.compose.runtime.MutableState<AppGraphState>,
+) {
+  LaunchedEffect(app.appId, attempt) {
+    state.value = AppGraphState.Loading
+    state.value =
+      try {
+        when (val result = withContext(ioDispatcher) { provider(app.appId).getNavigationGraph() }) {
+          is Result.Success ->
+            if (result.data.screens.isEmpty()) AppGraphState.Empty
+            else AppGraphState.Resolved(result.data)
+          is Result.Error ->
+            AppGraphState.Error(result.message ?: "Failed to load navigation graph")
+          // A one-shot read resolves to Success/Error; a stray Loading just keeps the spinner.
+          Result.Loading -> AppGraphState.Loading
+        }
+      } catch (c: CancellationException) {
+        throw c
+      } catch (e: Exception) {
+        LOG.warn("Offline app-graph load failed: ${e.message}", e)
+        AppGraphState.Error(e.message ?: "Failed to load navigation graph")
+      }
   }
 }

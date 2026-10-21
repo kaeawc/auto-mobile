@@ -1,11 +1,11 @@
 {
   "version": "1.0.0",
   "thresholds": {
-    "unpackedBytes": 22020096,
+    "unpackedBytes": 15728640,
     "warnHeadroomBytes": 1048576
   },
   "metadata": {
-    "generatedAt": "2026-10-05",
-    "description": "21 MiB NPM unpacked-size cap assumes trimming: measured 18,345,761 bytes plus 3 MiB, rounded up to a whole MiB; untrimmed reference 23,838,787 bytes (#9571)"
+    "generatedAt": "2026-10-18",
+    "description": "15 MiB NPM unpacked-size cap (lowered from 22.5 MiB): the external source maps (about 9 MB, unused at runtime) no longer ship in the tarball (package.json files negation, enforced by packed-runtime-assets), so the pack measures 14,073,766 bytes; the cap keeps about 1.5 MiB of headroom and sits well below the old 23,061,125-byte pack so a regression that re-packs the maps fails"
   }
 }

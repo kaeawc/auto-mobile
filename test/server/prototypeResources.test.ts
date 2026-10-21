@@ -51,20 +51,22 @@ describe("automobile:prototype resource", () => {
     }
   });
 
+  test("explains the default iOS icon form and closest Android match", () => {
+    expect(renderPrototypeGuide()).toContain(
+      'With no variant, iOS draws the name\'s default SF Symbol, which is often the outline form; pass `variant: "filled"` on an `icon` node for the closest match to Android where the table has a filled form.',
+    );
+  });
+
   test("mentions every node type, action type and theme role in the contract", () => {
     const guide = renderPrototypeGuide();
-    const defs = contract.definitions as unknown as Record<
-      string,
-      { variants?: Record<string, unknown>; values?: string[] }
-    >;
-    for (const type of [
-      ...Object.keys(defs.node.variants ?? {}),
-      ...Object.keys(defs.action.variants ?? {}),
-    ]) {
+    const defs = contract.definitions;
+    const variantNames = [...Object.keys(defs.node.variants), ...Object.keys(defs.action.variants)];
+    for (const type of variantNames) {
       expect(guide).toContain(`\`${type}\``);
     }
-    expect(defs.colorRole.values?.length).toBeGreaterThan(0);
-    for (const role of defs.colorRole.values ?? []) {
+    const roles = defs.colorRole.values;
+    expect(roles.length).toBeGreaterThan(0);
+    for (const role of roles) {
       expect(guide).toContain(`\`${role}\``);
     }
   });
@@ -88,10 +90,13 @@ describe("automobile:prototype resource", () => {
     expect(cost).toBeGreaterThan(icons);
     expect(errors).toBeGreaterThan(cost);
     const section = guide.slice(cost, errors);
+    expect(section).toContain("a decorative `icon` or `image`");
+    expect(section).toContain("labelled by that text");
+    expect(section).toContain("where icons and images keep their node and label");
+    expect(section).not.toContain("Being changed (#12135)");
     for (const issue of [
       "#12133",
       "#12134",
-      "#12135",
       "#12136",
       "#12138",
       "#12139",
@@ -107,8 +112,9 @@ describe("automobile:prototype resource", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),
     );
-    expect(blocks).toHaveLength(4);
-    const [minimal, list, components, appearanceCall] = blocks;
+    expect(blocks).toHaveLength(5);
+    const [minimal, list, data, components, appearanceCall] = blocks;
+    expect(validatePrototypeSpec(data)).toMatchObject({ success: true });
     expect(validatePrototypeSpec(minimal).success).toBe(true);
     // The light/dark section's example is a whole tool call, not a bare spec.
     expect(prototypeSchema.safeParse(appearanceCall)).toMatchObject({ success: true });
@@ -148,4 +154,38 @@ describe("automobile:prototype resource", () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
     expect(section).toContain("(`override`), else\n   the device's own setting (`system`)");
   });
+});
+
+test("the Data guide describes bindings, ownership, reporting, capability and errors", () => {
+  const guide = renderPrototypeGuide();
+  const section = guide.slice(guide.indexOf("## Data"), guide.indexOf("## Reuse"));
+  for (const text of [
+    "agent-owned",
+    "read-only",
+    "RFC 6901",
+    "repeat.items: {path}",
+    "repeat.key",
+    "{data:/pointer}",
+    "prototype_data_model_v1",
+    "once per show",
+    "inspect",
+    "Events carry data only",
+  ]) {
+    expect(section).toContain(text);
+  }
+  expect(guide).toContain("Repeat placeholder in a data condition operand is not supported");
+  expect(guide).toContain("Requires key or data");
+});
+
+test("the authoring guide documents menu/select capability, in-window rendering and row tags", () => {
+  const guide = renderPrototypeGuide();
+  for (const text of [
+    "prototype_menus_v1",
+    "<testTag>.<value>",
+    "<testTag>.<index>",
+    "in-window",
+    "platformNotes",
+  ]) {
+    expect(guide).toContain(text);
+  }
 });

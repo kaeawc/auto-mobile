@@ -1,3 +1,4 @@
+import { toolIsError, toolJson } from "../helpers/toolResponse";
 import { DisplayConfig } from "../../src/features/utility/DisplayConfig";
 import { installDeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
 import { SystemConfigurationManager } from "../../src/features/utility/SystemConfigurationManager";
@@ -58,6 +59,18 @@ describe("displayConfigSchema", () => {
   test("rejects densities below Android's wm density minimum", () => {
     expect(displayConfigSchema.safeParse({ density: 71 }).success).toBe(false);
     expect(displayConfigSchema.safeParse({ density: 72 }).success).toBe(true);
+  });
+
+  test("bounds numeric density to the supported Android range", () => {
+    expect(displayConfigSchema.safeParse({ density: 100000 }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: 1281 }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: 1280 }).success).toBe(true);
+    expect(displayConfigSchema.safeParse({ density: 72 }).success).toBe(true);
+    expect(displayConfigSchema.safeParse({ density: 71 }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: Number.NaN }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: Number.POSITIVE_INFINITY }).success).toBe(
+      false,
+    );
   });
 
   // The advertised JSON Schema must repeat the reset-exclusivity refinement
@@ -126,8 +139,8 @@ describe("displayConfig handler", () => {
       const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
         fontScale: 1.3,
       });
-      expect(response.isError).not.toBe(true);
-      expect(JSON.parse(response.content[0].text!)).toMatchObject({
+      expect(toolIsError(response)).toBe(false);
+      expect(toolJson(response)).toMatchObject({
         success: true,
         applied: { fontScale: 1.3 },
         message: "Applied display configuration",
@@ -135,6 +148,31 @@ describe("displayConfig handler", () => {
       expect(client.getCommandCalls().map((call) => call.command)).toContain(
         "shell settings put system font_scale 1.3",
       );
+    } finally {
+      create.mockRestore();
+    }
+  });
+  test("rejects an excessive density without dispatching wm density", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("shell settings get system font_scale", "1.0\n");
+    client.setCommandResult("shell wm density", "Physical density: 440\n");
+    client.setCommandResult("shell cmd uimode night", "Night mode: no\n");
+    const create = spyOn(defaultAdbClientFactory, "create").mockImplementation((target) =>
+      adbFactory.create(target),
+    );
+    try {
+      registerUtilityTools();
+      const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
+        density: 100000,
+      });
+      expect(toolIsError(response)).toBe(true);
+      expect(
+        adbFactory
+          .getFakeClient()
+          .getCommandCalls()
+          .map((call) => call.command),
+      ).not.toContain("shell wm density 100000");
     } finally {
       create.mockRestore();
     }
@@ -148,8 +186,8 @@ describe("displayConfig handler", () => {
         device,
         args,
       );
-      expect(JSON.parse(response.content[0].text!)).toMatchObject(result);
-      expect(response.isError).not.toBe(true);
+      expect(toolJson(response)).toMatchObject(result);
+      expect(toolIsError(response)).toBe(false);
       expect(get).toHaveBeenCalledTimes(1);
       expect(set).not.toHaveBeenCalled();
     } finally {
@@ -169,8 +207,8 @@ describe("displayConfig handler", () => {
         device,
         args,
       );
-      expect(JSON.parse(response.content[0].text!)).toMatchObject(result);
-      expect(response.isError).not.toBe(true);
+      expect(toolJson(response)).toMatchObject(result);
+      expect(toolIsError(response)).toBe(false);
       expect(set).toHaveBeenCalledWith(args);
       expect(get).not.toHaveBeenCalled();
     } finally {
@@ -186,8 +224,8 @@ describe("displayConfig handler", () => {
       const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
         reset: true,
       });
-      expect(response.isError).toBe(true);
-      expect(JSON.parse(response.content[0].text!)).toMatchObject({
+      expect(toolIsError(response)).toBe(true);
+      expect(toolJson(response)).toMatchObject({
         ...failure,
         message: failure.error,
       });
@@ -208,8 +246,8 @@ describe("displayConfig handler", () => {
       const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
         reset: true,
       });
-      expect(response.isError).not.toBe(true);
-      expect(JSON.parse(response.content[0].text!).message).toBe(resetResult.message);
+      expect(toolIsError(response)).toBe(false);
+      expect(toolJson(response).message).toBe(resetResult.message);
     } finally {
       set.mockRestore();
     }

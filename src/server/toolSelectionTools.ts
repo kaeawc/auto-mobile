@@ -1,4 +1,6 @@
+import { enableToolsSchemaField } from "../features/toolSelection/enableToolsSchemaField";
 import { z } from "zod/v4";
+import { InvalidToolParamsError } from "./invalidToolParamsError";
 import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import {
   isAlwaysOnTool,
@@ -27,22 +29,6 @@ export type ToolSelectionServiceLike =
   | (Pick<SessionToolSelectionService, "isEnabled"> &
       Partial<Pick<SessionToolSelectionService, "setEnabled" | "setEnabledMany">>)
   | undefined;
-
-/**
- * #6869 — the `enableTools` request field shared by the device-acquisition
- * tools (`getAndroid`, `getApple`, `provisionDevice`), which apply it while
- * minting the session so acquisition and capability declaration are one call.
- * Same vocabulary and same validation as `setToolEnabled`'s `toolNames`.
- */
-export const enableToolsSchemaField = z
-  .array(z.string().min(1))
-  .min(1)
-  .optional()
-  .describe(
-    "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, " +
-      "applied before the response is built so the returned enabledTools/gatedTools reflect discovery. " +
-      "Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
-  );
 
 export const setToolEnabledSchema = z
   .object({
@@ -154,10 +140,10 @@ export function partitionToolSelectionNames(
       !ToolRegistry.isUserConfigurableTool(toolName) && !isRegisteredAlwaysOnTool(toolName),
   );
   if (unknown.length === 1) {
-    throw new ActionableError(`Tool '${unknown[0]}' is not user-configurable.`);
+    throw new InvalidToolParamsError(`Tool '${unknown[0]}' is not user-configurable.`);
   }
   if (unknown.length > 1) {
-    throw new ActionableError(
+    throw new InvalidToolParamsError(
       `Tools ${unknown.map((toolName) => `'${toolName}'`).join(", ")} are not user-configurable.`,
     );
   }
@@ -310,7 +296,7 @@ async function getEnabledToolsResponse(
 export function registerToolSelectionTools(): void {
   ToolRegistry.register(
     SET_TOOL_ENABLED_TOOL_NAME,
-    "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
+    "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call, including default-off tools such as pinchOn and prototype that tools/list never shows until enabled; read the automobile:tools resource for every tool's name and default discovery state. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     setToolEnabledSchema,
     async (args) => {
       const context = getToolSelectionContext();
@@ -351,3 +337,5 @@ export function registerToolSelectionTools(): void {
     { defaultEnabled: true },
   );
 }
+
+export { enableToolsSchemaField };

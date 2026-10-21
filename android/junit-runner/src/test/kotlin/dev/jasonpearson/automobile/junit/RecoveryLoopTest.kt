@@ -17,6 +17,7 @@ import org.junit.Test
  * that recovery is skipped when aiAssistance=false or CI mode is on.
  */
 class RecoveryLoopTest {
+  private lateinit var collaborators: PlanExecutorCollaborators
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var fakeDaemonClient: RecoveryFakeDaemonToolClient
   private lateinit var fakeAgent: RecoveryFakeAutoMobileAgent
@@ -25,10 +26,13 @@ class RecoveryLoopTest {
   fun setup() {
     fakeDaemonClient = RecoveryFakeDaemonToolClient()
     fakeAgent = RecoveryFakeAutoMobileAgent()
-    DaemonSocketClientManager.testClient = fakeDaemonClient
-    AutoMobileSharedUtils.testDeviceChecker = RecoveryFakeDeviceChecker()
-    DaemonHeartbeat.testController = RecoveryFakeHeartbeat()
-    AutoMobilePlanExecutor.testAgent = fakeAgent
+    collaborators =
+      PlanExecutorCollaborators(
+        agent = { fakeAgent },
+        deviceChecker = RecoveryFakeDeviceChecker(),
+        daemon = fakeDaemonClient,
+        heartbeat = RecoveryFakeHeartbeat(),
+      )
     // Force CI mode off so recovery tests can exercise the recovery path
     // even when running in CI (where CI env var is set)
     System.setProperty("automobile.ci.mode", "false")
@@ -36,10 +40,6 @@ class RecoveryLoopTest {
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
-    AutoMobilePlanExecutor.testAgent = null
     System.clearProperty("automobile.ci.mode")
   }
 
@@ -60,6 +60,96 @@ class RecoveryLoopTest {
   }
 
   @Test
+  fun `real recovery client uses the execution wait budget and sleeper`() {
+    val waits = mutableListOf<Long>()
+    var calls = 0
+    val client = FakeMCPClient { _, parameters ->
+      calls++
+      assertTrue(parameters.containsKey("sessionUuid"))
+      throw IllegalStateException("""{"code":"device_owned_by_other_session"}""")
+    }
+    val recoveryAgent = recoveryAgent(client) { it.callTool("tapOn", emptyMap()) }
+    collaborators =
+      collaborators.copy(
+        agent = { recoveryAgent },
+        timings =
+          PlanExecutorTimings(
+            deviceOwnedWaitBudgetMs = 600L,
+            deviceOwnedSleeper = { waits.add(it) },
+          ),
+      )
+    fakeDaemonClient.responses.add(
+      buildFailureResponse(
+        failedStepIndex = 1,
+        failedTool = "tapOn",
+        details = FailureDetails(deviceId = "emulator-5554"),
+      ),
+    )
+
+    val result = executePlan(aiAssistance = true)
+
+    assertFalse(result.success)
+    assertTrue(result.aiRecoveryAttempted)
+    assertEquals(listOf(500L, 100L), waits)
+    assertEquals(3, calls)
+  }
+
+  @Test
+  fun `real recovery client stops before a device call when its injected heartbeat loses the session`() {
+    var lost = false
+    var calls = 0
+    val client = FakeMCPClient { _, _ ->
+      calls++
+      "{}"
+    }
+    val recoveryAgent =
+      recoveryAgent(client) {
+        lost = true
+        it.callTool("tapOn", emptyMap())
+      }
+    collaborators =
+      collaborators.copy(
+        agent = { recoveryAgent },
+        heartbeat =
+          RecoveryFakeHeartbeat { session ->
+            if (lost) DaemonSessionLoss(session, "idle", "Session not found") else null
+          },
+        timings =
+          PlanExecutorTimings(deviceOwnedSleeper = { error("A lost session must not wait") }),
+      )
+    fakeDaemonClient.responses.add(
+      buildFailureResponse(
+        failedStepIndex = 1,
+        failedTool = "tapOn",
+        details = FailureDetails(deviceId = "emulator-5554"),
+      ),
+    )
+
+    val result = executePlan(aiAssistance = true)
+
+    assertFalse(result.success)
+    assertTrue(result.aiRecoveryAttempted)
+    assertTrue(result.errorMessage.contains("releaseReason: idle"))
+    assertEquals(0, calls)
+  }
+
+  private fun recoveryAgent(
+    client: AutoMobileAgent.MCPClient,
+    onRecoveryClient: (AutoMobileAgent.MCPClient) -> Unit,
+  ): AutoMobileAgent =
+    AutoMobileAgent(
+      configProvider = FakeConfigProvider(),
+      fileSystemOperations = FakeFileSystemOps(),
+      aiAgentFactory = FakeAIAgentFactory(onRecoveryClient),
+      timeProvider =
+        object : AutoMobileAgent.TimeProvider {
+          override fun currentTimeMillis() = 0L
+        },
+      mcpClient = client,
+      recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true),
+    )
+
+  @Test
   fun `recovery does NOT fire when aiAssistance is false`() {
     fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn"))
 
@@ -74,7 +164,6 @@ class RecoveryLoopTest {
   fun `recovery does NOT fire when ai-recovery feature flag is disabled`() {
     // Replace the agent with one whose recoveryConfigProvider returns enabled=false
     fakeAgent = RecoveryFakeAutoMobileAgent(recoveryEnabled = false)
-    AutoMobilePlanExecutor.testAgent = fakeAgent
     fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn"))
 
     val result = executePlan(aiAssistance = true)
@@ -132,7 +221,11 @@ class RecoveryLoopTest {
     // The daemon reports the device the plan ran on as the payload's top-level deviceId;
     // `failedStep.device` is only a plan device LABEL (multi-device plans), never an id (#10089).
     fakeDaemonClient.responses.add(
-      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", deviceId = "emulator-5554"),
+      buildFailureResponse(
+        failedStepIndex = 1,
+        failedTool = "tapOn",
+        details = FailureDetails(deviceId = "emulator-5554"),
+      ),
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
@@ -171,7 +264,7 @@ class RecoveryLoopTest {
         failedStepIndex = 3,
         failedTool = "swipe",
         error = "No scrollable container",
-        toolResults = toolResults,
+        details = FailureDetails(toolResults = toolResults),
       ),
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
@@ -208,11 +301,12 @@ class RecoveryLoopTest {
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   private fun executePlan(aiAssistance: Boolean): AutoMobilePlanExecutionResult {
-    return AutoMobilePlanExecutor.execute(
-      "test-plans/launch-clock-app.yaml",
-      emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = aiAssistance),
-    )
+    return PlanExecutor(collaborators)
+      .execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = aiAssistance),
+      )
   }
 
   private fun buildSuccessResponse(): DaemonResponse {
@@ -227,14 +321,19 @@ class RecoveryLoopTest {
     )
   }
 
+  private data class FailureDetails(
+    val toolResults: JsonArray? = null,
+    val device: String? = null,
+    val deviceId: String? = null,
+  )
+
   private fun buildFailureResponse(
     failedStepIndex: Int,
     failedTool: String,
     error: String = "Element not found",
-    toolResults: JsonArray? = null,
-    device: String? = null,
-    deviceId: String? = null,
+    details: FailureDetails = FailureDetails(),
   ): DaemonResponse {
+    val (toolResults, device, deviceId) = details
     val failedStepFields =
       mutableMapOf<String, JsonElement>(
         "stepIndex" to JsonPrimitive(failedStepIndex),
@@ -336,9 +435,11 @@ private class RecoveryFakeAutoMobileAgent(recoveryEnabled: Boolean = true) :
 
   val recoverySecretValues = mutableListOf<List<String>>()
 
-  override fun attemptAiRecovery(
+  internal override fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
+    timings: PlanExecutorTimings,
+    heartbeat: DaemonHeartbeatController,
   ): RecoveryOutcome {
     recoveryCalls.add(context)
     recoverySecretValues.add(secretValues)
@@ -358,16 +459,25 @@ private class FakeConfigProvider : AutoMobileAgent.ConfigProvider {
 }
 
 private class FakeFileSystemOps : AutoMobileAgent.FileSystemOperations {
-  override fun createDirectories(dir: java.io.File) {}
+  val directories = mutableListOf<java.io.File>()
+  val writes = mutableMapOf<java.io.File, String>()
+
+  override fun createDirectories(dir: java.io.File) {
+    directories.add(dir)
+  }
 
   override fun fileExists(file: java.io.File) = false
 
-  override fun writeTextToFile(file: java.io.File, content: String) {}
+  override fun writeTextToFile(file: java.io.File, content: String) {
+    writes[file] = content
+  }
 
   override fun getLastModified(file: java.io.File) = 0L
 }
 
-private class FakeAIAgentFactory : AutoMobileAgent.AIAgentFactory {
+private class FakeAIAgentFactory(
+  private val onRecoveryClient: (AutoMobileAgent.MCPClient) -> Unit = {},
+) : AutoMobileAgent.AIAgentFactory {
   override fun createAIAgent(
     config: AutoMobileAgent.ModelConfig,
   ): ai.koog.agents.core.agent.AIAgent<String, String> {
@@ -388,7 +498,8 @@ private class FakeAIAgentFactory : AutoMobileAgent.AIAgentFactory {
     maxToolCalls: Int,
     rawMcpClient: AutoMobileAgent.MCPClient,
   ): ai.koog.agents.core.agent.AIAgent<String, String> {
-    throw UnsupportedOperationException("Not used in recovery tests")
+    onRecoveryClient(mcpClient)
+    throw UnsupportedOperationException("The fake stops after inspecting the recovery client")
   }
 }
 
@@ -396,14 +507,23 @@ private class FakeTimeProvider : AutoMobileAgent.TimeProvider {
   override fun currentTimeMillis() = System.currentTimeMillis()
 }
 
-private class FakeMCPClient : AutoMobileAgent.MCPClient {
+private class FakeMCPClient(
+  private val call: (String, Map<String, Any>) -> String = { _, _ -> "" },
+) : AutoMobileAgent.MCPClient {
   override fun isConnected() = false
 
-  override fun connect(serverUrl: String) {}
+  val connectionUrls = mutableListOf<String>()
+  var disconnectCalls = 0
 
-  override fun disconnect() {}
+  override fun connect(serverUrl: String) {
+    connectionUrls.add(serverUrl)
+  }
 
-  override fun callTool(toolName: String, parameters: Map<String, Any>) = ""
+  override fun disconnect() {
+    disconnectCalls++
+  }
+
+  override fun callTool(toolName: String, parameters: Map<String, Any>) = call(toolName, parameters)
 
   override fun listAvailableTools() = emptyList<AutoMobileAgent.MCPToolDefinition>()
 }
@@ -416,10 +536,14 @@ private class RecoveryFakeDeviceChecker : DeviceChecker {
   override fun getDeviceCount() = 1
 }
 
-private class RecoveryFakeHeartbeat : DaemonHeartbeatController {
+private class RecoveryFakeHeartbeat(
+  private val loss: (String) -> DaemonSessionLoss? = { null },
+) : DaemonHeartbeatController {
   override fun startBackground(intervalMs: Long) = java.io.Closeable {}
 
   override fun registerSession(sessionId: String) = Unit
 
   override fun unregisterSession(sessionId: String) = Unit
+
+  override fun sessionLoss(sessionId: String): DaemonSessionLoss? = loss(sessionId)
 }

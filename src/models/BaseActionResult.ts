@@ -3,7 +3,7 @@ import type {
   PinnedDisplayDetails,
 } from "./PinnedDisplayError";
 import type { TapEffect } from "./TapOnElementResult";
-import type { StaleDisplayDetails } from "./StaleDisplayError";
+import type { StaleDisplayDetails } from "./StaleDisplayDetails";
 import { ObserveResult } from "./ObserveResult";
 
 /**

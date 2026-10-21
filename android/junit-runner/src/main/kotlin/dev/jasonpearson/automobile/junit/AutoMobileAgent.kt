@@ -2,11 +2,6 @@ package dev.jasonpearson.automobile.junit
 
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.tools.SimpleTool
-import ai.koog.agents.core.tools.ToolRegistry
-import ai.koog.prompt.executor.clients.anthropic.AnthropicModels
-import ai.koog.prompt.executor.clients.openai.OpenAIModels
-import ai.koog.prompt.executor.model.PromptExecutor
-import ai.koog.prompt.llm.LLModel
 import ai.koog.serialization.typeToken
 import java.io.File
 import kotlinx.coroutines.runBlocking
@@ -36,6 +31,22 @@ open class AutoMobileAgent(
   private val mcpClient: MCPClient = DefaultMCPClient(),
   internal val recoveryConfigProvider: RecoveryConfigProvider = DaemonRecoveryConfigProvider(),
 ) {
+
+  companion object {
+    /** Construct both daemon-backed collaborators together without opening a connection. */
+    internal fun forDaemon(
+      daemon: DaemonToolClient,
+      connectivity: DaemonConnectivityChecker = DefaultDaemonConnectivityChecker(daemon),
+      configProvider: ConfigProvider = DefaultConfigProvider(),
+      aiAgentFactory: AIAgentFactory = DefaultAIAgentFactory(),
+    ): AutoMobileAgent =
+      AutoMobileAgent(
+        configProvider = configProvider,
+        aiAgentFactory = aiAgentFactory,
+        mcpClient = DefaultMCPClient(daemon, connectivity),
+        recoveryConfigProvider = DaemonRecoveryConfigProvider(daemon),
+      )
+  }
 
   /** Supported AI model providers */
   enum class ModelProvider {
@@ -85,7 +96,7 @@ open class AutoMobileAgent(
       println("Generated plan saved to: ${generatedPlanFile.absolutePath}")
       return generatedPlanPath
     } catch (e: Exception) {
-      throw RuntimeException("Failed to generate YAML plan from prompt: ${e.message}", e)
+      throw IllegalStateException("Failed to generate YAML plan from prompt: ${e.message}", e)
     }
   }
 
@@ -97,7 +108,7 @@ open class AutoMobileAgent(
    * finishes, we call observe ourselves (outside the tool budget) as a device-liveness gate: a
    * non-null result means the device is still responsive and worth resuming on. The authoritative
    * check that recovery actually worked is the caller re-running the failed step (see
-   * [AutoMobilePlanExecutor]) — if the obstruction is gone that step now passes.
+   * [PlanExecutor]) — if the obstruction is gone that step now passes.
    */
   /**
    * Backwards-compatible one-argument recovery hook (the pre-#6094 signature). Kept as an explicit
@@ -112,6 +123,18 @@ open class AutoMobileAgent(
   open fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
+  ): RecoveryOutcome =
+    attemptAiRecovery(context, secretValues, PlanExecutorTimings(), DaemonHeartbeat)
+
+  /**
+   * Recovery uses the same held-device wait and heartbeat owner as its executor. The executor calls
+   * this overload, so overriding only the two-argument [attemptAiRecovery] is not honoured by it.
+   */
+  internal open fun attemptAiRecovery(
+    context: FailedStepContext,
+    secretValues: List<String>,
+    timings: PlanExecutorTimings,
+    heartbeat: DaemonHeartbeatController,
   ): RecoveryOutcome {
     val startTime = timeProvider.currentTimeMillis()
     val maxToolCalls = recoveryConfigProvider.getMaxRecoveryToolCalls()
@@ -157,16 +180,7 @@ open class AutoMobileAgent(
       val redactionValues = SecretRedactor.secretValues(secretValues)
       // Every recovery call — the agent's tools, WaitForTool and the liveness observe — targets
       // the device the failed step ran on, not whichever device the daemon defaults to (#10089).
-      val pinnedClient =
-        DevicePinningMCPClient.pinTo(mcpClient, context.deviceId, context.sessionUuid)
-      // Recovery that holds the failed attempt's session waits, bounded, for its device if the
-      // idle window released it during a long think (#10979).
-      // A held session the daemon released mid-recovery fails every later call at once with the
-      // daemon's reason instead of driving a device the runner no longer holds (#11072).
-      val deviceClient =
-        if (context.sessionUuid.isNullOrBlank()) pinnedClient
-        else
-          HeldDeviceWaitingMCPClient(SessionLossGuardMCPClient(pinnedClient, context.sessionUuid))
+      val deviceClient = recoveryDeviceClient(context, heartbeat, timings)
       val agentMcpClient =
         if (redactionValues.isEmpty()) deviceClient
         else RedactingMCPClient(deviceClient, redactionValues)
@@ -187,20 +201,130 @@ open class AutoMobileAgent(
       // makes the public entry point self-contained, so a direct caller who supplies raw context
       // fields alongside raw secretValues cannot leak them in the first ModelRequest. Redacting an
       // already-redacted field changes nothing.
-      val redactedFailedTool = SecretRedactor.redact(context.failedTool, redactionValues)
-      val redactedError = SecretRedactor.redact(context.error, redactionValues)
-      val redactedPlanContent = SecretRedactor.redact(context.planContent, redactionValues)
-      val succeededStepsSummary =
-        if (context.succeededSteps.isEmpty()) {
-          "  (none — the first step failed)"
-        } else {
-          context.succeededSteps.joinToString("\n") { step ->
-            "  - Step ${step.stepIndex + 1}: ${SecretRedactor.redact(step.tool, redactionValues)} (completed)"
-          }
-        }
+      val recoveryPrompt = recoveryPrompt(context, redactionValues, maxToolCalls)
 
-      val recoveryPrompt =
-        """
+      return runRecoveryAgent(
+        aiAgent,
+        recoveryPrompt,
+        RecoveryVerification(context, deviceClient, redactionValues, startTime),
+      )
+    } catch (e: Exception) {
+      // Loud, actionable and on stderr: recovery is on by default outside CI, so a missing daemon
+      // or model API key must not look like "recovery ran and found nothing" (#10089).
+      System.err.println(
+        "AI-assisted recovery could not start: ${e.message}. " +
+          "The failed step is reported as a plain failure. Make sure the AutoMobile daemon " +
+          "is running and a model API key is configured, or disable AI assistance.",
+      )
+    } finally {
+      try {
+        mcpClient.disconnect()
+      } catch (e: Exception) {
+        println("Warning: Failed to cleanly disconnect MCP client: ${e.message}")
+      }
+    }
+
+    val recoveryTime = timeProvider.currentTimeMillis() - startTime
+    return RecoveryOutcome(false, recoveryTime)
+  }
+
+  private data class RecoveryVerification(
+    val context: FailedStepContext,
+    val deviceClient: MCPClient,
+    val redactionValues: List<String>,
+    val startTime: Long,
+  )
+
+  private fun runRecoveryAgent(
+    aiAgent: ai.koog.agents.core.agent.AIAgent<String, String>,
+    recoveryPrompt: String,
+    verification: RecoveryVerification,
+  ): RecoveryOutcome {
+    val (context, deviceClient, redactionValues, startTime) = verification
+    return runBlocking {
+      try {
+        println(
+          "Starting AI recovery for step ${context.failedStepIndex + 1} (${context.failedTool})...",
+        )
+
+        aiAgent.run(recoveryPrompt)
+
+        println("AI recovery agent finished, verifying device state...")
+
+        // Device-liveness gate: confirm the device is still responsive before the caller
+        // spends a daemon round-trip re-running the failed step. This is NOT proof the
+        // interruption is gone — the failed-step re-run in the executor is that check.
+        val observeResult =
+          try {
+            // Scrub the post-recovery liveness observe too (issue #6094): its view hierarchy can
+            // carry an on-screen secret, and it is surfaced on the RecoveryOutcome. The device is
+            // still queried with real values — only the returned text is redacted.
+            SecretRedactor.redact(deviceClient.callTool("observe", emptyMap()), redactionValues)
+          } catch (e: Exception) {
+            println("Warning: Post-recovery observe failed: ${e.message}")
+            null
+          }
+
+        val recoveryTime = timeProvider.currentTimeMillis() - startTime
+        RecoveryOutcome(
+          success = observeResult != null && !isToolErrorResult(observeResult),
+          recoveryTimeMs = recoveryTime,
+          observeResultAfterRecovery = observeResult,
+        )
+      } catch (e: Exception) {
+        println("AI recovery execution failed: ${e.message}")
+        val recoveryTime = timeProvider.currentTimeMillis() - startTime
+        RecoveryOutcome(false, recoveryTime)
+      }
+    }
+  }
+
+  private fun recoveryDeviceClient(
+    context: FailedStepContext,
+    heartbeat: DaemonHeartbeatController,
+    timings: PlanExecutorTimings,
+  ): MCPClient {
+    val pinnedClient =
+      DevicePinningMCPClient.pinTo(mcpClient, context.deviceId, context.sessionUuid)
+    // Recovery that holds the failed attempt's session waits, bounded, for its device if the
+    // idle window released it during a long think (#10979).
+    // A held session the daemon released mid-recovery fails every later call at once with the
+    // daemon's reason instead of driving a device the runner no longer holds (#11072).
+    return if (context.sessionUuid.isNullOrBlank()) pinnedClient
+    else
+      HeldDeviceWaitingMCPClient(
+        SessionLossGuardMCPClient(pinnedClient, context.sessionUuid, heartbeat::sessionLoss),
+        backoffDelayMs = { waits, waited, retryAfterMs, code ->
+          DeviceWaitPolicy.deviceOwnedBackoffDelayMs(
+            waits,
+            waited,
+            retryAfterMs,
+            code,
+            timings,
+          )
+        },
+        sleeper = timings.deviceOwnedSleeper,
+      )
+  }
+
+  private fun recoveryPrompt(
+    context: FailedStepContext,
+    redactionValues: List<String>,
+    maxToolCalls: Int,
+  ): String {
+    val redactedFailedTool = SecretRedactor.redact(context.failedTool, redactionValues)
+    val redactedError = SecretRedactor.redact(context.error, redactionValues)
+    val redactedPlanContent = SecretRedactor.redact(context.planContent, redactionValues)
+    val succeededStepsSummary =
+      if (context.succeededSteps.isEmpty()) {
+        "  (none — the first step failed)"
+      } else {
+        context.succeededSteps.joinToString("\n") { step ->
+          "  - Step ${step.stepIndex + 1}: ${SecretRedactor.redact(step.tool, redactionValues)} (completed)"
+        }
+      }
+
+    return """
         A test plan step was interrupted and failed. Your job is to CLEAR whatever is
         blocking the app — you do NOT need to perform the failed step yourself.
 
@@ -232,64 +356,7 @@ open class AutoMobileAgent(
 
         Do NOT perform the failed step's action — the runner retries it for you.
       """
-          .trimIndent()
-
-      val recoveryResult = runBlocking {
-        try {
-          println(
-            "Starting AI recovery for step ${context.failedStepIndex + 1} (${context.failedTool})...",
-          )
-
-          aiAgent.run(recoveryPrompt)
-
-          println("AI recovery agent finished, verifying device state...")
-
-          // Device-liveness gate: confirm the device is still responsive before the caller
-          // spends a daemon round-trip re-running the failed step. This is NOT proof the
-          // interruption is gone — the failed-step re-run in the executor is that check.
-          val observeResult =
-            try {
-              // Scrub the post-recovery liveness observe too (issue #6094): its view hierarchy can
-              // carry an on-screen secret, and it is surfaced on the RecoveryOutcome. The device is
-              // still queried with real values — only the returned text is redacted.
-              SecretRedactor.redact(deviceClient.callTool("observe", emptyMap()), redactionValues)
-            } catch (e: Exception) {
-              println("Warning: Post-recovery observe failed: ${e.message}")
-              null
-            }
-
-          val recoveryTime = timeProvider.currentTimeMillis() - startTime
-          RecoveryOutcome(
-            success = observeResult != null && !isToolErrorResult(observeResult),
-            recoveryTimeMs = recoveryTime,
-            observeResultAfterRecovery = observeResult,
-          )
-        } catch (e: Exception) {
-          println("AI recovery execution failed: ${e.message}")
-          val recoveryTime = timeProvider.currentTimeMillis() - startTime
-          RecoveryOutcome(false, recoveryTime)
-        }
-      }
-
-      return recoveryResult
-    } catch (e: Exception) {
-      // Loud, actionable and on stderr: recovery is on by default outside CI, so a missing daemon
-      // or model API key must not look like "recovery ran and found nothing" (#10089).
-      System.err.println(
-        "AI-assisted recovery could not start: ${e.message}. " +
-          "The failed step is reported as a plain failure. Make sure the AutoMobile daemon " +
-          "is running and a model API key is configured, or disable AI assistance.",
-      )
-    } finally {
-      try {
-        mcpClient.disconnect()
-      } catch (e: Exception) {
-        println("Warning: Failed to cleanly disconnect MCP client: ${e.message}")
-      }
-    }
-
-    val recoveryTime = timeProvider.currentTimeMillis() - startTime
-    return RecoveryOutcome(false, recoveryTime)
+      .trimIndent()
   }
 
   private fun shouldRegeneratePlan(planFile: File): Boolean {
@@ -306,8 +373,39 @@ open class AutoMobileAgent(
       val modelConfig = configProvider.getModelConfig()
       val aiAgent = aiAgentFactory.createAIAgent(modelConfig)
 
-      val planGenerationPrompt =
-        """
+      val planGenerationPrompt = planGenerationPrompt(prompt, className, methodName)
+
+      return runBlocking {
+        try {
+          val response = aiAgent.run(planGenerationPrompt)
+
+          // Extract YAML content from the response
+          val yamlContent = extractYamlFromResponse(response)
+
+          if (yamlContent.isEmpty()) {
+            throw IllegalStateException("AI agent generated empty YAML content")
+          }
+
+          val debugMode = configProvider.isDebugMode()
+          if (debugMode) {
+            println("AI agent generated plan:\n$yamlContent")
+          }
+
+          yamlContent
+        } catch (e: Exception) {
+          throw IllegalStateException("Plan generation via AI agent failed: ${e.message}", e)
+        }
+      }
+    } catch (e: Exception) {
+      throw IllegalStateException(
+        "Failed to initialize AI agent for plan generation: ${e.message}",
+        e,
+      )
+    }
+  }
+
+  private fun planGenerationPrompt(prompt: String, className: String, methodName: String): String =
+    """
         Generate an AutoMobile YAML test plan for the following requirement:
 
         Test Class: $className
@@ -338,33 +436,7 @@ open class AutoMobileAgent(
 
         Make the plan specific and actionable for mobile automation.
       """
-          .trimIndent()
-
-      return runBlocking {
-        try {
-          val response = aiAgent.run(planGenerationPrompt)
-
-          // Extract YAML content from the response
-          val yamlContent = extractYamlFromResponse(response)
-
-          if (yamlContent.isEmpty()) {
-            throw RuntimeException("AI agent generated empty YAML content")
-          }
-
-          val debugMode = configProvider.isDebugMode()
-          if (debugMode) {
-            println("AI agent generated plan:\n$yamlContent")
-          }
-
-          yamlContent
-        } catch (e: Exception) {
-          throw RuntimeException("Plan generation via AI agent failed: ${e.message}", e)
-        }
-      }
-    } catch (e: Exception) {
-      throw RuntimeException("Failed to initialize AI agent for plan generation: ${e.message}", e)
-    }
-  }
+      .trimIndent()
 
   private fun extractYamlFromResponse(response: String?): String {
     if (response.isNullOrBlank()) return ""
@@ -434,11 +506,12 @@ open class AutoMobileAgent(
     private val daemon: DaemonToolCaller,
     private val connectivity: DaemonConnectivityChecker,
   ) : MCPClient {
-    constructor() :
-      this(
-        DaemonToolCaller(DaemonSocketClientManager::callTool),
-        DefaultDaemonConnectivityChecker(),
-      )
+    constructor() : this(DaemonSocketClientManager)
+
+    internal constructor(
+      daemon: DaemonToolClient,
+      connectivity: DaemonConnectivityChecker = DefaultDaemonConnectivityChecker(daemon),
+    ) : this(DaemonToolCaller(daemon::callTool), connectivity)
 
     @Volatile private var connected = false
     private val koogJson = Json { ignoreUnknownKeys = true }
@@ -447,7 +520,7 @@ open class AutoMobileAgent(
 
     override fun connect(serverUrl: String) {
       if (!connectivity.isDaemonAlive()) {
-        throw RuntimeException(
+        throw IllegalStateException(
           "AutoMobile daemon is not reachable on its socket; AI recovery runs through the " +
             "same daemon as the plan (the configured MCP url $serverUrl is not used)",
         )
@@ -466,17 +539,19 @@ open class AutoMobileAgent(
         try {
           daemon.call(toolName, buildJsonParameters(parameters), TOOL_CALL_TIMEOUT_MS)
         } catch (e: Exception) {
-          throw RuntimeException("Failed to call MCP tool $toolName: ${e.message}", e)
+          throw IllegalStateException("Failed to call MCP tool $toolName: ${e.message}", e)
         }
       if (!response.success) {
-        throw RuntimeException(
+        throw IllegalStateException(
           "Failed to call MCP tool $toolName: ${response.error ?: "daemon returned failure"}",
         )
       }
       val result = response.result ?: return ""
       val resultText = result.toString()
       if (isToolErrorResult(resultText)) {
-        throw RuntimeException("MCP tool $toolName returned an error: ${toolResultText(result)}")
+        throw IllegalStateException(
+          "MCP tool $toolName returned an error: ${toolResultText(result)}",
+        )
       }
       return resultText
     }
@@ -497,9 +572,10 @@ open class AutoMobileAgent(
      */
     internal fun parseListToolsResponse(mcpResponse: MCPResponse): List<MCPToolDefinition> {
       if (mcpResponse.error != null) {
-        throw RuntimeException("MCP server error: ${mcpResponse.error}")
+        throw IllegalStateException("MCP server error: ${mcpResponse.error}")
       }
-      val result = mcpResponse.result ?: throw RuntimeException("MCP tools/list returned no result")
+      val result =
+        mcpResponse.result ?: throw IllegalStateException("MCP tools/list returned no result")
       return koogJson.decodeFromString<MCPListToolsResponse>(result.toString()).tools
     }
 
@@ -557,7 +633,11 @@ open class AutoMobileAgent(
     )
 
     override suspend fun execute(args: Args): String =
-      callElementOrCoordinateTap(mcpClient, args.text, args.id, args.x, args.y, args.action)
+      callElementOrCoordinateTap(
+        mcpClient,
+        TapTarget(args.text, args.id, args.x, args.y),
+        args.action,
+      )
   }
 
   /** Enter text into the focused input field */
@@ -690,6 +770,18 @@ open class AutoMobileAgent(
       description = "Wait for elements to appear or conditions to be met",
     ) {
 
+    private var clock: TimeProvider = DefaultTimeProvider()
+    private var pause: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) }
+
+    internal constructor(
+      mcpClient: MCPClient,
+      clock: TimeProvider,
+      pause: suspend (Long) -> Unit,
+    ) : this(mcpClient) {
+      this.clock = clock
+      this.pause = pause
+    }
+
     @Serializable
     data class Args(
       val text: String? = null,
@@ -700,10 +792,10 @@ open class AutoMobileAgent(
     override suspend fun execute(args: Args): String {
       // Note: The current MCP server doesn't have a dedicated waitFor tool
       // We'll simulate it by repeatedly calling observe until the element is found
-      val startTime = System.currentTimeMillis()
+      val startTime = clock.currentTimeMillis()
       val endTime = startTime + args.timeout
 
-      while (System.currentTimeMillis() < endTime) {
+      while (clock.currentTimeMillis() < endTime) {
         try {
           val observeResult = mcpClient.callTool("observe", mapOf("project" to "full"))
 
@@ -724,11 +816,11 @@ open class AutoMobileAgent(
         // sleep sat inside the try above the throw, so a throwing observe skipped it
         // and the loop busy-spun the daemon for the whole timeout window (#3606).
         // A successful match returns from inside the try and never reaches here.
-        Thread.sleep(500)
+        pause(500)
       }
 
       val target = args.text ?: args.elementId ?: "unknown"
-      throw RuntimeException("Timeout waiting for element: $target")
+      throw IllegalStateException("Timeout waiting for element: $target")
     }
   }
 
@@ -830,10 +922,7 @@ open class AutoMobileAgent(
     override suspend fun execute(args: Args): String =
       callElementOrCoordinateTap(
         mcpClient,
-        args.text,
-        args.id,
-        args.x,
-        args.y,
+        TapTarget(args.text, args.id, args.x, args.y),
         action = "longPress",
         durationMs = args.duration,
       )
@@ -951,62 +1040,7 @@ open class AutoMobileAgent(
   }
 
   // Default implementations
-  class DefaultConfigProvider : ConfigProvider {
-    override fun getModelConfig(): ModelConfig {
-      // Check for model provider preference (default to OpenAI)
-      val provider =
-        when (System.getProperty("automobile.ai.provider", "openai")?.lowercase()) {
-          "anthropic" -> ModelProvider.ANTHROPIC
-          "google" -> ModelProvider.GOOGLE
-          else -> ModelProvider.OPENAI
-        }
-
-      // Get API key for the selected provider
-      val apiKey =
-        when (provider) {
-          ModelProvider.OPENAI ->
-            System.getenv("OPENAI_API_KEY")
-              ?: System.getProperty("automobile.openai.api.key")
-              ?: throw RuntimeException(
-                "OpenAI API key not found. Set OPENAI_API_KEY environment variable or automobile.openai.api.key system property",
-              )
-
-          ModelProvider.ANTHROPIC ->
-            System.getenv("ANTHROPIC_API_KEY")
-              ?: System.getProperty("automobile.anthropic.api.key")
-              ?: throw RuntimeException(
-                "Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or automobile.anthropic.api.key system property",
-              )
-
-          ModelProvider.GOOGLE ->
-            System.getenv("GOOGLE_API_KEY")
-              ?: System.getProperty("automobile.google.api.key")
-              ?: throw RuntimeException(
-                "Google API key not found. Set GOOGLE_API_KEY environment variable or automobile.google.api.key system property",
-              )
-        }
-
-      // Optional proxy endpoint
-      val proxyEndpoint = System.getProperty("automobile.ai.proxy.endpoint")
-
-      return ModelConfig(provider, apiKey, proxyEndpoint)
-    }
-
-    override fun getPlanMaxAgeMs(): Long {
-      return System.getProperty("automobile.plan.max.age.ms", "3600000").toLong() // 1 hour default
-    }
-
-    override fun isDebugMode(): Boolean {
-      return System.getProperty("automobile.debug", "false").toBoolean()
-    }
-
-    override fun getMcpServerUrl(): String {
-      // The URL was mistakenly passed as the property NAME (1-arg getProperty),
-      // which is never set, so this returned null and AI recovery could never
-      // connect to the MCP server (#3596). Use the 2-arg form with the URL default.
-      return System.getProperty("automobile.mcp.server.url", "http://localhost:3000")
-    }
-  }
+  class DefaultConfigProvider : ConfigProvider by EnvironmentConfigProvider()
 
   class DefaultFileSystemOperations : FileSystemOperations {
     override fun createDirectories(dir: File) {
@@ -1024,129 +1058,7 @@ open class AutoMobileAgent(
     override fun getLastModified(file: File): Long = file.lastModified()
   }
 
-  class DefaultAIAgentFactory : AIAgentFactory {
-    override fun createAIAgent(config: ModelConfig): AIAgent<String, String> {
-      val executor = createPromptExecutor(config)
-      val model = selectModel(config.provider)
-
-      val systemPrompt =
-        """
-        You are an expert in mobile test automation using the AutoMobile framework.
-        You help generate YAML test plans and provide recovery suggestions for failed tests.
-
-        Your responses should be:
-        - Specific and actionable
-        - Focused on mobile automation best practices
-        - Clear and concise
-        - Include proper YAML formatting when generating plans
-
-        When generating YAML plans, always include proper structure with name, description, and steps.
-        When providing recovery suggestions, focus on common mobile testing issues and practical solutions.
-        """
-          .trimIndent()
-
-      return AIAgent(
-        promptExecutor = executor,
-        llmModel = model,
-        toolRegistry = ToolRegistry.EMPTY,
-        systemPrompt = systemPrompt,
-      )
-    }
-
-    // The original (pre-#6145) abstract method's mandatory override; see the interface doc on the
-    // 3-arg createAIAgentWithMCPTools for why this is a distinct method rather than a defaulted
-    // rawMcpClient parameter. Delegates to the 4-arg overload with rawMcpClient=mcpClient — no
-    // separate raw client, matching the pre-#6145 behavior this method's callers expect.
-    override fun createAIAgentWithMCPTools(
-      config: ModelConfig,
-      mcpClient: MCPClient,
-      maxToolCalls: Int,
-    ): AIAgent<String, String> =
-      createAIAgentWithMCPTools(config, mcpClient, maxToolCalls, mcpClient)
-
-    override fun createAIAgentWithMCPTools(
-      config: ModelConfig,
-      mcpClient: MCPClient,
-      maxToolCalls: Int,
-      rawMcpClient: MCPClient,
-    ): AIAgent<String, String> {
-      val executor = createPromptExecutor(config)
-      val model = selectModel(config.provider)
-
-      // Create AutoMobile MCP tools using class-based pattern (no reflection). WaitForTool gets the
-      // raw client (#6145); every other, pass-through tool gets mcpClient (the redacting wrapper
-      // during recovery).
-      val toolFactory = AutoMobileMCPToolFactory(mcpClient, rawMcpClient)
-      val toolRegistry = ToolRegistry { toolFactory.createAllTools().forEach { tool(it) } }
-
-      val systemPrompt =
-        """
-        You are an expert mobile test automation recovery agent using the AutoMobile framework.
-
-        Your goal is to clear whatever interruption blocked a failing test step — typically a
-        modal, popup, system notification, permission dialog, or crash/ANR dialog — and return
-        the app to the screen that step expects. You have access to AutoMobile tools for
-        observing and interacting with mobile devices, discovered dynamically from the MCP server.
-
-        The test runner re-runs the failed step itself after you finish, so do NOT perform that
-        step's action — just remove the obstruction.
-
-        IMPORTANT CONSTRAINTS:
-        - You have a maximum of $maxToolCalls tool calls per recovery attempt
-        - Always start by observing the current device state
-        - Focus on dismissing blockers, not on completing the test's own actions
-        - If you can't fix the issue within the tool call limit, explain what you discovered
-
-        Core tools typically available:
-        - observe: Get current UI state and hierarchy
-        - tapOn: Tap elements by text or id, or at coordinates
-        - typeText/sendKeys: Enter, clear, or submit text in input fields
-        - swipe/scroll: Navigate with gestures or within containers
-        - waitFor: Wait for elements or conditions (implemented as polling)
-        - goBack/pressButton: Navigate back or press hardware buttons
-        - launchApp/terminateApp: Manage app lifecycle
-
-        Additional tools may be available depending on the MCP server configuration.
-
-        Always be methodical: observe first, understand the problem, then take targeted actions.
-        Use the most appropriate tool for each interaction based on what's available.
-      """
-          .trimIndent()
-
-      // Hard-enforce the tool-call budget: cap Koog's agent loop via maxIterations so a
-      // looping or runaway model cannot exceed the budget the prompt advertises. Without
-      // this the "$maxToolCalls tool calls" line is advisory only. See [recoveryIterationCap]
-      // for why the ceiling is maxToolCalls + 1. When the cap is hit Koog throws, which the
-      // caller's try/catch turns into a failed RecoveryOutcome (we do not resume).
-      return AIAgent(
-        promptExecutor = executor,
-        llmModel = model,
-        toolRegistry = toolRegistry,
-        systemPrompt = systemPrompt,
-        maxIterations = recoveryIterationCap(maxToolCalls),
-      )
-    }
-
-    private fun createPromptExecutor(config: ModelConfig): PromptExecutor =
-      when (config.provider) {
-        ModelProvider.OPENAI -> PromptExecutor.builder().openAI(config.apiKey).build()
-        ModelProvider.ANTHROPIC -> PromptExecutor.builder().anthropic(config.apiKey).build()
-        ModelProvider.GOOGLE -> unsupportedGoogleProvider()
-      }
-
-    private fun selectModel(provider: ModelProvider): LLModel =
-      when (provider) {
-        ModelProvider.OPENAI -> OpenAIModels.Chat.GPT4o
-        ModelProvider.ANTHROPIC -> AnthropicModels.Sonnet_4
-        ModelProvider.GOOGLE -> unsupportedGoogleProvider()
-      }
-
-    private fun unsupportedGoogleProvider(): Nothing {
-      throw UnsupportedOperationException(
-        "Koog 1.0.0 stable artifacts do not publish a Google prompt executor; use OpenAI or Anthropic.",
-      )
-    }
-  }
+  class DefaultAIAgentFactory : AIAgentFactory by KoogAIAgentFactory()
 
   class DefaultTimeProvider : TimeProvider {
     override fun currentTimeMillis(): Long = System.currentTimeMillis()
@@ -1165,6 +1077,8 @@ open class AutoMobileAgent(
  */
 internal fun recoveryIterationCap(maxToolCalls: Int): Int = maxToolCalls.coerceAtLeast(1) + 1
 
+private data class TapTarget(val text: String?, val id: String?, val x: Int?, val y: Int?)
+
 private val TAP_ACTIONS = setOf("tap", "doubleTap", "longPress")
 
 /**
@@ -1174,13 +1088,11 @@ private val TAP_ACTIONS = setOf("tap", "doubleTap", "longPress")
  */
 private fun callElementOrCoordinateTap(
   mcpClient: AutoMobileAgent.MCPClient,
-  text: String?,
-  id: String?,
-  x: Int?,
-  y: Int?,
+  target: TapTarget,
   action: String,
   durationMs: Int? = null,
 ): String {
+  val (text, id, x, y) = target
   require(action in TAP_ACTIONS) { "action must be one of $TAP_ACTIONS" }
   val selector =
     when {

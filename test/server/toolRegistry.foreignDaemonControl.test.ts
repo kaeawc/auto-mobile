@@ -1,16 +1,24 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
-import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
+import {
+  ForwardLeaseForeignDeviceOwnership,
+  type DeviceOwnershipFileSource,
+} from "../../src/daemon/foreignDeviceOwnership";
+import type { ForeignCtrlProxyForwardVerdict } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
-import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
+import {
+  ToolRegistry,
+  type AuditRunnerInput,
+  type ToolRegistryCollaborators,
+} from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -18,6 +26,9 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { FakeTimer } from "../fakes/FakeTimer";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #11349 (owner decision 2026-10-10): a sessionless control call on a device another daemon has
@@ -33,10 +44,14 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
 
   let ran: Array<{ name: string; deviceId: string }>;
   let foreignOwners: Map<string, number>;
-  let originals: Array<[string, unknown]>;
+  let forwardVerdict: ForeignCtrlProxyForwardVerdict;
+  let originals: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let readinessRequests: number;
+  let devices: FakeDeviceSessionManager;
+  let fakeDeviceUtils: FakeDeviceUtils;
+  let visibleDevices: BootedDevice[];
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -47,11 +62,13 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
       (error: unknown) => error,
     );
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     ran = [];
     foreignOwners = new Map([[claimed.deviceId, FOREIGN_PID]]);
+    forwardVerdict = { kind: "none" };
     ToolRegistry.clearTools();
-    const deviceReadAccess = { listBooted: async () => [claimed, free], isAuthorized: () => true };
+    visibleDevices = [claimed, free];
+    const deviceReadAccess = { listBooted: async () => visibleDevices, isAuthorized: () => true };
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
       deviceReadAccess,
@@ -67,32 +84,50 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
         },
       },
     });
-    const devices = new FakeDeviceSessionManager();
+    devices = new FakeDeviceSessionManager();
     devices.setConnectedDevices([claimed, free]);
+    devices.setCurrentDevice(claimed, "android");
     readinessRequests = 0;
     const ensureDeviceReady = devices.ensureDeviceReady.bind(devices);
     devices.ensureDeviceReady = async (...args) => {
       readinessRequests++;
       return await ensureDeviceReady(...args);
     };
-    originals = (
-      ["deviceSessionManager", "toolCallRepository", "navigationToolCallRecorder"] as const
-    ).map((key) => [key, Reflect.get(ToolRegistry, key)]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originals = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
 
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
-    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [claimed, free]);
-    const foreignDeviceOwnership: ForeignDeviceOwnership = {
-      refresh: async () => {},
-      foreignOwnerPid: (deviceId) => foreignOwners.get(deviceId),
-      claim: async (deviceId) => !foreignOwners.has(deviceId),
+    const files: DeviceOwnershipFileSource = {
+      leasePath: () => undefined,
+      claimPath: (deviceId) => `/claims/${deviceId}`,
+      legacyClaimPath: () => undefined,
+      read: (path) => {
+        const pid = foreignOwners.get(path.slice("/claims/".length));
+        return pid === undefined ? undefined : { pid, token: "peer" };
+      },
+      isProcessRunning: (pid) => pid === FOREIGN_PID,
+      tryAcquire: () => true,
+      takeOver: () => true,
       release: () => {},
     };
+    const foreignDeviceOwnership = new ForwardLeaseForeignDeviceOwnership(
+      100,
+      files,
+      { query: async () => ({ kind: "unreachable", detail: "unused" }) },
+      () => undefined,
+      timer,
+      { read: async () => forwardVerdict },
+    );
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "foreign-daemon-control", {
         timer,
@@ -119,13 +154,40 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
         getMostRecentCachedObserveResult: async () => loadAndroidHomeObserve().observe,
       }),
     });
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach(table: Array<[string, Record<string, unknown>]>) {
+    return (
+      name: string,
+      fn: (name: string, args: Record<string, unknown>) => void | Promise<void>,
+      timeout?: number,
+    ): void => {
+      test.each(table)(
+        name,
+        async (tool, args) => {
+          await arrangeHarness();
+          await fn(tool, args);
+        },
+        timeout,
+      );
+    };
+  }
 
   afterEach(() => {
     restorePipeline();
-    for (const [key, value] of originals) {
-      Reflect.set(ToolRegistry, key, value);
-    }
+    ToolRegistry.setCollaboratorsForTesting(originals);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
@@ -136,27 +198,36 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     ["tapOn", { text: "OK", action: "tap" }],
   ];
 
-  for (const [name, args] of controlCalls) {
-    test(`a sessionless ${name} on the claimed device is refused before readiness or the handler`, async () => {
-      const error = await refusal(name, {
-        ...args,
-        platform: "android",
-        deviceId: claimed.deviceId,
-      });
+  const onlyClaimedVisible = () => {
+    visibleDevices = [claimed];
+    devices.setConnectedDevices([claimed]);
+    fakeDeviceUtils.setBootedDevices("android", [claimed]);
+  };
 
-      expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
-      expect(error).toMatchObject({
-        code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
-        retryable: true,
-        deviceId: claimed.deviceId,
-        ownerPid: FOREIGN_PID,
-      });
-      expect(ran).toEqual([]);
-      expect(readinessRequests).toBe(0);
-    });
+  for (const [name, args] of controlCalls) {
+    arranged(
+      `a sessionless ${name} on the claimed device is refused before readiness or the handler`,
+      async () => {
+        const error = await refusal(name, {
+          ...args,
+          platform: "android",
+          deviceId: claimed.deviceId,
+        });
+
+        expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+        expect(error).toMatchObject({
+          code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+          retryable: true,
+          deviceId: claimed.deviceId,
+          ownerPid: FOREIGN_PID,
+        });
+        expect(ran).toEqual([]);
+        expect(readinessRequests).toBe(0);
+      },
+    );
   }
 
-  test("a sessionless control call on a device no daemon claims still runs", async () => {
+  arranged("a sessionless control call on a device no daemon claims still runs", async () => {
     await call("rotate", {
       orientation: "landscape",
       platform: "android",
@@ -165,7 +236,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     expect(ran).toEqual([{ name: "rotate", deviceId: free.deviceId }]);
   });
 
-  test("the same control call runs once the other daemon's claim is gone", async () => {
+  arranged("the same control call runs once the other daemon's claim is gone", async () => {
     foreignOwners.clear();
     await call("rotate", {
       orientation: "landscape",
@@ -175,8 +246,135 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     expect(ran).toEqual([{ name: "rotate", deviceId: claimed.deviceId }]);
   });
 
-  test("a read of the claimed device is never refused", async () => {
+  arranged("a read of the claimed device is never refused", async () => {
     await call("observe", { platform: "android", deviceId: claimed.deviceId });
     expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
+  });
+
+  arrangedEach([
+    ["tapOn", { text: "OK", action: "tap" }],
+    ["rotate", { orientation: "landscape" }],
+  ])(
+    "#12220 unnamed %s refuses a foreign forward before readiness and handler",
+    async (name, args) => {
+      onlyClaimedVisible();
+      foreignOwners.clear();
+      forwardVerdict = {
+        kind: "foreign",
+        ports: [19001],
+        clientPids: [FOREIGN_PID],
+        message: "foreign CtrlProxy forward",
+      };
+      const error = await refusal(name, { ...args, platform: "android" });
+      expect(error).toMatchObject({
+        code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+        ownerPid: FOREIGN_PID,
+        deviceId: claimed.deviceId,
+      });
+      expect(String(error)).toContain("pass the deviceId");
+      expect(String(error)).toContain("getAndroid/getApple");
+      expect(ran).toEqual([]);
+      expect(readinessRequests).toBe(0);
+    },
+  );
+
+  arranged("#12220 explicit tapOn reports foreign PID and release remedy", async () => {
+    foreignOwners.clear();
+    forwardVerdict = {
+      kind: "foreign",
+      ports: [19001],
+      clientPids: [FOREIGN_PID],
+      message: "foreign CtrlProxy forward",
+    };
+    const error = await refusal("tapOn", {
+      text: "OK",
+      action: "tap",
+      platform: "android",
+      deviceId: claimed.deviceId,
+    });
+    expect(error).toMatchObject({
+      code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+      ownerPid: FOREIGN_PID,
+    });
+    expect(String(error)).toContain("Retry after that daemon releases it, or pick another device.");
+    expect(ran).toEqual([]);
+    expect(readinessRequests).toBe(0);
+  });
+
+  arranged("#12220 unknown forwarded port refuses control while observe watches", async () => {
+    foreignOwners.clear();
+    forwardVerdict = {
+      kind: "unknown",
+      ports: [19001],
+      reason: "pid unavailable",
+      message: "unknown forward owner",
+    };
+    const error = await refusal("tapOn", {
+      text: "OK",
+      action: "tap",
+      platform: "android",
+      deviceId: claimed.deviceId,
+    });
+    expect(error).toMatchObject({
+      code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+      ownerPid: undefined,
+    });
+    expect(readinessRequests).toBe(0);
+    await call("observe", { platform: "android", deviceId: claimed.deviceId });
+    expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
+    expect(readinessRequests).toBe(0);
+  });
+
+  arranged("#12220 foreign forward remains watchable through observe", async () => {
+    foreignOwners.clear();
+    forwardVerdict = {
+      kind: "foreign",
+      ports: [19001],
+      clientPids: [FOREIGN_PID],
+      message: "foreign CtrlProxy forward",
+    };
+    onlyClaimedVisible();
+    await call("observe", { platform: "android", deviceId: claimed.deviceId });
+    expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
+    expect(readinessRequests).toBe(0);
+  });
+
+  arranged(
+    "F6a no current device or pin and one foreign running device refuses tapOn {} while observe {} watches",
+    async () => {
+      onlyClaimedVisible();
+      foreignOwners.clear();
+      devices.getCurrentDevice = () => undefined;
+      devices.getCurrentPlatform = () => undefined;
+      expect(devices.getExplicitDevicePin()).toBeUndefined();
+      forwardVerdict = {
+        kind: "foreign",
+        ports: [8767],
+        clientPids: [FOREIGN_PID],
+        message: "foreign driver",
+      };
+      const error = await refusal("tapOn", {});
+      expect(error).toMatchObject({
+        code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+        deviceId: claimed.deviceId,
+        ownerPid: FOREIGN_PID,
+      });
+      expect(String(error)).toContain(
+        "the device it would use is driven by another AutoMobile daemon",
+      );
+      expect(String(error)).not.toContain("the only candidate");
+      expect(readinessRequests).toBe(0);
+      expect(ran).toEqual([]);
+      await call("observe", {});
+      expect(readinessRequests).toBe(0);
+      expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
+    },
+  );
+
+  arranged("#12220 no forward admits unnamed control", async () => {
+    onlyClaimedVisible();
+    foreignOwners.clear();
+    await call("tapOn", { text: "OK", action: "tap", platform: "android" });
+    expect(ran).toEqual([{ name: "tapOn", deviceId: claimed.deviceId }]);
   });
 });

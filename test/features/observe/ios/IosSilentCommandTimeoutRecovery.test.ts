@@ -41,7 +41,7 @@ describe("IOSCtrlProxyClient silent command timeout recovery (#11247)", () => {
       8765,
       createSuccessWebSocketFactory(timer, pongMode),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     expect(await client.ensureConnected()).toBe(true);
     // Commands follow the handshake; the handshake itself is the last proof of life.
@@ -50,7 +50,7 @@ describe("IOSCtrlProxyClient silent command timeout recovery (#11247)", () => {
   };
 
   const expectUnconfirmedTap = async (c: IOSCtrlProxyClient): Promise<void> => {
-    const tap = await c.requestTapCoordinates(10, 20);
+    const tap = await c.requestTapCoordinates({ x: 10, y: 20 });
     expect(tap).toMatchObject({ success: false, dispatched: true, acknowledged: false });
   };
 

@@ -5,12 +5,14 @@ import { resolveAutoMobileBaseDir } from "../../../../src/utils/tempDir";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import type { FileDownloader } from "../../../../src/utils/FileDownloader";
 import {
+  WEBP_CODEC_TIMEOUT_MS,
   defaultWebpBinaryFileSystem,
   WebpBinaryResolver,
   type WebpBinaryResolverOptions,
 } from "../../../../src/utils/image/webp/WebpBinaryResolver";
 import { FakeArchiveExtractor } from "../../../fakes/FakeArchiveExtractor";
 import { FakeChecksumCalculator } from "../../../fakes/FakeChecksumCalculator";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeChildProcess } from "../../../fakes/FakeChildProcess";
 import { FakeProcessExecutor } from "../../../fakes/FakeProcessExecutor";
 import { FakeWebpBinaryFileSystem } from "../../../fakes/FakeWebpBinaryFileSystem";
@@ -348,21 +350,13 @@ describe("WebpBinaryResolver", () => {
 
     const resolverOptions = { ...options, fileDownloader: downloader };
     const firstResolver = resolverFor(fileSystem, resolverOptions);
-    const secondResolver = resolverFor(fileSystem, resolverOptions);
     // Observe the second caller entering the shared in-flight map, rather than
     // assuming its probes finish before a fixed download delay.
     const secondProvisionStarted = Promise.withResolvers<void>();
-    const secondProvisioner = secondResolver as unknown as {
-      provisionArchiveOnce(archive: unknown, cacheDir: string): Promise<void>;
-    };
-    const provisionArchiveOnce = secondProvisioner.provisionArchiveOnce.bind(secondResolver);
-    const provisionSpy = spyOn(secondProvisioner, "provisionArchiveOnce").mockImplementation(
-      (archive, cacheDir) => {
-        const provision = provisionArchiveOnce(archive, cacheDir);
-        secondProvisionStarted.resolve();
-        return provision;
-      },
-    );
+    const secondResolver = resolverFor(fileSystem, {
+      ...resolverOptions,
+      onArchiveProvisionRequested: () => secondProvisionStarted.resolve(),
+    });
     let first: string;
     let second: string;
     try {
@@ -375,7 +369,6 @@ describe("WebpBinaryResolver", () => {
       [first, second] = await Promise.all([firstResolution, secondResolution]);
     } finally {
       downloadGate.resolve();
-      provisionSpy.mockRestore();
     }
 
     expect(first).toBe(MAC_ARM64_CWEBP);
@@ -474,6 +467,7 @@ function driveChild(
 function resolverWithExecutable(
   binary: "cwebp" | "dwebp",
   processExecutor: FakeProcessExecutor,
+  options: WebpBinaryResolverOptions = {},
 ): WebpBinaryResolver {
   const fileSystem = new FakeWebpBinaryFileSystem();
   const binaryPath = path.join(ROOT, "bin", binary);
@@ -484,6 +478,7 @@ function resolverWithExecutable(
     arch: "arm64",
     env: { [envVar]: binaryPath, PATH: "" },
     processExecutor,
+    ...options,
   });
 }
 
@@ -570,4 +565,46 @@ describe("WebpBinaryResolver codec execution", () => {
     expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
     expect(processExecutor.getSpawnedProcesses()).toEqual([]);
   });
+});
+
+test("codec deadline kills a never-closing cwebp child", async () => {
+  const timer = new FakeTimer();
+  const executor = new FakeProcessExecutor();
+  const child = new FakeChildProcess();
+  const kill = spyOn(child, "kill");
+  executor.setNextSpawnProcess(child);
+  const resolver = resolverWithExecutable("cwebp", executor, { timer, codecTimeoutMs: 200 });
+  const finished = new Promise<void>((resolve) => child.stdin.once("finish", resolve));
+  const result = resolver.runCwebp([], Buffer.from("x")).catch((error) => error);
+  await finished;
+  timer.advanceTime(199);
+  expect(kill).not.toHaveBeenCalled();
+  timer.advanceTime(1);
+  // Assert before awaiting: the unfixed implementation never settles.
+  expect(kill).toHaveBeenCalledWith("SIGKILL");
+  const error = await result;
+  expect(error).toBeInstanceOf(ActionableError);
+  expect(error.message).toContain("cwebp");
+  expect(error.message).toContain("200ms");
+  expect(error.message).toContain("AUTOMOBILE_CWEBP_PATH");
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("codec success clears its default deadline timer", async () => {
+  const timer = new FakeTimer();
+  const executor = new FakeProcessExecutor();
+  const child = new FakeChildProcess();
+  const finished = new Promise<void>((resolve) => child.stdin.once("finish", resolve));
+  const kill = spyOn(child, "kill");
+  executor.setNextSpawnProcess(child);
+  const resolver = resolverWithExecutable("cwebp", executor, { timer });
+  const result = resolver.runCwebp([], Buffer.from("x"));
+  await finished;
+  expect(WEBP_CODEC_TIMEOUT_MS).toBe(30_000);
+  expect(timer.getPendingTimeouts()).toEqual([WEBP_CODEC_TIMEOUT_MS]);
+  child.emit("close", 0, null);
+  expect(await result).toEqual(Buffer.alloc(0));
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  timer.advanceTime(WEBP_CODEC_TIMEOUT_MS);
+  expect(kill).not.toHaveBeenCalled();
 });

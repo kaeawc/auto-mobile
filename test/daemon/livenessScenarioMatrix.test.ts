@@ -1,19 +1,20 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { randomUUID } from "node:crypto";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
-import { FakeSocket } from "../fakes/FakeNetServer";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
+import { typedFrameSchema } from "../helpers/wireMessageSchemas";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
 } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
@@ -84,10 +85,10 @@ beforeAll(async () => {
   await warm.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
   await warm.stop();
   // Warm only the managed registry/policy/proxy setup; the rows below run their own scenarios.
-  const managedWarm = await LivenessScenario.start({ managedSlots: true });
+  const managedWarm = await LivenessScenario.start({ bindings: true });
   const managed = await managedWarm.acquire();
   await managedWarm.holdAsManagedExecution(managed);
-  await managedWarm.proxy.holdManagedExecutionSession(managed);
+  await managedWarm.holdBrokerExecution(managed);
   await managedWarm.daemonRestart();
   await managedWarm.idle(KEEPER_INTERVAL_MS);
   await managedWarm.stop();
@@ -99,10 +100,10 @@ afterEach(async () => {
 
 describe("managed execution owner exemption (#11340)", () => {
   test("managed execution idle 30 min with live owner is held", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     const original = scenario.daemon.manager.getSession(managed)!;
     const clocks = [original.lastUsedAt, original.expiresAt];
     // This sleep-pausing clock counts a forward wall-only jump as sleep, without interval replay.
@@ -127,10 +128,10 @@ describe("managed execution owner exemption (#11340)", () => {
   });
 
   test("managed execution heartbeat loss releases at lease plus grace", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(managed);
     const lastBeat = scenario.daemon.manager.getSession(managed)!.lastOwnerHeartbeat!;
@@ -149,12 +150,12 @@ describe("managed execution owner exemption (#11340)", () => {
   });
 
   test("plain session in the same daemon idle-releases at 2 minutes", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true, devices: [DEVICE_A, DEVICE_B] });
+    scenario = await LivenessScenario.start({ bindings: true, devices: [DEVICE_A, DEVICE_B] });
     const startedAt = scenario.timer.now();
     const plain = await scenario.acquire(DEVICE_B);
     const managed = await scenario.acquire(DEVICE_A);
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     scenario.timer.stepWallClock(IDLE_WINDOW_MS + 1);
     await scenario.idleUntilReleased(plain, RELEASE_SLACK_MS);
     const release = scenario.releaseOf(plain)!;
@@ -166,10 +167,10 @@ describe("managed execution owner exemption (#11340)", () => {
   });
 
   test("a managed execution reclaims after restarting beyond its persisted idle deadline", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     scenario.timer.stepWallClock(30 * 60_000);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(managed);
@@ -182,10 +183,10 @@ describe("managed execution owner exemption (#11340)", () => {
   });
 
   test("a managed execution whose proxy never returns ends on the existing owner path", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const absent = await scenario.acquire();
     await scenario.holdAsManagedExecution(absent);
-    await scenario.proxy.holdManagedExecutionSession(absent);
+    await scenario.holdBrokerExecution(absent);
     scenario.timer.stepWallClock(30 * 60_000);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(absent);
@@ -220,9 +221,9 @@ describe("live stdio proxy", () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
 
-    // Held side: a call every 110 s keeps the session across five idle windows.
+    // Held side: a call every 110 s keeps the session across three idle windows.
     const callEvery = IDLE_WINDOW_MS - 10_000;
-    for (let call = 0; call < 5; call++) {
+    for (let call = 0; call < 3; call++) {
       expect(await scenario.idleWhileHeld(session, scenario.timer.now() + callEvery, 30_000)).toBe(
         undefined,
       );
@@ -973,7 +974,8 @@ describe("host sleep longer than the idle window (#10661)", () => {
       expect(releasedAt! - sleptAt).toBeLessThanOrEqual(
         IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS + RELEASE_SLACK_MS,
       );
-      expect(["cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
+      const idleExpiry: Array<string | undefined> = ["cleanup-expired"];
+      expect(idleExpiry).toContain(scenario.releaseOf(session)?.reason);
       expectFreed();
     });
   }
@@ -1459,21 +1461,18 @@ class ObservationStreamForScenario extends DeviceDataStreamSocketServer {
     super("/fake/path/matrix.sock", timer, { authorize: () => {} });
   }
 
-  start(): void {
-    (this as unknown as { server: unknown }).server = { listening: true };
-    (this as unknown as { onServerStarted(): void }).onServerStarted();
+  override async start(): Promise<void> {
+    this.server = new FakeListeningNetServer();
+    this.onServerStarted();
   }
 
   stopListening(): void {
-    (this as unknown as { onServerClosing(): void }).onServerClosing();
-    (this as unknown as { server: unknown }).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   async viewerSubscribes(socket: FakeSocket, sessionUuid: string): Promise<void> {
-    await (this as unknown as { processLine(s: Socket, line: string): Promise<void> }).processLine(
-      socket as unknown as Socket,
-      JSON.stringify({ command: "subscribe", sessionUuid }),
-    );
+    await this.processLine(socket, JSON.stringify({ command: "subscribe", sessionUuid }));
   }
 }
 
@@ -1482,12 +1481,12 @@ describe("a viewer stream follows its observer registration (#11076, #11084)", (
   const DESKTOP_BEAT_MS = 2_000;
   // The stream's keepalive pings are not what is asserted on.
   const errorFrames = (socket: FakeSocket) =>
-    socket.getWrittenMessages().filter((message) => message.type === "error");
+    socket.getWrittenMessages(typedFrameSchema).filter((message) => message.type === "error");
 
   test("an observer that heartbeats keeps its observation stream; one that stops has it ended with session_ended", async () => {
     scenario = await LivenessScenario.start();
     const stream = new ObservationStreamForScenario(scenario.timer);
-    stream.start();
+    await stream.start();
     try {
       const registered = await scenario.daemonMethod("daemon/registerSession", {
         sessionId: OBSERVER,
@@ -1680,18 +1679,14 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
     forwarded: Array<{ tool: string; connection: string; settle(): void }>,
   ) {
     const socketPath = join(tmpdir(), `matrix-same-tick-${randomUUID()}.sock`);
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       scenario.daemon.state as never,
       scenario.timer,
     );
     server.mcpClientFactory = async () => ({
       listTools: async () => ({ tools: [] }),
-      callTool: async (
-        params: { name: string; arguments?: Record<string, unknown> },
-        _schema: unknown,
-      ) => {
+      callTool: async (params: { name: string; arguments?: Record<string, unknown> }) => {
         const connection = String(params.arguments?.__mcpSessionId);
         if (params.name === "getAndroid") {
           await scenario.daemonToolCallWith({ deviceId: DEVICE_A }, "getAndroid", connection);
@@ -1706,6 +1701,9 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
       listResources: async () => ({ resources: [] }),
       readResource: async () => ({ contents: [] }),
       listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      request: async () => {
+        throw new Error("this scenario never issues a raw MCP request");
+      },
       close: async () => {},
     });
     await server.start();
@@ -2014,6 +2012,28 @@ describe("behaviours only narrow tests protected (#11444, #10655)", () => {
     expect(own.applied).toEqual([`${DEVICE_A}:dark`]);
   });
 
+  test("the holder's appearance set restarts its idle window; the device is freed one window after the set", async () => {
+    scenario = await LivenessScenario.start();
+    const holder = await scenario.acquire();
+    const idleStretch = IDLE_WINDOW_MS - 30_000;
+    await scenario.idle(idleStretch);
+
+    const own = await scenario.appearanceSet(holder, "dark");
+    expect(own.response.success).toBe(true);
+    expect(own.applied).toEqual([`${DEVICE_A}:dark`]);
+    const appearanceEndedAt = scenario.timer.now();
+
+    // Held side: past the acquisition's window, but inside the appearance call's window.
+    await scenario.idle(idleStretch);
+    expectHeld(holder, DEVICE_A);
+
+    // Released side: the tracked appearance execution's end is the last tool use.
+    const releasedAt = await scenario.idleUntilReleased(holder, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(appearanceEndedAt + IDLE_WINDOW_MS);
+    expect(releasedAt).toBeLessThanOrEqual(appearanceEndedAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expectFreed(DEVICE_A);
+  });
+
   test("an idle release while a recording finalize hangs frees the device at the cap, and the recording is marked incomplete (#10957)", async () => {
     scenario = await LivenessScenario.start();
     scenario.recordingStopHangs = true;
@@ -2041,7 +2061,6 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
   const WATCHED_RESOURCE = "automobile:scenario/watched";
   const OTHER_RESOURCE = "automobile:scenario/other";
   /** How long the socket server keeps an unbound, unused loopback transport (its idle close). */
-  const MCP_TRANSPORT_IDLE_CLOSE_MS = 5 * 60_000;
 
   test("an acquisition of a device a peer daemon claims is refused before this daemon looks at the device; once the peer lets go it is acquired", async () => {
     scenario = await LivenessScenario.start({ sharedDeviceClaims: true });
@@ -2147,32 +2166,26 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     expectFreed();
   });
 
-  test("a released session's MCP transport is closed five minutes after the release although its proxy stays connected; a held session's stays open", async () => {
+  test("a forward's MCP client closes when the forward ends, for a held session and after its release (#11820)", async () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
     await scenario.toolCall(session);
 
-    // Held side: the transport is the session's for as long as the session is held.
-    await scenario.idle(IDLE_WINDOW_MS / 2);
+    // Each forward opens its own in-process client and closes it with the forward: a held
+    // session keeps no transport open between calls, and its release has none to let go of.
     expectHeld(session);
-    expect(scenario.sessionsWithOpenTransport).toEqual([session]);
-
-    // Released side: the proxy never calls again and never disconnects, so only the release
-    // itself can let go of the transport.
+    expect(scenario.sessionsWithOpenTransport).toEqual([]);
     const releasedAt = await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(releasedAt).toBeDefined();
-    await scenario.idle(MCP_TRANSPORT_IDLE_CLOSE_MS - RELEASE_SLACK_MS);
-    expect(scenario.sessionsWithOpenTransport).toEqual([session]);
-    await scenario.idle(RELEASE_SLACK_MS);
     expect(scenario.sessionsWithOpenTransport).toEqual([]);
   });
 
-  test("a managed slot names the daemon that holds its execution: the restarted daemon records itself as the owner", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+  test("a binding names the daemon that holds its execution: the restarted daemon records itself as the owner", async () => {
+    scenario = await LivenessScenario.start({ bindings: true });
     const session = await scenario.acquire();
     await scenario.holdAsManagedExecution(session);
     const firstDaemon = scenario.daemonId;
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: firstDaemon,
       sessionUuid: session,
     });
@@ -2181,17 +2194,17 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     await scenario.daemonRestart();
     expect(scenario.daemonId).not.toBe(firstDaemon);
     expectHeld(session);
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: scenario.daemonId,
       sessionUuid: session,
     });
   });
 
   test("a managed execution reclaims within one keeper interval after a 20 s daemon restart beyond recovery (#11901)", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const session = await scenario.acquire();
     await scenario.holdAsManagedExecution(session);
-    await scenario.proxy.holdManagedExecutionSession(session);
+    await scenario.holdBrokerExecution(session);
     const handovers: LivenessHandover[] = [];
     scenario.proxy.onLivenessHandover((handover) => handovers.push(handover));
     await scenario.idle(KEEPER_INTERVAL_MS);
@@ -2217,7 +2230,7 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
   });
 
   test("a managed execution whose session finishes rehydrating after the startup deadline is re-owned when it does", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const session = await scenario.acquire();
     await scenario.holdAsManagedExecution(session);
     const firstDaemon = scenario.daemonId;
@@ -2227,12 +2240,12 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     // The device's claim takes 5 s longer than the startup deadline, so the daemon starts first.
     scenario.deviceClaimDelayMs = SESSION_REHYDRATION_DEADLINE_MS + 5_000;
     await scenario.daemonRestart();
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({ daemonId: firstDaemon });
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({ daemonId: firstDaemon });
 
     // The claim lands: the session is this daemon's, and so is its slot.
     await scenario.idle(5_000 + KEEPER_INTERVAL_MS);
     expectHeld(session);
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: scenario.daemonId,
       sessionUuid: session,
     });
@@ -2250,19 +2263,13 @@ test("a connected suspect holder has a truthful bind retry that disappears after
   const remaining = state.getSessionManager().getOwnerLeaseHold(holder)!.remainingMs;
   const clocks = [session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat];
   const bind = () =>
-    pool.bindOrReuseDeviceSession(
-      "rival",
-      DEVICE_A,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "rival-connection",
-    );
+    pool.bindOrReuseDeviceSession({
+      sessionId: "rival",
+      deviceId: DEVICE_A,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "rival-connection",
+    });
   const refused = await bind().catch((error: unknown) => error);
   expect(refused).toBeInstanceOf(InputDeviceOwnedError);
   if (!(refused instanceof InputDeviceOwnedError)) {

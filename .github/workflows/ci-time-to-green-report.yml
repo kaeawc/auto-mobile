@@ -1,0 +1,67 @@
+---
+# Publish PR time-to-green as a job summary and a 90-day artifact (#11582).
+# PR runs only: an all-workflow day is ~700-1,100 runs with a jobs call each,
+# against GITHUB_TOKEN's 1,000 requests/hour per repository; an 18-hour PR-only
+# window measured 189 calls. Read-only, not a required check; one ubuntu job daily.
+name: CI time-to-green report
+
+"on":
+  schedule:
+    # 04:00 UTC was quietest on 2026-10-11 and 2026-10-12 (0 and 6 runs created).
+    # Clear of nightly.yml at 00:00, release-downloads-metrics at 05:17, and
+    # circleci-nightly-visibility at 10:40.
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "Window as Nd or Nh"
+        required: false
+        type: string
+        default: "24h"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-time-to-green-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: "Publish PR time-to-green report"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Publish time-to-green report"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TTG_SINCE: ${{ inputs.since || '24h' }}
+        run: bash scripts/ci/publish-time-to-green.sh
+
+      - name: "Upload time-to-green report"
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ci-time-to-green-report
+          path: ${{ runner.temp }}/ci-time-to-green-report/
+          if-no-files-found: ignore
+          retention-days: 90

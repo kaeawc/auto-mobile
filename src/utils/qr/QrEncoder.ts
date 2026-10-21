@@ -357,16 +357,3 @@ function chooseMask(base: QrMatrixBuilder, ecLevel: QrErrorCorrectionLevel): num
   );
   return scores.indexOf(Math.min(...scores));
 }
-
-/**
- * Build a symbol from already-computed final codewords with a fixed mask.
- * Exposed so tests can check placement against published codeword vectors.
- */
-export function buildQrMatrix(
-  codewords: readonly number[],
-  version: number,
-  ecLevel: QrErrorCorrectionLevel,
-  mask: number,
-): QrMatrix {
-  return finishSymbol(buildUnmaskedMatrix(codewords, version), ecLevel, mask);
-}

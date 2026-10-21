@@ -1,20 +1,21 @@
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
-import { permissiveDeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import { permissiveDeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
 import {
   resetWebRtcStreamManager,
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
   stopWebRtcStream,
-} from "../../src/server/webrtcStreamManager";
+} from "../../src/daemon/webrtcStreamManager";
 import type { BootedDevice } from "../../src/models";
 import type {
   H264CaptureSource,
   H264CaptureSourceOptions,
 } from "../../src/features/webrtc/H264CaptureSource";
-import type { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
+import type { WebRtcStreamPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 import { logger } from "../../src/utils/logger";
+import type { Socket } from "node:net";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -48,7 +49,7 @@ class Relay extends VideoStreamSocketServer {
         {
           generation: number;
           parser: object;
-          waitingForKeyFrame: Set<FakeSocket>;
+          waitingForKeyFrame: Set<Socket>;
           lastEncodedDataMs: number | null;
           firstEvidenceMs: number | null;
           encodedSinceSourceFrame: boolean;
@@ -106,8 +107,30 @@ function harness(platform: "android" | "ios" = "android") {
         notifySourceFailed: () => {},
         writeH264Chunk: () => {},
         primeH264ParameterSets: () => {},
-        getDescriptor: () => ({ streamId: config.streamId, state: "idle", iceServers: [] }),
-      }) as unknown as WebRtcPublisher,
+        endOfH264Packet: () => {},
+        writePcmAudioChunk: () => {},
+        getDescriptor: () => ({
+          streamId: config.streamId,
+          state: "idle",
+          whipEndpoint: config.whipEndpoint,
+          resourceUrl: null,
+          iceServers: [],
+          framesSent: 0,
+          packetsSent: 0,
+          audioPacketsSent: 0,
+          audioSamplesSent: 0,
+          readiness: {
+            lastEncodedFrameTimestampUs: null,
+            lastIdrTimestampUs: null,
+            idrRequestCount: null,
+            idrCompletionCount: null,
+            encodedAccessUnitCount: null,
+            publisherRtpPacketCount: null,
+            captureSourceState: "not_initialized",
+            lastSourceError: null,
+          },
+        }),
+      }) satisfies WebRtcStreamPublisher,
   });
   const relay = new Relay(
     {

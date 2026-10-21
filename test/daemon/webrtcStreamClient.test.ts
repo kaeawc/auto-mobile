@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_WEBRTC_STREAM_REQUEST_TIMEOUT_MS,
   sendWebRtcStreamRequest,
-} from "../../src/daemon/webrtcStreamClient";
+} from "../../scripts/lib/webrtcStreamClient";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
 } from "../../src/daemon/webrtcStreamSocketTypes";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
 import { ActionableError } from "../../src/models/ActionableError";
 
 const request: WebRtcStreamSocketRequest = { action: "status", id: "request-1" };
@@ -119,7 +119,7 @@ test("valid WebRTC envelope preserves extras and unchecked additive fields acros
   const split = bytes.indexOf(Buffer.from("😀")) + 1;
   socket.feed(bytes.subarray(0, split));
   socket.feed(bytes.subarray(split));
-  await expect(result).resolves.toEqual(futureResponse);
+  expect<unknown>(await result).toEqual(futureResponse);
   expect(socket.destroyed).toBe(true);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });

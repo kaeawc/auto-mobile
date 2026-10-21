@@ -2,21 +2,14 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.recompositionRate!!</ID>
-    <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.timeToInteractiveMs!!</ID>
-    <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.touchLatencyMs!!</ID>
-    <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:onUpdateCell!!</ID>
-    <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:selectedTable!!</ID>
-    <ID>UnsafeCallOnNullableType:DeviceListSection.kt:error!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.fileName!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.lineNumber!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:selectedFailure!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresPushSocketClient.kt:FailuresPushSocketClient$channel!!</ID>
-    <ID>UnsafeCallOnNullableType:McpConnectionSection.kt:connectedProcess!!</ID>
-    <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:hoveredTransitionId!!</ID>
-    <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:screenshotBitmap!!</ID>
-    <ID>UnsafeCallOnNullableType:NavigationDetailViews.kt:screenshotBitmap!!</ID>
-    <ID>UnsafeCallOnNullableType:PropertyInspectorPanel.kt:element.text!!</ID>
-    <ID>UnsafeCallOnNullableType:TelemetryDashboard.kt:previousDeviceId!!</ID>
+    <ID>CyclomaticComplexMethod:AutoMobileContent.kt:@Composable fun AutoMobileContent</ID>
+    <ID>LongMethod:AutoMobileContent.kt:@Composable fun AutoMobileContent</ID>
+    <ID>TooGenericExceptionCaught:FailuresDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FailuresViewModel.kt:FailuresViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpResourceClient.kt:DaemonMcpResourceClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NavigationFacet.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NavigationViewModel.kt:NavigationViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:OfflineNavigationBrowser.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealNavigationDataSource.kt:RealNavigationDataSource$e: Exception</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "sheet",
+        "edge": "bottom",
+        "height": 10001
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.placement.height",
+  "expectedMessage": "Invalid number value"
+}

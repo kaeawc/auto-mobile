@@ -9,7 +9,7 @@ import org.junit.Test
 
 class ImeCommitDriverTraceTest {
   private data class Replay(
-    val sink: ImeCommitDriverTest.FakeImeCommitSink,
+    val sink: ImeCommitDriverFixtures.FakeImeCommitSink,
     val result: ImeCommitResult,
     val lines: List<String>,
     val calls: List<String>,
@@ -21,7 +21,7 @@ class ImeCommitDriverTraceTest {
     inputType: Int = InputType.TYPE_CLASS_TEXT,
     text: String = if (scenario == "keys") "A !" else TEXT,
   ): Replay {
-    val sink = ImeCommitDriverTest.FakeImeCommitSink(inputType)
+    val sink = ImeCommitDriverFixtures.FakeImeCommitSink(inputType)
     sink.editorText = BASELINE
     if (scenario == "resume") {
       sink.beforeCommit = { index -> if (index == 3) sink.stale = true }
@@ -135,9 +135,11 @@ class ImeCommitDriverTraceTest {
       )
     var result: ImeCommitResult? = null
     driver.commit(
-      text,
-      "prior",
-      delivery = if (scenario == "keys") ImeTextDelivery.KEY_EVENTS else ImeTextDelivery.COMMIT,
+      ImeCommitRequest(
+        text,
+        "prior",
+        delivery = if (scenario == "keys") ImeTextDelivery.KEY_EVENTS else ImeTextDelivery.COMMIT,
+      ),
     ) {
       result = it
     }
@@ -223,12 +225,12 @@ class ImeCommitDriverTraceTest {
   }
 
   @Test
-  fun `consume to empty records none applied failure`() {
+  fun `consume to empty records consumed decision and continues`() {
     val replay = replay("consume", true)
-    assertFalse(replay.result.success)
-    assertTrue(replay.lines.any { it.endsWith("kind=fail confirmed=0 reason=noneApplied") })
-    assertTrue(replay.lines.last().endsWith("code=noneApplied"))
+    assertTrue(replay.result.success)
+    assertTrue(replay.lines.any { it.endsWith("kind=consumed confirmed=0") })
     assertFalse(replay.lines.any { it.contains("event=resend") })
+    assertFalse(replay.lines.any { it.contains("reason=noneApplied") })
   }
 
   @Test

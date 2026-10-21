@@ -1,3 +1,5 @@
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, spyOn, describe, test, beforeEach, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
 import { logger } from "../../../src/utils/logger";
@@ -21,6 +23,13 @@ const missingPackageDump = readFileSync(
   ),
   "utf8",
 );
+
+const createManagerWithElementServices = (
+  device: BootedDevice,
+  adb: AdbClientFactory | FakeAdbExecutor,
+  parser: DefaultElementParser,
+  geometry: DefaultElementGeometry,
+) => new DeepLinkManager(device, adb, { elementServices: { parser, geometry } });
 const stderrWarning = "avc: denied { read } for name=package";
 
 describe("DeepLinkManager", () => {
@@ -44,8 +53,10 @@ describe("DeepLinkManager", () => {
     fakeAdbFactory = { create: () => fakeAdb };
 
     // Set up default responses for dumpsys package
-    fakeAdb.setCommandResponse("dumpsys package 'com.example.app'", {
-      stdout: `Package [com.example.app] (12345):
+    fakeAdb.setCommandResponse(
+      "dumpsys package 'com.example.app'",
+      createExecResult(
+        `Package [com.example.app] (12345):
   userId=10123
   pkg=Package{abcdef com.example.app}
   codePath=/data/app/com.example.app-1
@@ -105,17 +116,19 @@ Receiver Resolver Table:
       androidx.profileinstaller.action.INSTALL_PROFILE:
         abcdef123 com.example.app/androidx.profileinstaller.ProfileInstallReceiver filter 654321
           Action: "androidx.profileinstaller.action.INSTALL_PROFILE"`,
-      stderr: "",
-    });
+        "",
+      ),
+    );
 
-    // Create deep link manager
-    deepLinkManager = new DeepLinkManager(testDevice, fakeAdbFactory);
-
-    // Create mock parser and geometry
+    // Create mock parser and geometry, injected into the manager
     mockParser = new DefaultElementParser();
     mockGeometry = new DefaultElementGeometry();
-    (deepLinkManager as any).parser = mockParser;
-    (deepLinkManager as any).geometry = mockGeometry;
+    deepLinkManager = createManagerWithElementServices(
+      testDevice,
+      fakeAdbFactory,
+      mockParser,
+      mockGeometry,
+    );
   });
 
   afterEach(() => {
@@ -193,10 +206,10 @@ Receiver Resolver Table:
     });
 
     test("should report a missing package with actionable guidance", async () => {
-      fakeAdb.setCommandResponse("dumpsys package 'com.example.not.installed'", {
-        stdout: missingPackageDump,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "dumpsys package 'com.example.not.installed'",
+        createExecResult(missingPackageDump, ""),
+      );
 
       const result = await deepLinkManager.getDeepLinks("com.example.not.installed");
 
@@ -214,10 +227,10 @@ Receiver Resolver Table:
     test.each([stderrWarning, ""])(
       "should parse a captured installed package with stderr %j",
       async (stderr) => {
-        fakeAdb.setCommandResponse(`dumpsys package '${playgroundAppId}'`, {
-          stdout: installedPackageDump,
-          stderr,
-        });
+        fakeAdb.setCommandResponse(
+          `dumpsys package '${playgroundAppId}'`,
+          createExecResult(installedPackageDump, stderr),
+        );
 
         const result = await deepLinkManager.getDeepLinks(playgroundAppId);
 
@@ -230,10 +243,10 @@ Receiver Resolver Table:
     );
 
     test("should fail for a captured missing package with stderr", async () => {
-      fakeAdb.setCommandResponse("dumpsys package 'com.example.not.installed'", {
-        stdout: missingPackageDump,
-        stderr: stderrWarning,
-      });
+      fakeAdb.setCommandResponse(
+        "dumpsys package 'com.example.not.installed'",
+        createExecResult(missingPackageDump, stderrWarning),
+      );
 
       const result = await deepLinkManager.getDeepLinks("com.example.not.installed");
 
@@ -242,10 +255,10 @@ Receiver Resolver Table:
     });
 
     test("should fail for captured stdout without a package marker and with stderr", async () => {
-      fakeAdb.setCommandResponse(`dumpsys package '${playgroundAppId}'`, {
-        stdout: installedPackageDump.split("\n").slice(0, 10).join("\n"),
-        stderr: stderrWarning,
-      });
+      fakeAdb.setCommandResponse(
+        `dumpsys package '${playgroundAppId}'`,
+        createExecResult(installedPackageDump.split("\n").slice(0, 10).join("\n"), stderrWarning),
+      );
 
       const result = await deepLinkManager.getDeepLinks(playgroundAppId);
 
@@ -254,8 +267,10 @@ Receiver Resolver Table:
     });
 
     test("should succeed for an installed package without deep links", async () => {
-      fakeAdb.setCommandResponse("dumpsys package 'com.example.empty'", {
-        stdout: `Package [com.example.empty] (12345):
+      fakeAdb.setCommandResponse(
+        "dumpsys package 'com.example.empty'",
+        createExecResult(
+          `Package [com.example.empty] (12345):
   userId=10123
   pkg=Package{abcdef com.example.empty}
   codePath=/data/app/com.example.empty-1
@@ -264,8 +279,9 @@ Receiver Resolver Table:
   versionName=1.0
   flags=[ INSTALLED HAS_CODE ]
   User 0: ceDataInode=123456 installed=true hidden=false suspended=false stopped=false notLaunched=false enabled=0 instant=false virtual=false`,
-        stderr: "",
-      });
+          "",
+        ),
+      );
 
       const result = await deepLinkManager.getDeepLinks("com.example.empty");
 
@@ -281,7 +297,7 @@ Receiver Resolver Table:
 
   describe("detectIntentChooser", () => {
     test("should detect intent chooser with ChooserActivity", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -289,14 +305,14 @@ Receiver Resolver Table:
             },
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(true);
     });
 
     test("should detect intent chooser with ResolverActivity", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -304,14 +320,14 @@ Receiver Resolver Table:
             },
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(true);
     });
 
     test("should detect intent chooser with 'Choose an app' text", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -319,14 +335,14 @@ Receiver Resolver Table:
             },
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(true);
     });
 
     test("should detect intent chooser with 'Always' and 'Just once' buttons", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {},
@@ -344,14 +360,14 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(true);
     });
 
     test("should not detect intent chooser in normal app screens", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {},
@@ -371,63 +387,63 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(false);
     });
 
     test("should handle malformed view hierarchy", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {},
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(false);
     });
 
     test("detects the chooser via the button_once resource id", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {},
             node: [{ $: { "resource-id": "android:id/button_once" } }],
           },
         },
-      };
+      });
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
 
     test("detects the chooser via the resolver_list resource id (substring match)", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { "resource-id": "com.android.internal:id/resolver_list" },
           },
         },
-      };
+      });
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
 
     test("detects an indicator that appears only in content-desc (text fallback)", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { "content-desc": "Just once" },
           },
         },
-      };
+      });
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
 
     test("requires an exact text match and ignores superstrings of an indicator", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { text: "Just once please tap here" },
           },
         },
-      };
+      });
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(false);
     });
   });
@@ -436,27 +452,22 @@ Receiver Resolver Table:
     beforeEach(() => {
       // Mock the element utils methods
       const mockButton = {
-        bounds: { left: 100, top: 200, right: 300, bottom: 400 },
-        text: "Always",
+        $: {
+          text: "Always",
+          class: "android.widget.Button",
+          bounds: { left: 100, top: 200, right: 300, bottom: 400 },
+        },
       };
 
       // Mock extractRootNodes
-      (mockParser as any).extractRootNodes = () => [mockButton];
+      mockParser.extractRootNodes = () => [mockButton];
 
       // Mock getElementCenter
-      (mockGeometry as any).getElementCenter = () => ({ x: 200, y: 300 });
-
-      // Mock findButtonByText method by adding it to the deep link manager
-      (deepLinkManager as any).findButtonByText = (node: any, textOptions: string[]) => {
-        if (textOptions.some((option) => node.text && node.text.includes(option))) {
-          return node;
-        }
-        return null;
-      };
+      mockGeometry.getElementCenter = () => ({ x: 200, y: 300 });
     });
 
     test("should handle intent chooser with 'always' preference", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -473,7 +484,7 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       const result = await deepLinkManager.handleIntentChooser(viewHierarchy, "always");
 
@@ -483,7 +494,7 @@ Receiver Resolver Table:
     });
 
     test("should return success false when no intent chooser is detected", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -498,10 +509,10 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       // Reset mocks for this specific test
-      (mockParser as any).extractRootNodes = () => [
+      mockParser.extractRootNodes = () => [
         {
           $: {
             class: "android.widget.LinearLayout",
@@ -523,7 +534,7 @@ Receiver Resolver Table:
     });
 
     test("should handle ADB command failures during tap", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -540,7 +551,7 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       // Create a failing fake for input tap commands
       const failingFake = new FakeAdbExecutor();
@@ -552,9 +563,12 @@ Receiver Resolver Table:
         includes: () => true,
       });
 
-      const manager = new DeepLinkManager(testDevice, failingFake);
-      (manager as any).parser = mockParser;
-      (manager as any).geometry = mockGeometry;
+      const manager = createManagerWithElementServices(
+        testDevice,
+        failingFake,
+        mockParser,
+        mockGeometry,
+      );
 
       const result = await manager.handleIntentChooser(viewHierarchy, "always");
 
@@ -564,7 +578,12 @@ Receiver Resolver Table:
   });
 
   describe("parsePackageDumpsysOutput", () => {
-    test("should extract schemes and hosts from dumpsys output", () => {
+    const parseDumpsys = async (output: string) => {
+      fakeAdb.setCommandResponse("dumpsys package 'com.example.app'", createExecResult(output, ""));
+      return (await deepLinkManager.getDeepLinks("com.example.app")).deepLinks;
+    };
+
+    test("should extract schemes and hosts from dumpsys output", async () => {
       const output = `  Schemes:
       https:
         abcdef123 com.example.app/.MainActivity filter 987654
@@ -581,7 +600,7 @@ Receiver Resolver Table:
           Scheme: "myapp"
           Authority: "deep": -1`;
 
-      const result = (deepLinkManager as any).parsePackageDumpsysOutput("com.example.app", output);
+      const result = await parseDumpsys(output);
 
       expect(result.schemes).toContain("https");
       expect(result.schemes).toContain("myapp");
@@ -590,10 +609,10 @@ Receiver Resolver Table:
       expect(result.intentFilters.length).toBeGreaterThan(0);
     });
 
-    test("should handle empty dumpsys output", () => {
+    test("should handle empty dumpsys output", async () => {
       const output = "";
 
-      const result = (deepLinkManager as any).parsePackageDumpsysOutput("com.example.app", output);
+      const result = await parseDumpsys(output);
 
       expect(result.schemes).toHaveLength(0);
       expect(result.hosts).toHaveLength(0);
@@ -601,7 +620,7 @@ Receiver Resolver Table:
       expect(result.supportedMimeTypes).toHaveLength(0);
     });
 
-    test("should handle dumpsys output without schemes section", () => {
+    test("should handle dumpsys output without schemes section", async () => {
       const output = `Package [com.example.app] (12345):
   Non-Data Actions:
       android.intent.action.MAIN:
@@ -609,7 +628,7 @@ Receiver Resolver Table:
           Action: "android.intent.action.MAIN"
           Category: "android.intent.category.LAUNCHER"`;
 
-      const result = (deepLinkManager as any).parsePackageDumpsysOutput("com.example.app", output);
+      const result = await parseDumpsys(output);
 
       expect(result.schemes).toHaveLength(0);
       expect(result.hosts).toHaveLength(0);

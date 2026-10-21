@@ -105,3 +105,16 @@ test("device loss recognition preserves the existing prefix protocol", () => {
     expect(isDeviceLossCancellationReason(reason)).toBe(false);
   }
 });
+
+test("in-memory store round-trips adopted output availability", async () => {
+  const store = createStore();
+  const incident = await store.open({
+    deviceId: "emulator-5554",
+    detectionPath: "device-discovery-miss",
+    outputUnavailable: "adopted",
+    recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+  });
+  expect(incident.outputUnavailable).toBe("adopted");
+  expect((await store.get(incident.id))?.outputUnavailable).toBe("adopted");
+  expect((await store.list())[0].outputUnavailable).toBe("adopted");
+});

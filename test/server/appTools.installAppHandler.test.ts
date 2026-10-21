@@ -1,29 +1,24 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  registerAppTools,
-  resetInstallAppToolDependencies,
-  setInstallAppToolDependencies,
-} from "../../src/server/appTools";
 import { ActionableError, type BootedDevice, type InstallAppResult } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 describe("installApp handler", () => {
   const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
   const artifactPath = "/tmp/app.apk";
 
   beforeEach(() => {
-    ToolRegistry.clearTools();
-    resetInstallAppToolDependencies();
-    registerAppTools();
+    appTools.reset();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetInstallAppToolDependencies();
+    appTools.clear();
   });
 
   const stubInstall = (result: InstallAppResult) => {
-    setInstallAppToolDependencies({ createInstallApp: () => ({ execute: async () => result }) });
+    appTools.configure("installApp", { createInstallApp: () => ({ execute: async () => result }) });
   };
 
   test("surfaces a failed install instead of claiming success", async () => {

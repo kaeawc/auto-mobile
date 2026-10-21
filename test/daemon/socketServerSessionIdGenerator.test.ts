@@ -1,39 +1,15 @@
+import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { describe, expect, test } from "bun:test";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-function createFakeDaemonState(): any {
-  return {
-    isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
-    getDevicePool: () => ({
-      refreshDevices: async () => 0,
-      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-      releaseDevice: async () => {},
-    }),
-  };
-}
-
-/**
- * Minimal stand-in for the connected net.Socket. handleConnection only needs
- * setTimeout + event registration to wire a session; no real I/O is required to
- * observe which session id it minted.
- */
-function createFakeSocket(): any {
-  return {
-    setTimeout() {},
-    on() {},
-    destroy() {},
-  };
-}
+import { FakeSocket } from "../fakes/FakeNetServer";
 
 describe("UnixSocketServer session id comes from the injected IdGenerator", () => {
   test("handleConnection keys the session on the injected generator", () => {
     const idGenerator = new CountingIdGenerator("session");
-    const server = new UnixSocketServer(
+    const server = createHarnessServer(
       "/tmp/never-listened.sock",
-      "http://localhost:0/mcp",
       createFakeDaemonState(),
       new FakeTimer(),
       null,
@@ -44,10 +20,10 @@ describe("UnixSocketServer session id comes from the injected IdGenerator", () =
     // handleConnection is only entered after start() enables admission in
     // production. This unit drives the private hook directly, so mirror that
     // lifecycle state before asserting the injected ID sequence.
-    (server as any).acceptingRequests = true;
-    (server as any).handleConnection(createFakeSocket());
-    (server as any).handleConnection(createFakeSocket());
+    server.allowRequests();
+    server.connect(new FakeSocket());
+    server.connect(new FakeSocket());
 
-    expect(Array.from((server as any).sessions.keys())).toEqual(["session-1", "session-2"]);
+    expect(server.sessionIds).toEqual(["session-1", "session-2"]);
   });
 });

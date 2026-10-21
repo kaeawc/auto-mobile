@@ -1,3 +1,7 @@
+import {
+  getNativeHelperRegistry,
+  type NativeHelperTracker,
+} from "../../utils/nativeHelpers/NativeHelperRegistry";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { EventEmitter } from "node:events";
 import type { Readable, Writable } from "node:stream";
@@ -50,10 +54,20 @@ export type HelperSpawner = (
   options: Parameters<HostProcessExecutor["spawn"]>[2],
 ) => HelperProcess;
 
-type HelperProcess = ReturnType<HostProcessExecutor["spawn"]> & {
+/** The child-process surface the helper drives; narrow so tests can fake just these members. */
+type HelperProcess = Pick<
+  ReturnType<HostProcessExecutor["spawn"]>,
+  "exitCode" | "kill" | "killed" | "pid" | "signalCode"
+> & {
   stdin: Writable;
   stdout: Readable;
   stderr: Readable;
+  once(event: "error", listener: (error: Error) => void): unknown;
+  once(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
+  removeAllListeners(): unknown;
 };
 
 export type HelperProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;
@@ -115,6 +129,7 @@ export interface IosScreenCaptureHelperOptions {
   stopGraceMs?: number;
   /** Override process-group cleanup for tests. */
   processGroupKiller?: HelperProcessGroupKiller;
+  nativeHelperRegistry?: NativeHelperTracker;
 }
 
 export type IosScreenCaptureReadinessPhase =
@@ -194,8 +209,11 @@ export class IosScreenCaptureHelper extends EventEmitter {
     null;
   private frameDeliveryScheduled = false;
 
+  private readonly nativeHelperRegistry?: NativeHelperTracker;
+
   constructor(options: IosScreenCaptureHelperOptions) {
     super();
+    this.nativeHelperRegistry = options.nativeHelperRegistry;
     this.binaryPath = options.binaryPath;
     this.target = options.target;
     this.spawner = options.spawner ?? defaultHelperSpawner;
@@ -243,6 +261,10 @@ export class IosScreenCaptureHelper extends EventEmitter {
     const proc = this.spawner(this.binaryPath, args, {
       detached: process.platform === "darwin",
       stdio: ["pipe", "pipe", "pipe"],
+    });
+    (this.nativeHelperRegistry ?? getNativeHelperRegistry()).track(proc, {
+      kind: "ios-capture-helper",
+      processGroup: process.platform === "darwin",
     });
     this.process = proc;
     this.controlChannelErrored = false;

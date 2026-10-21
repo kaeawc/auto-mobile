@@ -21,31 +21,32 @@ import org.junit.Test
  * is keyed by fully qualified class name (issue #10091).
  */
 class TestTimingKeyingTest {
+  private lateinit var store: TestTimingStore
+  private lateinit var collaborators: PlanExecutorCollaborators
   private lateinit var daemon: TimingFakeDaemonClient
 
   @Before
   fun setup() {
     daemon = TimingFakeDaemonClient()
-    DaemonSocketClientManager.testClient = daemon
-    AutoMobileSharedUtils.testDeviceChecker = TimingFakeDeviceChecker()
-    DaemonHeartbeat.testController = TimingFakeHeartbeat()
-    AutoMobilePlanExecutor.testAgent =
+    val agent =
       AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = false))
-    TestTimingCache.testCiModeOverride = false
+    collaborators =
+      PlanExecutorCollaborators(
+        agent = { agent },
+        deviceChecker = TimingFakeDeviceChecker(),
+        daemon = daemon,
+        heartbeat = TimingFakeHeartbeat(),
+      )
+    store = TestTimingStore(ciMode = { false }, collaborators = collaborators)
     SystemPropertyCache.clear()
-    TestTimingCache.clear()
+    store.clear()
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
-    AutoMobilePlanExecutor.testAgent = null
-    TestTimingCache.testCiModeOverride = null
     System.clearProperty("automobile.junit.timing.ordering")
     SystemPropertyCache.clear()
-    TestTimingCache.clear()
+    store.clear()
   }
 
   @Test
@@ -53,7 +54,7 @@ class TestTimingKeyingTest {
     daemon.sessionUuid = "fresh-jvm-session"
     daemon.timings = listOf(timing("com.app.login.SmokeTest", "opensHome", 500))
 
-    assertTrue(TestTimingCache.hasTimings())
+    assertTrue(store.hasTimings())
 
     val uri = daemon.readUris.single()
     assertTrue(uri, uri.startsWith("automobile:test-timings?"))
@@ -72,18 +73,18 @@ class TestTimingKeyingTest {
       )
 
     val qualified =
-      TestTimingCache.getTiming(
+      store.getTiming(
         "com.app.login.SmokeTest",
         "opensHome",
         legacySimpleName = "SmokeTest",
       )
     val legacy =
-      TestTimingCache.getTiming(
+      store.getTiming(
         "com.app.login.SmokeTest",
         "legacyOnly",
         legacySimpleName = "SmokeTest",
       )
-    val noFallback = TestTimingCache.getTiming("com.app.login.SmokeTest", "legacyOnly")
+    val noFallback = store.getTiming("com.app.login.SmokeTest", "legacyOnly")
 
     assertEquals(500, qualified?.averageDurationMs)
     assertEquals(700, legacy?.averageDurationMs)
@@ -100,7 +101,12 @@ class TestTimingKeyingTest {
       )
 
     val order =
-      AutoMobileRunner(RunnerTestTarget::class.java).description.children.map { it.methodName }
+      AutoMobileRunner(RunnerTestTarget::class.java, store, collaborators)
+        .description
+        .children
+        .map {
+          it.methodName
+        }
 
     assertEquals(listOf("testSetAlarm", "testLaunchClockApp"), order)
   }
@@ -115,7 +121,12 @@ class TestTimingKeyingTest {
       )
 
     val order =
-      AutoMobileRunner(RunnerTestTarget::class.java).description.children.map { it.methodName }
+      AutoMobileRunner(RunnerTestTarget::class.java, store, collaborators)
+        .description
+        .children
+        .map {
+          it.methodName
+        }
 
     assertEquals(listOf("testSetAlarm", "testLaunchClockApp"), order)
   }
@@ -124,8 +135,8 @@ class TestTimingKeyingTest {
   fun `same-named test classes in different packages record different testClass values`() {
     daemon.executePlanResponse = successResponse()
 
-    PlanRecordingAlpha.SmokeCase().runsPlan()
-    PlanRecordingBeta.SmokeCase().runsPlan()
+    PlanRecordingAlpha.SmokeCase(collaborators).runsPlan()
+    PlanRecordingBeta.SmokeCase(collaborators).runsPlan()
 
     val recorded =
       daemon.executePlanArgs.map {
@@ -181,29 +192,31 @@ class TestTimingKeyingTest {
  * Two same-simple-name classes whose @Test methods run a plan; skipped when Gradle discovers them.
  */
 object PlanRecordingAlpha {
-  class SmokeCase {
+  @Ignore("Driven directly by TestTimingKeyingTest")
+  class SmokeCase internal constructor(private val collaborators: PlanExecutorCollaborators) {
     @Test
-    @Ignore("Driven directly by TestTimingKeyingTest")
     fun runsPlan() {
-      AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
     }
   }
 }
 
 object PlanRecordingBeta {
-  class SmokeCase {
+  @Ignore("Driven directly by TestTimingKeyingTest")
+  class SmokeCase internal constructor(private val collaborators: PlanExecutorCollaborators) {
     @Test
-    @Ignore("Driven directly by TestTimingKeyingTest")
     fun runsPlan() {
-      AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
     }
   }
 }

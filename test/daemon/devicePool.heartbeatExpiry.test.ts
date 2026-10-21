@@ -1,28 +1,35 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
 async function setup() {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const device = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [device]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "test-daemon", { timer, deviceManager: utils }),
-  );
+  const pool = makePool(manager, "test-daemon", { timer, deviceManager: utils });
   await pool.initializeWithDevices([device]);
-  await manager.createSession("owner", device.deviceId, "android", 1_000, 1_000);
-  await pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
-  manager.recordHeartbeat("owner");
+  await manager.createSession("owner", device.deviceId, "android", {
+    timeoutMs: 1_000,
+    heartbeatTimeoutMs: 1_000,
+  });
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
+  await deliverDaemonHeartbeat(manager, "owner");
   manager.stopCleanupTimer();
   return { timer, persistence, manager, pool, device };
 }
@@ -46,7 +53,7 @@ test.each(["cleanup", "lookup"] as const)(
       }
       await manager.waitForSessionRelease("owner");
       await drainUntilQuiescent(timer);
-      expect(await persistence.getSession?.("owner")).toMatchObject({
+      expect(await persistence.getSession("owner")).toMatchObject({
         status: "expired",
         release_reason: "heartbeat-timeout",
       });
@@ -70,7 +77,7 @@ test("caller-driven release captures the device until the caller returns it to t
       device.deviceId,
     );
     await drainUntilQuiescent(timer);
-    expect(await persistence.getSession?.("owner")).toMatchObject({
+    expect(await persistence.getSession("owner")).toMatchObject({
       release_reason: "explicit-release",
     });
     expect(pool.getDevice(device.deviceId)).toMatchObject({ status: "busy", sessionId: "owner" });

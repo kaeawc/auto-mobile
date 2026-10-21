@@ -4,6 +4,7 @@
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
+import { markToolFailure } from "./toolFailureSignal";
 
 const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
   if (key === "extras") {
@@ -19,6 +20,10 @@ export const stringifyToolResponse = (content: unknown): string => {
   // tapOn/text matching.
   return JSON.stringify(content, stripAccessibilityExtras);
 };
+
+const toolTextContent = (payload: unknown): Array<{ type: "text"; text: string }> => [
+  { type: "text", text: stringifyToolResponse(payload) },
+];
 
 /**
  * Interface for tool response formatter
@@ -57,14 +62,12 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
       text: string;
     }>;
   } {
-    return {
-      content: [
-        {
-          type: "text",
-          text: stringifyToolResponse(content),
-        },
-      ],
+    const response: ReturnType<ToolResponseFormatter["createJSONToolResponse"]> = {
+      content: toolTextContent(content),
     };
+    return content !== null && typeof content === "object" && content.success === false
+      ? markToolFailure(response)
+      : response;
   }
 
   /**
@@ -137,14 +140,17 @@ export interface StructuredToolResponse<T = unknown> {
  * @returns A properly formatted tool response with both content and structuredContent
  */
 export const createStructuredToolResponse = <T>(content: T): StructuredToolResponse<T> => {
+  const structuredContent =
+    content &&
+    typeof content === "object" &&
+    Object.getOwnPropertySymbols(content).some((key) =>
+      Object.prototype.propertyIsEnumerable.call(content, key),
+    )
+      ? (Object.fromEntries(Object.entries(content)) as T)
+      : content;
   const response: StructuredToolResponse<T> = {
-    content: [
-      {
-        type: "text",
-        text: stringifyToolResponse(content),
-      },
-    ],
-    structuredContent: content,
+    content: toolTextContent(structuredContent),
+    structuredContent,
   };
   if (content && typeof content === "object") {
     if ("success" in content) {
@@ -212,14 +218,28 @@ export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
   key: K,
 ): TPayload[K] | undefined => {
   const structuredContent = response?.structuredContent;
-  if (structuredContent && typeof structuredContent === "object") {
-    if (!Object.hasOwn(structuredContent, key)) {
-      return undefined;
-    }
-    return (structuredContent as TPayload)[key];
+  if (hasOwnPayloadField(structuredContent, key)) {
+    return structuredContent[key];
   }
   return undefined;
 };
+
+function hasOwnPayloadField(payload: unknown, key: string): payload is Record<string, unknown> {
+  return payload !== null && typeof payload === "object" && Object.hasOwn(payload, key);
+}
+
+/** Runtime boundary for untyped envelopes; typed callers use getStructuredField. */
+export function readUnknownStructuredField(response: unknown, key: string): unknown {
+  if (
+    response === null ||
+    (typeof response !== "object" && typeof response !== "function") ||
+    !("structuredContent" in response)
+  ) {
+    return undefined;
+  }
+  const structuredContent = response.structuredContent;
+  return hasOwnPayloadField(structuredContent, key) ? structuredContent[key] : undefined;
+}
 
 /** Resolve runtime-hidden device loss before falling back to ordinary cancellation. */
 export const abortErrorFromSignal = (signal: AbortSignal, preserveReason = true): unknown =>
@@ -280,3 +300,13 @@ export const awaitWhileRequestIsLive = async <T>(
     );
   });
 };
+
+/**
+ * Locate the ObserveResult inside a tool's structured payload (#11830): `observe` returns the
+ * ObserveResult as its top-level payload, every action tool nests the same snapshot under
+ * `.observation`. The one place that encodes that difference.
+ */
+export const observationOfPayload = (
+  toolName: string,
+  payload: Record<string, unknown>,
+): unknown => (toolName === "observe" ? payload : payload.observation);

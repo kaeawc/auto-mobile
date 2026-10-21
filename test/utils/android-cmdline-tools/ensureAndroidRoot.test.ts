@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { ensureAndroidRoot } from "../../../src/utils/android-cmdline-tools/ensureAndroidRoot";
-import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { createExecResult } from "../../../src/utils/execResult";
 import { logger } from "../../../src/utils/logger";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -18,8 +18,9 @@ describe("ensureAndroidRoot", () => {
   test("propagates cancellation raised during adb root without issuing further commands", async () => {
     const controller = new AbortController();
     const commands: string[] = [];
-    const adb: Pick<AdbExecutor, "executeCommand"> = {
-      executeCommand: async (command, _timeoutMs, _maxBuffer, _noRetry, signal) => {
+    const adb: AdbCommandRunner = {
+      executeCommand: async (command, options) => {
+        const signal = options?.signal;
         commands.push(command);
         expect(signal).toBe(controller.signal);
         controller.abort(new Error("root request cancelled"));

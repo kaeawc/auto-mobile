@@ -1,3 +1,6 @@
+import { createFlatNodeForTest, capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { observeResultFromFixture, viewHierarchyFromFixture } from "../../helpers/observeFixture";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -22,12 +25,17 @@ const screenSize = { width: 1080, height: 2400 };
 const systemInsets = { top: 63, bottom: 63, left: 0, right: 0 };
 
 function observation(viewHierarchy: ViewHierarchyResult, timer: FakeTimer): ObserveResult {
-  return { timestamp: timer.now(), screenSize, systemInsets, viewHierarchy };
+  return buildObserveResult({ updatedAt: timer.now(), screenSize, systemInsets, viewHierarchy });
 }
 
 /** Real captured Playground hierarchy: includes android:id/content and a navigation bar view. */
 function capturedObservation(timer: FakeTimer): ObserveResult {
-  return { ...capturedAppHierarchy, timestamp: timer.now(), screenSize, systemInsets };
+  return observeResultFromFixture({
+    ...capturedAppHierarchy,
+    updatedAt: timer.now(),
+    screenSize,
+    systemInsets,
+  });
 }
 
 /**
@@ -38,19 +46,19 @@ function capturedObservation(timer: FakeTimer): ObserveResult {
 function appHierarchyWithControl(containerId: string, controlId: string): ViewHierarchyResult {
   return {
     hierarchy: {
-      node: {
+      node: createFlatNodeForTest({
         $: { class: "android.widget.FrameLayout", "resource-id": containerId },
         node: [
-          {
+          createFlatNodeForTest({
             $: {
               "resource-id": controlId,
               class: "android.view.View",
               bounds: { left: 720, top: 1810, right: 1080, bottom: 1910 },
               clickable: "true",
             },
-          },
+          }),
         ],
-      },
+      }),
     },
   };
 }
@@ -83,16 +91,16 @@ describe("RecentApps inner result", () => {
     recentApps.observeScreen = observe;
     recentApps.window = window;
     recentApps.awaitIdle = new FakeAwaitIdle();
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      () => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: () => {
         throw new Error("Unexpected socket connection");
       },
       timer,
-    );
+    });
     globalActionSpy = spyOn(client, "requestGlobalAction").mockResolvedValue({
       success: false,
+      action: "recent",
+      totalTimeMs: 0,
       error: "Global action failed",
     });
     instanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
@@ -118,12 +126,15 @@ describe("RecentApps inner result", () => {
   beforeEach(setUp);
   afterEach(tearDown);
 
-  const recentsObservation = (): ObserveResult => ({
-    ...capturedRecents,
-    timestamp: timer.now(),
-    screenSize,
-    systemInsets,
-  });
+  const recentsObservation = (): ObserveResult =>
+    buildObserveResult({
+      ...observeResultFromFixture(capturedRecents),
+      updatedAt: timer.now(),
+      observationId: "test-observation",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      screenSize,
+      systemInsets,
+    });
 
   test("already-open overview never dispatches another recent action", async () => {
     observe.setObserveResult(() => recentsObservation());
@@ -162,7 +173,17 @@ describe("RecentApps inner result", () => {
 
   test("a hidden overview panel on the captured Recents hierarchy is not an open overview", async () => {
     const hiddenOverview = hideCapturedNode(
-      capturedRecents.viewHierarchy,
+      {
+        ...viewHierarchyFromFixture(capturedRecents.viewHierarchy, "Recents"),
+        contentHiddenRegions: capturedRecents.viewHierarchy.contentHiddenRegions ?? undefined,
+        ctrlProxyIncomplete: capturedRecents.viewHierarchy.ctrlProxyIncomplete ?? undefined,
+        hierarchy: { node: capturedFlatNodeForTest(capturedRecents.viewHierarchy.hierarchy.node) },
+        windows: capturedRecents.viewHierarchy.windows.map((window) => ({
+          ...window,
+          bounds: capturedFlatNodeForTest(window).bounds,
+          hierarchy: capturedFlatNodeForTest(window.hierarchy),
+        })),
+      },
       "com.google.android.apps.nexuslauncher:id/overview_panel",
     );
     observe.setObserveResult(() => ({ ...recentsObservation(), viewHierarchy: hiddenOverview }));
@@ -177,7 +198,12 @@ describe("RecentApps inner result", () => {
     observe.setObserveResult(() =>
       adb.getExecutedCommands().includes("shell input keyevent 187")
         ? recentsObservation()
-        : { ...capturedHome, timestamp: timer.now(), screenSize, systemInsets },
+        : buildObserveResult({
+            ...observeResultFromFixture(capturedHome),
+            updatedAt: timer.now(),
+            screenSize,
+            systemInsets,
+          }),
     );
     const result = await recentApps.execute();
     expect(result.success).toBe(true);
@@ -235,11 +261,13 @@ describe("RecentApps inner result", () => {
   });
 
   test("an unavailable view hierarchy allows the press but cannot verify overview", async () => {
-    observe.setObserveResult(() => ({
-      timestamp: timer.now(),
-      screenSize,
-      systemInsets,
-    }));
+    observe.setObserveResult(() =>
+      buildObserveResult({
+        updatedAt: timer.now(),
+        screenSize,
+        systemInsets,
+      }),
+    );
     const result = await recentApps.execute();
     expect(result.success).toBe(false);
     expect(result.method).toBe("hardware");
@@ -316,7 +344,7 @@ describe("RecentApps inner result", () => {
   test("pre-aborted execute rejects without ADB commands", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(recentApps.execute(undefined, controller.signal)).rejects.toThrow(
+    await expect(recentApps.execute({ signal: controller.signal })).rejects.toThrow(
       "Operation cancelled",
     );
     expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input "))).toEqual([]);
@@ -325,7 +353,7 @@ describe("RecentApps inner result", () => {
   test("abort during the key event command rejects", async () => {
     const controller = new AbortController();
     adb.abortAfterCommand("shell input keyevent 187", controller);
-    await expect(recentApps.execute(undefined, controller.signal)).rejects.toThrow(
+    await expect(recentApps.execute({ signal: controller.signal })).rejects.toThrow(
       "Operation cancelled",
     );
     expect(adb.getExecutedCommands()).toContain("shell input keyevent 187");

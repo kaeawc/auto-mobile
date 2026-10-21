@@ -13,6 +13,17 @@ name: "Deploy Documentation"
 # republishes. Between doc changes they may be a few days stale.
 
 on:
+  # Pull requests that touch the docs build only verify the built site; they
+  # never publish (deploy-docs requires main and the `check` job below).
+  pull_request:
+    paths:
+      - "docs/**"
+      - "docs-assets/**"
+      - "mkdocs.yml"
+      - "overrides/**"
+      - "scripts/github/**"
+      - "scripts/docs/**"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
   schedule:
     # 08:00 UTC — offset from the midnight "Nightly" workflow to avoid runner
@@ -28,6 +39,7 @@ jobs:
     name: "Check Docs Changed"
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: github.event_name != 'pull_request'
     outputs:
       changed: ${{ steps.decide.outputs.changed }}
     steps:
@@ -45,6 +57,70 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: scripts/github/docs_changed_since_last_deploy.sh
+
+  # Build the site exactly as the deploy does, then fail on anything that would
+  # leave it unstyled or broken when served under the Pages base path: a
+  # built-HTML reference check (root-absolute URLs, missing local assets) and a
+  # headless-Chrome load of key pages from a server that mimics Pages. A site
+  # without `site_url` once published a 404.html whose CSS/JS 404'd.
+  verify-site:
+    name: "Verify Built Docs Site"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Setup Python"
+        uses: actions/setup-python@v6
+        background: true
+        id: setup-python
+        with:
+          python-version: "3.11"
+
+      - name: "Install uv"
+        uses: astral-sh/setup-uv@v7
+        background: true
+        id: setup-uv
+        with:
+          enable-cache: true
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - wait: [setup-python, setup-uv]
+
+      - name: "Install MkDocs and dependencies"
+        working-directory: scripts/github
+        run: uv sync --locked
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Build documentation"
+        run: scripts/github/deploy_pages.py build
+
+      - name: "Check built HTML references"
+        run: bun scripts/docs/check-built-site.ts site
+
+      - name: "Check key pages render themed in Chrome"
+        env:
+          AUTOMOBILE_CHROME_BINARY: /usr/bin/google-chrome
+        run: bun scripts/docs/check-site-in-browser.ts site --screenshots scratch/docs-site-screenshots
+
+      - name: "Upload page screenshots"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: docs-site-screenshots
+          path: scratch/docs-site-screenshots
+          if-no-files-found: ignore
 
   deploy-docs:
     name: "Deploy Documentation"

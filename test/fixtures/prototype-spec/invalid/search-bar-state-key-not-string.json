@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": 1
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query"
+    }
+  },
+  "expectedPath": "root.stateKey",
+  "expectedMessage": "Text field requires a string state key"
+}

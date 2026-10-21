@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import "./manual-test/harnessLogSink";
+import { z } from "zod/v4";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
@@ -16,9 +18,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { chmod, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { basename, dirname, join, resolve } from "node:path";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/buildIdentity";
 import { DaemonClient } from "../src/daemon/client";
 import {
@@ -38,14 +40,15 @@ import {
   provisionDeviceSchema,
   startDeviceSchema,
 } from "../src/server/deviceTools";
-import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
-import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../src/server/ambiguousDeviceTargetRefusal";
+import { readToolEnvelopePayload } from "../src/daemon/toolEnvelopePayload";
+import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../src/daemon/ambiguousDeviceTargetRefusal";
 import { MIN_AVD_RAM_MB } from "../src/utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../src/utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { parseAndroidApiLevelBound } from "../src/utils/androidVersionBounds";
 import { compareStrictNumericVersions } from "../src/utils/deviceMatcher";
 import { inferIosFormFactor } from "../src/utils/ios-cmdline-tools/iosDeviceType";
 import { stableStringify } from "../src/utils/stableStringify";
+import { defaultIdGenerator } from "../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
 
 const ENABLED_TOOLS = ["observe", "getDeviceState", "killDevice", "tapAt", "rotate"] as const;
@@ -54,7 +57,7 @@ const MAX_EVIDENCE_RESERVE_MS = 5_000;
 const MAX_REAP_RESERVE_MS = 1_000;
 
 type Platform = "android" | "ios";
-type Scenario = "full";
+type Scenario = "full" | "broker";
 type JsonObject = Record<string, unknown>;
 type Budget = "work" | "cleanup" | "evidence";
 type AcquisitionKind = "platform" | "generic";
@@ -83,7 +86,7 @@ export interface AcceptanceArgs {
     memoryMb: number;
     cpuCores: number;
   };
-  scenario: Scenario;
+  scenario: "full";
   evidencePath: string;
   ownershipManifestPath: string;
   operatorKeyPath: string;
@@ -234,7 +237,7 @@ interface Evidence {
   schemaVersion: 10;
   authentication: EvidenceAuthentication;
   generatedAt: string;
-  scenario: Scenario;
+  scenario: Extract<Scenario, "full">;
   platform: Platform;
   build: JsonObject;
   ownership: JsonObject;
@@ -496,6 +499,63 @@ function sameJson(left: unknown, right: unknown): boolean {
   return stableStringify(left) === stableStringify(right);
 }
 
+const manifestTargetSchema = z.looseObject({
+  target: z.looseObject({
+    avdName: z.string().optional(),
+    simulatorName: z.string().optional(),
+    simulatorUdid: z.string().optional(),
+  }),
+  controls: z.looseObject({
+    androidSiblingAvdName: z.string(),
+    androidDuplicateSerial: z.string(),
+    iosSameNameSiblingUdid: z.string(),
+  }),
+  runtime: z.string(),
+  deviceType: z.string(),
+  osVersionRange: z.looseObject({ min: z.string(), max: z.string() }),
+  androidConfig: z.looseObject({ memoryMb: z.number(), cpuCores: z.number() }).optional(),
+});
+const ownershipManifestSchema = z.looseObject({
+  schemaVersion: z.literal(1),
+  runId: z.string().min(1),
+  mac: z.string(),
+  targets: z.looseObject({
+    android: manifestTargetSchema.optional(),
+    ios: manifestTargetSchema.optional(),
+  }),
+});
+const jsonObjectSchema = z.record(z.string(), z.unknown());
+const evidenceSchema = z.looseObject({
+  schemaVersion: z.literal(10),
+  authentication: z.looseObject({
+    schemaVersion: z.literal(1),
+    algorithm: z.literal("hmac-sha256"),
+    binding: jsonObjectSchema,
+    mac: z.string(),
+  }),
+  generatedAt: z.string(),
+  scenario: z.literal("full"),
+  platform: z.enum(["android", "ios"]),
+  build: jsonObjectSchema,
+  ownership: jsonObjectSchema,
+  target: jsonObjectSchema,
+  provision: jsonObjectSchema,
+  acquisitionRequests: z.array(jsonObjectSchema),
+  runtimeIdentities: z.array(jsonObjectSchema),
+  controls: z.array(jsonObjectSchema),
+  checks: jsonObjectSchema,
+  cleanup: jsonObjectSchema,
+  outcome: jsonObjectSchema,
+  steps: z.array(
+    z.looseObject({
+      name: z.string(),
+      passed: z.boolean(),
+      elapsedMs: z.number(),
+      detail: jsonObjectSchema,
+    }),
+  ),
+});
+
 function parseOwnershipManifest(path: string, key: Buffer): OwnershipManifest {
   assertMode(path, SECURE_FILE_MODE, "Ownership manifest");
   let candidate: unknown;
@@ -504,7 +564,7 @@ function parseOwnershipManifest(path: string, key: Buffer): OwnershipManifest {
   } catch {
     throw new Error(`Ownership manifest is not valid JSON: ${path}`);
   }
-  const manifest = asObject(candidate, "ownership manifest") as OwnershipManifest;
+  const manifest = ownershipManifestSchema.parse(asObject(candidate, "ownership manifest"));
   if (
     manifest.schemaVersion !== 1 ||
     typeof manifest.runId !== "string" ||
@@ -544,7 +604,7 @@ function assertOwnershipManifest(args: AcceptanceArgs): OwnershipManifest {
 export function recordOwnershipManifest(args: AcceptanceArgs): void {
   assertControlConfiguration(args.target, args.controls);
   let targets: OwnershipManifestPayload["targets"] = {};
-  let runId = randomUUID();
+  let runId: string = randomUUID();
   if (existsSync(args.ownershipManifestPath)) {
     const existing = parseOwnershipManifest(args.ownershipManifestPath, args.operatorKey);
     targets = { ...existing.targets };
@@ -575,7 +635,7 @@ export function recordOwnershipManifest(args: AcceptanceArgs): void {
   writeSecureFile(args.ownershipManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function parseEvidence(path: string): JsonObject {
+function parseEvidence(path: string): Evidence {
   assertMode(path, SECURE_FILE_MODE, "Evidence file");
   let candidate: unknown;
   try {
@@ -587,7 +647,7 @@ function parseEvidence(path: string): JsonObject {
   if (evidence.schemaVersion !== 10) {
     throw new Error("Evidence has an unsupported schema version");
   }
-  return evidence;
+  return evidenceSchema.parse(evidence);
 }
 
 export function verifyEvidenceFile(args: EvidenceVerificationArgs): Evidence {
@@ -614,13 +674,13 @@ export function verifyEvidenceFile(args: EvidenceVerificationArgs): Evidence {
       "Evidence authentication binding does not match the build or ownership manifest",
     );
   }
-  const expectedMac = evidenceMac(evidence as Evidence, args.build, manifest, args.operatorKey);
+  const expectedMac = evidenceMac(evidence, args.build, manifest, args.operatorKey);
   assertMatchingMac(authentication.mac, expectedMac, "Evidence");
   const outcome = asObject(evidence.outcome, "evidence.outcome");
   if (outcome.passed !== true) {
     throw new Error("Evidence is authentic but records a failed acceptance outcome");
   }
-  return evidence as Evidence;
+  return evidence;
 }
 
 function writeSecureFile(path: string, content: string): void {
@@ -646,7 +706,260 @@ function ensureSecureDirectorySync(path: string, description: string): void {
   assertMode(path, SECURE_DIRECTORY_MODE, description);
 }
 
-export function parseArgs(argv: string[]): AcceptanceArgs {
+export const BROKER_ACCEPTANCE_SCENARIOS = [
+  "parallel-acquire",
+  "release-destroy-verification",
+  "multi-client-crash-isolation",
+  "cross-client-isolation-live",
+  "capacity-refusal-and-replay",
+  "daemon-restart-with-live-sessions",
+] as const;
+export interface BrokerAcceptanceArgs {
+  scenario: "broker";
+  brokerBatch: string;
+  clients?: string[];
+  maxDevices: number;
+  allowCrash: boolean;
+  only: string[];
+  confirmLive: boolean;
+  testOwnedDevices: boolean;
+  dryRun: boolean;
+  evidencePath: string;
+}
+function parseBrokerAcceptanceArgs(argv: string[]): BrokerAcceptanceArgs {
+  const values = new Map<string, string>();
+  const booleans = new Set(["confirm-live", "test-owned-devices", "dry-run", "allow-crash"]);
+  const flags = new Set([
+    "scenario",
+    "broker-batch",
+    "clients",
+    "max-devices",
+    "only",
+    ...booleans,
+  ]);
+  for (let index = 0; index < argv.length; index++) {
+    const name = argv[index].slice(2);
+    if (!argv[index].startsWith("--") || !flags.has(name) || values.has(name)) {
+      throw new Error(`Unknown or duplicate broker flag: ${argv[index]}`);
+    }
+    const value = booleans.has(name) ? "true" : argv[++index];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`--${name} needs a value`);
+    }
+    values.set(name, value);
+  }
+  const maxDevices = Number(values.get("max-devices") ?? 2);
+  if (!Number.isInteger(maxDevices) || maxDevices < 1 || maxDevices > 4) {
+    throw new Error("--max-devices must be an integer from 1 to the hard cap 4");
+  }
+  const clients = values.get("clients")?.split(",");
+  if (
+    clients &&
+    (new Set(clients).size !== clients.length || clients.some((c) => !/^[a-z0-9-]{1,32}$/.test(c)))
+  ) {
+    throw new Error("--clients requires unique batch client names");
+  }
+  const only = values.get("only")?.split(",") ?? [...BROKER_ACCEPTANCE_SCENARIOS];
+  if (
+    new Set(only).size !== only.length ||
+    only.some((name) => !BROKER_ACCEPTANCE_SCENARIOS.some((s) => s === name))
+  ) {
+    throw new Error("--only must select broker acceptance scenarios");
+  }
+  const brokerBatch = resolve(requiredFlag(values, "broker-batch"));
+  return {
+    scenario: "broker",
+    brokerBatch,
+    clients,
+    maxDevices,
+    only,
+    allowCrash: values.has("allow-crash"),
+    confirmLive: values.has("confirm-live"),
+    testOwnedDevices: values.has("test-owned-devices"),
+    dryRun: values.has("dry-run"),
+    evidencePath: join(brokerBatch, `evidence/acceptance-broker-${defaultIdGenerator.next()}.json`),
+  };
+}
+export interface BrokerAcceptanceDependencies {
+  createContext?: typeof import("./manual-test/brokerLiveAdapter").createBrokerLiveContext;
+  /** Tests still exercise confirmation and scenario sequencing, without any host I/O. */
+  evidence?: { key: Buffer; binding: JsonObject; write(path: string, text: string): void };
+  log?: (text: string) => void;
+  env?: Record<string, string | undefined>;
+}
+/** Platform-agnostic broker lane. The full matrix's verifier and manifest stay unchanged. */
+export async function runBrokerAcceptance(
+  args: BrokerAcceptanceArgs,
+  deps: BrokerAcceptanceDependencies = {},
+) {
+  if (!Number.isInteger(args.maxDevices) || args.maxDevices < 1 || args.maxDevices > 4) {
+    throw new Error("--max-devices must be an integer from 1 to the hard cap 4");
+  }
+  const plan = args.only.flatMap((name) => [
+    { name, crash: false },
+    ...(args.allowCrash && name === "daemon-restart-with-live-sessions"
+      ? [{ name, crash: true }]
+      : []),
+  ]);
+  if (args.dryRun) {
+    (deps.log ?? console.log)(
+      JSON.stringify({
+        scenario: "broker",
+        batch: args.brokerBatch,
+        maxDevices: args.maxDevices,
+        clients: args.clients,
+        plan,
+        dryRun: true,
+      }),
+    );
+    return { dryRun: true, plan };
+  }
+  if (
+    !args.confirmLive ||
+    !args.testOwnedDevices ||
+    (deps.env ?? process.env).AUTOMOBILE_ACCEPTANCE_LIVE !== "1"
+  ) {
+    throw new Error(
+      "Broker live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1",
+    );
+  }
+  const { createBrokerLiveContext } = await import("./manual-test/brokerLiveAdapter");
+  const { brokerDeviceScenarios } = await import("./manual-test/brokerDeviceScenarios");
+  const { runBrokerScenario } = await import("./manual-test/brokerScenarios");
+  const harness = await (deps.createContext ?? createBrokerLiveContext)(
+    args.brokerBatch,
+    {
+      mkdir: (path) => ensureSecureDirectorySync(path, "Broker evidence directory"),
+      writeFile: writeSecureFile,
+    },
+    { clients: args.clients, maxDevices: args.maxDevices },
+  );
+  const ctx = harness.context;
+  const steps: Step[] = [];
+  const summaries = [];
+  let failure: unknown;
+  let auth = deps.evidence;
+  try {
+    const capacity = ctx.deviceOps!.totalDeviceCap;
+    if (args.only.includes("parallel-acquire") && (capacity < 2 || ctx.clients.length < 2)) {
+      throw new Error("parallel-acquire requires at least two clients and capacity >= 2");
+    }
+    if (args.only.includes("capacity-refusal-and-replay") && ctx.clients.length <= capacity) {
+      throw new Error("capacity-refusal-and-replay requires capacity + 1 clients in the batch");
+    }
+    if (!auth) {
+      const keyPath = join(args.brokerBatch, "evidence/acceptance-operator.key");
+      if (!existsSync(keyPath)) {
+        ensureSecureDirectorySync(dirname(keyPath), "Broker evidence directory");
+        writeFileSync(
+          keyPath,
+          createHash("sha256")
+            .update(defaultIdGenerator.next())
+            .update(defaultIdGenerator.next())
+            .digest(),
+          { flag: "wx", mode: SECURE_FILE_MODE },
+        );
+      }
+      const manifest = JSON.parse(readFileSync(join(args.brokerBatch, "batch.json"), "utf8"));
+      const binding = {
+        batch: manifest,
+        hostConfig: JSON.parse(
+          readFileSync(join(args.brokerBatch, "broker/host-config.json"), "utf8"),
+        ),
+        clients: JSON.parse(readFileSync(join(args.brokerBatch, "broker/clients.json"), "utf8")),
+        build: computeBuildIdentity(manifest.options.serverPath),
+      };
+      if (binding.build.buildId === "unknown") {
+        throw new Error("Cannot compute private broker build identity");
+      }
+      auth = { key: readOperatorKey(keyPath), binding, write: writeSecureFile };
+    }
+    if (!deps.evidence) {
+      ensureSecureDirectorySync(dirname(args.evidencePath), "Broker evidence directory");
+    }
+    for (const item of plan) {
+      const scenario = brokerDeviceScenarios.find((s) => s.name === item.name)!;
+      const clients =
+        item.name === "capacity-refusal-and-replay"
+          ? ctx.clients.slice(0, capacity + 1)
+          : ctx.clients.slice(0, capacity);
+      const start = ctx.timer.now();
+      const summary = await runBrokerScenario(
+        scenario,
+        { ...ctx, clients },
+        { device: true, maxDevices: args.maxDevices, crash: item.crash },
+      );
+      summaries.push(summary);
+      recordStep(
+        steps,
+        ctx.timer,
+        `${item.name}${item.crash ? "-crash" : ""}`,
+        start,
+        { summary },
+        summary.outcome === "passed",
+      );
+      if (summary.outcome !== "passed") {
+        throw new Error(`Broker scenario failed: ${item.name}`);
+      }
+    }
+  } catch (error) {
+    failure = error; // Persist a typed failed outcome below, then surface it to the caller.
+  } finally {
+    try {
+      await harness.close();
+    } catch (error) {
+      failure ??= error;
+      recordStep(
+        steps,
+        ctx.timer,
+        "broker-cleanup",
+        ctx.timer.now(),
+        { error: String(error) },
+        false,
+      );
+    }
+  }
+  if (!auth) {
+    throw failure ?? new Error("Broker evidence authentication unavailable");
+  }
+  const evidence = {
+    schemaVersion: 11,
+    scenario: "broker",
+    generatedAt: new Date(ctx.timer.now()).toISOString(),
+    authentication: {
+      schemaVersion: 1,
+      algorithm: "hmac-sha256",
+      binding: redact(auth.binding, auth.key),
+    },
+    ownership: redact({ batch: args.brokerBatch, ledger: ctx.ledger.entries }, auth.key),
+    outcome: {
+      passed: failure === undefined,
+      ...(failure === undefined ? {} : { error: redact(String(failure), auth.key) }),
+    },
+    steps: steps.map((s) => ({ ...s, detail: redact(s.detail, auth.key) })),
+    scenarios: summaries.map((s) => ({
+      name: s.name,
+      outcome: s.outcome,
+      assertions: s.assertions,
+    })),
+  };
+  const mac = createHmac("sha256", auth.key).update(stableStringify(evidence)).digest("hex");
+  auth.write(
+    args.evidencePath,
+    `${JSON.stringify({ ...evidence, authentication: { ...evidence.authentication, mac } }, null, 2)}\n`,
+  );
+  if (failure) {
+    throw new Error(
+      `Broker acceptance failed; inspect ${basename(args.evidencePath)} and per-scenario evidence.`,
+    );
+  }
+  return evidence;
+}
+
+export function parseArgs(argv: string[]): AcceptanceArgs | BrokerAcceptanceArgs {
+  if (argv.some((value, index) => value === "--scenario" && argv[index + 1] === "broker")) {
+    return parseBrokerAcceptanceArgs(argv);
+  }
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length;) {
     const flag = argv[index];
@@ -844,26 +1157,44 @@ function toolDiagnostic(response: ToolResponse, tool: string): string {
  * Direct MCP SDK calls may render a JSON-RPC failure as an Error string instead
  * of the usual structured `isError` tool envelope. Preserve exact product
  * diagnostics while removing only that leading, validated transport rendering.
+ * The SDK v1 client prefixed the server's already-prefixed message again
+ * ("MCP error -32603: MCP error -32603: …"); the v2 client does not (issue
+ * #4678), so every leading validated prefix is removed.
  */
 export function normalizeMcpTransportDiagnostic(diagnostic: string): string {
   const renderedErrorPrefix = "Error: ";
+  let remainder = stripMcpErrorPrefix(
+    diagnostic.startsWith(renderedErrorPrefix)
+      ? diagnostic.slice(renderedErrorPrefix.length)
+      : diagnostic,
+  );
+  if (remainder === undefined) {
+    return diagnostic;
+  }
+  let next = stripMcpErrorPrefix(remainder);
+  while (next !== undefined) {
+    remainder = next;
+    next = stripMcpErrorPrefix(remainder);
+  }
+  return remainder;
+}
+
+/** Removes one leading `MCP error <negative integer code>: `, or returns undefined. */
+function stripMcpErrorPrefix(text: string): string | undefined {
   const mcpErrorPrefix = "MCP error ";
-  const candidate = diagnostic.startsWith(renderedErrorPrefix)
-    ? diagnostic.slice(renderedErrorPrefix.length)
-    : diagnostic;
-  if (!candidate.startsWith(mcpErrorPrefix)) {
-    return diagnostic;
+  if (!text.startsWith(mcpErrorPrefix)) {
+    return undefined;
   }
-  const separator = candidate.indexOf(": ", mcpErrorPrefix.length);
+  const separator = text.indexOf(": ", mcpErrorPrefix.length);
   if (separator === -1) {
-    return diagnostic;
+    return undefined;
   }
-  const code = candidate.slice(mcpErrorPrefix.length, separator);
+  const code = text.slice(mcpErrorPrefix.length, separator);
   const parsedCode = Number(code);
   if (!code.startsWith("-") || !Number.isInteger(parsedCode) || String(parsedCode) !== code) {
-    return diagnostic;
+    return undefined;
   }
-  return candidate.slice(separator + 2);
+  return text.slice(separator + 2);
 }
 
 function toolPayload(response: ToolResponse, tool: string): JsonObject {
@@ -1444,7 +1775,8 @@ export async function runTapAtMultiDeviceRefusalCheck(
   args: CoordinateAcceptanceArgs,
   dependencies: CoordinateAcceptanceDependencies,
 ): Promise<MultiDeviceRefusalResult> {
-  if (!args.expectedDeviceId) {
+  const expectedDeviceId = args.expectedDeviceId;
+  if (!expectedDeviceId) {
     throw new Error("tapAt multi-device refusal requires expectedDeviceId");
   }
   return await withCoordinateAcceptanceClient(
@@ -1499,7 +1831,7 @@ export async function runTapAtMultiDeviceRefusalCheck(
         ),
         point,
         `tapAt ${args.platform}-multiple-booted targeted call`,
-        { deviceId: args.expectedDeviceId, platform: args.platform },
+        { deviceId: expectedDeviceId, platform: args.platform },
       );
       const deviceId = stringField(targeted, "deviceId", "tapAt targeted response");
       if (deviceId !== args.expectedDeviceId) {
@@ -2097,8 +2429,16 @@ async function defaultCreateMcpClient(
     signal.removeEventListener("abort", abort);
   }
   return {
-    callTool: (name, arguments_, callSignal) =>
-      client.callTool({ name, arguments: arguments_ }, undefined, { signal: callSignal }),
+    callTool: async (name, arguments_, callSignal) => {
+      const result = await client.callTool({ name, arguments: arguments_ }, { signal: callSignal });
+      return {
+        ...result,
+        structuredContent:
+          result.structuredContent === undefined
+            ? undefined
+            : asObject(result.structuredContent, "tool structured content"),
+      };
+    },
     close: () => client.close(),
   };
 }
@@ -3110,7 +3450,8 @@ export async function runAcceptanceMatrix(
       if (!androidControls) {
         throw new Error("Android discovery controls were not initialized");
       }
-      if (devices.some((device) => device.deviceId === androidControls.duplicate.deviceId)) {
+      const controls = androidControls;
+      if (devices.some((device) => device.deviceId === controls.duplicate.deviceId)) {
         throw new Error(`Signed Android duplicate reappeared after ${stage}`);
       }
       const target = findExactlyOne(
@@ -3705,7 +4046,7 @@ export async function runAcceptanceMatrix(
     assertAndroidTransitionEvidence(prepared, stopped);
     if (args.platform === "android" && androidControls) {
       androidControls = { ...androidControls, target: stopped.device };
-      provisionedDevice = stopped.device;
+      provisionedDevice = { ...stopped.device };
     }
     await release(stopped.sessionUuid, "acquire-stopped");
     await assertCurrentControls("after-target-reacquire");
@@ -4025,7 +4366,7 @@ if (import.meta.main) {
     const argv = Bun.argv.slice(2);
     if (argv.includes("--help")) {
       console.log(
-        "Usage: bun scripts/live-device-acceptance.ts --platform <android|ios> --scenario full [options]",
+        "Usage: bun scripts/live-device-acceptance.ts --platform <android|ios> --scenario <full|broker> [options]",
       );
       process.exitCode = 0;
     } else if (argv.includes("--verify-evidence")) {
@@ -4037,7 +4378,9 @@ if (import.meta.main) {
       process.exitCode = 0;
     } else {
       const args = parseArgs(argv);
-      if (args.recordOwnershipManifest) {
+      if (args.scenario === "broker") {
+        await runBrokerAcceptance(args);
+      } else if (args.recordOwnershipManifest) {
         recordOwnershipManifest(args);
         console.log(
           `Recorded ${args.platform} ownership in ${basename(args.ownershipManifestPath)}`,

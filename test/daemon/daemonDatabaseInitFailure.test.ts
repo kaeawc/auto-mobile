@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -50,10 +50,6 @@ class SpyDeviceSessionRepository extends DeviceSessionRepository {
   }
 }
 
-interface DaemonInternals {
-  initializeDatabase(): Promise<void>;
-}
-
 function buildDaemon(overrides: {
   initializer: FakeDatabaseInitializer;
   tracker: FakeStartupFailureTracker;
@@ -73,25 +69,21 @@ function buildDaemon(overrides: {
     overrides.installedAppsRepository ?? new FakeInstalledAppsRepository();
   const daemon = new Daemon(
     {},
-    installedAppsRepository,
-    overrides.timer,
-    deviceSessionRepository,
-    new CountingIdGenerator("daemon-session"),
-    overrides.initializer,
-    overrides.tracker,
-    new DefaultDatabaseHealthProbe({ timer: overrides.timer }),
-    undefined,
-    process.env,
-    undefined,
-    // Never resolve the production default (real getDatabase()) — issue #3067.
-    new FakeToolSelectionProfileProvenanceLoader(),
-    undefined,
-    undefined,
-    undefined,
-    overrides.liveDaemonSessionIdProvider ?? {
-      collectLiveDaemonSessionIds: () => new Set(["live-peer-daemon"]),
+    {
+      installedAppsRepository,
+      timer: overrides.timer,
+      deviceSessionRepository,
+      idGenerator: new CountingIdGenerator("daemon-session"),
+      databaseInitializer: overrides.initializer,
+      startupFailureTracker: overrides.tracker,
+      databaseHealthProbe: new DefaultDatabaseHealthProbe({ timer: overrides.timer }),
+      recoveryPolicyEnvironment: process.env,
+      toolSelectionProfileProvenanceLoader: new FakeToolSelectionProfileProvenanceLoader(),
+      liveDaemonSessionIdProvider: overrides.liveDaemonSessionIdProvider ?? {
+        collectLiveDaemonSessionIds: () => new Set(["live-peer-daemon"]),
+      },
+      incumbentOwnerGuard: overrides.incumbentOwnerGuard,
     },
-    overrides.incumbentOwnerGuard,
   );
   return { daemon, deviceSessionRepository, installedAppsRepository };
 }
@@ -125,9 +117,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     tracker.setCounts([1]);
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     expect(initializer.initializeCalls).toBe(1);
     expect(tracker.recorded).toHaveLength(1);
     expect(tracker.recorded[0]!.kind).toBe("permanent");
@@ -141,13 +131,14 @@ describe("Daemon.initializeDatabase fatality", () => {
     const tracker = new FakeStartupFailureTracker();
     const { daemon, deviceSessionRepository } = buildDaemon({ initializer, tracker, timer });
 
-    await (daemon as unknown as DaemonInternals).initializeDatabase();
+    await daemon.initializeDatabase();
 
     expect(initializer.initializeCalls).toBe(1);
     expect(deviceSessionRepository.markStaleCalls).toBe(1);
     expect(deviceSessionRepository.liveDaemonSessionIds).toEqual(new Set(["live-peer-daemon"]));
     expect(configureRecordings).toHaveBeenCalledWith({
       liveDaemonSessionIds: new Set(["live-peer-daemon"]),
+      daemonSessionId: "daemon-session-1",
     });
     expect(tracker.recorded).toHaveLength(0);
     // Reset happens only at the END of start() (after all startup DB reads),
@@ -171,7 +162,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       installedAppsRepository,
     });
 
-    await (daemon as unknown as DaemonInternals).initializeDatabase();
+    await daemon.initializeDatabase();
 
     expect(await installedAppsRepository.listInstalledApps("peer-device")).toHaveLength(1);
     expect(await installedAppsRepository.listInstalledApps("dead-device")).toHaveLength(0);
@@ -192,6 +183,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       readPidFile: () => incumbentRecord,
       persistPidFile: () => {},
       isProcessRunning: (pid) => pid === incumbentRecord.pid,
+      readProcessGenerationToken: () => undefined,
       selfPid: 4242,
     };
     const incumbentOwnerGuard = new IncumbentOwnerGuard(guardDependencies);
@@ -208,7 +200,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       incumbentOwnerGuard,
     });
 
-    await (daemon as unknown as DaemonInternals).initializeDatabase();
+    await daemon.initializeDatabase();
 
     expect(deviceSessionRepository.liveDaemonSessionIds).toEqual(
       new Set(["sibling-worktree-daemon", "same-namespace-incumbent"]),
@@ -216,6 +208,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     expect(deviceSessionRepository.incumbentSessionStatus).toBe("active");
     expect(configureRecordings).toHaveBeenCalledWith({
       liveDaemonSessionIds: new Set(["sibling-worktree-daemon", "same-namespace-incumbent"]),
+      daemonSessionId: "daemon-session-1",
     });
   });
 
@@ -229,19 +222,13 @@ describe("Daemon.initializeDatabase fatality", () => {
     tracker.setCounts([1, 2, 3]);
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     const afterFirst = [...timer.getSleepHistory()];
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     const afterSecond = [...timer.getSleepHistory()];
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     const afterThird = [...timer.getSleepHistory()];
 
     // First failure did not park; subsequent failures park with the concrete
@@ -259,9 +246,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     tracker.setCounts([5]); // even at a high count, transient does not back off
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
 
     expect(timer.getSleepHistory()).toEqual([]);
     expect(tracker.recorded[0]!.kind).toBe("transient");
@@ -276,9 +261,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     const tracker = new FakeStartupFailureTracker();
     const { daemon } = buildDaemon({ initializer, tracker, timer, deviceSessionRepository });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     expect(tracker.recorded).toHaveLength(1);
     expect(tracker.resetCalls).toBe(0);
   });
@@ -299,9 +282,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       },
     });
 
-    await expect(
-      (daemon as unknown as DaemonInternals).initializeDatabase(),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(daemon.initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     expect(deviceSessionRepository.markStaleCalls).toBe(0);
     expect(tracker.recorded).toHaveLength(1);
   });

@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "item",
+        "key": "details"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{item.title}"
+        }
+      ]
+    },
+    "data": {
+      "orders": [
+        {
+          "id": 7,
+          "title": "Latte",
+          "total": 4.5,
+          "details": {
+            "size": "large"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.repeat.key",
+  "expectedMessage": "Unknown repeat field \"details\""
+}

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import {
   InMemoryProvisionedDeviceTransportFence,
@@ -31,7 +31,7 @@ describe("DeviceSessionManager retired transport tombstones (#11134)", () => {
       layoutSeqSum: 0,
     });
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl() as never, { window }),
+      new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), { window }),
     );
     return { manager, fence };
   }

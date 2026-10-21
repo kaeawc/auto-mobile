@@ -2,11 +2,15 @@ import com.android.build.api.artifact.ScopedArtifact
 import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.ScopedArtifacts
 import dev.jasonpearson.automobile.buildlogic.r8.VerifyR8KeptClassesTask
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.tasks.PathSensitivity
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
   id("automobile.kotlin-common")
+  id("automobile.robolectric-sdk-pin")
   id("automobile.android-app-signing")
-  alias(libs.plugins.android.application)
+  id("automobile.android-application")
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.compose.compiler)
 }
@@ -19,23 +23,16 @@ val minifyRelease =
 
 android {
   namespace = "dev.jasonpearson.automobile.ctrlproxy"
-  compileSdk = libs.versions.build.android.compileSdk.get().toInt()
-  buildToolsVersion = libs.versions.build.android.buildTools.get()
 
   defaultConfig {
     applicationId = "dev.jasonpearson.automobile.ctrlproxy"
-    minSdk = libs.versions.build.android.minSdk.get().toInt()
-    targetSdk = libs.versions.build.android.targetSdk.get().toInt()
     versionCode = 1
-    versionName = "0.0.84-SNAPSHOT"
-
-    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    versionName = "0.0.87-SNAPSHOT"
   }
 
   buildTypes {
     release {
       isMinifyEnabled = minifyRelease.get()
-      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }
 
@@ -47,16 +44,13 @@ android {
 
   buildFeatures { compose = true }
 
-  // Robolectric needs the merged resources to render Compose Material 3 off-device (its components
-  // read library string resources); used by the prototype renderer screenshot tests. The default
-  // Robolectric SDK this would otherwise change is pinned in
-  // src/test/resources/robolectric.properties.
+  // Robolectric needs merged resources to render Compose Material 3 off-device. The
+  // verifyRobolectricSdkPin guard checks the properties pin; the guard caps pins at SDK 35 (36+
+  // fails on JDK 21).
   testOptions { unitTests.isIncludeAndroidResources = true }
 
-  compileOptions {
-    sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
-    targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
-  }
+  // Preserve the screenshot fixtures verbatim after request() became a host extension.
+  sourceSets.named("test") { kotlin.directories.add("src/testCompatibility/kotlin") }
 
   packaging {
     resources {
@@ -98,14 +92,25 @@ androidComponents {
   }
 }
 
+kotlin {
+  compilerOptions {
+    // CtrlProxy is the renderer's own host and builds on its unstable internals.
+    optIn.add("dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi")
+  }
+}
+
 dependencies {
   implementation(libs.androidx.core)
+  implementation(libs.androidx.window)
 
   // AutoMobile SDK for navigation event tracking
   implementation(projects.autoMobileSdk)
 
   // Protocol module for type-safe WebSocket messages
   implementation(projects.protocol)
+
+  // Embeddable prototype renderer; CtrlProxy adds the overlay host around it.
+  implementation(projects.prototypeCompose)
 
   // Compose BOM
   implementation(platform(libs.compose.bom))
@@ -137,13 +142,17 @@ dependencies {
   implementation(libs.ktor.serialization.kotlinx.json)
   implementation(libs.okhttp)
   implementation(libs.okhttp.sse)
+  // Typed device client for prototype request actions (no converters; see docs/decisions)
+  implementation(libs.retrofit)
 
   // Test dependencies
+  testImplementation(projects.prototypeCompose)
   testImplementation(libs.bundles.unit.test)
   testImplementation(projects.junitRunner)
   testImplementation(libs.robolectric)
   // createComposeRule's mainClock drives prototype motion frame by frame (#10442).
   testImplementation(libs.compose.ui.junit)
+  testImplementation(libs.okhttp.mockwebserver)
   testImplementation(libs.ktor.client.core)
   testImplementation(libs.ktor.client.cio)
   testImplementation(libs.ktor.client.websockets)
@@ -182,6 +191,22 @@ val screenshotProperties =
   )
 
 tasks.withType<Test>().configureEach {
+  inputs
+    .dir(layout.projectDirectory.dir("../../test/fixtures/prototype-spec"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeSpecFixtures")
+  inputs
+    .file(layout.projectDirectory.file("../../test/fixtures/ime-commit-contract.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("imeCommitContract")
+  inputs
+    .file(layout.projectDirectory.file("../../benchmark/prototype-frame/spec.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeFrameBenchmarkSpec")
+  inputs
+    .file(layout.projectDirectory.file("../../benchmark/prototype-frame/scenarios.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeFrameBenchmarkScenarios")
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }
@@ -192,3 +217,34 @@ tasks.withType<Test>().configureEach {
     outputs.doNotCacheIf("prototype preview reads untracked spec files") { true }
   }
 }
+
+// Host integration and screenshot tests deliberately stay here. Give only test compilation friend
+// access to renderer internals, without widening the library's production API for test probes.
+configurations
+  .matching { it.name.endsWith("UnitTestCompileClasspath") }
+  .configureEach {
+    val compileTaskName =
+      "compile${name.removeSuffix("CompileClasspath").replaceFirstChar { it.titlecase() }}Kotlin"
+    val prototypeTestFriends =
+      incoming
+        .artifactView {
+          componentFilter { id ->
+            id is ProjectComponentIdentifier && id.buildTreePath == ":prototype-compose"
+          }
+          attributes.attribute(
+            Attribute.of("artifactType", String::class.java),
+            "android-classes-jar",
+          )
+        }
+        .files
+    tasks.withType<KotlinCompile>().configureEach {
+      if (name == compileTaskName) friendPaths.from(prototypeTestFriends)
+    }
+  }
+
+// Existing CtrlProxy unit-test CI entry points must continue to run every extracted test.
+tasks
+  .matching { it.name.startsWith("test") && it.name.endsWith("UnitTest") }
+  .configureEach {
+    dependsOn(":prototype-compose:$name", ":prototype-compose:verifyRendererDependencies")
+  }

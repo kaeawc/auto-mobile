@@ -7,10 +7,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 function harness(name: "avdmanager" | "sdkmanager" = "avdmanager") {
   // An inert child with in-memory pipes: no host process is started.
   const child = new ChildProcess();
+  const stdin = new PassThrough();
   Object.defineProperties(child, {
     stdout: { value: new PassThrough() },
     stderr: { value: new PassThrough() },
-    stdin: { value: new PassThrough() },
+    stdin: { value: stdin },
   });
   const kills: Array<NodeJS.Signals | number | undefined> = [];
   child.kill = (signal) => {
@@ -33,7 +34,7 @@ function harness(name: "avdmanager" | "sdkmanager" = "avdmanager") {
     ...(name === "avdmanager" ? { forcedSettlementDelayMs: 20 } : {}),
     onStart,
   };
-  return { child, kills, timer, spawn, request, onStart };
+  return { child, stdin, kills, timer, spawn, request, onStart };
 }
 
 describe("runAndroidCommand", () => {
@@ -46,7 +47,7 @@ describe("runAndroidCommand", () => {
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
     });
-    expect(h.child.stdin?.read()?.toString()).toBe("yes\n");
+    expect(h.stdin.read()?.toString()).toBe("yes\n");
     expect(h.onStart).toHaveBeenCalledTimes(1);
     h.child.stdout?.emit("data", Buffer.from("12345"));
     h.child.stderr?.emit("data", Buffer.from("abc"));
@@ -62,6 +63,15 @@ describe("runAndroidCommand", () => {
     expect(h.timer.getPendingTimeouts()).toEqual([]);
     h.timer.advanceTime(100);
     expect(h.kills).toEqual([]);
+  });
+
+  test("preserves split UTF-8 characters in stdout", async () => {
+    const h = harness();
+    const pending = runAndroidCommand(h, { ...h.request, maxStdoutChars: 32 });
+    h.child.stdout?.emit("data", Buffer.from([0xe2]));
+    h.child.stdout?.emit("data", Buffer.from([0x82, 0xac]));
+    h.child.emit("close", 0);
+    await expect(pending).resolves.toMatchObject({ stdout: "€", exitCode: 0 });
   });
 
   for (const name of ["avdmanager", "sdkmanager"] as const) {

@@ -1,7 +1,4 @@
-import type {
-  Transport,
-  TransportSendOptions,
-} from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { Transport, TransportSendOptions } from "@modelcontextprotocol/server";
 import { logger } from "../utils/logger";
 
 type JSONRPCMessage = Parameters<Transport["send"]>[0];

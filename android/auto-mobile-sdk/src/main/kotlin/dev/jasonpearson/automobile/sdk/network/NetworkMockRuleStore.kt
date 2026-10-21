@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.ControlBroadcastReply
 import dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.regex.PatternSyntaxException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
@@ -162,7 +163,7 @@ constructor(
               contentType = dto.contentType,
             ),
           )
-        } catch (e: Exception) {
+        } catch (e: PatternSyntaxException) {
           val reason = "invalid regex: ${e.message}"
           AutoMobileSDK.logger.w(TAG) { "Skipping mock rule ${dto.mockId}: $reason" }
           rejected += RejectedNetworkMockRule(dto.mockId, reason)

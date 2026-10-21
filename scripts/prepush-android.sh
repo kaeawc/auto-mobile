@@ -6,8 +6,11 @@ usage() {
   cat <<'EOF'
 Usage: scripts/prepush-android.sh [--base-ref <ref>]
 
-Runs fast formatting, scoped Detekt, compilation, and tests for Android Kotlin
-modules changed since the merge-base with the default branch.
+Runs Android lint and the shrink-only baseline guard for changed Android modules,
+plus fast formatting, scoped Detekt, compilation, and tests for Kotlin changes.
+Sources, resources, manifests and baselines select their owning module for lint;
+build-logic or Gradle configuration changes select all Android lintDebug tasks.
+Includes committed changes since the merge-base, staged, unstaged and untracked files.
 EOF
 }
 
@@ -31,26 +34,41 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# shellcheck source=scripts/lib/vcs-diff.sh disable=SC1091
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/vcs-diff.sh"
 
 repo_root="$(vcs_root)"
+
+attestation_head=""
+if [[ -e "${repo_root}/.git" ]]; then
+  attestation_head="$(git -C "${repo_root}" rev-parse HEAD 2>/dev/null || true)"
+elif [[ -d "${repo_root}/.jj" ]]; then
+  attestation_head="$(jj -R "${repo_root}" log -r @- --no-graph -T commit_id 2>/dev/null || true)"
+fi
+# Failure to capture initial cleanliness must suppress the attestation.
+attestation_start="$(bun "${repo_root}/scripts/ci/produce-attestations.ts" --print-dirty-at-start --lane android 2>/dev/null || true)"
+attestation_options=(--expected-head "$attestation_head")
+if [[ "$attestation_start" != clean ]]; then
+  attestation_options+=(--started-dirty)
+fi
 if [[ "$(pwd -P)" != "${repo_root}" ]]; then
   echo "error: run scripts/prepush-android.sh from the repository root" >&2
   exit 2
 fi
 
 if [[ -z "${base_ref}" ]]; then
-  # shellcheck disable=SC2310 # A false result selects the Git default below.
-  if vcs_uses_jj; then
+  if [[ -d .jj && ! -e .git ]]; then
     base_ref="origin/main"
   else
     base_ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || printf '%s' origin/main)"
   fi
 fi
 base_ref="$(vcs_base_ref "${base_ref}")"
-# shellcheck disable=SC2310 # A false result is reported as an invalid base.
-if ! vcs_base_exists "${base_ref}"; then
+set +e
+vcs_base_exists "${base_ref}"
+base_status=$?
+set -e
+if [[ "$base_status" -ne 0 ]]; then
   echo "error: base ref does not exist: ${base_ref}" >&2
   exit 2
 fi
@@ -59,6 +77,8 @@ set +e
 android_changes_output="$(vcs_changed_files_since_merge_base "${base_ref}" \
   'android/**' \
   'scripts/android/**' \
+  'scripts/prepush-android.sh' \
+  '.github/workflows/merge.yml' \
   '.github/actions/android-emulator/**' \
   '.github/actions/gradle-task-run/**' \
   'scripts/local-dev/hot-reload.sh' \
@@ -69,6 +89,14 @@ set -e
 if [[ "${android_changes_status}" -ne 0 ]]; then
   echo "error: failed to list Android changes since ${base_ref}" >&2
   exit 2
+fi
+
+# Include local edits before a commit, as well as branch changes. Deletions
+# matter too (removing a resource or baseline can introduce a lint finding).
+if [[ -e .git ]]; then
+  local_android_changes="$(git diff --name-only HEAD -- android scripts/android scripts/prepush-android.sh .github/workflows/pull_request.yml .github/workflows/merge.yml)"
+  untracked_android_changes="$(git ls-files --others --exclude-standard -- android scripts/android scripts/prepush-android.sh)"
+  android_changes_output="$(printf '%s\n' "$android_changes_output" "$local_android_changes" "$untracked_android_changes" | sort -u)"
 fi
 
 android_changes=()
@@ -84,15 +112,19 @@ fi
 root_gradle_changed=false
 detekt_config_changed=false
 sdk_api_baseline_changed=false
+lint_baseline_changed=false
 for changed_file in "${android_changes[@]}"; do
   case "${changed_file}" in
+    android/**/lint-baseline.xml)
+      lint_baseline_changed=true
+      ;;
     android/auto-mobile-sdk/api/auto-mobile-sdk.api)
       sdk_api_baseline_changed=true
       ;;
     android/config/detekt/*)
       detekt_config_changed=true
       ;;
-    android/build.gradle.kts|android/settings.gradle.kts|android/gradle.properties|android/gradle/*)
+    android/build-logic/*|android/build.gradle.kts|android/settings.gradle.kts|android/gradle.properties|android/gradle/*|android/gradlew|android/gradlew.bat|android/**/gradle.properties)
       root_gradle_changed=true
       ;;
     android/**/build.gradle.kts)
@@ -118,6 +150,34 @@ run_sdk_api_check() {
   echo "==> SDK API baseline validation"
   (cd android && ./gradlew :auto-mobile-sdk:apiCheck)
 }
+
+# Lint also consumes non-Kotlin inputs, so run before Kotlin-only early exits.
+# Module selection is shared with the PR Detekt job (one script, no drift).
+lint_selection="$(printf '%s\n' ${android_changes[@]+"${android_changes[@]}"} | bash scripts/android/select-lint-modules.sh)"
+if [[ "$root_gradle_changed" == true ]]; then
+  lint_selection=all
+fi
+lint_all=false
+lint_tasks=()
+if [[ "$lint_selection" == all ]]; then
+  lint_all=true
+elif [[ -n "$lint_selection" ]]; then
+  while IFS= read -r lint_task; do
+    lint_tasks+=("$lint_task")
+  done <<< "$lint_selection"
+fi
+if [[ "$lint_all" == true ]]; then
+  echo "==> Android lint (all modules; build configuration or gate changed)"
+  (cd android && ./gradlew lintDebug --continue)
+elif [[ "${#lint_tasks[@]}" -gt 0 ]]; then
+  echo "==> Android lint (${lint_tasks[*]})"
+  (cd android && ./gradlew ${lint_tasks[@]+"${lint_tasks[@]}"} --continue)
+fi
+
+if [[ "$lint_all" == true || "$lint_baseline_changed" == true || "${#lint_tasks[@]}" -gt 0 ]]; then
+  echo "==> Android lint baseline shrink-only guard"
+  bash scripts/android/check-lint-baseline-shrink.sh --base-ref "$base_ref" --worktree
+fi
 
 kotlin_changes=()
 while IFS= read -r changed_file; do
@@ -228,11 +288,12 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
   if [[ "${module_path}" == ":build-logic" ]]; then
     # build-logic is a kotlin-dsl-only build with no detekt plugin applied.
     compile_tasks+=("${module_path}:compileKotlin")
+    test_tasks+=("${module_path}:test")
   else
     if [[ "${detekt_config_changed}" == "false" ]]; then
       detekt_tasks+=("${module_path}:detekt")
     fi
-    if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)' "${module_dir}/build.gradle.kts"; then
+    if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)|id\("automobile\.android-(library|application)"\)' "${module_dir}/build.gradle.kts"; then
       compile_tasks+=("${module_path}:compileDebugKotlin")
     else
       compile_tasks+=("${module_path}:compileKotlin")
@@ -271,8 +332,10 @@ echo "==> compile (${modules[*]})"
 
 if [[ "${#test_tasks[@]}" -eq 0 ]]; then
   echo "No changed modules have unit-test sources; tests are a no-op."
+  "${repo_root}/scripts/ci/record-attestations.sh" android "${attestation_options[@]}" --scope partial --scope-note "scoped Detekt/compile/tests for changed modules only; not a substitute for the full-tree CI Detekt job" 'Android pre-push smoke check=pass:0' 'Android unit tests=skip:0' || true
   exit 0
 fi
 
 echo "==> unit tests (${test_tasks[*]})"
 (cd android && ./gradlew "${test_tasks[@]}")
+"${repo_root}/scripts/ci/record-attestations.sh" android "${attestation_options[@]}" --scope partial --scope-note "scoped Detekt/compile/tests for changed modules only; not a substitute for the full-tree CI Detekt job" 'Android pre-push smoke check=pass:0' 'Android unit tests=pass:0' || true

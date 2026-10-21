@@ -5,7 +5,7 @@ import type { Plan, PlanExecutionResult } from "../../src/models/Plan";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -46,8 +46,9 @@ describe("finish-current-step participant failure at a barrier (#10025)", () => 
   let restorePipeline: () => void;
   let barrierCalls: string[];
   let failedCalls: string[];
-  let toolCallRepository: { toolCallRepository: unknown };
-  let originalToolCallRepository: unknown;
+  let originalToolCallRepository: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["toolCallRepository"];
   /** Work-tool gates by "<device>:<tag>"; an unset gate runs straight through. */
   let workGates: Map<string, Gate>;
 
@@ -86,9 +87,10 @@ describe("finish-current-step participant failure at a barrier (#10025)", () => 
 
     // The device-aware wrapper records every call through ToolCallRepository, which would
     // resolve the real file-backed DB (#3067); swap in no-ops as barrierTools.test.ts does.
-    toolCallRepository = ToolRegistry as unknown as { toolCallRepository: unknown };
-    originalToolCallRepository = toolCallRepository.toolCallRepository;
-    toolCallRepository.toolCallRepository = { recordToolCall: async () => {} };
+    originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         resolveExecutionTarget: async (input) => {
@@ -117,7 +119,7 @@ describe("finish-current-step participant failure at a barrier (#10025)", () => 
 
   afterEach(() => {
     restorePipeline();
-    toolCallRepository.toolCallRepository = originalToolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     coordinator.reset();
     restoreCoordinator();
     ToolRegistry.unregister(workTool);
@@ -129,7 +131,7 @@ describe("finish-current-step participant failure at a barrier (#10025)", () => 
     whileRunning?: () => Promise<void>,
   ): Promise<PlanExecutionResult> {
     let settled = false;
-    const execution = new DefaultPlanExecutor(timer)
+    const execution = createDefaultPlanExecutor(timer)
       .executePlan(plan, 0, "android", "device-a", "base-uuid", undefined, "finish-current-step")
       .finally(() => {
         settled = true;

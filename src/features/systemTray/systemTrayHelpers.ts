@@ -1,0 +1,58 @@
+/** Shared system tray API. Implementations live in the cohesive helper modules below. */
+export {
+  type SystemTrayObserver,
+  type SystemTrayAdb,
+  type SystemTrayIosClient,
+  type SystemTrayDependencies,
+  getSystemTrayDependencies,
+  setSystemTrayDependencies,
+  resetSystemTrayDependencies,
+  resolveAppLabel,
+  resolveUniqueTrayAppLabel,
+} from "./helpers/dependencies";
+export {
+  SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
+  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
+  EXPAND_GROUP_SETTLE_MS,
+  resolveSystemTrayAwaitTimeout,
+  observeSystemTray,
+  observeSystemTrayAfterTap,
+  captureSystemTrayTerminalEvidence,
+  waitForSystemTrayOpen,
+  ensureSystemTrayOpen,
+  ensureSystemTrayClosed,
+  waitForNotificationMatch,
+  tapElement,
+  swipeElement,
+} from "./helpers/runtime";
+export {
+  type SystemTrayNotificationCandidate,
+  type SystemTrayNotificationMatch,
+  createSubHierarchy,
+  nodeIsNotificationGroup,
+  isMatchInCollapsedGroup,
+  getNotificationGroupHeader,
+  getNotificationGroupChildRows,
+  type NotificationGroupExpansionState,
+  resolveNotificationGroupExpansionState,
+  isNotificationGroupExpanded,
+  collectNotificationCandidates,
+  extractNodeTextCandidates,
+  findHeaderAppLabel,
+} from "./helpers/hierarchy";
+export {
+  expandNotificationGroup,
+  expandAndRematchIfCollapsed,
+  isSwipeTargetIsolatedFromGroup,
+} from "./helpers/groupExpansion";
+export { resolveNotificationTapElement, resolveNotificationSwipeElement } from "./helpers/matching";
+export {
+  type NotificationDismissBaseline,
+  captureNotificationDismissBaseline,
+  type NotificationDismissVerification,
+  verifyNotificationDismissed,
+  clearMatchingSystemTrayNotifications,
+  clearIosSystemTrayNotifications,
+} from "./helpers/dismissal";
+export { listSystemTrayNotifications, readActiveNotificationKeysForApp } from "./helpers/listing";
+export { NotificationShadeNotOpenError } from "./systemTrayNotificationList";

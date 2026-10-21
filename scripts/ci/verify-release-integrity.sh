@@ -62,24 +62,32 @@ check() {
 # Extract a JSON field, failing the whole gate loudly (clean message, no python
 # traceback) if the file is malformed or the field is missing — a swallowed
 # extraction would otherwise surface only as a confusing "expected X, got ''".
+JSON_FIELD_VALUE=""
 json_field() {
-  # $1 = file, $2 = python expression evaluated against `d` (parsed JSON)
-  python3 -c 'import json,sys
+  # $1 = file, $2 = python expression evaluated against `d` (parsed JSON).
+  # The value lands in JSON_FIELD_VALUE; callers invoke this as a plain command
+  # so a failure aborts under `set -e` (a function inside `$(...) || ...` would
+  # run with errexit suppressed).
+  JSON_FIELD_VALUE="$(python3 -c 'import json,sys
 try:
     d = json.load(open(sys.argv[1]))
     print(eval(sys.argv[2]))
 except Exception as exc:
     sys.stderr.write(f"failed to read {sys.argv[2]} from {sys.argv[1]}: {exc}\n")
-    sys.exit(1)' "$1" "$2"
+    sys.exit(1)' "$1" "$2")"
 }
 
-pkg_version="$(json_field "$PACKAGE_JSON" 'd["version"]')" || exit 1
+json_field "$PACKAGE_JSON" 'd["version"]'
+pkg_version="$JSON_FIELD_VALUE"
 check "package.json version" "$pkg_version"
-plugin_version="$(json_field "$PLUGIN_JSON" 'd["version"]')" || exit 1
+json_field "$PLUGIN_JSON" 'd["version"]'
+plugin_version="$JSON_FIELD_VALUE"
 check ".claude-plugin/plugin.json version" "$plugin_version"
-marketplace_version="$(json_field "$MARKETPLACE_JSON" 'd["plugins"][0]["version"]')" || exit 1
+json_field "$MARKETPLACE_JSON" 'd["plugins"][0]["version"]'
+marketplace_version="$JSON_FIELD_VALUE"
 check ".claude-plugin/marketplace.json plugins[0].version" "$marketplace_version"
-server_version="$(json_field "$SERVER_JSON" 'd["version"]')" || exit 1
+json_field "$SERVER_JSON" 'd["version"]'
+server_version="$JSON_FIELD_VALUE"
 check "server.json version" "$server_version"
 
 server_packages="$(python3 -c 'import json,sys
@@ -111,6 +119,7 @@ runner_sha="$(bun "$RELEASE_READER" runnerSha256 "$RELEASE_TS")"
 runner_sha_target="$(bun "$RELEASE_READER" runnerSha256Target "$RELEASE_TS")"
 screen_capture_helper_sha="$(bun "$RELEASE_READER" screenCaptureHelperSha256 "$RELEASE_TS")"
 prototype_agent_sha="$(bun "$RELEASE_READER" prototypeAgentSha256 "$RELEASE_TS")"
+prototype_viewer_sha="$(bun "$RELEASE_READER" prototypeViewerSha256 "$RELEASE_TS")"
 network_filter_sha="$(bun "$RELEASE_READER" networkFilterSha256 "$RELEASE_TS")"
 
 if [ "$runner_sha_target" != "xctest" ]; then
@@ -163,6 +172,13 @@ else
   errors+=("registry[0].prototypeAgentSha256 must be a 64-char hex sha256, got '${prototype_agent_sha}'")
 fi
 
+
+if [[ "$prototype_viewer_sha" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "  OK  registry[0].prototypeViewerSha256 populated"
+else
+  errors+=("registry[0].prototypeViewerSha256 must be a 64-char hex sha256, got '${prototype_viewer_sha}'")
+fi
+
 if [[ "$network_filter_sha" =~ ^[a-f0-9]{64}$ ]]; then
   echo "  OK  registry[0].networkFilterSha256 populated"
 else
@@ -177,7 +193,7 @@ if [ "${#errors[@]}" -gt 0 ]; then
   done
   echo ""
   echo "All manifests + the checksum registry + the git tag must name the same"
-  echo "version, and the iOS CtrlProxy plus screen-capture-helper, prototype-agent and network-filter checksums must be populated, before releasing."
+  echo "version, and the iOS CtrlProxy plus screen-capture-helper, prototype-agent, prototype-viewer and network-filter checksums must be populated, before releasing."
   exit 1
 fi
 

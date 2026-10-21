@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "",
+      "active": true
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query",
+      "extra": true
+    }
+  },
+  "expectedPath": "root.extra",
+  "expectedMessage": "Unknown property"
+}

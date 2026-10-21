@@ -1,5 +1,8 @@
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
-import type { IOSCtrlProxy } from "../../observe/ios";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
+import type { IosCtrlProxy } from "../../observe/ios";
+
+/** The only CtrlProxy capability VoiceOver detection needs. */
+export type VoiceOverStateClient = Pick<IosCtrlProxy, "requestVoiceOverState">;
 
 export const VOICEOVER_STATE_UNKNOWN_WARNING =
   "AutoMobile could not determine the current VoiceOver state; used the default gesture. VoiceOver may be enabled.";
@@ -26,8 +29,8 @@ export interface IosVoiceOverDetector {
    */
   isVoiceOverEnabled(
     deviceId: string,
-    client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean>;
@@ -51,8 +54,8 @@ export interface IosVoiceOverDetector {
    */
   resolveState(
     deviceId: string,
-    client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean | null>;
@@ -80,8 +83,8 @@ export interface IosVoiceOverDetector {
    */
   isVoiceOverActiveOrUnknown(
     deviceId: string,
-    client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean>;

@@ -92,6 +92,11 @@ function isScalar(value: unknown): boolean {
 }
 
 function childNodes(node: Raw): Raw[] {
+  if (node.type === "stack") {
+    return Object.values(record(node.screens) ?? {}).flatMap((value) =>
+      record(value) ? [record(value)!] : [],
+    );
+  }
   const single = record(node.child);
   if (single) {
     return [single];
@@ -141,6 +146,14 @@ function bindProps(node: Raw, instance: Instance): Raw {
   if (props) {
     bound.props = Object.fromEntries(
       Object.entries(props).map(([name, value]) => [name, bindTyped(value, instance)]),
+    );
+  }
+  if (bound.type === "stack") {
+    bound.screens = Object.fromEntries(
+      Object.entries(record(bound.screens) ?? {}).map(([name, value]) => [
+        name,
+        record(value) ? bindProps(record(value)!, instance) : value,
+      ]),
     );
   }
   const single = record(bound.child);
@@ -245,6 +258,20 @@ function expandUse(use: Raw, path: string, stack: string[], context: Context): E
 }
 
 function expandChildren(node: Raw, path: string, stack: string[], context: Context): Expanded {
+  if (node.type === "stack") {
+    const screens: Raw = {};
+    for (const [name, value] of Object.entries(record(node.screens) ?? {})) {
+      const child = record(value);
+      const expanded: Expanded = child
+        ? expandNode(child, `${path}.screens[${JSON.stringify(name)}]`, stack, context)
+        : { node: value as Raw };
+      if (expanded.error) {
+        return { error: expanded.error };
+      }
+      Object.defineProperty(screens, name, { value: expanded.node, enumerable: true });
+    }
+    return { node: { ...node, screens } };
+  }
   const single = record(node.child);
   if (single) {
     const child = expandNode(single, `${path}.child`, stack, context);

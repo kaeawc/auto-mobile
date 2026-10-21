@@ -1,5 +1,6 @@
 import type {
   ForegroundAppReadResult,
+  AdbDeviceState,
   AdbExecuteOptions,
   AdbExecutor,
   AdbProcess,
@@ -7,20 +8,8 @@ import type {
   DeviceTimestampSource,
   DeviceTimestampResult,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { ExecResult } from "../../src/models";
+import type { AndroidUser, BootedDevice, DeviceLockState, ExecResult } from "../../src/models";
 import { FakeAdbProcess } from "./FakeAdbProcess";
-
-type FakeAdbClientContract = Pick<
-  AdbExecutor,
-  | "execute"
-  | "executeCommand"
-  | "getForegroundAppChecked"
-  | "getForegroundApp"
-  | "getDeviceTimestampMs"
-  | "getDeviceTimestampMsWithSource"
-  | "listUsers"
-  | "spawn"
->;
 
 /** How a spawned command should terminate, keyed by a substring of its argv. */
 interface SpawnBehavior {
@@ -37,7 +26,7 @@ interface SpawnBehavior {
  * Fake implementation of AdbClient for testing
  * Captures commands executed without actually running ADB
  */
-export class FakeAdbClient implements FakeAdbClientContract {
+export class FakeAdbClient implements AdbExecutor {
   private commandCalls: Array<{
     command: string;
     timeoutMs?: number;
@@ -51,8 +40,14 @@ export class FakeAdbClient implements FakeAdbClientContract {
     new Map();
   private commandSequenceCursor: Map<string, number> = new Map();
   private commandErrors: Map<string, Error> = new Map();
+  private commandStdoutChunks = new Map<string, string[]>();
   // Models failures before ADB can dispatch, so beforeDispatch must not run.
   private preDispatchErrors: Map<string, Error> = new Map();
+  private devices: BootedDevice[] = [];
+  private deviceStates: AdbDeviceState[] = [];
+  private screenOn = true;
+  private wakefulness: "Awake" | "Asleep" | "Dozing" | null = "Awake";
+  private deviceLock: DeviceLockState | null = null;
   private foregroundApp: { packageName: string; userId: number } | null = null;
   private readonly displayForegroundApps = new Map<
     number,
@@ -82,11 +77,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   async executeCommand(
     command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
+    options: AdbExecuteOptions = {},
   ): Promise<{
     stdout: string;
     stderr: string;
@@ -94,6 +85,8 @@ export class FakeAdbClient implements FakeAdbClientContract {
     trim: () => string;
     includes: (search: string) => boolean;
   }> {
+    const { timeoutMs, maxBuffer, noRetry, signal, waitForProcessSettlementAfterAbort, onStdout } =
+      options;
     this.commandCalls.push({
       command,
       timeoutMs,
@@ -103,19 +96,6 @@ export class FakeAdbClient implements FakeAdbClientContract {
       waitForProcessSettlementAfterAbort,
     });
     this.interactionLog.push({ kind: "command", text: command });
-
-    const error = this.commandErrors.get(command);
-    if (error) {
-      throw error;
-    }
-
-    // A hanging command never resolves — used to let a racing timeout win
-    // deterministically (e.g. an adb backup the user never confirms). Safe
-    // because the caller races it against a FakeTimer setTimeout, so nothing
-    // actually blocks the test.
-    if (this.hangingCommandPatterns.some((pattern) => command.includes(pattern))) {
-      return new Promise(() => {});
-    }
 
     // A scripted sequence takes precedence: each call to the same command returns
     // the next entry, and the final entry repeats once exhausted. This lets a
@@ -129,6 +109,21 @@ export class FakeAdbClient implements FakeAdbClientContract {
     } else {
       // Return configured result or default success
       result = this.commandResults.get(command) || { stdout: "", stderr: "" };
+    }
+    const chunks = this.commandStdoutChunks.get(command) ?? [result.stdout];
+    for (const chunk of chunks) {
+      onStdout?.(chunk);
+    }
+    const error = this.commandErrors.get(command);
+    if (error) {
+      throw error;
+    }
+    // A hanging command never resolves — used to let a racing timeout win
+    // deterministically (e.g. an adb backup the user never confirms). Safe
+    // because the caller races it against a FakeTimer setTimeout, so nothing
+    // actually blocks the test.
+    if (this.hangingCommandPatterns.some((pattern) => command.includes(pattern))) {
+      return new Promise(() => {});
     }
     return {
       stdout: result.stdout,
@@ -152,14 +147,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
       throw preDispatchError;
     }
     await options?.beforeDispatch?.(options.timeoutMs);
-    return this.executeCommand(
-      command,
-      options?.timeoutMs,
-      options?.maxBuffer,
-      options?.noRetry,
-      options?.signal,
-      options?.waitForProcessSettlementAfterAbort,
-    );
+    return this.executeCommand(command, options);
   }
 
   /**
@@ -291,6 +279,11 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.commandErrors.set(command, error);
   }
 
+  /** Stream partial output before either successful completion or host failure. */
+  setCommandStdoutChunks(command: string, chunks: string[]): void {
+    this.commandStdoutChunks.set(command, chunks);
+  }
+
   /** Configure an error before {@link AdbExecuteOptions.beforeDispatch} can run. */
   setPreDispatchError(command: string, error: Error): void {
     this.preDispatchErrors.set(command, error);
@@ -370,10 +363,12 @@ export class FakeAdbClient implements FakeAdbClientContract {
   /**
    * Return the list of users
    */
-  async listUsers(): Promise<
-    Array<{ userId: number; name: string; flags?: number; running?: boolean }>
-  > {
-    return [...this.users];
+  async listUsers(): Promise<AndroidUser[]> {
+    return this.users.map((user) => ({
+      ...user,
+      flags: user.flags ?? 0,
+      running: user.running ?? false,
+    }));
   }
 
   /**
@@ -461,6 +456,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * Reset fake state
    */
   reset(): void {
+    this.commandStdoutChunks.clear();
     this.commandCalls = [];
     this.commandResults.clear();
     this.commandErrors.clear();
@@ -498,5 +494,53 @@ export class FakeAdbClient implements FakeAdbClientContract {
       return this.commandCalls.filter((call) => call.command.includes(commandPattern)).length;
     }
     return this.commandCalls.filter((call) => commandPattern.test(call.command)).length;
+  }
+
+  setDevices(devices: BootedDevice[]): void {
+    this.devices = devices;
+  }
+
+  setDeviceStates(states: AdbDeviceState[]): void {
+    this.deviceStates = states;
+  }
+
+  /** Configure screen state; wakefulness defaults to Awake when on and Asleep when off. */
+  setScreenState(isOn: boolean, wakefulness?: "Awake" | "Asleep" | "Dozing"): void {
+    this.screenOn = isOn;
+    this.wakefulness = wakefulness ?? (isOn ? "Awake" : "Asleep");
+  }
+
+  /** Configure the lock state returned by getDeviceLock (null = unknown). */
+  setDeviceLock(state: DeviceLockState | null): void {
+    this.deviceLock = state;
+  }
+
+  async getBootedAndroidDevices(
+    _options?: Parameters<AdbExecutor["getBootedAndroidDevices"]>[0],
+  ): Promise<BootedDevice[]> {
+    return this.devices;
+  }
+
+  async getDeviceStates(_options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<AdbDeviceState[]> {
+    return this.deviceStates;
+  }
+
+  async isScreenOn(): Promise<boolean> {
+    return this.screenOn;
+  }
+
+  async getWakefulness(): Promise<"Awake" | "Asleep" | "Dozing" | null> {
+    return this.wakefulness;
+  }
+
+  async getDeviceLock(): Promise<DeviceLockState | null> {
+    return this.deviceLock;
+  }
+
+  async getAdbPathOnly(): Promise<string> {
+    return "adb";
   }
 }

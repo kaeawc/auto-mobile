@@ -27,7 +27,7 @@ teardown() {
   rm -rf "$TEST_ROOT"
 }
 
-# write_fixtures <manifest_version> <gradle_version_name> <registry_version> <runner_sha> [helper_sha] [prototype_sha] [filter_sha]
+# write_fixtures <manifest_version> <gradle_version_name> <registry_version> <runner_sha> [helper_sha] [prototype_sha] [filter_sha] [viewer_sha]
 write_fixtures() {
   local ver="$1" gradle="$2" registry="$3" runner="$4" helper="$HELPER_SHA"
   if [ "$#" -ge 5 ]; then
@@ -41,6 +41,8 @@ write_fixtures() {
   if [ "$#" -ge 7 ]; then
     filter="$7"
   fi
+
+  local viewer="${8-$HELPER_SHA}"
 
   cat > "${TEST_ROOT}/package.json" <<EOF
 { "name": "@kaeawc/auto-mobile", "version": "${ver}" }
@@ -73,6 +75,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     runnerSha256Target: "${runner_target:-xctest}",
     screenCaptureHelperSha256: "${helper}",
     prototypeAgentSha256: "${prototype}",
+    prototypeViewerSha256: "${viewer}",
     networkFilterSha256: "${filter}",
   },
 ];
@@ -327,4 +330,13 @@ PY
   run_gate_ipa "$VERSION" "$ipa"
   [ "$status" -ne 0 ]
   [[ "$output" == *"CtrlProxyUITests not found inside"* ]]
+}
+
+@test "fails when prototype-viewer sha256 is empty or malformed" {
+  for viewer in "" "not-a-valid-sha"; do
+    write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA" "$HELPER_SHA" "$HELPER_SHA" "$FILTER_SHA" "$viewer"
+    run_gate "$VERSION"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"registry[0].prototypeViewerSha256"* ]]
+  done
 }

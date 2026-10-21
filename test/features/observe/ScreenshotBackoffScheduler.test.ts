@@ -6,6 +6,23 @@ import {
 } from "../../../src/features/observe/ScreenshotBackoffScheduler";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
+// Validate the raw callback envelope while retaining malformed optional metadata from the wire.
+function isWireScreenshot(value: unknown): value is ScreenshotCaptureResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "success" in value &&
+    typeof value.success === "boolean" &&
+    (!("data" in value) || typeof value.data === "string")
+  );
+}
+function wireScreenshot(value: unknown): ScreenshotCaptureResult {
+  if (!isWireScreenshot(value)) {
+    throw new Error("Expected wire screenshot envelope");
+  }
+  return value;
+}
+
 describe("computeChecksum", () => {
   it("returns different checksum for different data", () => {
     const checksum1 = computeChecksum("data1");
@@ -475,12 +492,12 @@ describe("DefaultScreenshotBackoffScheduler", () => {
     it("emits when rotation provenance changes even if image bytes are unchanged", async () => {
       const emittedResults: ScreenshotCaptureResult[] = [];
       const captures: ScreenshotCaptureResult[] = [
-        {
+        wireScreenshot({
           success: true,
           data: "same-data",
           captureBinding: { captureSequence: 7, width: 1080, height: 2340 },
           rotation: null,
-        },
+        }),
         {
           success: true,
           data: "same-data",

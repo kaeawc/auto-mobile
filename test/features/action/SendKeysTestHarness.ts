@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createExecResult } from "../../../src/utils/execResult";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
   DefaultSendKeysCommandExecutor,
@@ -24,12 +26,14 @@ export const android: BootedDevice = {
   platform: "android",
 };
 export const ios: BootedDevice = { deviceId: "ios-sim", name: "iPhone", platform: "ios" };
-export const focused: ObserveResult = {
-  timestamp: 1,
+export const focused: ObserveResult = buildObserveResult({
+  screenSize: { width: 1080, height: 1920 },
+  systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+  updatedAt: 1,
   viewHierarchy: {
     hierarchy: { node: { $: { focused: "true", class: "android.widget.EditText" } } },
   },
-} as ObserveResult;
+});
 export const observer: SendKeysObserver = { execute: async () => focused };
 export const smallCorpus = {
   nonAscii: "é",
@@ -42,6 +46,12 @@ const priorImeId = "com.example.keyboard/.Ime";
 export type TextDelivery =
   | { kind: "insert" | "replace" | "commit"; text: string }
   | { kind: "keyevent" | "inputText"; text: string };
+
+/** Expected PID wrapper; keep argv assertions explicit about both Android implementations. */
+export function trackedInputTextCommand(command: string, apiLevel: number | null = null): string {
+  const input = command.slice("shell ".length);
+  return `shell echo $$; exec ${apiLevel !== null && apiLevel >= 31 ? "cmd " : ""}${input}`;
+}
 
 /**
  * Split a device-shell command line into words the way `/system/bin/sh` does for the subset
@@ -98,6 +108,11 @@ export function decodeAndroidInputTextArgument(argument: string): string {
 
 /** The text a `shell input text ...` adb command types on the device, or undefined. */
 export function decodeInputTextCommand(command: string): string | undefined {
+  const prefix = "shell echo $$; exec ";
+  if (command.startsWith(prefix)) {
+    const input = command.slice(prefix.length);
+    command = `shell ${input.startsWith("cmd ") ? input.slice("cmd ".length) : input}`;
+  }
   if (!command.startsWith("shell input text ")) {
     return undefined;
   }
@@ -120,6 +135,10 @@ function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): Adb
         return async (args: string[], options?: Parameters<FakeAdbExecutor["execute"]>[1]) => {
           const result = await execute(args, options);
           const command = args.join(" ");
+          const inputText = decodeInputTextCommand(command);
+          if (inputText !== undefined) {
+            deliveries.push({ kind: "inputText", text: inputText });
+          }
           if (command === "shell ime list -a -s" && !result.stdout.trim()) {
             return { ...result, stdout: `${priorImeId}\n${commitImeId}\n` };
           }
@@ -159,11 +178,22 @@ function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): Adb
   return { create: () => catalogAdb };
 }
 
-export function createSendKeysHarness(device: BootedDevice, observe: SendKeysObserver = observer) {
+/** API 31+ input text paces its call on the timer; tests that do not steer time need it to flow. */
+function autoAdvancingTimer(): FakeTimer {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  return timer;
+}
+
+export function createSendKeysHarness(
+  device: BootedDevice,
+  observe: SendKeysObserver = observer,
+  timer = autoAdvancingTimer(),
+) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: priorImeId, stderr: "" },
-    { stdout: commitImeId, stderr: "" },
+    createExecResult(priorImeId, ""),
+    createExecResult(commitImeId, ""),
   ]);
   const inserted: string[] = [];
   const replaced: string[] = [];
@@ -220,7 +250,7 @@ export function createSendKeysHarness(device: BootedDevice, observe: SendKeysObs
     clientCalls,
     deliveries,
     executor: new DefaultSendKeysCommandExecutor(device, adbFactory, observe, {
-      timer: new FakeTimer(),
+      timer,
       textClient: client,
       inputKey: { press: async () => ({ success: true }) },
     }),
@@ -239,33 +269,33 @@ export function createSendKeysCaptureHarness(
   const captures: ObserveResult[] = [];
   const transitions = new FakeDisplayTransitionReader();
   let value = "";
-  const frame = (id: string, updatedAt: number): ObserveResult => ({
-    deviceId: android.deviceId,
-    observationId: id,
-    platform: "android",
-    updatedAt,
-    screenSize: { width: 100, height: 100 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
-    displayRevision: transitions.fullRevision,
-    activeWindow: { appId: "com.example.app" },
-    viewHierarchy: {
+  const frame = (id: string, updatedAt: number): ObserveResult =>
+    buildObserveResult({
+      deviceId: android.deviceId,
+      observationId: id,
       updatedAt,
-      packageName: "com.example.app",
-      hierarchy: {
-        node: {
-          $: {
-            focused: "true",
-            class: "android.widget.EditText",
-            text:
-              scenario === "fallback"
-                ? h.deliveries.map((delivery) => delivery.text).join("")
-                : value,
+      screenSize: { width: 100, height: 100 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      displayRevision: transitions.fullRevision,
+      activeWindow: { appId: "com.example.app", activityName: "Main", layoutSeqSum: 0 },
+      viewHierarchy: {
+        updatedAt,
+        packageName: "com.example.app",
+        hierarchy: {
+          node: {
+            $: {
+              focused: "true",
+              class: "android.widget.EditText",
+              text:
+                scenario === "fallback"
+                  ? h.deliveries.map((delivery) => delivery.text).join("")
+                  : value,
+            },
           },
         },
       },
-    },
-  });
+    });
   const observer = {
     async execute(options: ObserveScreenExecuteOptions = {}) {
       reads.push(options);
@@ -284,7 +314,7 @@ export function createSendKeysCaptureHarness(
       captures.push(observation);
       observation.screenshotCaptureAttempted = true;
       observation.screenshotPath = `${observation.observationId}.png`;
-      observation.screenshotCapturedAt = 123;
+      observation.screenshotCapturedAt = new Date(123).toISOString();
     },
   };
   const commit = h.client.commitViaIme;
@@ -358,12 +388,12 @@ export function createSendKeysFocusHarness(device: BootedDevice = android) {
     close: async () => ({ success: true }),
   };
   const transitions = new FakeDisplayTransitionReader();
-  const observation: ObserveResult = {
+  const observation: ObserveResult = buildObserveResult({
     ...focused,
     display: { key: "0", role: "unknown", posture: "unknown", generation: transitions.generation },
     displayRevision: transitions.fullRevision,
     viewHierarchy: { ...focused.viewHierarchy!, displayId: 0 },
-  };
+  });
   const insert = h.client.insert;
   h.client.insert = async (...args) => {
     calls.push("type");

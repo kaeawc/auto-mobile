@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
-import { Daemon } from "../../src/daemon/daemon";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
@@ -16,9 +15,10 @@ import {
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { executionTracker } from "../../src/daemon/executionTracker";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
+import type { PlatformDeviceManager } from "../../src/utils/interfaces/DeviceUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -28,6 +28,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 
 const HELD: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
 const WATCHED: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
@@ -38,24 +39,17 @@ const OUTER = "__nested_key_outer__";
 const READ = "__nested_key_read__";
 const CONTROL = "__nested_key_control__";
 
-/** Exercise the daemon's production subscriptions without starting any sockets or discovery. */
-interface DaemonToolCallEndWiring {
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
-
 type Nesting = "read" | "sessionless-control" | "same-session-control" | "throwing-read";
 
 describe("nested sessionless calls keep the outer control execution's session key (#11680)", () => {
-  let previousPlatformManager: unknown;
-  let previousInjectedManager: unknown;
+  let previousInjectedManager: PlatformDeviceManager | null;
   let restoreHermeticServer: () => void;
   let restorePipeline: () => void;
-  let previousRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let previousAutolock: string | undefined;
   let fixture: McpTestFixture;
   let timer: FakeTimer;
-  let daemon: Daemon;
+  let daemon: DaemonLifecycleHarness;
   let session: string;
   let entered: PromiseWithResolvers<void>;
   let outcome: PromiseWithResolvers<{ success: true }>;
@@ -77,8 +71,7 @@ describe("nested sessionless calls keep the outer control execution's session ke
   beforeAll(async () => {
     // The helper captures the current manager with getInstance; prime it without constructing
     // the production manager, whose constructor probes the Android toolchain.
-    previousPlatformManager = Reflect.get(PlatformDeviceManagerFactory, "instance");
-    previousInjectedManager = Reflect.get(PlatformDeviceManagerFactory, "injectedManager");
+    previousInjectedManager = PlatformDeviceManagerFactory.slotsForTesting().injectedManager;
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
     await arrange("read", true);
     const { call } = await startOuter(true);
@@ -91,8 +84,7 @@ describe("nested sessionless calls keep the outer control execution's session ke
   });
   afterEach(dismantle);
   afterAll(() => {
-    Reflect.set(PlatformDeviceManagerFactory, "instance", previousPlatformManager);
-    Reflect.set(PlatformDeviceManagerFactory, "injectedManager", previousInjectedManager);
+    PlatformDeviceManagerFactory.setInstance(previousInjectedManager);
   });
 
   async function arrange(nesting: Nesting = "read", seeded = false): Promise<void> {
@@ -111,8 +103,10 @@ describe("nested sessionless calls keep the outer control execution's session ke
         handle: async (input) => ({ durationMs: 0, finalizedResponse: input.response }),
       },
     });
-    previousRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
     timer = new FakeTimer();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [HELD, WATCHED];
@@ -122,11 +116,13 @@ describe("nested sessionless calls keep the outer control execution's session ke
       (deps) => new DevicePool({ ...deps, deviceManager }),
     );
     try {
-      daemon = new Daemon(
+      daemon = new DaemonLifecycleHarness(
         {},
-        new FakeInstalledAppsRepository(),
-        timer,
-        new FakeDeviceSessionRepository(),
+        {
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          timer,
+          deviceSessionRepository: new FakeDeviceSessionRepository(),
+        },
       );
     } finally {
       poolFactory.mockRestore();
@@ -137,7 +133,7 @@ describe("nested sessionless calls keep the outer control execution's session ke
     manager.onSessionRelease((sessionId, _deviceId, reason) => {
       releases.push({ sessionId, reason, at: timer.now() });
     });
-    (daemon as unknown as DaemonToolCallEndWiring).subscribeToolCallEndActivity();
+    daemon.subscribeToolCallEnd();
     ends = [];
     unsubscribeEnds = executionTracker.onSessionExecutionEnded((uuids, { admitted }) =>
       ends.push({ uuids, admitted }),
@@ -147,21 +143,21 @@ describe("nested sessionless calls keep the outer control execution's session ke
     restoreEndSpy = () => endSpy.mockRestore();
     const pool = daemon.getDevicePool();
     await pool.initializeWithDevices([HELD, WATCHED]);
-    session = seeded ? await pool.autolockDevice(HELD.deviceId, "android", OWNER) : SESSION;
+    const autolocked = seeded
+      ? await pool.autolockDevice(HELD.deviceId, "android", OWNER)
+      : SESSION;
+    if (!autolocked) {
+      throw new Error("autolockDevice did not return a session");
+    }
+    session = autolocked;
     if (!seeded) {
-      await pool.bindOrReuseDeviceSession(
-        session,
-        HELD.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        OWNER,
-      );
+      await pool.bindOrReuseDeviceSession({
+        sessionId: session,
+        deviceId: HELD.deviceId,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: OWNER,
+      });
     }
     entered = Promise.withResolvers<void>();
     outcome = Promise.withResolvers<{ success: true }>();
@@ -248,12 +244,12 @@ describe("nested sessionless calls keep the outer control execution's session ke
     await fixture.teardown();
     unsubscribeEnds();
     restoreEndSpy();
-    (daemon as unknown as DaemonToolCallEndWiring).stopSessionTimers();
+    daemon.stopTimers();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
     NavigationGraphManager.resetInstance();
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", previousRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     restorePipeline();
     restoreHermeticServer();
     resetDbWriteBarrier();

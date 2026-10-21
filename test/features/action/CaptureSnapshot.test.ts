@@ -1,4 +1,5 @@
 import { describe, it, test, expect, beforeEach, afterEach } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import {
   CaptureSnapshot,
   VM_SNAPSHOT_SAVE_DISPATCHED,
@@ -7,12 +8,11 @@ import { BootedDevice } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
-import * as os from "os";
+
 import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
 import {
   noOpSnapshotDirectorySync,
@@ -26,6 +26,7 @@ describe("CaptureSnapshot", () => {
   let fakeTimer: FakeTimer;
   let captureSnapshot: CaptureSnapshot;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
 
   beforeEach(async () => {
@@ -34,21 +35,24 @@ describe("CaptureSnapshot", () => {
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true,
     };
 
     // Create fakes
     fakeAdb = new FakeAdbClient();
-    fakeAdbFactory = { create: () => fakeAdb as any };
+    fakeAdbFactory = { create: () => fakeAdb };
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
     // Create secure temporary directory for tests
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-test-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create CaptureSnapshot instance with fakes
-    captureSnapshot = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+    captureSnapshot = new CaptureSnapshot(device, {
+      adbFactory: fakeAdbFactory,
+      timer: fakeTimer,
+      store,
+    });
 
     // Setup default command results
     fakeAdb.setCommandResult("shell settings list global", "airplane_mode_on=0");
@@ -57,12 +61,6 @@ describe("CaptureSnapshot", () => {
   });
 
   afterEach(async () => {
-    // Clean up test directory
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch (error) {
-      // Ignore cleanup errors
-    }
     fakeTimer.reset();
   });
 
@@ -93,15 +91,12 @@ describe("CaptureSnapshot", () => {
     it("holds the injected console-busy marker for a VM save", async () => {
       const snapshotName = "console-fenced";
       const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
-      const capture = new CaptureSnapshot(
-        device,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capture = new CaptureSnapshot(device, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
         store,
-        undefined,
-        consoleBusy,
-      );
+        consoleBusyRegistry: consoleBusy,
+      });
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
 
       await capture.execute({ snapshotName, includeSettings: false, useVmSnapshot: true });
@@ -312,16 +307,13 @@ describe("CaptureSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false,
       };
 
-      const capturePhysical = new CaptureSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capturePhysical = new CaptureSnapshot(physicalDevice, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
         store,
-      );
+      });
       fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       const result = await capturePhysical.execute({
@@ -411,15 +403,12 @@ describe("CaptureSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false,
       };
-      const capturePhysical = new CaptureSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capturePhysical = new CaptureSnapshot(physicalDevice, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
         store,
-      );
+      });
       fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       const result = await capturePhysical.execute({
@@ -594,8 +583,9 @@ describe("CaptureSnapshot", () => {
 
 describe("CaptureSnapshot (iOS)", () => {
   let device: BootedDevice;
-  let simctl: FakeSimCtlClient;
+  let simctl: FakeSimctl;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
 
   beforeEach(async () => {
@@ -605,21 +595,13 @@ describe("CaptureSnapshot (iOS)", () => {
       platform: "ios",
     };
 
-    simctl = new FakeSimCtlClient();
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-capture-"));
+    simctl = new FakeSimctl();
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });
 
-  afterEach(async () => {
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
-    }
-  });
-
   function makeCapture(): CaptureSnapshot {
-    return new CaptureSnapshot(device, undefined, undefined, undefined, store, simctl as any);
+    return new CaptureSnapshot(device, { store, simctl });
   }
 
   test("returns installed bundle IDs through strict simctl listing", async () => {
@@ -629,14 +611,11 @@ describe("CaptureSnapshot (iOS)", () => {
       { CFBundleIdentifier: "com.apple.Preferences" },
       { CFBundleIdentifier: "com.example.app" },
     ]);
-    const capture = new CaptureSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    const capture = new CaptureSnapshot(device, {
+      timer: new FakeTimer(),
       store,
-      transport,
-    );
+      simctl: transport,
+    });
     expect(await capture["getInstalledIosBundleIds"]()).toEqual(
       new Set(["com.example.app", "com.apple.Preferences"]),
     );
@@ -647,14 +626,11 @@ describe("CaptureSnapshot (iOS)", () => {
   test("wraps a strict simctl listing failure with the existing actionable context", async () => {
     const transport = new FakeSimctl();
     transport.setListAppsError(new Error("listing unavailable"));
-    const capture = new CaptureSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    const capture = new CaptureSnapshot(device, {
+      timer: new FakeTimer(),
       store,
-      transport,
-    );
+      simctl: transport,
+    });
     await expect(capture["getInstalledIosBundleIds"]()).rejects.toThrow(
       "Failed to list installed iOS apps to validate appBundleIds",
     );
@@ -1065,6 +1041,7 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
   let fakeAdbFactory: AdbClientFactory;
   let fakeTimer: FakeTimer;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
 
   beforeEach(async () => {
@@ -1072,28 +1049,26 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true,
     };
     fakeAdb = new FakeAdbClient();
-    fakeAdbFactory = { create: () => fakeAdb as any };
+    fakeAdbFactory = { create: () => fakeAdb };
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-traversal-test-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });
 
   afterEach(async () => {
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch {
-      // ignore cleanup errors
-    }
     fakeTimer.reset();
   });
 
   for (const badName of ["../traversal_x", "a/b", "/etc/passwd"]) {
     it(`rejects '${badName}' before any adb snapshot-save command`, async () => {
-      const capture = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+      const capture = new CaptureSnapshot(device, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
+        store,
+      });
       await expect(capture.execute({ snapshotName: badName, useVmSnapshot: true })).rejects.toThrow(
         /invalid snapshot name/i,
       );

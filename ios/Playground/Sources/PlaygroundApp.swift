@@ -7,6 +7,15 @@ struct PlaygroundApp: App {
         // Initialize AutoMobile SDK
         AutoMobileSDK.shared.initialize(bundleId: "dev.jasonpearson.automobile.Playground")
 
+        do {
+            try PhotosAuthorizationProbe.writeLiveSnapshotToDocuments()
+        } catch {
+            AutoMobileLog.shared.e(
+                "PlaygroundApp",
+                "photos_authorization_probe_failed error=\(error.localizedDescription)"
+            )
+        }
+
         // Enable storage inspection in debug builds
         #if DEBUG
             UserDefaultsInspector.shared.setEnabled(true)

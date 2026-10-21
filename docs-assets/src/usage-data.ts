@@ -21,7 +21,7 @@ const PALETTE = [
 // Asset families for the headline "downloads by type" chart. Order is the
 // bottom-to-top stacking order and the legend order. Colors are fixed per
 // family (not palette-indexed) so a family keeps its color as releases come
-// and go. Mirrors src/metrics/downloadSnapshots.ts (unit-tested there); this
+// and go. Mirrors scripts/metrics/downloadSnapshots.ts (unit-tested there); this
 // copy is standalone because the page's script is fetched on its own.
 const ASSET_TYPE_ORDER = [
   "android-apk",
@@ -191,7 +191,7 @@ function cmpTagDesc(a: string, b: string): number {
   return 0;
 }
 
-// Map an asset file name to its family (see src/metrics/downloadSnapshots.ts).
+// Map an asset file name to its family (see scripts/metrics/downloadSnapshots.ts).
 function classifyAssetType(asset: string): string {
   const name = String(asset).toLowerCase();
   if (endsWith(name, ".apk")) {

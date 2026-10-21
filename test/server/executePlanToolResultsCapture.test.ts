@@ -11,22 +11,24 @@ import {
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { BootedDevice } from "../../src/models";
+import type { ElementSelectionStrategy } from "../../src/models/ElementSelectionStrategy";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import {
   PlanExecutionOrchestrator,
   type VideoRecorder,
 } from "../../src/server/planExecutionOrchestrator";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetTapOnElementFactory,
-  setTapOnElementFactory,
 } from "../../src/server/interactionTools";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { activeVideoRecording } from "../helpers/planVideoFixtures";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
+const interactionDeps: InteractionToolDependencies = {};
 // #10090: the JUnit runner's getSelection/getToolResult/getTypedResponse read per-step results out
 // of the `executePlan` response. This drives the real PlanExecutionOrchestrator and PlanExecutor
 // with the real tapOn tool handler and finalizer (only the device-bound TapOnElement is faked) and
@@ -84,7 +86,7 @@ steps:
         text: Missing
 `;
 
-function selectedElement(text: string, totalMatches: number, strategy: string) {
+function selectedElement(text: string, totalMatches: number, strategy: ElementSelectionStrategy) {
   return {
     text,
     resourceId: "com.example:id/item",
@@ -102,7 +104,7 @@ describe("executePlan toolResults capture (#10090)", () => {
 
   beforeAll(() => {
     restoreSuiteTools = preserveToolRegistry();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     // The captures carry no failure observation. In the shared-process lane an earlier file can
     // leave the real observe tool registered, and the failed plan would then observe a real device.
     ToolRegistry.unregister("observe");
@@ -111,14 +113,14 @@ describe("executePlan toolResults capture (#10090)", () => {
 
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async (params) => {
-        const label = params.selector?.text ?? params.text;
+        const label = params.text ?? "";
         if (label === "Dismiss" || label === "Missing") {
           return {
             success: false,
             action: "tap",
-            element: { text: "" },
+            element: { text: "", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
             error: "Element not found",
           };
         }
@@ -130,7 +132,7 @@ describe("executePlan toolResults capture (#10090)", () => {
           selectedElement: selectedElement(label === "Item" ? "Row 7" : "Confirm", 12, strategy),
         };
       },
-    }));
+    });
     const tap = ToolRegistry.getToolForPlan("tapOn")!;
     const handler = spyOn(tap, "handler").mockImplementation(async (params, progress, signal) =>
       finalizeToolResponse(await tap.deviceAwareHandler!(device, params, progress, signal), {
@@ -142,7 +144,7 @@ describe("executePlan toolResults capture (#10090)", () => {
     const start = spyOn(
       AndroidSegmentedPlanVideoSession.prototype,
       "startFirstSegment",
-    ).mockResolvedValue(undefined);
+    ).mockResolvedValue(activeVideoRecording("plan-video"));
     const finalize = spyOn(
       AndroidSegmentedPlanVideoSession.prototype,
       "finalize",
@@ -156,7 +158,7 @@ describe("executePlan toolResults capture (#10090)", () => {
 
   afterEach(() => {
     restoreHandler();
-    resetTapOnElementFactory();
+    delete interactionDeps.tapOnElementFactory;
     restoreTools();
   });
 

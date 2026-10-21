@@ -1,3 +1,8 @@
+import type { ReadResourceResult } from "@modelcontextprotocol/server";
+import {
+  resetBootedDevicesResourceCache as invalidateBootedResourceViaDaemon,
+  notifyBootedDeviceResourcesUpdated as notifyBootedResourceViaDaemon,
+} from "../../../src/daemon/deviceResourceInvalidation";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../../src/utils/execResult";
 import { listBootedDevicesForResource } from "../../../src/server/resourceDeviceResolver";
@@ -23,7 +28,6 @@ import {
   setDeviceManager,
   setDeviceLockProbe,
   setIosLockStateProbe,
-  setOrientationReaderFactory,
   notifyBootedDeviceResourcesUpdated,
   BootedDevicesResourceContent,
   DeviceLockStatesResourceContent,
@@ -34,8 +38,9 @@ import {
   type CtrlProxyVersionLookup,
   getBootedDevicesForPlatforms,
   resetBootedDevicesResourceCache,
-  setBootCompletionAdbFactory,
   setInFlightAndroidColdBootReader,
+  registerBootedDeviceResources,
+  type BootedDeviceResourceDependencies,
 } from "../../../src/server/bootedDeviceResources";
 import {
   DeviceBootService,
@@ -47,13 +52,13 @@ import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../../src/daemon/foreignDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../../../src/daemon/managedSlots/managedSlotExclusion";
-import { assignManagedSlotDevice } from "../../daemon/managedSlots/managedSlotFixtures";
-import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+import { RegistryBindingExclusion } from "../../../src/daemon/sessionBroker/provisioning/exclusion";
+import { assignBindingDevice } from "../../daemon/sessionBroker/provisioning/bindingFixtures";
+import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
-import { describeDevice, listDevicesEntrySchema } from "../../../src/server/deviceDescription";
+import { describeDevice, listDevicesEntrySchema } from "../../../src/daemon/deviceDescription";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { getAndroidAppMetadataViaAdb } from "../../../src/features/observe/GetAppMetadata";
 import {
@@ -74,6 +79,28 @@ import {
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { PlatformDeviceManager } from "../../../src/devices/deviceUtils";
+
+let deps: BootedDeviceResourceDependencies = {};
+function useBootCompletionAdbFactory(
+  value: BootedDeviceResourceDependencies["injectedBootCompletionAdbFactory"] | null,
+): void {
+  deps = { ...deps, injectedBootCompletionAdbFactory: value ?? undefined };
+  registerBootedDeviceResources(deps);
+}
+function useOrientationReaderFactory(
+  value: BootedDeviceResourceDependencies["injectedOrientationReaderFactory"] | null,
+): void {
+  deps = { ...deps, injectedOrientationReaderFactory: value ?? undefined };
+  registerBootedDeviceResources(deps);
+}
+
+function resourceText(result: ReadResourceResult): string {
+  const content = result.contents[0];
+  if (!content || !("text" in content)) {
+    throw new Error("Expected a text resource");
+  }
+  return content.text;
+}
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;
@@ -124,7 +151,7 @@ describe("MCP Booted Device Resources", () => {
   });
 
   afterEach(() => {
-    setBootCompletionAdbFactory(null);
+    useBootCompletionAdbFactory(null);
     setInFlightAndroidColdBootReader(null);
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
@@ -132,7 +159,7 @@ describe("MCP Booted Device Resources", () => {
     // Restore the real (adb-backed) lock probe so a test's fake never leaks into the next.
     setDeviceLockProbe(null);
     setIosLockStateProbe(null);
-    setOrientationReaderFactory(null);
+    useOrientationReaderFactory(null);
     resetBootedDevicesResourceCache();
   });
 
@@ -168,7 +195,7 @@ describe("MCP Booted Device Resources", () => {
       for (const rows of [[usb, alias], [alias]]) {
         fakeDeviceUtils.setBootedDevices("android", rows);
         resetBootedDevicesResourceCache();
-        const result = await getBootedDevicesForPlatforms(["android"], timer);
+        const result = await getBootedDevicesForPlatforms(["android"], timer, deps);
         expect(result.devices.map((device) => device.runtime.deviceId)).toEqual([usb.deviceId]);
         expect(
           (await listBootedDevicesForResource("android", "alias-test")).map(
@@ -191,9 +218,9 @@ describe("MCP Booted Device Resources", () => {
     adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
     const factory = spyOn(androidTransportIdentityAdbFactory, "create").mockReturnValue(adb);
     fakeDeviceUtils.setBootedDevices("android", [usb, { ...usb, deviceId: "host-a:5555" }]);
-    setDeviceLockProbe(async () => ({ locked: false, keyguardShowing: false }));
+    setDeviceLockProbe(async () => false);
     try {
-      const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer());
+      const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer(), deps);
       expect(result.devices.map((device) => device.runtime.deviceId)).toEqual([usb.deviceId]);
       expect(
         (await listBootedDevicesForResource("android", "alias-test")).map(
@@ -234,7 +261,7 @@ describe("MCP Booted Device Resources", () => {
         pool.getDeviceIncarnation(mockAndroidDevice1.deviceId)!,
         "biometric-enrollment",
       );
-      const result = await getBootedDevicesForPlatforms(["android"], timer);
+      const result = await getBootedDevicesForPlatforms(["android"], timer, deps);
       expect(result.devices[0].unhealthy).toEqual({ reason: "biometric-enrollment", since: 1234 });
       expect(result.devices[1]).not.toHaveProperty("unhealthy");
       expect(result.poolStatus?.idle).toBe(1);
@@ -256,21 +283,21 @@ describe("MCP Booted Device Resources", () => {
     fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 
     const concurrentResults = await Promise.all(
-      Array.from({ length: 4 }, () => getBootedDevicesForPlatforms(["android"], timer)),
+      Array.from({ length: 4 }, () => getBootedDevicesForPlatforms(["android"], timer, deps)),
     );
 
     expect(concurrentResults).toHaveLength(4);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(1);
 
-    await getBootedDevicesForPlatforms(["android"], timer);
+    await getBootedDevicesForPlatforms(["android"], timer, deps);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(1);
 
     timer.advanceTime(2_501);
-    await getBootedDevicesForPlatforms(["android"], timer);
+    await getBootedDevicesForPlatforms(["android"], timer, deps);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(2);
 
-    resetBootedDevicesResourceCache();
-    await getBootedDevicesForPlatforms(["android"], timer);
+    invalidateBootedResourceViaDaemon();
+    await getBootedDevicesForPlatforms(["android"], timer, deps);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(3);
   });
 
@@ -312,7 +339,7 @@ describe("MCP Booted Device Resources", () => {
     const notification = spyOn(server.server, "notification").mockImplementation(
       async (message) => {
         if (message.method === "notifications/resources/updated") {
-          sent.push(message.params.uri);
+          sent.push(String(message.params?.uri));
         }
       },
     );
@@ -350,7 +377,7 @@ describe("MCP Booted Device Resources", () => {
       await started;
       expect(sent).toEqual(expect.arrayContaining(uris));
       const read = async (uri: string): Promise<BootedDevicesResourceContent> =>
-        JSON.parse((await client.readResource({ uri })).contents[0].text!);
+        JSON.parse(resourceText(await client.readResource({ uri })));
       for (const uri of uris) {
         const data = await read(uri);
         expect(data.totalCount).toBe(1);
@@ -371,15 +398,15 @@ describe("MCP Booted Device Resources", () => {
 
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("shell getprop sys.boot_completed", { stdout: "0", stderr: "" });
-      setBootCompletionAdbFactory({ create: () => adb });
+      adb.setCommandResponse("shell getprop sys.boot_completed", createExecResult("0", ""));
+      useBootCompletionAdbFactory({ create: () => adb });
       resetBootedDevicesResourceCache();
       const preCompleted = await read(uris[1]);
       expect(preCompleted.devices).toHaveLength(1);
       expect(preCompleted.devices[0].runtime.deviceId).toBe(mockAndroidDevice1.deviceId);
       expect(preCompleted.devices[0].runtime.lifecycle.state).toBe("booting");
 
-      adb.setCommandResponse("shell getprop sys.boot_completed", { stdout: "1", stderr: "" });
+      adb.setCommandResponse("shell getprop sys.boot_completed", createExecResult("1", ""));
       resetBootedDevicesResourceCache();
       const completed = await read(uris[1]);
       expect(completed.devices).toHaveLength(1);
@@ -401,11 +428,11 @@ describe("MCP Booted Device Resources", () => {
     ["1", { state: "booted", known: true }],
   ] as const)("reports Android OS boot completion %s", async (property, lifecycle) => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell getprop sys.boot_completed", { stdout: property, stderr: "" });
-    setBootCompletionAdbFactory({ create: () => adb });
+    adb.setCommandResponse("shell getprop sys.boot_completed", createExecResult(property, ""));
+    useBootCompletionAdbFactory({ create: () => adb });
     fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 
-    const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer());
+    const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer(), deps);
     expect(result.devices[0].runtime.lifecycle).toEqual(lifecycle);
     expect(adb.getExecutedCommands()).toContain("shell getprop sys.boot_completed");
   });
@@ -413,10 +440,10 @@ describe("MCP Booted Device Resources", () => {
   test("keeps an Android device with unknown lifecycle when boot completion fails", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError("shell getprop sys.boot_completed", new Error("transport unavailable"));
-    setBootCompletionAdbFactory({ create: () => adb });
+    useBootCompletionAdbFactory({ create: () => adb });
     fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 
-    const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer());
+    const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer(), deps);
     expect(result.devices[0].runtime.deviceId).toBe(mockAndroidDevice1.deviceId);
     expect(result.devices[0].runtime.lifecycle).toEqual({ state: "booted", known: false });
   });
@@ -468,7 +495,7 @@ describe("MCP Booted Device Resources", () => {
 
     const { client } = fixture.getContext();
     const result = await client.readResource({ uri: "automobile:devices/booted/android" });
-    const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+    const data: BootedDevicesResourceContent = JSON.parse(resourceText(result));
 
     expect(data.devices).toEqual([
       expect.objectContaining({
@@ -903,7 +930,7 @@ describe("MCP Booted Device Resources", () => {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       const orientationReader = new FakeOrientationReader();
       orientationReader.setResult("landscape");
-      setOrientationReaderFactory(() => orientationReader);
+      useOrientationReaderFactory(() => orientationReader);
 
       const { client } = fixture.getContext();
       const result = await client.request(
@@ -989,7 +1016,7 @@ describe("MCP Booted Device Resources", () => {
           expect(data.lockStates).toHaveLength(1);
           expect(data.lockStates[0].locked).toBe(scenario.locked);
 
-          const booted = await getBootedDevicesForPlatforms(["ios"], new FakeTimer());
+          const booted = await getBootedDevicesForPlatforms(["ios"], new FakeTimer(), deps);
           expect(booted.devices).toHaveLength(1);
           expect(booted.devices[0].runtime.locked).toBe(scenario.locked ?? null);
           if (scenario.physical) {
@@ -1206,7 +1233,7 @@ describe("MCP Booted Device Resources", () => {
       const notification = spyOn(server.server, "notification").mockImplementation(
         async (message) => {
           if (message.method === "notifications/resources/updated") {
-            sent.push(message.params.uri);
+            sent.push(String(message.params?.uri));
           }
         },
       );
@@ -1231,7 +1258,7 @@ describe("MCP Booted Device Resources", () => {
       const notification = spyOn(server.server, "notification").mockImplementation(
         async (message) => {
           if (message.method === "notifications/resources/updated") {
-            sent.push(message.params.uri);
+            sent.push(String(message.params?.uri));
           }
         },
       );
@@ -1252,21 +1279,21 @@ describe("MCP Booted Device Resources", () => {
     test("notification invalidates the cached booted inventory before subscribers re-read", async () => {
       const timer = new FakeTimer();
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
-      const before = await getBootedDevicesForPlatforms(["ios"], timer);
+      const before = await getBootedDevicesForPlatforms(["ios"], timer, deps);
       expect(before.devices.map((device) => device.runtime.deviceId)).toEqual([
         mockIosDevice1.deviceId,
       ]);
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice2]);
       const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockImplementation(
         async () => {
-          const after = await getBootedDevicesForPlatforms(["ios"], timer);
+          const after = await getBootedDevicesForPlatforms(["ios"], timer, deps);
           expect(after.devices.map((device) => device.runtime.deviceId)).toEqual([
             mockIosDevice2.deviceId,
           ]);
         },
       );
       try {
-        await notifyBootedDeviceResourcesUpdated();
+        await notifyBootedResourceViaDaemon();
         expect(notify).toHaveBeenCalledTimes(1);
         expect(fakeDeviceUtils.getCallCount("getBootedDevices:ios")).toBe(2);
       } finally {
@@ -1429,7 +1456,7 @@ describe("MCP Booted Device Resources", () => {
 
       const readIos = async (timer: FakeTimer) => {
         resetBootedDevicesResourceCache();
-        const result = await getBootedDevicesForPlatforms(["ios"], timer);
+        const result = await getBootedDevicesForPlatforms(["ios"], timer, deps);
         const status = (deviceId: string) =>
           result.devices.find((device) => device.runtime.deviceId === deviceId)?.runtime;
         return { result, status };
@@ -1463,16 +1490,16 @@ describe("MCP Booted Device Resources", () => {
         }
       });
 
-      test("a managed-slot device is assigned/held and not counted idle", async () => {
-        const registry = new FakeSlotRegistry(new FakeTimer());
-        await assignManagedSlotDevice(registry, "ios", "SIM-HELD");
+      test("a binding device is assigned/held and not counted idle", async () => {
+        const registry = new FakeBindingRegistry(new FakeTimer());
+        await assignBindingDevice(registry, "ios", "SIM-HELD");
         const { pool, sessions, timer } = await makeHoldPool((t) => ({
-          managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, t),
+          bindingExclusion: new RegistryBindingExclusion(async () => registry, t),
         }));
         try {
           const { result, status } = await readIos(timer);
           expect(status("SIM-HELD")?.poolStatus).toBe("assigned");
-          expect(status("SIM-HELD")?.heldBy).toBe("managed_slot");
+          expect(status("SIM-HELD")?.heldBy).toBe("session_broker");
           expect(result.poolStatus).toMatchObject({ idle: 1, assigned: 1 });
           expect(result.poolStatus?.idle).toBe(pool.getStats().idle);
           expect(pool.getAvailableDeviceCount()).toBe(1);
@@ -1523,12 +1550,10 @@ describe("MCP Booted Device Resources", () => {
             )
           : createExecResult("", ""),
       );
-      const emulator = new AndroidEmulatorClient(
-        undefined,
-        null,
-        fakeTimer,
-        new FakeAdbClientFactory(adb),
-      );
+      const emulator = new AndroidEmulatorClient({
+        timer: fakeTimer,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
       (fakeDeviceUtils as PlatformDeviceManager).getAndroidListedDeviceStates = (ids) =>
         emulator.getListedNonDeviceStatesAmong(ids);
@@ -1547,7 +1572,7 @@ describe("MCP Booted Device Resources", () => {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice2]);
       DaemonState.getInstance().initialize(sessionManager, devicePool);
 
-      const result = await getBootedDevicesForPlatforms(["android"], fakeTimer);
+      const result = await getBootedDevicesForPlatforms(["android"], fakeTimer, deps);
 
       const held = result.devices.find((d) => d.runtime.deviceId === "emulator-5554");
       expect(held?.runtime.session?.sessionUuid).toBe("session-held");
@@ -1579,12 +1604,10 @@ describe("MCP Booted Device Resources", () => {
             )
           : createExecResult("", ""),
       );
-      const emulator = new AndroidEmulatorClient(
-        undefined,
-        null,
-        fakeTimer,
-        new FakeAdbClientFactory(adb),
-      );
+      const emulator = new AndroidEmulatorClient({
+        timer: fakeTimer,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       (fakeDeviceUtils as PlatformDeviceManager).getAndroidListedDeviceStates = (ids) =>
         emulator.getListedNonDeviceStatesAmong(ids);
@@ -1603,7 +1626,7 @@ describe("MCP Booted Device Resources", () => {
         listInFlightAndroidColdBootAvdNames: () => [mockAndroidDevice1.name],
       });
 
-      const result = await getBootedDevicesForPlatforms(["android"], fakeTimer);
+      const result = await getBootedDevicesForPlatforms(["android"], fakeTimer, deps);
 
       expect(result.devices).toHaveLength(1);
       expect(result.devices[0]?.runtime.session?.sessionUuid).toBe("session-held");
@@ -1710,7 +1733,7 @@ describe("MCP Booted Device Resources", () => {
       try {
         const { client } = fixture.getContext();
         const result = await client.readResource({ uri: "automobile:devices/booted" });
-        const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+        const data: BootedDevicesResourceContent = JSON.parse(resourceText(result));
         const entry = data.devices.find(
           (device) => device.runtime.deviceId === mockAndroidDevice1.deviceId,
         );
@@ -1763,7 +1786,7 @@ describe("MCP Booted Device Resources", () => {
 
       const { client } = fixture.getContext();
       const result = await client.readResource({ uri: "automobile:devices/booted" });
-      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+      const data: BootedDevicesResourceContent = JSON.parse(resourceText(result));
       const device = data.devices.find((entry) => entry.runtime.deviceId === unresolved.deviceId);
 
       expect(device?.runtime.connectionId).toBe(unresolved.deviceId);
@@ -1856,7 +1879,7 @@ describe("MCP Booted Device Resources", () => {
       try {
         const { client } = fixture.getContext();
         const result = await client.readResource({ uri: "automobile:devices/booted" });
-        const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+        const data: BootedDevicesResourceContent = JSON.parse(resourceText(result));
         const quarantined = data.devices.find(
           (entry) => entry.runtime.deviceId === mockAndroidDevice1.deviceId,
         );
@@ -1904,7 +1927,7 @@ describe("MCP Booted Device Resources", () => {
       try {
         const { client } = fixture.getContext();
         const result = await client.readResource({ uri: "automobile:devices/booted" });
-        const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+        const data: BootedDevicesResourceContent = JSON.parse(resourceText(result));
 
         expect(data.devices).toEqual(
           expect.arrayContaining([
@@ -2297,8 +2320,8 @@ describe("ResourceRegistry Template Matching", () => {
 
     // The compiled RegExp is stored on the template and the SAME instance is
     // returned on every read — proof it is not recompiled per request.
-    const firstRegex = (first!.template as unknown as { regex: RegExp }).regex;
-    const secondRegex = (second!.template as unknown as { regex: RegExp }).regex;
+    const firstRegex = first!.template.regex;
+    const secondRegex = second!.template.regex;
     expect(firstRegex).toBeInstanceOf(RegExp);
     expect(firstRegex).toBe(secondRegex);
   });
@@ -2397,10 +2420,10 @@ describe("booted device readiness", () => {
 
   test("reads Android package versions via ADB without constructing CtrlProxy", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell dumpsys package 'com.example.ctrlproxy'", {
-      stdout: "versionCode=45\nversionName=1.2.3\ncodePath=/data/app/ctrlproxy",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell dumpsys package 'com.example.ctrlproxy'",
+      createExecResult("versionCode=45\nversionName=1.2.3\ncodePath=/data/app/ctrlproxy", ""),
+    );
     const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
     try {
       const metadata = await getAndroidAppMetadataViaAdb(
@@ -2445,7 +2468,7 @@ describe("booted device readiness", () => {
 
     const status = await queryDeviceServiceStatus(device, lookup, versionLookup);
 
-    expect(status).toEqual({
+    expect<unknown>(status).toEqual({
       ...withoutVersion,
       version: "1.2.3",
       versionInfo: { versionName: "1.2.3", versionCode: "45", source: "android-package" },

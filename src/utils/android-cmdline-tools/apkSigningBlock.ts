@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import type { ApkSignatureScheme, ApkSignerCertificate } from "../../models/ApkSignerCertificate";
+import { ApkSigningCursor as Cursor } from "./ApkSigningCursor";
+import { ApkSigningParseError } from "./ApkSigningParseError";
+
+export { ApkSigningParseError } from "./ApkSigningParseError";
 
 /**
  * Reads the signing certificates of an APK from its APK Signing Block (signature schemes v2, v3
@@ -22,18 +27,7 @@ const V3_BLOCK_ID = 0xf05368c0;
 const V31_BLOCK_ID = 0x1b93ad61;
 const V3_LINEAGE_ATTRIBUTE_ID = 0x3ba06f8c;
 
-export type ApkSignatureScheme = "v2" | "v3" | "v3.1";
-
-export interface ApkSignerCertificate {
-  /** Lowercase hex SHA-256 of the DER-encoded signer certificate. */
-  sha256: string;
-  /** v3/v3.1 only: first platform SDK this signer applies to. */
-  minSdkVersion?: number;
-  /** v3/v3.1 only: last platform SDK this signer applies to. */
-  maxSdkVersion?: number;
-  /** v3/v3.1 only: certificate history from the signing-certificate lineage, oldest first. */
-  lineage?: string[];
-}
+export type { ApkSignatureScheme, ApkSignerCertificate };
 
 export type ApkSigningSchemes = Partial<Record<ApkSignatureScheme, ApkSignerCertificate[]>>;
 
@@ -43,51 +37,11 @@ export interface ApkByteSource {
   read(offset: number, length: number): Promise<Buffer>;
 }
 
-export class ApkSigningParseError extends Error {}
-
 export function bufferByteSource(buffer: Buffer): ApkByteSource {
   return {
     size: buffer.length,
     read: async (offset, length) => buffer.subarray(offset, offset + length),
   };
-}
-
-class Cursor {
-  private position = 0;
-  constructor(private readonly buffer: Buffer) {}
-
-  get remaining(): number {
-    return this.buffer.length - this.position;
-  }
-
-  u32(): number {
-    this.require(4);
-    const value = this.buffer.readUInt32LE(this.position);
-    this.position += 4;
-    return value;
-  }
-
-  /** Everything not yet read. */
-  rest(): Buffer {
-    const slice = this.buffer.subarray(this.position);
-    this.position = this.buffer.length;
-    return slice;
-  }
-
-  /** A u32 length followed by that many bytes. */
-  lengthPrefixed(): Buffer {
-    const length = this.u32();
-    this.require(length);
-    const slice = this.buffer.subarray(this.position, this.position + length);
-    this.position += length;
-    return slice;
-  }
-
-  private require(length: number): void {
-    if (length > this.remaining) {
-      throw new ApkSigningParseError("Truncated APK signing data");
-    }
-  }
 }
 
 function sha256Hex(der: Buffer): string {

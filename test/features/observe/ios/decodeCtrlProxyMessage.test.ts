@@ -1,3 +1,9 @@
+function decodeRawMessage(raw: unknown) {
+  if (typeof raw !== "object" || raw === null || !("type" in raw) || typeof raw.type !== "string") {
+    throw new Error("Expected raw CtrlProxy message");
+  }
+  return decodeCtrlProxyMessage({ ...raw, type: raw.type });
+}
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -10,7 +16,7 @@ import type { WebSocketMessage } from "../../../../src/features/observe/ios/type
 const REQ = "req-1";
 
 /** Helper to build a WebSocketMessage with a requestId. */
-const msg = (partial: Partial<WebSocketMessage> & { type: string }): WebSocketMessage => ({
+const msg = <T extends { type: string }>(partial: T) => ({
   requestId: REQ,
   ...partial,
 });
@@ -159,7 +165,7 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("hierarchy failure preserves the Swift runner error envelope", () => {
     // Built from WebSocketResponse.error in
-    // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
+    // ios/control-proxy/Sources/CtrlProxy/Models/WebSocketResponse.swift; no data.
     const message = msg({
       type: "hierarchy_update",
       success: false,
@@ -237,6 +243,7 @@ describe("decodeCtrlProxyMessage", () => {
     "launch_app_result",
     "reset_permissions_result",
     "multi_finger_swipe_result",
+    "path_gesture_result",
   ];
 
   for (const type of baseResultTypes) {
@@ -550,7 +557,7 @@ describe("decodeCtrlProxyMessage", () => {
       valueType: "STRING",
       redacted: true,
     } as const;
-    expect(decodeCtrlProxyMessage(msg(response))?.result).toMatchObject({
+    expect(decodeRawMessage(msg(response))?.result).toMatchObject({
       entry: { key: "token", value: "hunter2", type: "STRING", redacted: true },
     });
   });
@@ -840,37 +847,6 @@ describe("decodeCtrlProxyMessage", () => {
 });
 
 /**
- * Parse every `case` rawValue from the Swift `ResponseType: String` enum.
- *
- * Swift String-enum semantics: a case without an explicit `= "..."` uses the
- * case name itself as its rawValue (e.g. `case screenshot` → "screenshot"), so
- * we fall back to the identifier when no string literal is present.
- */
-function parseSwiftResponseTypeRawValues(swiftSource: string): string[] {
-  const lines = swiftSource.split("\n");
-  // Tolerate extra protocol conformances after `String` (e.g. `String, Sendable`), which the
-  // rewrite's `ResponseType.swift` declares — `[^{]*` spans them up to the opening brace.
-  const startIdx = lines.findIndex((line) =>
-    /enum\s+ResponseType\s*:\s*String\b[^{]*\{/.test(line),
-  );
-  if (startIdx < 0) {
-    throw new Error("Could not locate `enum ResponseType: String` in ResponseType.swift");
-  }
-  const rawValues: string[] = [];
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trim() === "}") {
-      break; // end of the (brace-flat) enum body
-    }
-    const match = line.match(/^\s*case\s+([A-Za-z0-9_]+)(?:\s*=\s*"([^"]+)")?/);
-    if (match) {
-      rawValues.push(match[2] ?? match[1]);
-    }
-  }
-  return rawValues;
-}
-
-/**
  * A rawValue is "explicitly decoded" when a dedicated decoder
  * reshapes it into a fresh result object. The default branch, by contrast,
  * resolves the message verbatim (`result === message` by identity), so identity
@@ -904,6 +880,7 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "list_tables_result",
   "magic_tap_result",
   "multi_finger_swipe_result",
+  "path_gesture_result",
   "pinch_result",
   "preference_files",
   "preferences",
@@ -934,14 +911,12 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
 ];
 
 describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)", () => {
-  const swiftSource = readFileSync(
-    join(
-      import.meta.dir,
-      "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/Models/ResponseType.swift",
+  const { responseTypes: rawValues } = JSON.parse(
+    readFileSync(
+      join(import.meta.dir, "../../../fixtures/ios-contract/runner-responses.json"),
+      "utf8",
     ),
-    "utf8",
-  );
-  const rawValues = parseSwiftResponseTypeRawValues(swiftSource);
+  ) as { responseTypes: string[] };
 
   // Response types the daemon deliberately does NOT reshape: they reach the
   // decoder's default verbatim-resolve branch on purpose because no client
@@ -949,14 +924,12 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
   // here — per the spec we do not assert on their absence from the switch,
   // only subtract them so the genuinely-unhandled residue is isolated.
   //   1. set_hierarchy_poll_interval_result — poll-interval ack
-  //   2. screenshot_error                   — error push, handled client-side
-  //   3. current_focus_result               — focus push, no awaiter
-  //   4. traversal_order_result             — traversal push, no awaiter
-  //   5. connected                          — connection handshake push
+  //   2. current_focus_result               — focus push, no awaiter
+  //   3. traversal_order_result             — traversal push, no awaiter
+  //   4. connected                          — connection handshake push
   //   (set_network_mock_rules_result is now decoded: it carries rejectedMockIds, #10101)
   const FIRE_AND_FORGET_EXCUSES = [
     "set_hierarchy_poll_interval_result",
-    "screenshot_error",
     "current_focus_result",
     "traversal_order_result",
     "connected",
@@ -976,9 +949,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 45 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 46 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(45);
+    expect(reshaped.length).toBe(46);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1027,7 +1000,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
     readFileSync(
       join(
         import.meta.dir,
-        "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift",
+        "../../../../ios/control-proxy/Sources/CtrlProxy/Models/WebSocketResponse.swift",
       ),
       "utf8",
     ),
@@ -1041,6 +1014,8 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
     verified: { value: true, types: ["press_key_result"] },
     text: { value: "clipboard text", types: ["clipboard_result"] },
     pinchPath: { value: "element-anchored", types: ["pinch_result"] },
+    swipeRoute: { value: "unpinnedSynthesized", types: ["swipe_result"] },
+    effectiveDurationMs: { value: 50, types: ["swipe_result"] },
     tapDiagnostics: { value: { requested: { x: 1, y: 2 } }, types: ["tap_coordinates_result"] },
     resolvedStore: {
       value: "standard",
@@ -1060,6 +1035,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
         "rotate_result",
         "pinch_result",
         "multi_finger_swipe_result",
+        "path_gesture_result",
       ],
     },
   };
@@ -1128,6 +1104,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "voiceover_state_result", expected: true },
     { type: "voiceover_set_result", expected: false },
     { type: "multi_finger_swipe_result", expected: true },
+    { type: "path_gesture_result", expected: true },
     { type: "clipboard_result", expected: true },
     { type: "highlight_response", expected: false },
     { type: "preference_files", expected: false },
@@ -1169,6 +1146,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     "ime_action_result",
     "action_result",
     "multi_finger_swipe_result",
+    "path_gesture_result",
     "clipboard_result",
   ];
 
@@ -1198,7 +1176,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 45 explicitly-decoded types", () => {
+  test("the default table covers all 46 explicitly-decoded types", () => {
     expect(DEFAULT_WHEN_ABSENT.map((row) => row.type).sort()).toEqual(
       EXPECTED_RESHAPED_RESPONSE_TYPES,
     );
@@ -1239,8 +1217,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 44 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(44);
+  test("the passthrough set is the 45 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(45);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {
@@ -1319,7 +1297,7 @@ describe("preference store resolution decoding", () => {
       `${type} preserves boolean effectiveValueDiffers: %s`,
       (effectiveValueDiffers) => {
         expect(
-          decodeCtrlProxyMessage({
+          decodeRawMessage({
             ...msg({ type, success: true }),
             resolvedStore: "standard",
             effectiveValueDiffers,
@@ -1331,7 +1309,7 @@ describe("preference store resolution decoding", () => {
       `${type} ignores non-boolean effectiveValueDiffers: %s`,
       (effectiveValueDiffers) => {
         expect(
-          decodeCtrlProxyMessage({
+          decodeRawMessage({
             ...msg({ type, success: true }),
             effectiveValueDiffers,
           })?.result,
@@ -1340,8 +1318,7 @@ describe("preference store resolution decoding", () => {
     );
     test(`${type} forwards only string resolvedStore values`, () => {
       expect(
-        decodeCtrlProxyMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })
-          ?.result,
+        decodeRawMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })?.result,
       ).toMatchObject({ resolvedStore: "standard" });
       for (const payload of [
         msg({ type, success: true }),
@@ -1390,5 +1367,33 @@ describe("decodeCtrlProxyMessage errorCode (#10161)", () => {
       decodeCtrlProxyMessage(msg({ type: "press_key_result", success: false, error: "boom" }))
         ?.result,
     ).not.toHaveProperty("errorCode");
+  });
+});
+
+describe("decodeCtrlProxyMessage swipe route report (#13145)", () => {
+  const decodeSwipe = (extra: Record<string, unknown>) =>
+    decodeCtrlProxyMessage(
+      msg({ type: "swipe_result", success: true, totalTimeMs: 5, ...extra } as never),
+    )?.result;
+
+  test("passes through the additive route and effective duration", () => {
+    expect(
+      decodeSwipe({ swipeRoute: "unpinnedSynthesized", effectiveDurationMs: 50 }),
+    ).toMatchObject({ swipeRoute: "unpinnedSynthesized", effectiveDurationMs: 50 });
+  });
+
+  test("an older runner reply carries neither field", () => {
+    const result = decodeSwipe({}) as Record<string, unknown>;
+    expect("swipeRoute" in result).toBe(false);
+    expect("effectiveDurationMs" in result).toBe(false);
+  });
+
+  test("malformed values are dropped", () => {
+    const result = decodeSwipe({ swipeRoute: 3, effectiveDurationMs: "50" }) as Record<
+      string,
+      unknown
+    >;
+    expect("swipeRoute" in result).toBe(false);
+    expect("effectiveDurationMs" in result).toBe(false);
   });
 });

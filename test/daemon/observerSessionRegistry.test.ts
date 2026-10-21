@@ -24,7 +24,9 @@ describe("ObserverSessionRegistry", () => {
     timer = new FakeTimer();
     registry = new ObserverSessionRegistry(timer, 10000);
     const barrier = new FakeDbWriteBarrier();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => barrier);
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => barrier,
+    });
     manager.setObserverSessionRegistry(registry);
   });
   afterEach(() => {
@@ -134,8 +136,8 @@ describe("ObserverSessionRegistry", () => {
   test("rehydration also promotes the observer before publishing a device session", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const barrier = new FakeDbWriteBarrier();
-    const prior = new SessionManager(timer, persistence, () => barrier);
-    const restarted = new SessionManager(timer, persistence, () => barrier);
+    const prior = new SessionManager(timer, persistence, { barrier: () => barrier });
+    const restarted = new SessionManager(timer, persistence, { barrier: () => barrier });
     restarted.setObserverSessionRegistry(registry);
     try {
       await prior.createSession(sessionId, "device-a", "android");
@@ -143,16 +145,13 @@ describe("ObserverSessionRegistry", () => {
       registry.register(sessionId, "desktop");
       const pool: SessionDeviceAssigner = {
         assignDeviceToSession: async (id, _platform, target) => {
-          const session = await restarted.createSession(
-            id,
-            "device-a",
-            "android",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          const session = await restarted.createSession(id, "device-a", "android", {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return session.assignedDevice;
         },
       };

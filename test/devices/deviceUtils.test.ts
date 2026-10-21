@@ -1,13 +1,18 @@
 import { assertAndroidImageRunningStateKnown } from "../../src/devices/deviceUtils";
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { describe, expect, spyOn, test } from "bun:test";
-import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import {
+  MultiPlatformDeviceManager,
+  type DeviceManagerSimCtl,
+} from "../../src/devices/deviceUtils";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
-import { AdbClient, AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { discoverySourceOutcome } from "../../src/utils/discoverySource";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { VirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
@@ -16,9 +21,20 @@ import type {
   IosBootRequest,
 } from "../../src/features/iosSimFleet/IosBootInstrumentation";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
+import type {
+  IosPhysicalDeviceLister,
+  PhysicalIosDeviceDiscovery,
+} from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { logger } from "../../src/utils/logger";
-import type { BootedDeviceScanOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { BootedDeviceScanOptions } from "../../src/utils/android-cmdline-tools/AndroidDeviceInventoryScanner";
+import type { AndroidEmulatorLaunchHandle } from "../../src/utils/android-cmdline-tools/AndroidEmulatorLaunchTypes";
+
+const launchedHandle = (avdName: string): AndroidEmulatorLaunchHandle => ({
+  avdName,
+  process: null,
+  outcome: "launched",
+  dispose: () => {},
+});
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -53,11 +69,11 @@ describe("MultiPlatformDeviceManager", () => {
       androidDiscovery: () => Promise<BootedDevice[]>,
     ): MultiPlatformDeviceManager {
       return new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        {
+        new FakeAdbClient(),
+        fakeDeviceManagerSimctl({
           isAvailable: async () => true,
           getBootedSimulatorsChecked: async () => [iosDevice],
-        } as unknown as SimCtlClient,
+        }),
         createFakeAndroidEmulator({ getBootedDevicesChecked: androidDiscovery }),
         undefined,
         undefined,
@@ -142,11 +158,11 @@ describe("MultiPlatformDeviceManager", () => {
     }): MultiPlatformDeviceManager {
       const resolve = <T>(value: T | Error): Promise<T> =>
         value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async () => true,
         getBootedSimulators: () => resolve(options.simulators ?? []),
         getBootedSimulatorsChecked: () => resolve(options.simulators ?? []),
-      } as unknown as SimCtlClient;
+      });
       const fakeLister: IosPhysicalDeviceLister = {
         listConnectedDevices: async () => {
           options.onPhysicalList?.();
@@ -166,7 +182,7 @@ describe("MultiPlatformDeviceManager", () => {
       };
 
       return new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
+        new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
         undefined,
@@ -180,13 +196,13 @@ describe("MultiPlatformDeviceManager", () => {
         const timer = new FakeTimer();
         let simctlStartedBeforePhysicalSettled = false;
         let physicalSettled = false;
-        const fakeSimctl = {
+        const fakeSimctl = fakeDeviceManagerSimctl({
           isAvailable: async () => true,
           getBootedSimulatorsChecked: async () => {
             simctlStartedBeforePhysicalSettled = !physicalSettled;
             return [simulator];
           },
-        } as unknown as SimCtlClient;
+        });
         const hangingLister: IosPhysicalDeviceLister = {
           listConnectedDevices: () =>
             new Promise(() => {
@@ -194,7 +210,7 @@ describe("MultiPlatformDeviceManager", () => {
             }),
         };
         const manager = new MultiPlatformDeviceManager(
-          new FakeAdbClient() as unknown as AdbClient,
+          new FakeAdbClient(),
           fakeSimctl,
           createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
           undefined,
@@ -275,9 +291,9 @@ describe("MultiPlatformDeviceManager", () => {
         expect(physicalListings).toBe(0);
         expect(discovery.devices).toEqual([simulator]);
         expect(discovery.succeededPlatforms.has("ios")).toBe(true);
-        expect([...discovery.succeededSources]).toEqual(["ios-simulator"]);
+        expect([...(discovery.succeededSources ?? [])]).toEqual(["ios-simulator"]);
         expect(discovery.sourceErrors).toBeUndefined();
-        expect([...discovery.freshDeviceIds]).toEqual([simulator.deviceId]);
+        expect([...(discovery.freshDeviceIds ?? [])]).toEqual([simulator.deviceId]);
       });
     });
 
@@ -409,14 +425,14 @@ describe("MultiPlatformDeviceManager", () => {
 
     test("waitForDeviceReady adopts a connected physical device without simctl", async () => {
       await withProcessPlatform("darwin", async () => {
-        const fakeSimctl = {
+        const fakeSimctl = fakeDeviceManagerSimctl({
           isAvailable: async () => true,
           waitForSimulatorReady: async () => {
             throw new Error("simctl bootstatus must not run for a physical UDID");
           },
-        } as unknown as SimCtlClient;
+        });
         const manager = new MultiPlatformDeviceManager(
-          new FakeAdbClient() as unknown as AdbClient,
+          new FakeAdbClient(),
           fakeSimctl,
           createFakeAndroidEmulator({}),
         );
@@ -433,13 +449,13 @@ describe("MultiPlatformDeviceManager", () => {
 
     test("killDevice refuses a physical UDID instead of shelling out to simctl", async () => {
       await withProcessPlatform("darwin", async () => {
-        const fakeSimctl = {
+        const fakeSimctl = fakeDeviceManagerSimctl({
           killSimulator: async () => {
             throw new Error("simctl shutdown must not run for a physical UDID");
           },
-        } as unknown as SimCtlClient;
+        });
         const manager = new MultiPlatformDeviceManager(
-          new FakeAdbClient() as unknown as AdbClient,
+          new FakeAdbClient(),
           fakeSimctl,
           createFakeAndroidEmulator({}),
         );
@@ -453,13 +469,13 @@ describe("MultiPlatformDeviceManager", () => {
     test("physical discovery is not attempted when iOS tooling is unavailable", async () => {
       await withProcessPlatform("linux", async () => {
         let listerCalls = 0;
-        const fakeSimctl = {
+        const fakeSimctl = fakeDeviceManagerSimctl({
           isAvailable: async () => false,
           getBootedSimulators: async () => [],
           getBootedSimulatorsChecked: async () => [],
-        } as unknown as SimCtlClient;
+        });
         const manager = new MultiPlatformDeviceManager(
-          new FakeAdbClient() as unknown as AdbClient,
+          new FakeAdbClient(),
           fakeSimctl,
           createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
           undefined,
@@ -467,7 +483,7 @@ describe("MultiPlatformDeviceManager", () => {
           {
             listConnectedDevices: async () => {
               listerCalls++;
-              return [physicalDevice];
+              return { devices: [physicalDevice], complete: true };
             },
           },
         );
@@ -492,8 +508,8 @@ describe("MultiPlatformDeviceManager", () => {
       },
     });
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      {} as SimCtlClient,
+      new FakeAdbClient(),
+      fakeDeviceManagerSimctl(),
       emulator,
     );
 
@@ -512,8 +528,8 @@ describe("MultiPlatformDeviceManager", () => {
       },
     });
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      {} as SimCtlClient,
+      new FakeAdbClient(),
+      fakeDeviceManagerSimctl(),
       emulator,
     );
 
@@ -528,14 +544,14 @@ describe("MultiPlatformDeviceManager", () => {
       const cancellation = new Error("iOS discovery cancelled");
       controller.abort(cancellation);
       let simctlCalled = false;
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => {
           simctlCalled = true;
           return await new Promise<BootedDevice[]>(() => {});
         },
-      } as unknown as SimCtlClient;
+      });
       const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
+        new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
         undefined,
@@ -555,16 +571,16 @@ describe("MultiPlatformDeviceManager", () => {
       const controller = new AbortController();
       const cancellation = new Error("iOS probe cancelled");
       let probeSignal: AbortSignal | undefined;
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async (options?: { signal?: AbortSignal }) => {
           probeSignal = options?.signal;
           return await new Promise<boolean>((resolve) => {
             options?.signal?.addEventListener("abort", () => resolve(false), { once: true });
           });
         },
-      } as unknown as SimCtlClient;
+      });
       const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
+        new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
       );
@@ -581,22 +597,19 @@ describe("MultiPlatformDeviceManager", () => {
     await withProcessPlatform("darwin", async () => {
       const controller = new AbortController();
       const cancellation = new Error("iOS discovery cancelled");
-      let resolvePhysical!: (discovery: { devices: BootedDevice[]; complete: boolean }) => void;
-      const physicalDiscovery = new Promise<{
-        devices: BootedDevice[];
-        complete: boolean;
-      }>((resolve) => {
+      let resolvePhysical!: (discovery: PhysicalIosDeviceDiscovery) => void;
+      const physicalDiscovery = new Promise<PhysicalIosDeviceDiscovery>((resolve) => {
         resolvePhysical = resolve;
       });
       let simctlCalled = false;
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => {
           simctlCalled = true;
           return [];
         },
-      } as unknown as SimCtlClient;
+      });
       const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
+        new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
         undefined,
@@ -617,11 +630,12 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
-  test("getBootedDevicesDetailed forwards iOS cache bypass and cancellation to simctl", async () => {
+  test("getBootedDevicesDetailed forwards iOS cache bypass to both sources and cancellation to simctl", async () => {
     await withProcessPlatform("darwin", async () => {
       const controller = new AbortController();
       let request: { signal?: AbortSignal; options?: { bypassCache?: boolean } } | undefined;
-      const fakeSimctl = {
+      let physicalOptions: { bypassCache?: boolean } | undefined;
+      const fakeSimctl = fakeDeviceManagerSimctl({
         getBootedSimulatorsChecked: async (
           _timeoutMs?: number,
           signal?: AbortSignal,
@@ -630,22 +644,29 @@ describe("MultiPlatformDeviceManager", () => {
           request = { signal, options };
           return [];
         },
-      } as unknown as SimCtlClient;
+      });
       const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
+        new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
         undefined,
         undefined,
-        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+        {
+          listConnectedDevices: async (options) => {
+            physicalOptions = options;
+            return { devices: [], complete: true };
+          },
+        },
       );
 
       await manager.getBootedDevicesDetailed("ios", {
         signal: controller.signal,
         bypassIosDeviceListCache: true,
+        bypassPhysicalIosDeviceListCache: true,
       });
 
       expect(request).toEqual({ signal: controller.signal, options: { bypassCache: true } });
+      expect(physicalOptions).toEqual({ bypassCache: true });
     });
   });
 
@@ -667,8 +688,8 @@ describe("MultiPlatformDeviceManager", () => {
       },
     });
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      {} as SimCtlClient,
+      new FakeAdbClient(),
+      fakeDeviceManagerSimctl(),
       emulator,
     );
 
@@ -679,19 +700,14 @@ describe("MultiPlatformDeviceManager", () => {
   });
 
   test("startDevice rejects a name-only iOS DeviceInfo instead of booting by name (#6414)", async () => {
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       getBootedSimulators: async () => [],
-      isSimulatorRunning: async () => false,
       startSimulator: async () => {
         throw new Error("simctl bootstatus must not run for a name-only iOS target");
       },
-    } as unknown as SimCtlClient;
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      fakeSimctl,
-      null,
-    );
+    });
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, null);
     const device: DeviceInfo = {
       name: "iPhone 17 Pro",
       platform: "ios",
@@ -705,16 +721,15 @@ describe("MultiPlatformDeviceManager", () => {
 
   test("startDevice boots an iOS simulator through the injected boot instrumentation with the requested profile", async () => {
     const started: Array<{ udid: string; timeoutMs: number | undefined }> = [];
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       getBootedSimulators: async () => [],
       getBootedSimulatorsChecked: async () => [],
-      isSimulatorRunning: async () => false,
       startSimulator: async (udid: string, timeoutMs?: number) => {
         started.push({ udid, timeoutMs });
         return {} as never;
       },
-    } as unknown as SimCtlClient;
+    });
     const requests: IosBootRequest[] = [];
     const instrumentation: IosBootInstrumentation = {
       run: async (request, boot) => {
@@ -723,11 +738,11 @@ describe("MultiPlatformDeviceManager", () => {
       },
     };
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       fakeSimctl,
       null,
     ).withIosBootInstrumentation(instrumentation);
-    const resourceProfile = { resources: { location: "disabled" as const } };
+    const resourceProfile = { resources: { widgets: "disabled" as const } };
 
     await manager.startDevice(
       { name: "iPhone", platform: "ios", isRunning: false, deviceId: "UDID-1", runtimeId: "rt" },
@@ -743,13 +758,12 @@ describe("MultiPlatformDeviceManager", () => {
 
   // #11064: an opt-in capacity wait must see the boot request's cancellation.
   test("startDevice hands the ambient abort signal to the iOS boot instrumentation", async () => {
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       getBootedSimulators: async () => [],
       getBootedSimulatorsChecked: async () => [],
-      isSimulatorRunning: async () => false,
       startSimulator: async () => ({}) as never,
-    } as unknown as SimCtlClient;
+    });
     const signals: Array<AbortSignal | undefined> = [];
     const instrumentation: IosBootInstrumentation = {
       run: async (request, boot) => {
@@ -758,7 +772,7 @@ describe("MultiPlatformDeviceManager", () => {
       },
     };
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       fakeSimctl,
       null,
     ).withIosBootInstrumentation(instrumentation);
@@ -777,28 +791,17 @@ describe("MultiPlatformDeviceManager", () => {
 
   test("startDevice validates a missing UDID before probing simctl running-state, even when a same-named simulator is already booted (#6414)", async () => {
     let runningStateProbed = false;
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       getBootedSimulators: async () => {
         runningStateProbed = true;
         return [];
       },
-      // An already-booted simulator that happens to share the target's name:
-      // pre-fix, this made isDeviceImageRunning() return true and the caller
-      // observed "already running" instead of the missing-UDID error.
-      isSimulatorRunning: async () => {
-        runningStateProbed = true;
-        return true;
-      },
       startSimulator: async () => {
         throw new Error("simctl bootstatus must not run for a name-only iOS target");
       },
-    } as unknown as SimCtlClient;
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      fakeSimctl,
-      null,
-    );
+    });
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, null);
     const device: DeviceInfo = {
       name: "iPhone 17 Pro",
       platform: "ios",
@@ -813,7 +816,7 @@ describe("MultiPlatformDeviceManager", () => {
 
   test("startDeviceWithOutcome reports how the Android launcher obtained the emulator", async () => {
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       undefined,
       createFakeAndroidEmulator({
         getBootedDevicesChecked: async () => [],
@@ -840,13 +843,13 @@ describe("MultiPlatformDeviceManager", () => {
     const admitRequests: Array<{ timeoutMs: number; signal?: AbortSignal; avdName: string }> = [];
     let admitColdBoot: (() => Promise<unknown>) | undefined;
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       undefined,
       createFakeAndroidEmulator({
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           admitColdBoot = request.admitColdBoot;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     ).withAndroidBootAdmission({
@@ -867,13 +870,13 @@ describe("MultiPlatformDeviceManager", () => {
   test("startDevice gives the Android launcher no admission hook when gating is off", async () => {
     let sawHook = true;
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       undefined,
       createFakeAndroidEmulator({
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           sawHook = request.admitColdBoot !== undefined;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     ).withAndroidBootAdmission(null);
@@ -886,13 +889,13 @@ describe("MultiPlatformDeviceManager", () => {
   test("startDevice forwards the poster option to the Android launcher", async () => {
     let received: string | undefined;
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       undefined,
       createFakeAndroidEmulator({
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           received = request.cameraPosterPath;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     );
@@ -904,7 +907,7 @@ describe("MultiPlatformDeviceManager", () => {
 
   test("startDevice rejects physical Android poster requests before probing or launching", async () => {
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       undefined,
       createFakeAndroidEmulator(),
     );
@@ -927,14 +930,10 @@ describe("MultiPlatformDeviceManager", () => {
       },
       launchEmulator: async () => {
         launched = true;
-        return { process: null };
+        return launchedHandle("Pixel");
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(
       manager.startDevice({
@@ -959,14 +958,10 @@ describe("MultiPlatformDeviceManager", () => {
       },
       launchEmulator: async () => {
         launched = true;
-        return { process: null };
+        return launchedHandle("Pixel");
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(
       manager.startDevice({ name: "Pixel_9_Pro", platform: "android", isRunning: false }),
@@ -979,17 +974,17 @@ describe("MultiPlatformDeviceManager", () => {
   test("startDevice refuses an iOS launch when checked liveness discovery fails", async () => {
     await withProcessPlatform("darwin", async () => {
       let launched = false;
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => {
           throw new Error("simctl executor failed");
         },
         startSimulator: async () => {
           launched = true;
-          return null;
+          return new FakeChildProcess();
         },
-      } as unknown as SimCtlClient;
+      });
       const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
+        new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
       );
@@ -1012,15 +1007,15 @@ describe("MultiPlatformDeviceManager", () => {
     await withProcessPlatform("darwin", async () => {
       const booted: BootedDevice = { name: "iPhone 17 Pro", platform: "ios", deviceId: "IOS-17" };
       let launched = false;
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => [booted],
         startSimulator: async () => {
           launched = true;
-          return null;
+          return new FakeChildProcess();
         },
-      } as unknown as SimCtlClient;
+      });
       const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
+        new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
       );
@@ -1045,14 +1040,14 @@ describe("MultiPlatformDeviceManager", () => {
   });
 
   test("waitForDeviceReady rejects a name-only iOS DeviceInfo instead of polling bootstatus by name (#6414)", async () => {
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       waitForSimulatorReady: async () => {
         throw new Error("simctl bootstatus must not run for a name-only iOS target");
       },
-    } as unknown as SimCtlClient;
+    });
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       fakeSimctl,
       createFakeAndroidEmulator({}),
     );
@@ -1068,22 +1063,15 @@ describe("MultiPlatformDeviceManager", () => {
   });
 
   test("isDeviceImageRunning uses UDID when present for iOS", async () => {
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       getBootedSimulatorsChecked: async () => [
         { name: "iPhone 15", platform: "ios", deviceId: "booted-1" },
       ],
-      isSimulatorRunning: async () => {
-        throw new Error("should not use name-based check when deviceId is present");
-      },
-    } as unknown as SimCtlClient;
+    });
 
     // Use FakeAdbClient to avoid starting real adb daemon
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      fakeSimctl,
-      null,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, null);
     const device: DeviceInfo = {
       name: "iPhone 15",
       platform: "ios",
@@ -1099,7 +1087,7 @@ describe("MultiPlatformDeviceManager", () => {
   test("isDeviceImageRunning bypasses the Android device-list cache", async () => {
     let receivedOptions: BootedDeviceScanOptions | undefined;
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       null,
       createFakeAndroidEmulator({
         getBootedDevicesChecked: async (_onlyEmulators, options) => {
@@ -1122,7 +1110,7 @@ describe("MultiPlatformDeviceManager", () => {
   test("isDeviceImageRunning bypasses the iOS simulator-list cache", async () => {
     await withProcessPlatform("darwin", async () => {
       let receivedOptions: { bypassCache?: boolean } | undefined;
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async () => true,
         getBootedSimulatorsChecked: async (
           _timeoutMs?: number,
@@ -1132,12 +1120,8 @@ describe("MultiPlatformDeviceManager", () => {
           receivedOptions = options;
           return [{ name: "iPhone 15", platform: "ios", deviceId: "booted-1" }];
         },
-      } as unknown as SimCtlClient;
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        fakeSimctl,
-        null,
-      );
+      });
+      const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, null);
 
       const isRunning = await manager.isDeviceImageRunning({
         name: "iPhone 15",
@@ -1152,19 +1136,15 @@ describe("MultiPlatformDeviceManager", () => {
   });
 
   test("isDeviceImageRunning falls back to name-based check for iOS without UDID", async () => {
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       getBootedSimulatorsChecked: async () => [
         { name: "iPhone 15", platform: "ios", deviceId: "booted-1" },
       ],
-    } as unknown as SimCtlClient;
+    });
 
     // Use FakeAdbClient to avoid starting real adb daemon
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      fakeSimctl,
-      null,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, null);
     const device: DeviceInfo = {
       name: "iPhone 15",
       platform: "ios",
@@ -1184,22 +1164,18 @@ describe("MultiPlatformDeviceManager", () => {
         platform: "android",
         deviceId: "emulator-5554",
       };
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async () => false,
         getBootedSimulators: async () => {
           simctlListCalls++;
           throw new Error("simctl should not be queried");
         },
-      } as unknown as SimCtlClient;
+      });
       const fakeEmulator = createFakeAndroidEmulator({
         getBootedDevices: async () => [androidDevice],
       });
 
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        fakeSimctl,
-        fakeEmulator,
-      );
+      const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
       const devices = await manager.getBootedDevices("either");
 
@@ -1215,21 +1191,17 @@ describe("MultiPlatformDeviceManager", () => {
         platform: "android",
         deviceId: "emulator-5554",
       };
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async () => true,
         getBootedSimulators: async () => {
           throw new Error("simctl unavailable");
         },
-      } as unknown as SimCtlClient;
+      });
       const fakeEmulator = createFakeAndroidEmulator({
         getBootedDevices: async () => [androidDevice],
       });
 
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        fakeSimctl,
-        fakeEmulator,
-      );
+      const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
       const devices = await manager.getBootedDevices("either");
 
@@ -1245,23 +1217,19 @@ describe("MultiPlatformDeviceManager", () => {
         platform: "android",
         isRunning: false,
       };
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async () => false,
         listSimulatorImages: async () => {
           simctlListCalls++;
           throw new Error("simctl should not be queried");
         },
-      } as unknown as SimCtlClient;
+      });
       const fakeEmulator = createFakeAndroidEmulator({
         listAvds: async () => [androidImage],
         getBootedDevicesChecked: async () => [],
       });
 
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        fakeSimctl,
-        fakeEmulator,
-      );
+      const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
       const devices = await manager.listDeviceImages("either");
 
@@ -1277,22 +1245,18 @@ describe("MultiPlatformDeviceManager", () => {
         platform: "android",
         isRunning: false,
       };
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async () => true,
         listSimulatorImages: async () => {
           throw new Error("simctl unavailable");
         },
-      } as unknown as SimCtlClient;
+      });
       const fakeEmulator = createFakeAndroidEmulator({
         listAvds: async () => [androidImage],
         getBootedDevicesChecked: async () => [],
       });
 
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        fakeSimctl,
-        fakeEmulator,
-      );
+      const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
       const devices = await manager.listDeviceImages("either");
 
@@ -1309,22 +1273,18 @@ describe("MultiPlatformDeviceManager", () => {
         platform: "android",
         isRunning: false,
       };
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async () => true,
         listSimulatorImages: async () => {
           controller.abort(reason);
           throw new Error("simctl listing interrupted");
         },
-      } as unknown as SimCtlClient;
+      });
       const fakeEmulator = createFakeAndroidEmulator({
         listAvds: async () => [androidImage],
         getBootedDevicesChecked: async () => [],
       });
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        fakeSimctl,
-        fakeEmulator,
-      );
+      const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
       await expect(manager.listDeviceImages("either", controller.signal)).rejects.toBe(reason);
     });
@@ -1340,7 +1300,7 @@ describe("MultiPlatformDeviceManager", () => {
         isRunning: false,
       };
       const iosImage: DeviceInfo = { name: "iPhone 17", platform: "ios", isRunning: false };
-      const fakeSimctl = {
+      const fakeSimctl = fakeDeviceManagerSimctl({
         isAvailable: async () => true,
         listSimulatorImages: async (
           _timeoutMs?: number,
@@ -1349,16 +1309,12 @@ describe("MultiPlatformDeviceManager", () => {
           recordedOptions = options;
           return [iosImage];
         },
-      } as unknown as SimCtlClient;
+      });
       const fakeEmulator = createFakeAndroidEmulator({
         listAvds: async () => [androidImage],
         getBootedDevicesChecked: async () => [],
       });
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        fakeSimctl,
-        fakeEmulator,
-      );
+      const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
       await expect(manager.listDeviceImages("either", controller.signal)).resolves.toEqual([
         androidImage,
@@ -1383,11 +1339,7 @@ describe("MultiPlatformDeviceManager", () => {
       ],
     });
 
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     const devices = await manager.listDeviceImages("android");
 
@@ -1404,11 +1356,7 @@ describe("MultiPlatformDeviceManager", () => {
       getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [],
     });
 
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(manager.listDeviceImages("android")).resolves.toEqual([
       { name: "Pixel_8", platform: "android", isRunning: false },
@@ -1434,11 +1382,7 @@ describe("MultiPlatformDeviceManager", () => {
         },
       ],
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(manager.listDeviceImages("android")).resolves.toEqual([
       { name: "Pixel_8", platform: "android", isRunning: true },
@@ -1459,11 +1403,7 @@ describe("MultiPlatformDeviceManager", () => {
         throw new Error("adb devices unavailable");
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(manager.listDeviceImages("android")).resolves.toEqual([
       {
@@ -1483,11 +1423,7 @@ describe("MultiPlatformDeviceManager", () => {
         throw new Error("sync boom");
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(manager.listDeviceImages("android")).resolves.toEqual([
       { ...image, isRunningStateKnown: false },
@@ -1496,22 +1432,18 @@ describe("MultiPlatformDeviceManager", () => {
 
   test("listDeviceImages(android) keeps configured AVDs when overlay mapping fails", async () => {
     const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
-    const malformedBootedDevice = {
+    const malformedBootedDevice: BootedDevice = {
       name: "Pixel_8",
       platform: "android",
       get deviceId(): string {
         throw new Error("malformed booted device");
       },
-    } as unknown as BootedDevice;
+    };
     const fakeEmulator = createFakeAndroidEmulator({
       listAvds: async () => [image],
       getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [malformedBootedDevice],
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(manager.listDeviceImages("android")).resolves.toEqual([
       { ...image, isRunningStateKnown: false },
@@ -1526,11 +1458,7 @@ describe("MultiPlatformDeviceManager", () => {
         throw new Error("sync boom");
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(manager.getDeviceImagesDetailed("android")).resolves.toEqual({
       devices: [{ ...image, isRunningStateKnown: false }],
@@ -1549,11 +1477,7 @@ describe("MultiPlatformDeviceManager", () => {
       },
       getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [],
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await runWithAbortSignal(controller.signal, () => manager.listDeviceImages("android"));
 
@@ -1573,11 +1497,7 @@ describe("MultiPlatformDeviceManager", () => {
       ],
     });
 
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(manager.listDeviceImages("android")).resolves.toEqual([
       { name: "Pixel_8", platform: "android", isRunning: false },
@@ -1593,11 +1513,7 @@ describe("MultiPlatformDeviceManager", () => {
       ],
     });
 
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     await expect(manager.listDeviceImages("android")).resolves.toEqual([
       { name: "Pixel_8", platform: "android", isRunning: true },
@@ -1605,21 +1521,17 @@ describe("MultiPlatformDeviceManager", () => {
   });
 
   test("listDeviceImages(ios) surfaces iOS image discovery failures", async () => {
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       listSimulatorImages: async () => {
         throw new Error("simctl list devices exploded");
       },
-    } as unknown as SimCtlClient;
+    });
     const fakeEmulator = createFakeAndroidEmulator({
       listAvds: async () => [],
     });
 
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      fakeSimctl,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
     await expect(manager.listDeviceImages("ios")).rejects.toThrow(/simctl list devices exploded/);
   });
@@ -1630,21 +1542,17 @@ describe("MultiPlatformDeviceManager", () => {
       platform: "android",
       isRunning: false,
     };
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       listSimulatorImages: async () => {
         throw new Error("simctl list devices exploded");
       },
-    } as unknown as SimCtlClient;
+    });
     const fakeEmulator = createFakeAndroidEmulator({
       listAvds: async () => [androidImage],
       getBootedDevicesChecked: async () => [],
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      fakeSimctl,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
     const result = await manager.getDeviceImagesDetailed("either");
 
@@ -1666,16 +1574,16 @@ describe("MultiPlatformDeviceManager", () => {
       platform: "android",
       isRunning: false,
     };
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       listSimulatorImages: async (
-        _sessionId?: string,
+        _timeoutMs?: number,
         options?: { bypassCache?: boolean; signal?: AbortSignal },
       ): Promise<DeviceInfo[]> => {
         iosOptions = options;
         return [];
       },
-    } as unknown as SimCtlClient;
+    });
     const fakeEmulator = createFakeAndroidEmulator({
       listAvds: async (options?: { signal?: AbortSignal }): Promise<DeviceInfo[]> => {
         androidSignal = options?.signal;
@@ -1690,11 +1598,7 @@ describe("MultiPlatformDeviceManager", () => {
         return [{ name: "Pixel_8", platform: "android", deviceId: "emulator-5554" }];
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      fakeSimctl,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator);
 
     const result = await manager.getDeviceImagesDetailed("either", {
       signal: controller.signal,
@@ -1725,11 +1629,7 @@ describe("MultiPlatformDeviceManager", () => {
         });
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     const inventory = manager.listDeviceImages("android", controller.signal);
     await Promise.resolve();
@@ -1754,11 +1654,7 @@ describe("MultiPlatformDeviceManager", () => {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
         }),
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
 
     const inventory = manager.listDeviceImages("android", controller.signal);
     await Promise.resolve();
@@ -1772,16 +1668,16 @@ describe("MultiPlatformDeviceManager", () => {
     let request:
       | { udid: string; options?: { timeoutMs?: number; signal?: AbortSignal } }
       | undefined;
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       deleteSimulator: async (
         udid: string,
         options?: { timeoutMs?: number; signal?: AbortSignal },
       ) => {
         request = { udid, options };
       },
-    } as unknown as SimCtlClient;
+    });
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       fakeSimctl,
       createFakeAndroidEmulator({}),
     );
@@ -1813,6 +1709,7 @@ describe("MultiPlatformDeviceManager", () => {
     timer.advanceTime(4_000);
     let reservedDeadlineMs: number | undefined;
     const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: () => false,
       reserve: async (identity, options) => {
         reservedDeadlineMs = options.deadlineMs;
         return {
@@ -1824,11 +1721,11 @@ describe("MultiPlatformDeviceManager", () => {
         };
       },
     };
-    const fakeSimctl = {
+    const fakeSimctl = fakeDeviceManagerSimctl({
       deleteSimulator: async () => {},
-    } as unknown as SimCtlClient;
+    });
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       fakeSimctl,
       createFakeAndroidEmulator({}),
       lifecycleCoordinator,
@@ -1858,11 +1755,7 @@ describe("MultiPlatformDeviceManager Android offline recovery delegation (#7536)
         return new Set(["emulator-5554"]);
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      null,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), null, fakeEmulator);
 
     const offline = await manager.getAndroidOfflineDeviceIds(["emulator-5554", "emulator-5556"]);
 
@@ -1871,21 +1764,21 @@ describe("MultiPlatformDeviceManager Android offline recovery delegation (#7536)
   });
 
   test("recoverAndroidOfflineDevices delegates to the emulator client", async () => {
-    let called = false;
+    let receivedIds: Iterable<string> | undefined;
+    let receivedOptions: { timeoutMs?: number; signal?: AbortSignal } | undefined;
     const fakeEmulator = createFakeAndroidEmulator({
-      recoverOfflineDevices: async () => {
-        called = true;
+      recoverOfflineDevices: async (ids, options) => {
+        receivedIds = ids;
+        receivedOptions = options;
       },
     });
-    const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      null,
-      fakeEmulator,
-    );
+    const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), null, fakeEmulator);
 
-    await manager.recoverAndroidOfflineDevices();
-
-    expect(called).toBe(true);
+    const ids = new Set(["emulator-5554", "emulator-5558"]);
+    const options = { timeoutMs: 1234, signal: new AbortController().signal };
+    await manager.recoverAndroidOfflineDevices(ids, options);
+    expect(receivedIds).toBe(ids);
+    expect(receivedOptions).toBe(options);
   });
 });
 
@@ -1901,16 +1794,16 @@ describe("discovery classifies tooling that is not installed apart from a failed
 
   function manager(seams: {
     adb?: () => Promise<BootedDevice[]>;
-    simctl?: SimCtlClient;
+    simctl?: DeviceManagerSimCtl;
     devicectl?: IosPhysicalDeviceLister;
   }): MultiPlatformDeviceManager {
     return new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       seams.simctl ??
-        ({
+        fakeDeviceManagerSimctl({
           isAvailable: async () => true,
           getBootedSimulatorsChecked: async () => [sim],
-        } as unknown as SimCtlClient),
+        }),
       createFakeAndroidEmulator({ getBootedDevicesChecked: seams.adb ?? (async () => []) }),
       undefined,
       undefined,
@@ -1919,7 +1812,7 @@ describe("discovery classifies tooling that is not installed apart from a failed
   }
 
   /** A real simctl client over an `xcrun` that fails the way the given spawn error does. */
-  const simctlFailing = (message: string): SimCtlClient =>
+  const simctlFailing = (message: string): DeviceManagerSimCtl =>
     new SimCtlClient(null, async () => {
       throw new Error(message);
     });
@@ -2021,7 +1914,7 @@ describe("discovery classifies tooling that is not installed apart from a failed
   test("off macOS with no simctl, both iOS sources are not applicable", async () => {
     await withProcessPlatform("linux", async () => {
       const deviceManager = manager({
-        simctl: { isAvailable: async () => false } as unknown as SimCtlClient,
+        simctl: fakeDeviceManagerSimctl({ isAvailable: async () => false }),
       });
       expect(await outcomes(deviceManager)).toEqual({
         android: "complete",

@@ -1,11 +1,20 @@
+import { prototypeHasStack, prototypeStackUnsupportedMessage } from "../prototypeSpec";
+import { PROTOTYPE_STACK_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import { prototypeStacksSchema } from "../../observe/android/CtrlProxyPrototypes";
+import {
+  prototypePatchReplyFields,
+  prototypePatchUnsupportedMessage,
+  type PrototypePatchRequest,
+  type PrototypePatchReply,
+} from "../prototypePatchWire";
 /**
  * The shared prototype transport over the injected iOS simulator prototype agent (#10568).
  *
  * The agent speaks the CtrlProxy prototype message names, so requests and `prototype_event` pushes
  * map one to one. It has no `update_prototype` (#10550): a same-id `show` replaces the prototype.
  * It has no display targeting. `reset` is forwarded to start a same-id show fresh, and `appearance`
- * to pin the system setting (an agent advertising `prototype_appearance_v1` only). Per-call `timeoutMs` is not forwarded: the agent client applies
- * its own request timeout to every request.
+ * to pin the system setting (an agent advertising `prototype_appearance_v1` only). Transport per-call `timeoutMs` is not forwarded. Status uses a short client deadline to detect
+ * a suspended app; other requests use the agent client's default request timeout.
  */
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -14,7 +23,9 @@ import type { PrototypeAssetRequestOptions } from "../../observe/android/CtrlPro
 import { decodePrototypeEvent } from "../../observe/android/CtrlProxyPrototypes";
 import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
+  PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_STORAGE_CAPABILITY,
   SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
 } from "../../observe/android/ctrlProxyProtocol";
 import type {
@@ -33,11 +44,17 @@ import {
   type PrototypeAssetUpload,
 } from "../prototypeAssets";
 import type { PrototypeSpec } from "../prototypeSpec";
+import { prototypeClearStorageUnsupportedMessage } from "../prototypeStorage";
 import type {
   PrototypeDeviceStatus,
   PrototypeShowOptions,
   PrototypeTransport,
 } from "../PrototypeTransport";
+import { PrototypeAgentRequestTimeoutError } from "./prototypeAgentClient";
+import {
+  IOS_PROTOTYPE_STATUS_TIMEOUT_MS,
+  PrototypeAgentSuspendedError,
+} from "./prototypeAgentSuspended";
 import type {
   PrototypeAgentClient,
   PrototypeAgentMessage,
@@ -68,6 +85,10 @@ export { SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY };
  * `inspect` adopts. An older agent answers status without it, so inspect is refused on one.
  */
 export const IOS_PROTOTYPE_INSPECT_CAPABILITY = "prototype_inspect_v1";
+
+// ORCHESTRATOR-CHOSEN: iOS multi-window parity is a follow-up.
+export const IOS_PROTOTYPE_MULTI_SURFACE_UNSUPPORTED_MESSAGE =
+  "iOS shows one prototype at a time; replaceOthers:false is Android only (prototype_multi_surface_v1)";
 
 /** The agent restores the prototype by itself after this long, even if the host never asks. */
 export const DEFAULT_CAPTURE_HIDE_DEADLINE_MS = 1500;
@@ -109,8 +130,16 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
   const appearance = parsePrototypeAppearance(result.appearance);
   return {
     ...(appearance ? { appearance } : {}),
+    ...(prototypeStacksSchema.parse(result.stacks)
+      ? { stacks: prototypeStacksSchema.parse(result.stacks) }
+      : {}),
     success: result.success,
     requestId: result.requestId,
+    ...(typeof result.cleared === "number" &&
+    Number.isSafeInteger(result.cleared) &&
+    result.cleared >= 0
+      ? { cleared: result.cleared }
+      : {}),
     ...(typeof result.error === "string" ? { error: result.error } : {}),
     ...(typeof totalTimeMs === "number" ? { totalTimeMs } : {}),
     ...(Array.isArray(missingAssets) &&
@@ -205,6 +234,12 @@ export class IosPrototypeTransport implements PrototypeTransport {
    * `prototype_show_in_place_v1`.
    */
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
+    if (prototypeHasStack(spec) && !this.supportsCapability(PROTOTYPE_STACK_CAPABILITY)) {
+      throw new ActionableError(prototypeStackUnsupportedMessage("ios"));
+    }
+    if (options.replaceOthers === false) {
+      throw new ActionableError(IOS_PROTOTYPE_MULTI_SURFACE_UNSUPPORTED_MESSAGE);
+    }
     if (options.reset === true && !this.supportsCapability(PROTOTYPE_SHOW_IN_PLACE_CAPABILITY)) {
       throw new ActionableError(
         `Prototype agent ${this.agent.handshake.agentVersion} does not support reset; relaunch ` +
@@ -225,9 +260,38 @@ export class IosPrototypeTransport implements PrototypeTransport {
     );
   }
 
+  async patch(patch: PrototypePatchRequest): Promise<PrototypePatchReply> {
+    if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
+      return { success: false, delivery: "unsent", error: prototypePatchUnsupportedMessage("ios") };
+    }
+    try {
+      const reply = await this.agent.request("patch_prototype", {
+        id: patch.id,
+        ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
+        ops: patch.ops,
+      });
+      return {
+        ...toPrototypeResult(reply),
+        ...prototypePatchReplyFields(reply),
+        delivery: "answered",
+      };
+    } catch (error) {
+      logger.warn("[prototype-agent] Patch request failed", error);
+      return { success: false, delivery: "indeterminate", error: errorMessage(error) };
+    }
+  }
+
   async dismiss(target: PrototypeDismiss): Promise<PrototypeResult> {
     const body: PrototypeAgentMessage = target.all ? { all: true } : { id: target.id };
     return toPrototypeResult(await this.agent.request("dismiss_prototype", body));
+  }
+
+  /** Wipes the values the agent stored for `id` (#12522); refused unless it advertises prototype_storage_v1. */
+  async clearStorage(id: string): Promise<PrototypeResult> {
+    if (!this.supportsCapability(PROTOTYPE_STORAGE_CAPABILITY)) {
+      throw new ActionableError(prototypeClearStorageUnsupportedMessage("ios"));
+    }
+    return toPrototypeResult(await this.agent.request("clear_prototype_storage", { id }));
   }
 
   async putAsset(
@@ -267,7 +331,17 @@ export class IosPrototypeTransport implements PrototypeTransport {
   }
 
   async status(): Promise<PrototypeDeviceStatus> {
-    const result = await this.agent.request("get_prototype_status");
+    let result: PrototypeAgentResult;
+    try {
+      result = await this.agent.request("get_prototype_status", undefined, {
+        timeoutMs: IOS_PROTOTYPE_STATUS_TIMEOUT_MS,
+      });
+    } catch (error) {
+      if (error instanceof PrototypeAgentRequestTimeoutError) {
+        throw new PrototypeAgentSuspendedError(error.timeoutMs, { cause: error });
+      }
+      throw error;
+    }
     return {
       success: result.success,
       ...(typeof result.error === "string" ? { error: result.error } : {}),

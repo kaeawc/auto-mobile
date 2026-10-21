@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "switch",
+          "stateKey": "liked_{item.id}"
+        }
+      ]
+    },
+    "data": {
+      "orders": [
+        {
+          "id": 7,
+          "title": "Latte",
+          "total": 4.5,
+          "details": {
+            "size": "large"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].stateKey",
+  "expectedMessage": "Toggle control requires a boolean state key (repeat item 0)"
+}

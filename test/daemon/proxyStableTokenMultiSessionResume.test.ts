@@ -20,6 +20,23 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // #10990: a proxy restarted with its stable `--liveness-owner-token` resumes EVERY session the
 // token owned, not just one, and another token still cannot take them (#10664).
 
+/** A real proxy that exposes the device ids its token resume recorded. */
+class DeviceIdProxy extends DaemonMcpProxy {
+  deviceIdOf(sessionUuid: string): string | undefined {
+    return this.sessionDeviceIds.get(sessionUuid);
+  }
+}
+
+/** The daemon's refusal as a client sees it: an error carrying the wire `code`. */
+class DaemonRefusalError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | undefined,
+  ) {
+    super(message);
+  }
+}
+
 const FIRST = "stable-token-session-a";
 const SECOND = "stable-token-session-b";
 const TOKEN = "harness-stable-token";
@@ -30,18 +47,19 @@ describe("proxy restarted with a stable owner token", () => {
   let sessionManager: SessionManager;
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let state: DaemonStateAccess;
-  let proxies: DaemonMcpProxy[];
+  let proxies: DeviceIdProxy[];
 
   beforeEach(async () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    await sessionManager.createSession(FIRST, "emulator-5554", "android", 60_000);
-    await sessionManager.createSession(SECOND, "emulator-5556", "android", 60_000);
+    await sessionManager.createSession(FIRST, "emulator-5554", "android", { timeoutMs: 60_000 });
+    await sessionManager.createSession(SECOND, "emulator-5556", "android", { timeoutMs: 60_000 });
     state = {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -73,10 +91,10 @@ describe("proxy restarted with a stable owner token", () => {
   function restartedProxy(
     clients: FakeDaemonClient[],
     options: { livenessOwnerToken: string; initialSessionUuid?: string },
-  ): DaemonMcpProxy {
+  ): DeviceIdProxy {
     const manager = new FakeDaemonManager();
     manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
-    const proxy = new DaemonMcpProxy({
+    const proxy = new DeviceIdProxy({
       ...options,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       clientFactory: () => {
@@ -84,7 +102,7 @@ describe("proxy restarted with a stable owner token", () => {
           onCallDaemonMethod: async (method, params) => {
             const response = await daemonCall(method, params);
             if (!response.success) {
-              throw Object.assign(new Error(response.error), { code: response.code });
+              throw new DaemonRefusalError(response.error ?? "", response.code);
             }
             return response.result;
           },
@@ -180,10 +198,8 @@ describe("proxy restarted with a stable owner token", () => {
 
     // Handover and stall payloads name a session's device from this map; calls naming the
     // startup-bound session carry no deviceId, so the token resume is its only source.
-    const devices = (proxy as unknown as { sessionDeviceIds: Map<string, string> })
-      .sessionDeviceIds;
-    expect(devices.get(FIRST)).toBe("emulator-5554");
-    expect(devices.get(SECOND)).toBe("emulator-5556");
+    expect(proxy.deviceIdOf(FIRST)).toBe("emulator-5554");
+    expect(proxy.deviceIdOf(SECOND)).toBe("emulator-5556");
   });
 
   test("a different token cannot resume them", async () => {

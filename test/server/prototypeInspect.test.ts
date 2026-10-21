@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   prototypeOutputSchema,
@@ -79,7 +80,7 @@ describe("prototype inspect (#10494)", () => {
   async function call(input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(readToolResponse(response).structuredContent);
   }
 
   test("inspect is an argument-free action", () => {
@@ -128,6 +129,17 @@ describe("prototype inspect (#10494)", () => {
     expect(client.getInspectCount()).toBe(1);
   });
 
+  test("inspect, status and awaitEvent preserve stack navigation snapshots", async () => {
+    const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
+    client.setInspectReply({ success: true, prototypes: [{ ...reported(1), stacks }] }, [
+      event(1, "screen_changed", "nav", { stacks, payload: { screen: "detail", depth: 2 } }),
+    ]);
+    expect((await call({ action: "inspect" })).prototypes).toMatchObject([{ stacks }]);
+    expect((await call({ action: "status" })).prototypes).toMatchObject([{ stacks }]);
+    expect(
+      (await call({ action: "awaitEvent", id: "proto", kind: "screen_changed" })).event,
+    ).toMatchObject({ stacks, name: "nav", payload: { screen: "detail", depth: 2 } });
+  });
   test("events the device buffered offline are delivered to awaitEvent in order", async () => {
     client.setInspectReply({ success: true, prototypes: [reported(3)] }, [
       event(1, "emit", "tap"),
@@ -290,7 +302,9 @@ describe("prototype inspect across sessions (#10494)", () => {
       const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
       const run = async (session: string, input: Record<string, unknown>) =>
         runWithToolSelectionContext({ routingSessionUuid: session }, async () =>
-          prototypeOutputSchema.parse((await handler(device, input)).structuredContent),
+          prototypeOutputSchema.parse(
+            readToolResponse(await handler(device, input)).structuredContent,
+          ),
         );
       await run("session-a", {
         action: "show",

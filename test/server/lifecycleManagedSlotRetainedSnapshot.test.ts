@@ -1,29 +1,30 @@
 import { describe, expect, spyOn } from "bun:test";
+import { bindDevice } from "../../src/daemon/deviceBinding";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   assertLifecycleCallerHoldsDevice,
-  assertLifecycleCallerNotOnForeignManagedSlot,
+  assertLifecycleCallerNotOnForeignBinding,
 } from "../../src/server/lifecycleDeviceOwnership";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { restartStopHarness } from "../helpers/restartStopHarness";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 
 const DEVICE = { name: "iPhone", deviceId: "IOS-SLOT", platform: "ios" as const };
 const EXECUTION = "exec-new";
 
-describe("lifecycle retained managed-slot snapshot", () => {
+describe("lifecycle retained binding snapshot", () => {
   const { test, cleanups } = restartStopHarness();
 
   async function fixture() {
     const timer = new FakeTimer();
-    const registry = new FakeSlotRegistry(timer, () => true);
+    const registry = new FakeBindingRegistry(timer, () => true);
     const outage = { unreadable: false };
     const snapshot = registry.snapshotManagedDevices.bind(registry);
     const read = spyOn(registry, "snapshotManagedDevices").mockImplementation(async () => {
@@ -33,14 +34,14 @@ describe("lifecycle retained managed-slot snapshot", () => {
       return snapshot();
     });
     cleanups.push(() => read.mockRestore());
-    const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+    const exclusion = new RegistryBindingExclusion(async () => registry, timer);
     const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessions.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessions, "lifecycle-retained", {
         timer,
         deviceManager: new FakeDeviceUtils(),
-        managedSlotExclusion: exclusion,
+        bindingExclusion: exclusion,
       }),
     );
     cleanups.push(() => {
@@ -50,16 +51,17 @@ describe("lifecycle retained managed-slot snapshot", () => {
       expect(timer.getPendingTimeoutCount()).toBe(0);
     });
     await pool.initializeWithDevices([DEVICE]);
-    await assignManagedSlotDevice(registry, "ios", DEVICE.deviceId, "runner-b", "exec-previous");
+    await assignBindingDevice(registry, "ios", DEVICE.deviceId, "runner-b", "exec-previous");
     await sessions.createSession(EXECUTION, DEVICE.deviceId, "ios");
-    pool.getDevice(DEVICE.deviceId)!.sessionId = EXECUTION;
-    pool.getDevice(DEVICE.deviceId)!.status = "assigned";
+    bindDevice(pool.getDevice(DEVICE.deviceId)!, EXECUTION);
     DaemonState.getInstance().initialize(sessions, pool);
     cleanups.push(() => {
       DaemonState.getInstance().reset();
       expect(DaemonState.getInstance().isInitialized()).toBe(false);
     });
-    const input = (sessionUuid: string | undefined = EXECUTION) => ({
+    const input = (
+      sessionUuid: string | undefined = EXECUTION,
+    ): Parameters<typeof assertLifecycleCallerHoldsDevice>[0] => ({
       toolName: "killDevice",
       device: DEVICE,
       requester: { sessionUuid, mcpSessionId: undefined },
@@ -72,7 +74,7 @@ describe("lifecycle retained managed-slot snapshot", () => {
     const h = await fixture();
     await h.exclusion.refresh();
     h.outage.unreadable = true;
-    await expect(assertLifecycleCallerNotOnForeignManagedSlot(h.input())).resolves.toBeUndefined();
+    await expect(assertLifecycleCallerNotOnForeignBinding(h.input())).resolves.toBeUndefined();
     expect(() => assertLifecycleCallerHoldsDevice(h.input())).not.toThrow();
   });
 
@@ -86,7 +88,7 @@ describe("lifecycle retained managed-slot snapshot", () => {
       const input = h.input();
       input.requester.sessionUuid = sessionUuid;
       expect(() => assertLifecycleCallerHoldsDevice(input)).toThrow(
-        expect.objectContaining({ code: "device_assigned_to_managed_slot" }),
+        expect.objectContaining({ code: "device_assigned_to_binding" }),
       );
     },
   );
@@ -95,7 +97,7 @@ describe("lifecycle retained managed-slot snapshot", () => {
     const h = await fixture();
     await h.exclusion.refresh();
     expect(() => assertLifecycleCallerHoldsDevice(h.input())).toThrow(
-      expect.objectContaining({ code: "device_assigned_to_managed_slot" }),
+      expect.objectContaining({ code: "device_assigned_to_binding" }),
     );
   });
 

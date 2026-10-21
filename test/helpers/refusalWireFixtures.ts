@@ -1,11 +1,21 @@
+import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
+import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
+import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
-import { ManagedSlotConfigError } from "../../src/models/managedSlotConfig";
+import { SessionConfigError } from "../../src/devices/sessionConfig";
+import { AndroidIdentityUnresolvedError } from "../../src/devices/AndroidIdentityUnresolvedError";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
+import { SdkCapabilityQueryError } from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import { SharedDaemonNamespaceError } from "../../src/daemon/sharedNamespaceGuard";
 import {
   deviceSessionErrorFields,
@@ -28,40 +38,32 @@ import {
   SessionCreationTimeoutError,
   RetryableDeviceAcquisitionError,
   SessionReleasedDuringCreationError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import { unsupportedIosButtonResult } from "../../src/features/action/PressButton";
 import {
   MCP_OVERLOAD_ERROR_CODE,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
   McpTimeoutError,
   McpOverloadError,
 } from "../../src/daemon/McpTimeoutError";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
 import {
-  DaemonRestartDeferredError,
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
-} from "../../src/daemon/daemonRestartAdmission";
+} from "../../src/daemon/daemonRestartPending";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  daemonResponseError,
-  DaemonHandshakeMismatchError,
-  DaemonBoundSessionLostError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  DaemonRequestNotDeliveredError,
-} from "../../src/daemon/client";
-import {
-  DeviceControlTransportError,
-  LoopbackMcpConnectionError,
-} from "../../src/daemon/deviceControlTransportFailure";
-import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
+import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client";
+import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
+import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   AndroidAvdIdentityUnresolvedError,
+  AndroidDeviceIdentityUnresolvedError,
   AndroidAvdIdentityConflictError,
   DeviceBootTimeoutError,
 } from "../../src/devices/deviceBootService";
@@ -101,54 +103,45 @@ import {
   ProvisionDeviceError,
   ProvisionDeviceCreateRejectedError,
 } from "../../src/devices/exactDeviceProvisioning";
+import { DeviceOutsideBrokerGrantError } from "../../src/daemon/sessionBroker/connectionRefusal";
 import {
-  DeviceAssignedToManagedSlotError,
-  DeviceOutsideManagedSlotsError,
-  ManagedSlotDiscoveryIncompleteError,
-  ManagedSlotOwnershipUnconfirmedError,
-  ManagedSlotOwnershipLostError,
-} from "../../src/daemon/managedSlots/managedSlotRefusal";
+  DeviceAssignedToBindingError,
+  BindingDiscoveryIncompleteError,
+  BindingRegistrySchemaUnsupportedError,
+  BindingOwnershipUnconfirmedError,
+  BindingOwnershipLostError,
+} from "../../src/daemon/sessionBroker/provisioning/refusal";
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "../../src/server/deviceOutsideBoundSessionRefusal";
-import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+} from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import { PlanExecutionInProgressError } from "../../src/daemon/planExecutionInProgressRefusal";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import {
   createToolErrorResponse,
   PooledAvdIdentityError,
   ProvisionDeviceRollbackError,
 } from "../../src/server/deviceTools";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import {
+  noActiveDeviceSessionPayload,
+  sessionOwnershipLostPayload,
+} from "../../src/daemon/deviceSessionResult";
 import {
   mcpOverloadResult,
-  managedEndedPayload,
-  managedSlotsFailedToolResult,
   noActiveDeviceSessionResult,
-  noActiveDeviceSessionPayload,
   deviceControlTransportFailureResult,
   ambiguousSessionSelectorResult,
 } from "../../src/server/proxyServer";
 import {
-  MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES,
-  type ManagedSlotAcquisitionOwnFailureCode,
-  type ManagedSlotResultEntry,
-  type ManagedSlotsFailure,
-  type ManagedSlotsResult,
-} from "../../src/models/managedSlotsResult";
-import { acquisitionFailure } from "../../src/daemon/managedSlots/managedSlotAcquisition";
-import {
-  MANAGED_SLOT_RECONCILE_FAILURE_CODES,
-  failure as reconcileFailure,
-} from "../../src/daemon/managedSlots/reconciler";
-import {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type ProvisionDeviceFailureCode,
 } from "../../src/devices/exactDeviceProvisioning";
+import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { deviceLossOutcomeFromError } from "../../src/server/deviceLossOutcome";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import { deviceLossOutcomeFromError } from "../../src/utils/deviceLossOutcome";
 import { logger } from "../../src/utils/logger";
 
 /** How a runner reacts to a refusal; the vocabulary of `expectations.json`. */
@@ -235,16 +228,31 @@ function shaped(error: unknown): RefusalWireResult {
   }
 }
 
-/** The error the boot admission gate throws for an Android boot refused at capacity. */
-function bootCapacityRefusal(platform: "android" | "ios" = "android"): unknown {
+/** The error the boot admission gate throws for a boot refused at capacity. */
+function bootCapacityRefusal(platform: "android" | "ios" = "android", heldOnly = false): unknown {
   const ios = platform === "ios";
-  const decision = atCapacityDecision(2, { maxBooted: 2, source: "default" }, 5_000, {
+  const decision = atCapacityDecision(2, { maxBooted: 2, source: "derived" }, 5_000, {
     noun: ios ? "simulator" : "emulator",
     envName: ios ? IOS_SIM_MAX_BOOTED_ENV : "AUTO_MOBILE_MAX_BOOTED",
-    externalDevices: [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
+    externalDevices: heldOnly
+      ? []
+      : [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
+    ...(ios
+      ? {
+          heldDevices: heldOnly
+            ? ["9A1B2C3D-0000-4000-8000-000000000001", "9A1B2C3D-0000-4000-8000-000000000002"]
+            : ["9A1B2C3D-0000-4000-8000-000000000002"],
+        }
+      : {}),
   });
   try {
-    assertBootCapacityGranted({ decision: decision! }, platform, ios ? "simulator" : "emulator");
+    if (!decision) {
+      throw new Error("expected a refusal at capacity");
+    }
+    // The captured wire contract predates the source label's rename to "derived".
+    // Preserve that historical message while constructing a valid current capacity decision.
+    decision.message = decision.message.replace("(derived)", "(default)");
+    assertBootCapacityGranted({ decision }, platform, ios ? "simulator" : "emulator");
   } catch (error) {
     return error;
   }
@@ -266,9 +274,12 @@ function provisionEnvelope(failure: ProvisionDeviceError): RefusalWireResult {
   driven(failure);
   // The provisionDevice failure envelope (`provisionDeviceErrorResponse` in
   // deviceToolsProvisioning) around the real ProvisionDeviceError.
-  return createToolErrorResponse(failure.code, failure.message, {
-    error: { code: failure.code, message: failure.message, retryable: failure.retryable },
-  });
+  return {
+    ...createToolErrorResponse(failure.code, failure.message, {
+      error: { code: failure.code, message: failure.message, retryable: failure.retryable },
+    }),
+    isError: true,
+  };
 }
 
 type FixtureEntry = readonly [string, string, () => RefusalWireResult];
@@ -320,7 +331,7 @@ const CUT_RELEASE_REASONS: readonly (readonly [string, SessionReleaseReason])[] 
   ["heartbeat_timeout", "heartbeat-timeout"],
   ["cli_idle_timeout", "cli-idle-timeout"],
   ["owner_disconnected", "owner-disconnected"],
-  ["managed_slot_ownership_lost", "managed-slot-ownership-lost"],
+  ["binding_ownership_lost", "binding-ownership-lost"],
   ["explicit_release", "explicit-release"],
 ];
 
@@ -342,6 +353,21 @@ export function overloadRefusalError(): McpOverloadError {
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
   [
+    "target_identity_unresolved",
+    "AndroidAvdIdentityUnresolvedError via shapeToolCallError",
+    () => shaped(new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [DEVICE])),
+  ],
+  [
+    "target_identity_unresolved.device",
+    "AndroidDeviceIdentityUnresolvedError via shapeToolCallError",
+    () => shaped(new AndroidDeviceIdentityUnresolvedError(DEVICE)),
+  ],
+  [
+    "orphan_recorder_active",
+    "OrphanRecorderActiveError via shapeToolCallError",
+    () => shaped(new OrphanRecorderActiveError(DEVICE, ["startup-orphan"])),
+  ],
+  [
     "plan_execution_in_progress",
     "PlanExecutionInProgressError via shapeToolCallError",
     () => shaped(new PlanExecutionInProgressError("session")),
@@ -362,6 +388,17 @@ const BUILDERS: readonly FixtureEntry[] = [
       ),
   ],
   [
+    "device_transport_unavailable",
+    "AdbDeviceTransportUnavailableError via shapeToolCallError",
+    () =>
+      shaped(
+        new AdbDeviceTransportUnavailableError(
+          DEVICE,
+          new Error(`adb: device '${DEVICE}' not found`),
+        ),
+      ),
+  ],
+  [
     "session_released_during_creation",
     "SessionReleasedDuringCreationError via shapeToolCallError",
     () => shaped(new SessionReleasedDuringCreationError(SESSION)),
@@ -370,6 +407,38 @@ const BUILDERS: readonly FixtureEntry[] = [
     "timeout.iosHomeLaunch",
     "IosHomeLaunchTimeoutError via shapeToolCallError",
     () => shaped(new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget")),
+  ],
+  [
+    "cancelled.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () => shaped(new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled")),
+  ],
+  [
+    "timeout.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () => shaped(new SdkCapabilityQueryError("timeout", "SDK capability query timed out")),
+  ],
+  [
+    "not_connected.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () =>
+      shaped(
+        new SdkCapabilityQueryError(
+          "not_connected",
+          "SDK capability query not connected to CtrlProxy",
+        ),
+      ),
+  ],
+  [
+    "sdk_capability_query_failed",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () =>
+      shaped(
+        new SdkCapabilityQueryError(
+          "sdk_capability_query_failed",
+          "SDK capability query failed: invalid capability reply",
+        ),
+      ),
   ],
   [
     "provision_device.platform_command_failed.create_rejected",
@@ -406,6 +475,21 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_owned_by_other_session",
     "deviceAssignedToOtherSessionError via shapeToolCallError",
     () => shaped(deviceAssignedToOtherSessionError(DEVICE, "holder-session", SESSION)),
+  ],
+  [
+    "prototype_hidden",
+    "PrototypeHiddenError via shapeToolCallError",
+    () => shaped(new PrototypeHiddenError("app_layer_window_hidden")),
+  ],
+  [
+    "prototype_suspended",
+    "PrototypeSuspendedError via shapeToolCallError",
+    () => shaped(new PrototypeSuspendedError()),
+  ],
+  [
+    "sdk_too_old",
+    "SdkTooOldError via shapeToolCallError",
+    () => shaped(new SdkTooOldError("com.example.app", DEVICE, MINIMUM_READ_ONLY_SDK_VERSION)),
   ],
   [
     "app_not_running",
@@ -477,14 +561,19 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(bootCapacityRefusal("ios")),
   ],
   [
+    "capacity_exhausted.ios.held_only",
+    "assertBootCapacityGranted via shapeToolCallError",
+    () => shaped(bootCapacityRefusal("ios", true)),
+  ],
+  [
     "discovery_incomplete.ios",
     "ProvisionDeviceError via createToolErrorResponse",
     () => provisionFailure(iosInventoryIncomplete()),
   ],
   [
-    "device_outside_managed_slots.tool",
-    "DeviceOutsideManagedSlotsError via shapeToolCallError",
-    () => shaped(new DeviceOutsideManagedSlotsError("startDevice", "tool", "0123abcd")),
+    "device_outside_broker_grant.tool",
+    "DeviceOutsideBrokerGrantError via shapeToolCallError",
+    () => shaped(new DeviceOutsideBrokerGrantError("startDevice", "tool", "0123abcd")),
   ],
   ...RECOVERY_LOSSES.map(([name, error]): FixtureEntry => [
     `session_ownership_lost.recovery_${name}`,
@@ -534,14 +623,6 @@ const BUILDERS: readonly FixtureEntry[] = [
       ) as RefusalWireResult,
   ],
   [
-    "managed_execution_ended",
-    "managedEndedPayload",
-    () =>
-      jsonResult(
-        managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "heartbeat_timeout"),
-      ),
-  ],
-  [
     "session_terminal_release_in_progress",
     "SessionTerminalReleaseInProgressError via shapeToolCallError",
     () =>
@@ -574,37 +655,35 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(new SessionSuspectError(SESSION, 8_000)),
   ],
   [
-    "device_assigned_to_managed_slot",
-    "DeviceAssignedToManagedSlotError via shapeToolCallError",
+    "device_assigned_to_binding",
+    "DeviceAssignedToBindingError via shapeToolCallError",
     () =>
       shaped(
-        new DeviceAssignedToManagedSlotError("killDevice", DEVICE, {
+        new DeviceAssignedToBindingError("killDevice", DEVICE, {
           platform: "android",
           stableDeviceId: "amslot-0123abcd-0-g1",
-          holder: "slot",
+          holder: "session_broker",
           scopeKey: "0123abcd",
-          slotIndex: 0,
-          scopeState: "valid",
-          execSessionUuid: null,
+          bindingIndex: 0,
         }),
       ),
   ],
   [
-    "managed_slot_ownership_unconfirmed",
-    "ManagedSlotOwnershipUnconfirmedError via shapeToolCallError",
-    () => shaped(new ManagedSlotOwnershipUnconfirmedError(SESSION)),
+    "binding_ownership_unconfirmed",
+    "BindingOwnershipUnconfirmedError via shapeToolCallError",
+    () => shaped(new BindingOwnershipUnconfirmedError(SESSION)),
   ],
   [
-    "session_ownership_lost.managed_slot_ownership_lost_at_gate",
-    "ManagedSlotOwnershipLostError via shapeToolCallError",
-    () => shaped(new ManagedSlotOwnershipLostError(SESSION)),
+    "session_ownership_lost.binding_ownership_lost_at_gate",
+    "BindingOwnershipLostError via shapeToolCallError",
+    () => shaped(new BindingOwnershipLostError(SESSION)),
   ],
   [
-    "device_outside_managed_slots",
-    "DeviceOutsideManagedSlotsError via shapeToolCallError",
+    "device_outside_broker_grant",
+    "DeviceOutsideBrokerGrantError via shapeToolCallError",
     () =>
       shaped(
-        new DeviceOutsideManagedSlotsError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
+        new DeviceOutsideBrokerGrantError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
       ),
   ],
   [
@@ -667,195 +746,6 @@ const BUILDERS: readonly FixtureEntry[] = [
 
 /** Fixture stem of a provisionDevice failure whose bare code has no fixture of its own. */
 export const PROVISION_DEVICE_FIXTURE_PREFIX = "provision_device.";
-/** Fixture stem of a managed slot acquisition failure: the wrapper code, then the nested one. */
-export const MANAGED_SLOT_FIXTURE_PREFIX = "managed_slot_acquisition_failed.";
-
-/** The retryability each call site passes to `acquisitionFailure`. */
-const OWN_FAILURE_RETRYABLE: Readonly<Record<ManagedSlotAcquisitionOwnFailureCode, boolean>> = {
-  managed_slot_config_invalid: false,
-  contract_unsupported: false,
-  managed_slot_group_unsupported: false,
-  managed_slots_unsupported: false,
-  scope_invalidated: false,
-  scope_transition_pending: true,
-  execution_policy_failed: true,
-  execution_hold_failed: true,
-  liveness_owner_conflict: true,
-  daemon_unavailable: true,
-  timeout: true,
-  cancelled: true,
-};
-
-/** A failed acquisition, with the failure on the scope or (as the reconciler reports it) the slot. */
-export function failedManagedSlotsResult(
-  slotFailure: ManagedSlotsFailure,
-  onSlot = false,
-): ManagedSlotsResult {
-  const slot: ManagedSlotResultEntry = {
-    slotIndex: 0,
-    role: "primary",
-    platform: "android",
-    assignmentGeneration: null,
-    device: null,
-    sessionUuid: null,
-    requestedSpec: null,
-    resolvedSpec: null,
-    specFingerprint: null,
-    disposition: null,
-    readiness: null,
-    lifecycle: null,
-    failure: slotFailure,
-  };
-  return {
-    contractVersion: 1,
-    scope: {
-      managedHostScope: "host",
-      runnerNamespace: "ns",
-      runnerIncarnation: "inc",
-      scopeKey: null,
-    },
-    outcome: "failed",
-    slots: onSlot ? [slot] : [],
-    ...(onSlot ? {} : { failure: slotFailure }),
-  };
-}
-
-/** A ready acquisition whose one slot (index 1, generation 3) holds `sessionUuid`. */
-export function readyManagedSlotsResult(sessionUuid: string): ManagedSlotsResult {
-  const { slots, scope } = failedManagedSlotsResult(capacitySlotFailure(), true);
-  return {
-    contractVersion: 1,
-    scope: { ...scope, scopeKey: "0123abcd" },
-    outcome: "ready",
-    slots: [
-      { ...slots[0], failure: undefined, slotIndex: 1, assignmentGeneration: 3, sessionUuid },
-    ],
-  };
-}
-
-function managedSlotsFailureResult(
-  slotFailure: ManagedSlotsFailure,
-  onSlot = false,
-): RefusalWireResult {
-  return managedSlotsFailedToolResult(
-    failedManagedSlotsResult(slotFailure, onSlot),
-    "tapOn",
-  ) as RefusalWireResult;
-}
-
-/** Total-resource evidence is independent of boot admission and has no retry hint. */
-function budgetSlotFailure(): ManagedSlotsFailure {
-  return reconcileFailure(
-    "managed_slot_budget_exhausted",
-    "Total-resource capacity is exhausted.",
-    {
-      budget: {
-        limit: 2,
-        usage: {
-          total: 3,
-          active: 1,
-          assignedIdle: 0,
-          cached: 0,
-          preparing: 1,
-          deleting: 1,
-          orphaned: 0,
-        },
-        retained: [
-          {
-            platform: "android",
-            stableDeviceId: "amslot-kept",
-            reason: "deletion_pending",
-            attempts: 2,
-            failedDeletes: 1,
-            lastError: "delete failed",
-          },
-          {
-            platform: "android",
-            stableDeviceId: "amslot-stuck",
-            reason: "deletion_stuck",
-            attempts: 5,
-            failedDeletes: 3,
-            lastError: "native delete keeps failing",
-          },
-        ],
-        evictionFailures: [
-          { platform: "android", stableDeviceId: "amslot-kept", message: "delete failed" },
-        ],
-      },
-    },
-  );
-}
-
-/** A slot-level `capacity_exhausted` failure carrying boot-capacity details (#11390, #11402). */
-function capacitySlotFailure(externalDevices?: string[]): ManagedSlotsFailure {
-  const { code, retryable, message, nextAction, capacity } = reconcileFailure(
-    "capacity_exhausted",
-    "capacity_exhausted fixture",
-    {
-      capacity: {
-        limit: 2,
-        booted: 2,
-        retryAfterMs: 5_000,
-        ...(externalDevices ? { externalDevices } : {}),
-      },
-    },
-  );
-  return { code, retryable, message, nextAction, ...(capacity ? { capacity } : {}) };
-}
-
-/** Nested codes that reach a client under `managed_slot_acquisition_failed`. */
-export function managedSlotNestedCodes(): string[] {
-  const own: readonly string[] = MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES;
-  return [...own, ...MANAGED_SLOT_RECONCILE_FAILURE_CODES.filter((code) => !own.includes(code))];
-}
-
-function managedSlotFixtures(): [string, string, () => RefusalWireResult][] {
-  const own: readonly string[] = MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES;
-  const withCapacity: [string, string, () => RefusalWireResult][] = [
-    [
-      `${MANAGED_SLOT_FIXTURE_PREFIX}managed_slot_budget_exhausted.budget`,
-      "reconciler failure with budget via managedSlotsFailedToolResult",
-      () => managedSlotsFailureResult(budgetSlotFailure(), true),
-    ],
-    [
-      `${MANAGED_SLOT_FIXTURE_PREFIX}capacity_exhausted.capacity`,
-      "reconciler failure with capacity via managedSlotsFailedToolResult",
-      () => managedSlotsFailureResult(capacitySlotFailure(), true),
-    ],
-    [
-      `${MANAGED_SLOT_FIXTURE_PREFIX}capacity_exhausted.capacity_external`,
-      "reconciler failure with capacity via managedSlotsFailedToolResult",
-      () => managedSlotsFailureResult(capacitySlotFailure(["emulator-5560"]), true),
-    ],
-  ];
-  return [
-    ...withCapacity,
-    ...managedSlotNestedCodes().map((code): [string, string, () => RefusalWireResult] => [
-      `${MANAGED_SLOT_FIXTURE_PREFIX}${code}`,
-      own.includes(code)
-        ? "acquisitionFailure via managedSlotsFailedToolResult"
-        : "reconciler failure via managedSlotsFailedToolResult",
-      () => {
-        if (own.includes(code)) {
-          const ownCode = code as ManagedSlotAcquisitionOwnFailureCode;
-          return managedSlotsFailureResult(
-            acquisitionFailure(ownCode, `${code} fixture`, OWN_FAILURE_RETRYABLE[ownCode]),
-          );
-        }
-        const {
-          code: failureCode,
-          retryable,
-          message,
-          nextAction,
-        } = reconcileFailure(
-          code as (typeof MANAGED_SLOT_RECONCILE_FAILURE_CODES)[number],
-          `${code} fixture`,
-        );
-        return managedSlotsFailureResult({ code: failureCode, retryable, message, nextAction });
-      },
-    ]),
-  ];
-}
 
 /** provisionDevice failure codes whose bare wire code has no fixture above. */
 function provisionFixtures(
@@ -874,21 +764,21 @@ function provisionFixtures(
 /** Every refusal fixture, built fresh from the real TypeScript builders. */
 export function buildRefusalWireFixtures(): RefusalWireFixture[] {
   const covered = new Set(BUILDERS.map(([code]) => code));
-  return [...BUILDERS, ...provisionFixtures(covered), ...managedSlotFixtures()].map(
-    ([code, builder, build]) => ({ code, builder, result: build() }),
-  );
+  return [...BUILDERS, ...provisionFixtures(covered)].map(([code, builder, build]) => ({
+    code,
+    builder,
+    result: build(),
+  }));
 }
 
 /**
  * Surfaces that carry a typed refusal but are not an MCP tool result, so the runners' refusal
- * classifier never reads them: the control socket failure frame, deleteDevice's failure result and
- * the managed slots result (MCP initialize outcome and the `automobile:managed-slots` resource).
+ * classifier never reads them: the control socket failure frame and deleteDevice's failure result.
  * They live beside the tool-result fixtures in `surfaces/`, named `<surface>.<name>.json`.
  */
 export type RefusalSurface =
   | "socket-frame"
   | "delete-device"
-  | "managed-slots-result"
   | "overload-frame"
   | "webrtc-stream-response"
   | "aux-socket-response"
@@ -898,8 +788,8 @@ export type RefusalSurface =
   | "proxy-tool-result"
   | "request-failure-fields"
   | "liveness-handover"
-  | "managed-slots-response"
-  | "provision-envelope";
+  | "provision-envelope"
+  | "press-button-result";
 
 /** Asynchronous real-wire captures: their owning test always checks the committed bytes. */
 export const EXTERNALLY_CAPTURED_SURFACE_FIXTURES = [
@@ -920,12 +810,6 @@ export const EXTERNALLY_CAPTURED_SURFACE_FIXTURES = [
     name: "daemon_shutting_down",
     testFile: "test/daemon/refusalWireContract.test.ts",
     errorClass: DaemonShuttingDownError,
-  },
-  {
-    surface: "managed-slots-response",
-    name: "managed_slot_config_invalid",
-    testFile: "test/daemon/refusalWireContract.test.ts",
-    errorClass: ManagedSlotConfigError,
   },
   {
     surface: "provision-envelope",
@@ -1009,9 +893,9 @@ function boundSessionError(): DeviceOutsideBoundSessionError {
 const SLOT_HOLDER = {
   platform: "android",
   stableDeviceId: "amslot-0123abcd-0-g1",
-  holder: "slot",
+  holder: "session_broker",
   scopeKey: "0123abcd",
-  slotIndex: 0,
+  bindingIndex: 0,
   scopeState: "valid",
   execSessionUuid: null,
 } as const;
@@ -1048,6 +932,8 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  ["prototype_hidden", () => new PrototypeHiddenError("app_layer_window_hidden")],
+  ["prototype_suspended", () => new PrototypeSuspendedError()],
   ["device_unhealthy", () => unhealthyRefusal()],
   ["device_unhealthy.permanent", () => unhealthyRefusal("permanent")],
   [
@@ -1064,13 +950,36 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     "timeout.iosHomeLaunch",
     () => new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget"),
   ],
+  [
+    "cancelled.sdkCapabilityQuery",
+    () => new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled"),
+  ],
+  [
+    "timeout.sdkCapabilityQuery",
+    () => new SdkCapabilityQueryError("timeout", "SDK capability query timed out"),
+  ],
+  [
+    "not_connected.sdkCapabilityQuery",
+    () =>
+      new SdkCapabilityQueryError(
+        "not_connected",
+        "SDK capability query not connected to CtrlProxy",
+      ),
+  ],
+  [
+    "sdk_capability_query_failed",
+    () =>
+      new SdkCapabilityQueryError(
+        "sdk_capability_query_failed",
+        "SDK capability query failed: invalid capability reply",
+      ),
+  ],
   ["timeout.boot", () => new DeviceBootTimeoutError("boot", "readiness", 1_000, 1_000, DEVICE)],
   [
     "daemon_handoff_interrupted",
     () => new DaemonHandoffInterruptionError("Daemon handoff interrupted the in-flight request"),
   ],
-  // shapeToolCallError returns plain Error: text; no top-level JSON refusal. Inline
-  // deleteDevice/provisionDevice target_identity_unresolved literals have no shared capture builder.
+  // The same retryable identity refusal is shaped by shapeToolCallError on the tool boundary.
   [
     "target_identity_unresolved",
     () => new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [DEVICE]),
@@ -1100,24 +1009,25 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
   ["daemon_restart_deferred", () => new DaemonRestartDeferredError("a device operation is active")],
   ["daemon_restart_pending", () => new DaemonRestartPendingError()],
   ["device_outside_bound_session", boundSessionError],
-  ["managed_slot_ownership_unconfirmed", () => new ManagedSlotOwnershipUnconfirmedError(SESSION)],
+  ["binding_ownership_unconfirmed", () => new BindingOwnershipUnconfirmedError(SESSION)],
   [
-    "session_ownership_lost.managed_slot_ownership_lost_at_gate",
-    () => new ManagedSlotOwnershipLostError(SESSION),
+    "session_ownership_lost.binding_ownership_lost_at_gate",
+    () => new BindingOwnershipLostError(SESSION),
   ],
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
+  ["capacity_exhausted.ios.held_only", () => bootCapacityRefusal("ios", true) as Error],
   ["discovery_incomplete.ios", iosInventoryIncomplete],
   [
-    "device_outside_managed_slots",
-    () => new DeviceOutsideManagedSlotsError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
+    "device_outside_broker_grant",
+    () => new DeviceOutsideBrokerGrantError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
   ],
   [
-    "device_outside_managed_slots.tool",
-    () => new DeviceOutsideManagedSlotsError("startDevice", "tool", "0123abcd"),
+    "device_outside_broker_grant.tool",
+    () => new DeviceOutsideBrokerGrantError("startDevice", "tool", "0123abcd"),
   ],
   [
-    "device_assigned_to_managed_slot",
-    () => new DeviceAssignedToManagedSlotError("killDevice", DEVICE, SLOT_HOLDER),
+    "device_assigned_to_binding",
+    () => new DeviceAssignedToBindingError("killDevice", DEVICE, SLOT_HOLDER),
   ],
   ...RECOVERY_LOSSES.map(([name, error]): readonly [string, () => Error] => [
     `session_ownership_lost.recovery_${name}`,
@@ -1221,6 +1131,12 @@ export function buildRefusalSurfaceFixtures(): RefusalSurfaceFixture[] {
       builder: "mcpRequestFailureDetails",
       payload: socketFrame(overloadRefusalError()),
     },
+    {
+      surface: "press-button-result",
+      name: "unsupported_button",
+      builder: "PressButton.unsupportedIosButtonResult",
+      payload: unsupportedIosButtonResult("menu", "iOS has no menu hardware button"),
+    },
     ...SOCKET_FRAME_ERRORS.map(([name, error]): RefusalSurfaceFixture => ({
       surface: "socket-frame",
       name,
@@ -1237,25 +1153,7 @@ export function buildRefusalSurfaceFixtures(): RefusalSurfaceFixture[] {
       surface: "delete-device",
       name: "discovery_incomplete",
       builder: "typedTeardownRefusal",
-      payload: teardownFailure(new ManagedSlotDiscoveryIncompleteError("registry locked")),
-    },
-    {
-      surface: "managed-slots-result",
-      name: "managed_slot_budget_exhausted.budget",
-      builder: "reconciler failure in ManagedSlotsResult",
-      payload: failedManagedSlotsResult(budgetSlotFailure(), true),
-    },
-    {
-      surface: "managed-slots-result",
-      name: "capacity_exhausted.capacity",
-      builder: "reconciler failure in ManagedSlotsResult",
-      payload: failedManagedSlotsResult(capacitySlotFailure(), true),
-    },
-    {
-      surface: "managed-slots-result",
-      name: "capacity_exhausted.capacity_external",
-      builder: "reconciler failure in ManagedSlotsResult",
-      payload: failedManagedSlotsResult(capacitySlotFailure(["emulator-5560"]), true),
+      payload: teardownFailure(new BindingDiscoveryIncompleteError("registry locked")),
     },
   ];
 }
@@ -1267,12 +1165,6 @@ export function serializeRefusalSurfaceFixture(fixture: RefusalSurfaceFixture): 
 /** The wire codes a top-level fixture carries, outermost first, derived from its file stem. */
 export function expectedWireCodes(fixtureCode: string): string[] {
   const variantless = (stem: string) => stem.split(".")[0];
-  if (fixtureCode.startsWith(MANAGED_SLOT_FIXTURE_PREFIX)) {
-    return [
-      "managed_slot_acquisition_failed",
-      variantless(fixtureCode.slice(MANAGED_SLOT_FIXTURE_PREFIX.length)),
-    ];
-  }
   if (fixtureCode.startsWith(PROVISION_DEVICE_FIXTURE_PREFIX)) {
     return [variantless(fixtureCode.slice(PROVISION_DEVICE_FIXTURE_PREFIX.length))];
   }
@@ -1292,6 +1184,10 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   "daemon_restart_deferred",
   "viewer_read_only",
   "target_identity_unresolved",
+  "cancelled",
+  "timeout",
+  "not_connected",
+  "sdk_capability_query_failed",
 ];
 
 /** Every exported Error in the coded-refusal modules is covered or has an honest, reviewable gap. */
@@ -1299,6 +1195,26 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   Error["constructor"],
   string
 >([
+  [
+    AndroidIdentityUnresolvedError,
+    "shared base for the AVD and device identity refusals; it is only ever constructed through those two subclasses, which both have fixtures.",
+  ],
+  [
+    UnknownToolError,
+    "daemon socket frame code (`daemon_unknown_tool`) only; clients still get the unchanged `Unknown tool:` text, not a typed refusal body.",
+  ],
+  [
+    BindingConfigError,
+    "Internal broker validation becomes a SessionBroker failure; slot launch and socket serializers were removed.",
+  ],
+  [
+    BindingRegistrySchemaUnsupportedError,
+    "Internal registry-open refusal becomes a SessionBroker failure; handler tests cover unsupported schema propagation.",
+  ],
+  [
+    SessionConfigError,
+    "launcher validation error; the prepare-session handler translates it to session_config_invalid, covered by handler tests but not yet a captured refusal fixture",
+  ],
   [
     HostBootAdmissionRegistryError,
     "internal host-lock failure; AndroidBootAdmissionGate maps it to discovery_incomplete before the wire",
@@ -1365,10 +1281,6 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
     "uncoded pre-dispatch transport failure used for safe proxy replay; shapeToolCallError returns plain 'Error: ...' text",
   ],
   [
-    LoopbackMcpConnectionError,
-    "uncoded loopback fetch cause; socketServer normalizes it into DeviceControlTransportError before the wire",
-  ],
-  [
     PooledAvdIdentityError,
     "uncoded pooled-identity failure; deviceToolsLifecycle maps it to target_identity_unresolved in a tool error response",
   ],
@@ -1380,16 +1292,19 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
 
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
+  registry_schema_unsupported:
+    "Internal registry-open code translated by the broker acquisition path; covered by broker handler tests.",
+  daemon_unknown_tool:
+    "a daemon socket response field the proxy classifies by (details.toolName); clients still see the unchanged `Unknown tool:` text",
+  daemon_session_not_active:
+    "a daemon socket response field the proxy classifies by; clients still see the unchanged `is not an active daemon session` text",
   daemon_session_not_found:
     "a daemon socket response field (`code` beside `error`) for an unknown session, not an MCP tool result body",
   bound_session_lost:
     "internal ReleasedBoundSessionError payload; clients receive it as the session_ownership_lost fixture",
   daemon_instance_changed:
     "a daemon/heartbeat protocol answer to a proxy, never an MCP tool result a runner classifies",
-  managed_slot_registration_refused:
-    "a daemon/registerSession protocol answer to a managed proxy, never a device-tool refusal",
-  liveness_owner_conflict:
-    "a daemon liveness-ownership protocol answer to a proxy or keeper (as a managed acquisition failure it is fixtured under managed_slot_acquisition_failed.)",
+  liveness_owner_conflict: "a daemon liveness-ownership protocol answer to a proxy or keeper",
   liveness_owner_is_proxy:
     "a daemon liveness protocol answer to an external keeper, never a tool result",
   liveness_owner_not_owner:

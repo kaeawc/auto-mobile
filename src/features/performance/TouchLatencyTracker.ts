@@ -13,6 +13,11 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { calculateMedian } from "../shared/MetricsUtils";
 import { shellQuote } from "../../utils/shellQuote";
 
+// Samples are spaced to avoid overlapping touch measurements.
+// Poll gfxinfo every 10ms while waiting for the touch frame, for a quick response.
+const FRAME_STATS_POLL_INTERVAL_MS = 10;
+const TOUCH_LATENCY_SAMPLE_INTERVAL_MS = 100;
+
 /**
  * Result of a touch latency measurement
  */
@@ -156,7 +161,7 @@ export class TouchLatencyTracker {
    * @param windowBounds - The audited app's actual window rect, if known
    * @returns Touch coordinates (x, y)
    */
-  private selectSafeTouchLocation(
+  selectSafeTouchLocation(
     screenSize: ScreenSize,
     touchPoint?: { x: number; y: number },
     windowBounds?: ElementBounds,
@@ -222,18 +227,15 @@ export class TouchLatencyTracker {
     perf: PerformanceTracker,
   ): Promise<number | null> {
     const startTime = this.timer.now();
-    const pollIntervalMs = 10; // Poll every 10ms for quick response
 
     while (this.timer.now() - startTime < maxWaitMs) {
-      await this.timer.sleep(pollIntervalMs);
+      await this.timer.sleep(FRAME_STATS_POLL_INTERVAL_MS);
 
       try {
         const { stdout } = await perf.track("adbGfxinfoCheck", () =>
-          this.adb.executeCommand(
-            `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-            undefined,
-            DUMPSYS_MAX_BUFFER,
-          ),
+          this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
+            maxBuffer: DUMPSYS_MAX_BUFFER,
+          }),
         );
 
         const currentStats = this.idle.parseMetrics(stdout);
@@ -284,22 +286,18 @@ export class TouchLatencyTracker {
   }> {
     // Reset gfxinfo to get a clean counter baseline.
     await perf.track("adbGfxinfoReset", () =>
-      this.adb.executeCommand(
-        `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-      ),
+      this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`, {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+      }),
     );
 
     // First no-input snapshot. Any one-off settling/layout frame that occurs
     // right after reset is absorbed here rather than compared to zero.
     await this.timer.sleep(PRE_TAP_SETTLE_WINDOW_MS);
     const { stdout: firstStdout } = await perf.track("adbGfxinfoBaselineFirst", () =>
-      this.adb.executeCommand(
-        `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-      ),
+      this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+      }),
     );
     const firstStats = this.idle.parseMetrics(firstStdout);
 
@@ -308,11 +306,9 @@ export class TouchLatencyTracker {
     // already counted in `firstStats` does not grow further.
     await this.timer.sleep(PRE_TAP_SETTLE_WINDOW_MS);
     const { stdout: baselineStdout } = await perf.track("adbGfxinfoBaselineSecond", () =>
-      this.adb.executeCommand(
-        `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-      ),
+      this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+      }),
     );
     const baselineStats = this.idle.parseMetrics(baselineStdout);
 
@@ -358,11 +354,9 @@ export class TouchLatencyTracker {
       // the tap, so any frame rendered during re-observe is part of the baseline
       // and the first post-tap poll doesn't read it as the tap's response.
       const { stdout: refreshedStdout } = await perf.track("adbGfxinfoBaselinePostRevalidate", () =>
-        this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-          undefined,
-          DUMPSYS_MAX_BUFFER,
-        ),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+        }),
       );
       responseBaseline = this.idle.parseMetrics(refreshedStdout);
     }
@@ -508,7 +502,7 @@ export class TouchLatencyTracker {
 
         // Wait between samples to avoid interference
         if (i < sampleCount - 1) {
-          await this.timer.sleep(100);
+          await this.timer.sleep(TOUCH_LATENCY_SAMPLE_INTERVAL_MS);
         }
       }
 

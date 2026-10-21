@@ -28,9 +28,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.layout.HierarchyTreeOptions
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyTreeView
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
 import dev.jasonpearson.automobile.desktop.core.layout.PropertyInspectorPanel
+import dev.jasonpearson.automobile.desktop.core.layout.hoverElement
+import dev.jasonpearson.automobile.desktop.core.layout.selectElement
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -43,69 +46,66 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 fun RightInspectorPanel(
   selectedEvent: TelemetryDisplayEvent?,
   onClose: () -> Unit,
-  isLiveMode: Boolean = false,
-  onToggleLiveMode: (Boolean) -> Unit = {},
-  layoutInspectorState: LayoutInspectorState? = null,
-  hasDevice: Boolean = false,
-  onOpenSource: ((String, Int, String) -> Unit)? = null,
-  screenshotLoader: ScreenshotLoader? = null,
   modifier: Modifier = Modifier,
+  options: InspectorPanelOptions = InspectorPanelOptions(),
 ) {
-  val colors = SharedTheme.globalColors
-  val panelModifier = modifier.fillMaxSize().background(colors.panelBackground)
+  return with(options) {
+    val colors = SharedTheme.globalColors
+    val panelModifier = modifier.fillMaxSize().background(colors.panelBackground)
 
-  if (!isLiveMode && selectedEvent == null) {
-    InspectorEmptyState(modifier = panelModifier)
-    return
-  }
+    if (!isLiveMode && selectedEvent == null) {
+      InspectorEmptyState(modifier = panelModifier)
+      return
+    }
 
-  val canShowLive = hasDevice && layoutInspectorState != null
-  val isLayoutEvent = selectedEvent is TelemetryDisplayEvent.Layout
+    val canShowLive = hasDevice && layoutInspectorState != null
+    val isLayoutEvent = selectedEvent is TelemetryDisplayEvent.Layout
 
-  Column(panelModifier) {
-    // Header bar with mode toggle
-    Row(
-      Modifier.fillMaxWidth()
-        .height(24.dp)
-        .background(colors.text.normal.copy(alpha = 0.04f))
-        .padding(horizontal = 8.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      if (canShowLive && (isLayoutEvent || isLiveMode)) {
-        InspectorTabButton("Event", !isLiveMode) { onToggleLiveMode(false) }
-        Spacer(Modifier.width(2.dp))
-        InspectorTabButton("Live Layout", isLiveMode) { onToggleLiveMode(true) }
-      } else if (isLiveMode) {
-        Text("Live Layout", fontSize = 10.sp, color = colors.text.info)
-      } else if (selectedEvent != null) {
+    Column(panelModifier) {
+      // Header bar with mode toggle
+      Row(
+        Modifier.fillMaxWidth()
+          .height(24.dp)
+          .background(colors.text.normal.copy(alpha = 0.04f))
+          .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        if (canShowLive && (isLayoutEvent || isLiveMode)) {
+          InspectorTabButton("Event", !isLiveMode) { onToggleLiveMode(false) }
+          Spacer(Modifier.width(2.dp))
+          InspectorTabButton("Live Layout", isLiveMode) { onToggleLiveMode(true) }
+        } else if (isLiveMode) {
+          Text("Live Layout", fontSize = 10.sp, color = colors.text.info)
+        } else if (selectedEvent != null) {
+          Text(
+            inspectorTitle(selectedEvent),
+            fontSize = 10.sp,
+            color = colors.text.normal.copy(alpha = 0.7f),
+          )
+        }
+        Spacer(Modifier.weight(1f))
         Text(
-          inspectorTitle(selectedEvent),
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.7f),
+          "\u2715",
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+          modifier =
+            Modifier.clickable(onClick = onClose).pointerHoverIcon(PointerIcon.Hand).padding(4.dp),
         )
       }
-      Spacer(Modifier.weight(1f))
-      Text(
-        "\u2715",
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
-        modifier =
-          Modifier.clickable(onClick = onClose).pointerHoverIcon(PointerIcon.Hand).padding(4.dp),
-      )
-    }
-    Box(Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.08f)))
+      Box(Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.08f)))
 
-    // Content
-    if (isLiveMode && layoutInspectorState != null) {
-      LiveLayoutSplitPane(layoutInspectorState, Modifier.weight(1f))
-    } else if (selectedEvent != null) {
-      EventInspectorContent(
-        event = selectedEvent,
-        onClose = onClose,
-        onOpenSource = onOpenSource,
-        screenshotLoader = screenshotLoader,
-        modifier = Modifier.weight(1f),
-      )
+      // Content
+      if (isLiveMode && layoutInspectorState != null) {
+        LiveLayoutSplitPane(layoutInspectorState, Modifier.weight(1f))
+      } else if (selectedEvent != null) {
+        EventInspectorContent(
+          event = selectedEvent,
+          onClose = onClose,
+          onOpenSource = onOpenSource,
+          screenshotLoader = screenshotLoader,
+          modifier = Modifier.weight(1f),
+        )
+      }
     }
   }
 }
@@ -128,12 +128,15 @@ private fun LiveLayoutSplitPane(
     Column(Modifier.fillMaxSize()) {
       Box(Modifier.fillMaxWidth().height(with(density) { topHeightPx.toDp() })) {
         HierarchyTreeView(
-          hierarchy = layoutInspectorState.hierarchy,
-          selectedElementId = layoutInspectorState.selectedElementId,
-          hoveredElementId = layoutInspectorState.hoveredElementId,
-          onElementSelected = { layoutInspectorState.selectElement(it) },
-          onElementHovered = { layoutInspectorState.hoverElement(it) },
-          parentMap = layoutInspectorState.parentMap,
+          options =
+            HierarchyTreeOptions(
+              hierarchy = layoutInspectorState.hierarchy,
+              selectedElementId = layoutInspectorState.selectedElementId,
+              hoveredElementId = layoutInspectorState.hoveredElementId,
+              onElementSelected = { layoutInspectorState.selectElement(it) },
+              onElementHovered = { layoutInspectorState.hoverElement(it) },
+              parentMap = layoutInspectorState.parentMap,
+            ),
           modifier = Modifier.fillMaxSize(),
         )
       }
@@ -203,3 +206,12 @@ private fun inspectorTitle(event: TelemetryDisplayEvent): String =
     is TelemetryDisplayEvent.ToolCall -> "Tool: ${event.toolName}"
     is TelemetryDisplayEvent.Accessibility -> "Accessibility"
   }
+
+data class InspectorPanelOptions(
+  val isLiveMode: Boolean = false,
+  val onToggleLiveMode: (Boolean) -> Unit = {},
+  val layoutInspectorState: LayoutInspectorState? = null,
+  val hasDevice: Boolean = false,
+  val onOpenSource: ((String, Int, String) -> Unit)? = null,
+  val screenshotLoader: ScreenshotLoader? = null,
+)

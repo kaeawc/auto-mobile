@@ -165,7 +165,7 @@ After placing the signed app in `/Applications`, invoke its executable:
 
 Every command prints exactly one line of JSON on stdout, then exits. The daemon
 runs the installed controller as a subprocess and parses this line
-(`src/features/network-filter/NetworkFilterBridge.ts`); it never talks XPC to
+(`src/features/networkFilter/NetworkFilterBridge.ts`); it never talks XPC to
 the provider, which only accepts peers signed by its own team. The types live in
 `Sources/NetworkFilterCore/ControllerContract.swift`.
 
@@ -175,7 +175,7 @@ the provider, which only accepts peers signed by its own team. The types live in
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `version` | integer | Negotiated invocation version: newest `4`, supported `[3, 4]`, default `3`. The unchanged daemon understands only `3` and reports any other version as `unavailable`. The provider snapshot must carry the same negotiated version. |
+| `version` | integer | Negotiated invocation version: newest `4`, supported `[3, 4]`, default `3`. The daemon requests `4` and supports `3` for offline commands after the released controller rejects the contract flag; shaped applies require an upgrade. The provider snapshot must carry the same negotiated version. |
 | `state` | string | `installation_required`, `approval_required`, `unavailable`, or `ready`. |
 | `detail` | string | Human-readable reason or next step. |
 | `snapshot` | object, optional | `status`/`snapshot` when `ready`: the provider's snapshot, with its own `version`, its `mode` (`allow_only` or `app_offline` in version 3; also `app_shaped` and `app_mixed` in version 4) and the visible active `rules`. |

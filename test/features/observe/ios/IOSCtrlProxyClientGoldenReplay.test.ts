@@ -3,7 +3,7 @@ import path from "node:path";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import type { CtrlProxyNode } from "../../../../src/features/observe/ios/types";
 import type { BootedDevice } from "../../../../src/models";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import {
@@ -95,7 +95,7 @@ describe("IOSCtrlProxyClient golden replay (Settings, tap General)", () => {
     // The recorded General row spans x 16-386, y 380-432; the capture tapped its centre.
     expect(labels(before!.hierarchy.hierarchy)).toContain("General");
 
-    const tap = await client.requestTapCoordinates(201, 406);
+    const tap = await client.requestTapCoordinates({ x: 201, y: 406 });
     expect(tap.success).toBe(true);
     const after = await client.requestHierarchySync();
 

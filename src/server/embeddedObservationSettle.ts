@@ -1,4 +1,4 @@
-import { StaleDisplayError } from "../models/StaleDisplayError";
+import { StaleDisplayError } from "../features/observe/StaleDisplayError";
 import {
   terminalScreenshotUnavailable,
   isTerminalScreenshotUnavailable,
@@ -21,7 +21,7 @@ import { combineAbortSignals } from "../utils/AbortContext";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { SystemTimer, type Timer } from "../utils/SystemTimer";
-import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
+import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/toolEnvelopePayload";
 
 /**
  * Budget for the embedded-observation settle gate (issue #6866).

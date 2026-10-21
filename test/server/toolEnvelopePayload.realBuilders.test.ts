@@ -7,7 +7,7 @@ import {
   type ObservationArtifactWriteInput,
 } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { classifyToolResult } from "../../src/utils/toolEnvelopePayload";
 import { createJSONToolResponse, createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeLogger } from "../fakes/FakeLogger";
@@ -123,7 +123,7 @@ const rows: BuilderCase[] = [
         screenshotImage: { included: true, mimeType: "image/png", sizeBytes: 5 },
       };
       const r = createStructuredToolResponse(payload);
-      // Mirrors observeTools.ts withCapturedScreenshotImage; neither observe builder is exported.
+      // Mirrors observeResponse.ts withCapturedScreenshotImage; neither observe builder is exported.
       return {
         response: {
           ...r,
@@ -161,7 +161,7 @@ const rows: BuilderCase[] = [
         payload: "ToolResponse",
         data: payload,
       });
-      expect(response.structuredContent).toEqual({
+      expect<unknown>(response.structuredContent).toEqual({
         success: true,
         artifact: {
           path: "/tmp/auto-mobile/tapOn-1.json",
@@ -214,17 +214,17 @@ describe("real response builders through classifier and PlanExecutor", () => {
       test(`${row.name}; optional: ${optional}`, async () => {
         const { response, payload, failure } = row.build();
         const interpretation = classifyToolResult(response, probeName, new FakeLogger());
-        expect(interpretation).toEqual({
+        expect<unknown>(interpretation).toEqual({
           kind: row.kind,
           ...(row.kind === "payload" ? { payload } : {}),
           ...(failure !== undefined ? { failure } : {}),
         });
         registerResponse(probeName, response);
         // No platform: a failed step cannot trigger a real follow-up observation.
-        const result = await new DefaultPlanExecutor(new FakeTimer(), new FakeLogger()).executePlan(
-          { name: row.name, steps: [{ tool: probeName, params: {}, optional }] },
-          0,
-        );
+        const result = await createDefaultPlanExecutor(
+          new FakeTimer(),
+          new FakeLogger(),
+        ).executePlan({ name: row.name, steps: [{ tool: probeName, params: {}, optional }] }, 0);
         expect(result.debug?.steps).toHaveLength(1);
         expect(result.debug?.steps[0].status).toBe(
           row.error ? (optional ? "skipped" : "failed") : "completed",
@@ -245,7 +245,7 @@ describe("real response builders through classifier and PlanExecutor", () => {
       payload,
     });
     registerResponse("tapOn", response);
-    const result = await new DefaultPlanExecutor(new FakeTimer(), new FakeLogger()).executePlan(
+    const result = await createDefaultPlanExecutor(new FakeTimer(), new FakeLogger()).executePlan(
       { name: "JSON diagnostics", steps: [{ tool: "tapOn", params: {} }] },
       0,
     );

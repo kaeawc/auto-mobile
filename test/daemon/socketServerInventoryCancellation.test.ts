@@ -1,58 +1,21 @@
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest } from "../../src/daemon/types";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-class InventorySocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    if (this.destroyed) {
-      throw Object.assign(new Error("peer closed"), { code: "EPIPE" });
-    }
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  destroy(): this {
-    this.destroyed = true;
-    this.emit("close", false);
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  clientSockets: Map<string, Socket>;
-  activeRequestHandlers: Set<Promise<void>>;
-  forwardMcpRequestWithRecovery(options: {
-    request: DaemonRequest;
-    signal: AbortSignal;
-  }): Promise<unknown>;
-}
 function harness() {
-  const state = { isInitialized: () => false } as DaemonStateAccess;
-  const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, new FakeTimer());
-  const internal = server as unknown as Internals;
-  internal.acceptingRequests = true;
+  const state = { ...createFakeDaemonState(), isInitialized: () => false };
+  const server = createHarnessServer("unused", state, new FakeTimer());
+  server.allowRequests();
   const connect = () => {
-    const socket = new InventorySocket();
-    internal.handleConnection(socket as unknown as Socket);
+    const socket = new FakeSocket();
+    server.connect(socket);
     return socket;
   };
-  return { internal, connect };
+  return { internal: server, connect };
 }
 const request = (id: string): DaemonRequest => ({
   id,
@@ -80,9 +43,9 @@ test.each(["EPIPE", "ECONNRESET", "ERR_STREAM_DESTROYED", "ECONNABORTED"])(
     const { internal, connect } = harness();
     const socket = connect();
     socket.emit("error", Object.assign(new Error("peer closed"), { code }));
-    await Promise.all([...internal.activeRequestHandlers]);
+    await Promise.all([...internal.state.activeRequestHandlers]);
     expect(socket.destroyed).toBe(true);
-    expect(internal.clientSockets.size).toBe(0);
+    expect(internal.state.clientSockets.size).toBe(0);
     expect(socketErrorLogs(error)).toEqual([]);
     expect(debug.mock.calls.some(([message]) => String(message).includes("Socket"))).toBe(true);
   },
@@ -93,7 +56,7 @@ test("unexpected socket errors retain error logging", async () => {
   const { internal, connect } = harness();
   const socket = connect();
   socket.emit("error", Object.assign(new Error("bad handle"), { code: "EBADF" }));
-  await Promise.all([...internal.activeRequestHandlers]);
+  await Promise.all([...internal.state.activeRequestHandlers]);
   expect(socket.destroyed).toBe(true);
   expect(socketErrorLogs(error)).toHaveLength(1);
 });
@@ -112,7 +75,10 @@ test.each([true, false])(
       ["A", Promise.withResolvers<unknown>()],
       ["B", Promise.withResolvers<unknown>()],
     ]);
-    internal.forwardMcpRequestWithRecovery = async ({ request: frame, signal }) => {
+    internal.mcpForwarder = async ({ request: frame, signal }) => {
+      if (!signal) {
+        throw new Error("Expected the forward to carry an abort signal");
+      }
       signals.set(frame.id, signal);
       if (signals.size === 2) {
         started.resolve();
@@ -126,7 +92,7 @@ test.each([true, false])(
     a.send(request("A"));
     b.send(request("B"));
     await started.promise;
-    const handlers = [...internal.activeRequestHandlers];
+    const handlers = [...internal.state.activeRequestHandlers];
     a.destroy();
     expect(signals.get("A")?.aborted).toBe(true);
     expect(signals.get("B")?.aborted).toBe(false);
@@ -142,7 +108,7 @@ test.each([true, false])(
       ).toHaveLength(1);
     }
     b.destroy();
-    await Promise.all([...internal.activeRequestHandlers]);
+    await Promise.all([...internal.state.activeRequestHandlers]);
   },
 );
 
@@ -152,7 +118,10 @@ test("a live client cancel keeps the error response shape and emits no error-lev
   const { internal, connect } = harness();
   const socket = connect();
   const started = Promise.withResolvers<void>();
-  internal.forwardMcpRequestWithRecovery = async ({ signal }) => {
+  internal.mcpForwarder = async ({ signal }) => {
+    if (!signal) {
+      throw new Error("Expected the forward to carry an abort signal");
+    }
     started.resolve();
     return new Promise<never>((_resolve, reject) =>
       signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
@@ -167,7 +136,7 @@ test("a live client cancel keeps the error response shape and emits no error-lev
     params: { requestId: "A" },
   });
   await new Promise<void>((resolve) => setImmediate(resolve));
-  await Promise.all([...internal.activeRequestHandlers]);
+  await Promise.all([...internal.state.activeRequestHandlers]);
   expect(socket.responses.find((frame) => frame.id === "A")).toMatchObject({
     type: "mcp_response",
     success: false,
@@ -178,5 +147,5 @@ test("a live client cancel keeps the error response shape and emits no error-lev
     debug.mock.calls.filter(([message]) => String(message).includes("MCP forward abandoned")),
   ).toHaveLength(1);
   socket.destroy();
-  await Promise.all([...internal.activeRequestHandlers]);
+  await Promise.all([...internal.state.activeRequestHandlers]);
 });

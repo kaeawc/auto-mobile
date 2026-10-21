@@ -3,17 +3,26 @@ test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
 test/fixtures/ci-time-to-green/*.json text eol=lf
+test/fixtures/prototype-capabilities/*.json text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/android-dumpsys-package/*.txt text eol=lf
 test/fixtures/android-notification-policy/*.txt text eol=lf
+test/fixtures/android-emulator/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf
+test/fixtures/ios-notification-center/*.json text eol=lf
+test/fixtures/ios-devicetype-order/*.json text eol=lf
+test/fixtures/ios-devicetype-order/*.md text eol=lf
 test/fixtures/ci/coverage-badge/*.json text eol=lf
 test/fixtures/release/*.md text eol=lf
+test/fixtures/tool-registration/*.json text eol=lf
+test/fixtures/intent-chooser/*.json text eol=lf
+test/fixtures/intent-chooser/*.xml text eol=lf
+test/fixtures/intent-chooser/*.md text eol=lf
 test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/android-launcher/*.json text eol=lf
 test/fixtures/android-adb/*.txt text eol=lf
@@ -22,8 +31,10 @@ test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
+test/fixtures/observe-output/ios-prototype-sheet/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
 test/fixtures/network-filter-controller/v4/*.json text eol=lf
+test/fixtures/network-filter-controller/v3-app/*.json text eol=lf
 test/fixtures/desktop-wire/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
@@ -48,7 +59,6 @@ test/fixtures/identify-interactions/playground-text-fields.json text eol=lf
 # Pin byte-exact captured plutil output to LF across Windows checkouts.
 test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
 test/features/observe/windowDumps/*.txt text eol=lf
-scripts/utils-import-direction-baseline.txt text eol=lf
 # Generated MDM profile asserted byte-for-byte against its generator (#10595).
 docs/assets/mdm/*.mobileconfig text eol=lf
 scripts/unit-test-host-spawn-allowlist.txt text eol=lf
@@ -126,13 +136,19 @@ test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 
 # Shared prototype specs: preserve byte limits and path parity on Windows.
 test/fixtures/prototype-spec/**/*.json text eol=lf
+test/fixtures/prototype-saved-layout/**/*.json text eol=lf
+test/fixtures/prototype-embedded-routing/*.json text eol=lf
 test/bats/fixtures/compose-compiler-report/**/*.txt text eol=lf
 test/bats/fixtures/compose-compiler-report/**/*.json text eol=lf
 schemas/prototype-spec-contract.json text eol=lf
+schemas/prototype-ios-icon-symbols.json text eol=lf
+ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift text eol=lf
+ios/prototype-agent/ICON-SYMBOLS.md text eol=lf
 schemas/prototype-asset-contract.json text eol=lf
 
 # Real `ps -o lstart=` captures whose exact bytes (trailing padding) are asserted (issue #10116).
 test/fixtures/daemon-ps-lstart/*.txt text eol=lf
+test/fixtures/manual-test-host/*.txt text eol=lf
 # Real contrast-audit captures (PNG already uses the test/fixtures exemption above).
 test/fixtures/accessibility-contrast/*.json text eol=lf
 
@@ -145,13 +161,37 @@ android/control-proxy/src/test/resources/ime-traces/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.txt text eol=lf
 # Real `ps -axo pid=,ppid=,rss=,pcpu=,command=` capture with a running emulator (#11588).
 test/fixtures/android-boot-admission/*.txt text eol=lf
+test/fixtures/android-boot-admission/proc-*-status.txt text eol=lf
+test/fixtures/android-boot-admission/proc-*-cmdline.bin binary
+test/fixtures/android-boot-admission/proc-*.bin binary
 test/fixtures/ios-sim-fleet/*.json text eol=lf
 test/fixtures/android-apk-signing/*.b64 text eol=lf
 test/fixtures/android-apk-signing/*.txt text eol=lf
 test/fixtures/refusal-wire/*.json text eol=lf
 test/fixtures/refusal-wire/surfaces/*.json text eol=lf
 test/fixtures/refusal-wire-hints/*.json text eol=lf
-test/lint/*-baseline.txt text eol=lf
 
 test/fixtures/android-boot-admission/README.md text eol=lf
 test/fixtures/gradle-retry/*.log text eol=lf
+test/fixtures/managed-slots/*.sql text eol=lf
+ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/PlanCorpus/** text eol=lf
+
+# Shared iOS wire contracts are compared across Swift and TypeScript.
+test/fixtures/ios-contract/*.json text eol=lf
+test/fixtures/android-contract/*.json text eol=lf
+test/fixtures/ios-ctrlproxy-request-snapshots.json text eol=lf
+test/fixtures/ios-tcc-photos/*.json text eol=lf
+test/fixtures/ios-tcc-photos/ios26.5/*.json text eol=lf
+test/fixtures/ios-tcc-photos/*.md text eol=lf
+test/fixtures/ci-classify-failure/*.log text eol=lf
+test/fixtures/changed-test-selection/*.txt text eol=lf
+
+# Captured session broker protocol evidence stays stable across checkout platforms.
+test/fixtures/session-broker/** text eol=lf
+test/fixtures/android-system-image-37/** text eol=lf
+test/fixtures/input-route-params/*.json text eol=lf
+test/fixtures/ide-route-params/*.json text eol=lf
+test/fixtures/docs-site/*.html text eol=lf
+test/fixtures/android-pin-dialog/*.json text eol=lf
+test/fixtures/android-pin-dialog/*.xml text eol=lf
+test/fixtures/android-pin-dialog/*.md text eol=lf

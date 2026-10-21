@@ -10,12 +10,13 @@ import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -72,6 +73,109 @@ class PrototypeNodeLayoutTest {
     value * RuntimeEnvironment.getApplication().resources.displayMetrics.density
 
   @Test
+  fun `flow reports one line height while measuring and placing overflow children`() {
+    val root =
+      render(
+        PrototypeFlowNode(
+          testTag = "flow",
+          maxLines = 1,
+          style =
+            PrototypeStyle(width = PrototypeDimension.Dp(80.0), spacing = 4.0, runSpacing = 6.0),
+          children =
+            (0 until 4).map {
+              PrototypeBoxNode(
+                testTag = "flow-$it",
+                style =
+                  PrototypeStyle(
+                    width = PrototypeDimension.Dp(70.0),
+                    height = PrototypeDimension.Dp(20.0),
+                  ),
+                children = emptyList(),
+              )
+            },
+        ),
+      )
+    assertEquals(dp(20f), root.tagged("flow").size.height.toFloat(), 1f)
+    for (index in 0 until 4) {
+      val child = root.tagged("flow-$index")
+      assertEquals(dp(20f), child.size.height.toFloat(), 1f)
+      assertEquals(dp(index * 26f), child.positionInRoot.y, 1f)
+    }
+  }
+
+  @Test
+  fun `grid measures equal columns and wraps a span that does not fit`() {
+    // Semantic bounds describe the drawn child, so fill the slot rather than wrap empty content.
+    val cellStyle =
+      PrototypeStyle(width = PrototypeDimension.Fill, height = PrototypeDimension.Dp(20.0))
+    val root =
+      render(
+        PrototypeGridNode(
+          columns = PrototypeGridColumns.Fixed(3),
+          style =
+            PrototypeStyle(width = PrototypeDimension.Dp(320.0), spacing = 10.0, runSpacing = 12.0),
+          children =
+            listOf(
+              PrototypeBoxNode(
+                testTag = "first",
+                span = 2,
+                style = cellStyle,
+                children = emptyList(),
+              ),
+              PrototypeBoxNode(
+                testTag = "second",
+                span = 2,
+                style = cellStyle,
+                children = emptyList(),
+              ),
+              PrototypeBoxNode(testTag = "third", style = cellStyle, children = emptyList()),
+            ),
+        ),
+      )
+    val first = root.tagged("first").boundsInRoot
+    val second = root.tagged("second").boundsInRoot
+    val third = root.tagged("third").boundsInRoot
+    assertEquals(dp(210f), first.width, 1f)
+    assertEquals(first.left, second.left, 1f)
+    assertEquals(first.bottom + dp(12f), second.top, 1f)
+    assertEquals(second.top, third.top, 1f)
+    assertEquals(second.right + dp(10f), third.left, 1f)
+    assertEquals(dp(100f), third.width, 1f)
+  }
+
+  @Test
+  fun `hidden grid child does not shift the span of a later child`() {
+    val root =
+      render(
+        PrototypeGridNode(
+          testTag = "grid",
+          columns = PrototypeGridColumns.Fixed(3),
+          style = PrototypeStyle(width = PrototypeDimension.Dp(320.0), spacing = 10.0),
+          children =
+            listOf(
+              PrototypeTextNode(
+                text = "hidden",
+                span = 1,
+                visibleWhen =
+                  PrototypeCondition(key = "show", equals = PrototypeScalar.BooleanValue(true)),
+              ),
+              PrototypeTextNode(
+                testTag = "visible",
+                text = "visible",
+                span = 2,
+                style = PrototypeStyle(width = PrototypeDimension.Fill),
+              ),
+            ),
+        ),
+      )
+    val grid = root.tagged("grid").boundsInRoot
+    val visible = root.tagged("visible").boundsInRoot
+    assertEquals(dp(210f), visible.width, 1f)
+    assertEquals(grid.left, visible.left, 1f)
+    assertEquals(grid.top, visible.top, 1f)
+  }
+
+  @Test
   fun `a padded tappable node reports its padding inside its bounds`() {
     val root =
       render(
@@ -91,8 +195,19 @@ class PrototypeNodeLayoutTest {
             ),
         ),
       )
-    val button = root.tagged("done").boundsInRoot
-    val label = root.labelled("Done").boundsInRoot
+    val taggedBox = root.tagged("done")
+    val button = taggedBox.boundsInRoot
+    val label =
+      checkNotNull(
+          taggedBox.children.firstNotNullOfOrNull { child ->
+            child.find {
+              it.config.getOrNull(SemanticsProperties.Text)?.singleOrNull()?.text == "Done"
+            }
+          },
+        )
+        .boundsInRoot
+    assertEquals(listOf("Done"), taggedBox.config[SemanticsProperties.ContentDescription])
+    assertTrue(taggedBox.config.contains(SemanticsActions.OnClick))
     assertEquals(
       Rect(
         label.left - dp(24f),
@@ -276,8 +391,8 @@ class PrototypeNodeLayoutTest {
       root.tagged(tag).config.getOrElseNullable(SemanticsProperties.ContentDescription) { null }
     assertEquals(listOf("add"), label("fab"))
     assertEquals(listOf("settings"), label("settings"))
-    // Mixed content labels the container through its children, never as "row".
-    assertNull(label("save"))
+    // Mixed content with one text labels the container by that text, never its kind or icon name.
+    assertEquals(listOf("Save"), label("save"))
   }
 
   @Test

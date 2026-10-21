@@ -35,10 +35,12 @@ import kotlinx.coroutines.CancellationException
  *   production (lazily resolving the `lateinit` server), a capturing lambda in tests.
  * @param logError diagnostic sink; `Log.e` in production, a capturing lambda in tests. This type
  *   holds no Android dependency of its own so it stays unit-testable.
+ * @param clock timestamp source for emitted fallback frames.
  */
 class CorrelatedErrorReporter(
   private val broadcastError: suspend (ErrorResponse) -> Unit,
   private val logError: (String, Throwable) -> Unit,
+  private val clock: () -> Long = System::currentTimeMillis,
 ) {
 
   /**
@@ -132,7 +134,7 @@ class CorrelatedErrorReporter(
     doubleFailureLogMessage: () -> String,
   ) {
     try {
-      broadcastError(frame(requestId, errorMessage))
+      broadcastError(frame(requestId, errorMessage, clock()))
     } catch (fallbackError: CancellationException) {
       throw fallbackError
     } catch (fallbackError: Exception) {
@@ -145,8 +147,12 @@ class CorrelatedErrorReporter(
      * The one factory for a fallback [ErrorResponse]. Shared by correlated-error consumers so a new
      * path cannot change the frame shape while reusing the cause rule.
      */
-    fun frame(requestId: String?, errorMessage: String): ErrorResponse =
-      ErrorResponse(requestId = requestId, error = errorMessage)
+    fun frame(
+      requestId: String?,
+      errorMessage: String,
+      timestamp: Long = System.currentTimeMillis(),
+    ): ErrorResponse =
+      ErrorResponse(requestId = requestId, error = errorMessage, timestamp = timestamp)
 
     /**
      * The one cause-derivation rule: the throwable's message, else its simple class name, else a

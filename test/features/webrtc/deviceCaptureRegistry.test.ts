@@ -9,6 +9,8 @@ import {
 import type {
   H264CaptureSource,
   H264CaptureSourceOptions,
+  H264CaptureSourceMetrics,
+  H264CaptureSourceTelemetry,
 } from "../../../src/features/webrtc/H264CaptureSource";
 import type { BootedDevice } from "../../../src/models";
 import { H264AnnexBParser } from "../../../src/features/webrtc/h264";
@@ -16,6 +18,7 @@ import { logger } from "../../../src/utils/logger";
 
 const device = { deviceId: "a", platform: "android", name: "Pixel" } as BootedDevice;
 class FakeSource implements H264CaptureSource {
+  getTelemetry?: () => H264CaptureSourceTelemetry;
   starts = 0;
   stops = 0;
   staleStops: Array<boolean | undefined> = [];
@@ -932,7 +935,7 @@ describe("review regressions", () => {
     const seen: unknown[][] = [[], []];
     const a = h.acquire({ onFrameMetrics: (metrics) => seen[0].push(metrics) });
     await a.start();
-    const metrics = {
+    const metrics: H264CaptureSourceMetrics = {
       native: null,
       helper: null,
       encoder: {
@@ -1010,6 +1013,24 @@ for (const [actual, requested, compatible] of [
   });
 }
 
+type FrameMetrics = Parameters<NonNullable<H264CaptureSourceOptions["onFrameMetrics"]>>[0];
+
+const idleFrameMetrics = (): FrameMetrics => ({
+  native: null,
+  helper: null,
+  encoder: {
+    captureTimestampMs: null,
+    frameAgeMs: null,
+    queueDepth: 0,
+    droppedFrames: 0,
+    bytesQueued: 0,
+    highWaterMarkBytes: 0,
+    maxFrameBytes: 100,
+    outputWriteDurationMs: null,
+    outputWriteHighWaterDurationMs: 0,
+  },
+});
+
 test("android relay-first then a metrics consumer shares one capture and detaches by refcount", async () => {
   const h = harness();
   const a = h.acquire();
@@ -1020,9 +1041,7 @@ test("android relay-first then a metrics consumer shares one capture and detache
   await b.start();
   expect(h.sources).toHaveLength(1);
   expect(h.sources[0].starts).toBe(1);
-  const metrics = { fps: 30 } as unknown as Parameters<
-    NonNullable<H264CaptureSourceOptions["onFrameMetrics"]>
-  >[0];
+  const metrics = idleFrameMetrics();
   h.sources[0].options.onFrameMetrics?.(metrics);
   expect(seen).toEqual([metrics]);
   await b.stop();
@@ -1043,9 +1062,7 @@ test("ios relay-first then a metrics consumer shares one capture", async () => {
   await b.start();
   expect(h.sources).toHaveLength(1);
   expect(h.sources[0].starts).toBe(1);
-  const metrics = { fps: 30 } as unknown as Parameters<
-    NonNullable<H264CaptureSourceOptions["onFrameMetrics"]>
-  >[0];
+  const metrics = idleFrameMetrics();
   h.sources[0].options.onFrameMetrics?.(metrics);
   expect(seen).toEqual([metrics]);
   await Promise.all([a.stop(), b.stop()]);
@@ -1089,12 +1106,10 @@ test("optional capabilities forward resolved source identity and arguments", asy
     options: { device, onData: () => {} },
     create: (options) => {
       const source = h.create(options);
-      Object.assign(source, {
-        getTelemetry() {
-          expect(this).toBe(source);
-          return telemetry;
-        },
-      });
+      source.getTelemetry = function () {
+        expect(this).toBe(source);
+        return telemetry;
+      };
       return gate.promise;
     },
   });

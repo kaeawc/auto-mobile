@@ -1,19 +1,23 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { Socket } from "node:net";
 import {
   TelemetryPushSocketServer,
   boundBackfillEventText,
+  type TelemetryFilter,
 } from "../../src/daemon/telemetryPushSocketServer";
 import { boundStructuredField } from "../../src/utils/truncateBodyText";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
+import type { Subscriber } from "../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { withInMemorySingletonDatabase } from "../db/inMemorySingletonDatabase";
 import { getDatabase } from "../../src/db/database";
 import { runMigrations } from "../../src/db/migrator";
-import type { Database } from "../../src/db/types";
-import type { Kysely } from "kysely";
+import {
+  navigationScreenshotFrameSchema,
+  telemetryEventPushFrameSchema,
+  telemetryPushFrameSchema,
+} from "../helpers/wireMessageSchemas";
 
 /**
  * Test helper that wraps TelemetryPushSocketServer to allow injecting fake sockets
@@ -25,13 +29,11 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
   }
 
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
-    (this as any).onServerStarted();
+    this.onServerStarted();
   }
 
   async closeFake(): Promise<void> {
-    (this as any).onServerClosing();
-    (this as any).server = null;
+    this.onServerClosing();
   }
 
   simulateSubscription(options: {
@@ -44,12 +46,11 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
     subscriptionId: string;
   } {
     const socket = new FakeSocket();
-    const subscriptionId = `telemetrypush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = `telemetrypush-${++this.subscriptionCounter}`;
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket: socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         category: options.category ?? null,
         deviceSessionUuid: options.deviceSessionUuid ?? null,
@@ -67,14 +68,46 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
   simulatePong(subscriptionId: string): void {
     const subscriber = this.subscribers.get(subscriptionId);
     if (subscriber) {
-      const timer = (this as any).timer as FakeTimer;
-      subscriber.lastActivity = timer.now();
+      subscriber.lastActivity = this.timer.now();
     }
   }
 
   triggerKeepalive(): void {
-    (this as any).checkKeepalive();
+    this.checkKeepalive();
   }
+
+  /** Register a subscriber directly, as `subscribe` would after authorizing it. */
+  seedSubscriber(subscriptionId: string, subscriber: Subscriber<TelemetryFilter>): void {
+    this.subscribers.set(subscriptionId, subscriber);
+  }
+
+  getSubscriber(subscriptionId: string): Subscriber<TelemetryFilter> | undefined {
+    return this.subscribers.get(subscriptionId);
+  }
+
+  removeSubscriber(subscriptionId: string): void {
+    this.subscribers.delete(subscriptionId);
+  }
+
+  runBackfill(subscriptionId: string, filter: TelemetryFilter, socket: FakeSocket): Promise<void> {
+    return this.backfillRecentEvents(subscriptionId, filter, socket);
+  }
+}
+
+/** The own enumerable fields of a bounded telemetry payload; fails the test for a non-object. */
+function fieldsOf(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`expected an object payload, got ${JSON.stringify(value)}`);
+  }
+  return Object.fromEntries(Object.entries(value));
+}
+
+function stringField(value: unknown, key: string): string {
+  const field = fieldsOf(value)[key];
+  if (typeof field !== "string") {
+    throw new Error(`expected "${key}" to be a string, got ${typeof field}`);
+  }
+  return field;
 }
 
 describe("boundBackfillEventText", () => {
@@ -83,10 +116,11 @@ describe("boundBackfillEventText", () => {
       category: "log",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "t", message: "m".repeat(50_000) },
     };
     const bounded = boundBackfillEventText(event);
-    expect((bounded.data as { message: string }).message.length).toBe(10_240);
+    expect(stringField(bounded.data, "message").length).toBe(10_240);
   });
 
   it("caps large storage value and previousValue at 10KB", () => {
@@ -94,6 +128,7 @@ describe("boundBackfillEventText", () => {
       category: "storage",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: {
         key: "k",
         value: "v".repeat(30_000),
@@ -102,9 +137,8 @@ describe("boundBackfillEventText", () => {
       },
     };
     const bounded = boundBackfillEventText(event);
-    const data = bounded.data as { value: string; previousValue: string };
-    expect(data.value.length).toBe(10_240);
-    expect(data.previousValue.length).toBe(10_240);
+    expect(stringField(bounded.data, "value").length).toBe(10_240);
+    expect(stringField(bounded.data, "previousValue").length).toBe(10_240);
   });
 
   it("leaves small fields and unrelated categories untouched", () => {
@@ -112,15 +146,17 @@ describe("boundBackfillEventText", () => {
       category: "log",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "t", message: "small" },
     };
     const bounded = boundBackfillEventText(event);
-    expect((bounded.data as { message: string }).message).toBe("small");
+    expect(stringField(bounded.data, "message")).toBe("small");
 
     const os: TelemetryEvent = {
       category: "os",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { category: "lifecycle", kind: "foreground", details: null },
     };
     expect(boundBackfillEventText(os)).toEqual(os);
@@ -131,10 +167,11 @@ describe("boundBackfillEventText", () => {
       category: "log",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "t", message: "m".repeat(10_239) + "😀" + "n".repeat(50) },
     };
     const bounded = boundBackfillEventText(event);
-    const msg = (bounded.data as { message: string }).message;
+    const msg = stringField(bounded.data, "message");
     expect(msg.length).toBe(10_239);
     expect(msg.isWellFormed()).toBe(true);
   });
@@ -145,15 +182,14 @@ describe("boundBackfillEventText", () => {
       category: "os",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { category: "lifecycle", kind: "foreground", details: bigDetails },
     };
     const bounded = boundBackfillEventText(event);
-    const details = (bounded.data as { details: unknown }).details as {
-      _truncated: boolean;
-      bytes: number;
-    };
-    expect(details._truncated).toBe(true);
-    expect(details.bytes).toBe(JSON.stringify(bigDetails).length);
+    expect(fieldsOf(bounded.data).details).toMatchObject({
+      _truncated: true,
+      bytes: JSON.stringify(bigDetails).length,
+    });
     // Result must round-trip through JSON.parse (dashboard contract).
     expect(() => JSON.parse(JSON.stringify(bounded.data))).not.toThrow();
   });
@@ -164,10 +200,11 @@ describe("boundBackfillEventText", () => {
       category: "os",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { category: "lifecycle", kind: "foreground", details },
     };
     const bounded = boundBackfillEventText(event);
-    expect((bounded.data as { details: unknown }).details).toBe(details);
+    expect(fieldsOf(bounded.data).details).toBe(details);
   });
 
   it("replaces an oversized layout detailsJson raw string with a marker", () => {
@@ -176,15 +213,14 @@ describe("boundBackfillEventText", () => {
       category: "layout",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { composableId: "c", detailsJson: raw },
     };
     const bounded = boundBackfillEventText(event);
-    const dj = (bounded.data as { detailsJson: unknown }).detailsJson as {
-      _truncated: boolean;
-      bytes: number;
-    };
-    expect(dj._truncated).toBe(true);
-    expect(dj.bytes).toBe(raw.length);
+    expect(fieldsOf(bounded.data).detailsJson).toMatchObject({
+      _truncated: true,
+      bytes: raw.length,
+    });
   });
 
   it("leaves a small layout detailsJson string untouched", () => {
@@ -193,10 +229,11 @@ describe("boundBackfillEventText", () => {
       category: "layout",
       timestamp: 1,
       deviceId: null,
+      sessionId: null,
       data: { composableId: "c", detailsJson: raw },
     };
     const bounded = boundBackfillEventText(event);
-    expect((bounded.data as { detailsJson: unknown }).detailsJson).toBe(raw);
+    expect(fieldsOf(bounded.data).detailsJson).toBe(raw);
   });
 });
 
@@ -220,19 +257,14 @@ describe("boundStructuredField", () => {
       method: "doSomethingExpensive",
       line: i,
     }));
-    const bounded = boundStructuredField(frames, false) as {
-      _truncated: boolean;
-      bytes: number;
-    };
-    expect(bounded._truncated).toBe(true);
-    expect(bounded.bytes).toBe(JSON.stringify(frames).length);
+    const bounded = boundStructuredField(frames, false);
+    expect(bounded).toMatchObject({ _truncated: true, bytes: JSON.stringify(frames).length });
     expect(() => JSON.parse(JSON.stringify(bounded))).not.toThrow();
   });
 
   it("measures raw JSON strings by their own length when isJsonString", () => {
     const raw = "z".repeat(20_000);
-    const bounded = boundStructuredField(raw, true) as { bytes: number };
-    expect(bounded.bytes).toBe(20_000);
+    expect(boundStructuredField(raw, true)).toMatchObject({ bytes: 20_000 });
   });
 });
 
@@ -269,8 +301,8 @@ describe("TelemetryPushSocketServer", () => {
 
     server.pushTelemetryEvent(telemetryEvent("device-1"));
 
-    expect(scoped.socket.getWrittenMessages()).toHaveLength(0);
-    expect(all.socket.getWrittenMessages()).toHaveLength(0);
+    expect(scoped.socket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(0);
+    expect(all.socket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(0);
   });
 
   it("resumes telemetry delivery under the same uuid once the quarantine lifts", () => {
@@ -281,7 +313,7 @@ describe("TelemetryPushSocketServer", () => {
     resolver.resolveIdentity("device-1");
     server.pushTelemetryEvent(telemetryEvent("device-1"));
 
-    const msgs = socket.getWrittenMessages<{ data?: TelemetryEvent }>();
+    const msgs = socket.getWrittenMessages(telemetryPushFrameSchema);
     expect(msgs).toHaveLength(1);
     expect(msgs[0].data?.deviceSessionUuid).toBe("uuid-1");
   });
@@ -304,13 +336,14 @@ describe("TelemetryPushSocketServer", () => {
       category: "network",
       timestamp: 1000,
       deviceId: null,
+      sessionId: null,
       data: { method: "GET", url: "/users", statusCode: 200, durationMs: 42 },
     };
 
     server.pushTelemetryEvent(event);
 
-    const msgs1 = socket1.getWrittenMessages<{ type: string; data?: TelemetryEvent }>();
-    const msgs2 = socket2.getWrittenMessages<{ type: string; data?: TelemetryEvent }>();
+    const msgs1 = socket1.getWrittenMessages(telemetryPushFrameSchema);
+    const msgs2 = socket2.getWrittenMessages(telemetryPushFrameSchema);
 
     expect(msgs1).toHaveLength(1);
     expect(msgs1[0].type).toBe("telemetry_push");
@@ -329,14 +362,15 @@ describe("TelemetryPushSocketServer", () => {
       category: "network",
       timestamp: 1000,
       deviceId: null,
+      sessionId: null,
       data: { method: "GET", url: "/users", statusCode: 200, durationMs: 42 },
     };
 
     server.pushTelemetryEvent(networkEvent);
 
-    expect(networkSocket.getWrittenMessages()).toHaveLength(1);
-    expect(logSocket.getWrittenMessages()).toHaveLength(0);
-    expect(allSocket.getWrittenMessages()).toHaveLength(1);
+    expect(networkSocket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(1);
+    expect(logSocket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(0);
+    expect(allSocket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(1);
   });
 
   it("pushes different event categories to matching subscribers", () => {
@@ -346,6 +380,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "log",
       timestamp: 2000,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "TestTag", message: "hello" },
     };
 
@@ -353,32 +388,34 @@ describe("TelemetryPushSocketServer", () => {
       category: "network",
       timestamp: 3000,
       deviceId: null,
+      sessionId: null,
       data: { method: "POST", url: "/submit", statusCode: 201, durationMs: 100 },
     };
 
     server.pushTelemetryEvent(logEvent);
     server.pushTelemetryEvent(networkEvent);
 
-    const msgs = logSocket.getWrittenMessages<{ type: string; data?: TelemetryEvent }>();
+    const msgs = logSocket.getWrittenMessages(telemetryPushFrameSchema);
     expect(msgs).toHaveLength(1);
     expect(msgs[0].data?.category).toBe("log");
   });
 
-  it("pushes custom events correctly", () => {
-    const { socket } = server.simulateSubscription({ category: "custom" });
+  it("pushes performance events correctly", () => {
+    const { socket } = server.simulateSubscription({ category: "performance" });
 
     const event: TelemetryEvent = {
-      category: "custom",
+      category: "performance",
       timestamp: 4000,
       deviceId: null,
-      data: { name: "purchase", properties: { item: "premium" } },
+      sessionId: null,
+      data: { metric: "frame_time", value: 16 },
     };
 
     server.pushTelemetryEvent(event);
 
-    const msgs = socket.getWrittenMessages<{ type: string; data?: TelemetryEvent }>();
+    const msgs = socket.getWrittenMessages(telemetryPushFrameSchema);
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data?.category).toBe("custom");
+    expect(msgs[0].data?.category).toBe("performance");
   });
 
   it("pushes os events correctly", () => {
@@ -388,12 +425,13 @@ describe("TelemetryPushSocketServer", () => {
       category: "os",
       timestamp: 5000,
       deviceId: null,
+      sessionId: null,
       data: { category: "lifecycle", kind: "foreground", details: null },
     };
 
     server.pushTelemetryEvent(event);
 
-    const msgs = socket.getWrittenMessages<{ type: string; data?: TelemetryEvent }>();
+    const msgs = socket.getWrittenMessages(telemetryPushFrameSchema);
     expect(msgs).toHaveLength(1);
     expect(msgs[0].data?.category).toBe("os");
   });
@@ -409,6 +447,7 @@ describe("TelemetryPushSocketServer", () => {
       category: "log",
       timestamp: 6000,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "Test", message: "msg" },
     };
 
@@ -447,16 +486,13 @@ describe("TelemetryPushSocketServer", () => {
       category: "network",
       timestamp: 50000,
       deviceId: null,
+      sessionId: null,
       data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
     };
 
     server.pushTelemetryEvent(event);
 
-    const msgs = socket.getWrittenMessages<{
-      type: string;
-      timestamp: number;
-      data?: TelemetryEvent;
-    }>();
+    const msgs = socket.getWrittenMessages(telemetryPushFrameSchema);
     expect(msgs[0].timestamp).toBe(99999);
     expect(msgs[0].data?.timestamp).toBe(50000);
   });
@@ -476,12 +512,12 @@ describe("TelemetryPushSocketServer", () => {
 
     server.pushTelemetryEvent(event);
 
-    const d1 = d1Socket.getWrittenMessages<{ data?: TelemetryEvent }>();
+    const d1 = d1Socket.getWrittenMessages(telemetryPushFrameSchema);
     expect(d1).toHaveLength(1);
     // Live events carry the resolved epoch key (AC1).
     expect(d1[0].data?.deviceSessionUuid).toBe("uuid-1");
-    expect(d2Socket.getWrittenMessages()).toHaveLength(0);
-    expect(allSocket.getWrittenMessages()).toHaveLength(1);
+    expect(d2Socket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(0);
+    expect(allSocket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(1);
   });
 
   it("yields zero events to a stale/retired deviceSessionUuid filter (AC4)", () => {
@@ -496,7 +532,7 @@ describe("TelemetryPushSocketServer", () => {
       data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
     });
 
-    expect(socket.getWrittenMessages()).toHaveLength(0);
+    expect(socket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(0);
   });
 
   it("filters by both category and deviceSessionUuid", () => {
@@ -509,18 +545,21 @@ describe("TelemetryPushSocketServer", () => {
       category: "log",
       timestamp: 1000,
       deviceId: "device-1",
+      sessionId: null,
       data: { level: 4, tag: "t", message: "m" },
     };
     const wrongCategory: TelemetryEvent = {
       category: "network",
       timestamp: 2000,
       deviceId: "device-1",
+      sessionId: null,
       data: { method: "GET", url: "/x", statusCode: 200, durationMs: 0 },
     };
     const wrongDevice: TelemetryEvent = {
       category: "log",
       timestamp: 3000,
       deviceId: "device-2",
+      sessionId: null,
       data: { level: 4, tag: "t", message: "m" },
     };
 
@@ -528,33 +567,34 @@ describe("TelemetryPushSocketServer", () => {
     server.pushTelemetryEvent(wrongCategory);
     server.pushTelemetryEvent(wrongDevice);
 
-    expect(socket.getWrittenMessages()).toHaveLength(1);
+    expect(socket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(1);
   });
 
   it("skips subscribers that are backfilling", () => {
     const { socket, subscriptionId } = server.simulateSubscription({});
 
     // Simulate backfill in progress
-    const subscriber = server.subscribers.get(subscriptionId)!;
+    const subscriber = server.getSubscriber(subscriptionId)!;
     subscriber.backfilling = true;
 
     const event: TelemetryEvent = {
       category: "log",
       timestamp: 1000,
       deviceId: null,
+      sessionId: null,
       data: { level: 4, tag: "Test", message: "during backfill" },
     };
 
     server.pushTelemetryEvent(event);
 
     // Should not receive the event while backfilling
-    expect(socket.getWrittenMessages()).toHaveLength(0);
+    expect(socket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(0);
 
     // After backfill completes, events should flow again
     subscriber.backfilling = false;
 
     server.pushTelemetryEvent(event);
-    expect(socket.getWrittenMessages()).toHaveLength(1);
+    expect(socket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(1);
   });
 });
 
@@ -574,8 +614,8 @@ describe("TelemetryPushSocketServer", () => {
 describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
   it("applies the session filter before limiting backfilled crash events", async () => {
     await withInMemorySingletonDatabase(async () => {
-      const db = getDatabase() as unknown as Kysely<Database>;
-      await runMigrations(db as unknown as Kysely<unknown>);
+      const db = getDatabase();
+      await runMigrations(db);
 
       await db
         .insertInto("failure_groups")
@@ -638,11 +678,16 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
 
       const server = new TestableTelemetryPushSocketServer(new FakeTimer());
       const socket = new FakeSocket();
-      (server as any).subscribers.set("backfill-test", {
-        socket: socket as unknown as Socket,
+      server.seedSubscriber("backfill-test", {
+        socket: socket,
         subscriptionId: "backfill-test",
         lastActivity: 0,
-        filter: { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
+        filter: {
+          category: "crash",
+          deviceSessionUuid: null,
+          deviceId: "emulator-5554",
+          sessionId: "session-abc",
+        },
         backfilling: true,
         drainPending: false,
       });
@@ -657,45 +702,58 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         didWrite?.();
         return false;
       };
-      const drainingBackfill = (server as any).backfillRecentEvents(
+      const drainingBackfill = server.runBackfill(
         "backfill-test",
-        { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
-        socket as unknown as Socket,
+        {
+          category: "crash",
+          deviceSessionUuid: null,
+          deviceId: "emulator-5554",
+          sessionId: "session-abc",
+        },
+        socket,
       );
       await wrote;
-      expect(socket.listenerCount("drain")).toBe(1);
+      // The connection outbox and the backfill waiter each own one drain listener.
+      expect(socket.listenerCount("drain")).toBe(2);
       socket.emit("drain");
       await drainingBackfill;
       expect(socket.listenerCount("drain")).toBe(0);
 
-      const messages = socket.getWrittenMessages<{
-        data: TelemetryEvent;
-        subscriptionId: string;
-      }>();
+      const messages = socket.getWrittenMessages(telemetryEventPushFrameSchema);
       const crash = messages.find((m) => m.data.category === "crash");
       expect(crash).toBeDefined();
       expect(crash!.data.sessionId).toBe("session-abc");
       expect(crash!.subscriptionId).toBe("backfill-test");
 
       socket.reset();
-      (server as any).subscribers.set("backfill-test", {
-        socket: socket as unknown as Socket,
+      server.seedSubscriber("backfill-test", {
+        socket: socket,
         subscriptionId: "backfill-test",
         lastActivity: 0,
-        filter: { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
+        filter: {
+          category: "crash",
+          deviceSessionUuid: null,
+          deviceId: "emulator-5554",
+          sessionId: "session-abc",
+        },
         backfilling: true,
         drainPending: false,
       });
-      const backfill = (server as any).backfillRecentEvents(
+      const backfill = server.runBackfill(
         "backfill-test",
-        { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
-        socket as unknown as Socket,
+        {
+          category: "crash",
+          deviceSessionUuid: null,
+          deviceId: "emulator-5554",
+          sessionId: "session-abc",
+        },
+        socket,
       );
-      (server as any).subscribers.delete("backfill-test");
+      server.removeSubscriber("backfill-test");
 
       await backfill;
 
-      expect(socket.getWrittenMessages()).toHaveLength(0);
+      expect(socket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(0);
     });
   });
 
@@ -706,8 +764,8 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
   // the guard in backfillRecentEvents and the stale case below leaks the crash.
   it("backfills zero events for a specific deviceSessionUuid that no longer resolves (AC4)", async () => {
     await withInMemorySingletonDatabase(async () => {
-      const db = getDatabase() as unknown as Kysely<Database>;
-      await runMigrations(db as unknown as Kysely<unknown>);
+      const db = getDatabase();
+      await runMigrations(db);
 
       await db
         .insertInto("failure_groups")
@@ -756,20 +814,16 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         deviceId: null,
         sessionId: null,
       };
-      (server as any).subscribers.set("stale", {
-        socket: staleSocket as unknown as Socket,
+      server.seedSubscriber("stale", {
+        socket: staleSocket,
         subscriptionId: "stale",
         lastActivity: 0,
         filter: staleFilter,
         backfilling: true,
         drainPending: false,
       });
-      await (server as any).backfillRecentEvents(
-        "stale",
-        staleFilter,
-        staleSocket as unknown as Socket,
-      );
-      expect(staleSocket.getWrittenMessages()).toHaveLength(0);
+      await server.runBackfill("stale", staleFilter, staleSocket);
+      expect(staleSocket.getWrittenMessages(telemetryPushFrameSchema)).toHaveLength(0);
 
       // Contrast: an all-devices subscription (deviceSessionUuid === null) still backfills.
       const allSocket = new FakeSocket();
@@ -779,16 +833,16 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         deviceId: null,
         sessionId: null,
       };
-      (server as any).subscribers.set("all", {
-        socket: allSocket as unknown as Socket,
+      server.seedSubscriber("all", {
+        socket: allSocket,
         subscriptionId: "all",
         lastActivity: 0,
         filter: allFilter,
         backfilling: true,
         drainPending: false,
       });
-      await (server as any).backfillRecentEvents("all", allFilter, allSocket as unknown as Socket);
-      expect(allSocket.getWrittenMessages().length).toBeGreaterThan(0);
+      await server.runBackfill("all", allFilter, allSocket);
+      expect(allSocket.getWrittenMessages(telemetryPushFrameSchema).length).toBeGreaterThan(0);
     });
   });
 });
@@ -805,8 +859,8 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
 describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", () => {
   it("backfills a navigation event with an app-scoped screenshot URI", async () => {
     await withInMemorySingletonDatabase(async () => {
-      const db = getDatabase() as unknown as Kysely<Database>;
-      await runMigrations(db as unknown as Kysely<unknown>);
+      const db = getDatabase();
+      await runMigrations(db);
 
       const APP_B = "com.example.b";
       await db
@@ -866,8 +920,8 @@ describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", 
         deviceId: "emulator-5554",
         sessionId: null,
       };
-      (server as any).subscribers.set("nav-scope", {
-        socket: socket as unknown as Socket,
+      server.seedSubscriber("nav-scope", {
+        socket: socket,
         subscriptionId: "nav-scope",
         lastActivity: 0,
         filter,
@@ -875,11 +929,9 @@ describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", 
         drainPending: false,
       });
 
-      await (server as any).backfillRecentEvents("nav-scope", filter, socket as unknown as Socket);
+      await server.runBackfill("nav-scope", filter, socket);
 
-      const messages = socket.getWrittenMessages<{
-        data: TelemetryEvent & { data: { screenshotUri: string | null } };
-      }>();
+      const messages = socket.getWrittenMessages(navigationScreenshotFrameSchema);
       const nav = messages.find((m) => m.data.category === "navigation");
       expect(nav).toBeDefined();
       expect(nav!.data.data.screenshotUri).toBe(

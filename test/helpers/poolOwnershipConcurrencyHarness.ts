@@ -1,12 +1,14 @@
+import { commitAcquisition, type AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
 import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { holderOf } from "../../src/daemon/deviceBinding";
 import {
-  MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
-  assertInputNotOnForeignManagedSlotDevice,
+  BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
+  assertInputNotOnForeignBindingDevice,
   assertInputRequesterHoldsDevice,
 } from "../../src/daemon/inputDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
-import type { SlotKey } from "../../src/daemon/managedSlots/slotRegistry";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { isReadOnlySqlQuery } from "../../src/server/databaseTools";
 import {
   handleDaemonRequest,
@@ -35,12 +37,12 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SeededRandom } from "../fakes/SeededRandom";
 import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { drainMicrotasks } from "./fakeTimerStepping";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 
 // Seeded concurrency harness for device-session ownership. One seed generates a list of steps
 // (acquire, release, heartbeat, control and read tool calls, heartbeat loss, time advance,
@@ -75,6 +77,14 @@ const SETTLE_TURNS = 300;
 /** Fake-time nudges a settle point may spend unparking sleeping operations. */
 const SETTLE_TIME_NUDGES = 75;
 const SETTLE_NUDGE_MS = 1_000;
+/** Microtask turns the fake keep-screen-awake restore takes. */
+const RESTORE_TURNS = positiveIntEnv("AUTOMOBILE_POOL_OWNERSHIP_RESTORE_TURNS") ?? 60;
+/**
+ * Microtask turns a settle point leaves for background work no operation awaits. Deferred rebind
+ * cleanup restores the old device's overrides one after another, each as slow as the restore, and a
+ * second cleanup can chain behind it, so the budget scales with the restore (#12832).
+ */
+const BACKGROUND_DRAIN_TURNS = Math.max(60, RESTORE_TURNS * 8);
 
 export type StepKind =
   | "acquireMcp"
@@ -91,6 +101,11 @@ export type StepKind =
   | "kill"
   | "disconnect"
   | "reconnect"
+  | "rebind"
+  | "rebindActive"
+  | "evict"
+  | "refreshDevices"
+  | "replaceIdentity"
   | "closeConnection"
   | "reopenConnection"
   | "attachAutolock"
@@ -99,11 +114,10 @@ export type StepKind =
   | "planEnd"
   | "restart"
   | "settle"
-  // Managed-slot operations (RunOptions.managedSlots): the registry-level life of a slot.
+  // Broker binding operations (RunOptions.bindings): the registry-level life of a slot.
   | "slotAssign"
   | "slotExecStart"
   | "slotExecEnd"
-  | "slotRelease"
   // Tool-path operations: the admission a read or a control call passes before a handler runs.
   | "toolRead"
   | "toolControl"
@@ -159,16 +173,19 @@ export function describeStep(step: Step, index: number): string {
             "kill",
             "disconnect",
             "reconnect",
+            "evict",
+            "replaceIdentity",
             "slotAssign",
             "slotExecStart",
             "slotExecEnd",
-            "slotRelease",
           ].includes(step.kind)
         ? `d${step.device}`
         : [
               "acquireMcp",
               "acquireAutolock",
               "acquireCli",
+              "rebind",
+              "rebindActive",
               "attachAutolock",
               "restoreAutolock",
               "toolControl",
@@ -279,10 +296,10 @@ export interface Violation {
 
 export interface RunOptions {
   /**
-   * Plug a fake managed-slot registry into the pool, so the slot steps can assign devices to
+   * Plug a fake broker binding registry into the pool, so the slot steps can assign devices to
    * slots. Off by default: the pool then has no slot exclusion, as before.
    */
-  managedSlots?: boolean;
+  bindings?: boolean;
   /** Violation kinds that are logged but do not end the run (known, reported findings). */
   tolerate?: ReadonlySet<ViolationKind>;
 }
@@ -297,17 +314,9 @@ export interface RunResult {
  * its acquired sets), read without side effects. Private state, read only here.
  */
 function autolockConnections(pool: DevicePool): Set<string> {
-  const manager: unknown = Reflect.get(pool, "autolockManager");
-  const routes: unknown = manager ? Reflect.get(manager, "mcpSessionAutolockMap") : undefined;
-  const acquired: unknown = manager
-    ? Reflect.get(manager, "mcpSessionAcquiredAutolocks")
-    : undefined;
-  if (!(routes instanceof Map) || !(acquired instanceof Map)) {
-    throw new Error("DeviceAutolockManager no longer keeps its MCP route maps; update the harness");
-  }
-  return new Set(
-    [...routes.keys(), ...acquired.keys()].filter((c): c is string => typeof c === "string"),
-  );
+  const { mcpSessionAutolockMap, mcpSessionAcquiredAutolocks } =
+    pool.testHooks.autolockManager.testHooks;
+  return new Set([...mcpSessionAutolockMap.keys(), ...mcpSessionAcquiredAutolocks.keys()]);
 }
 
 /**
@@ -329,7 +338,7 @@ export function isExpectedRefusal(error: unknown): boolean {
  * getSession() and so can start a lazy-expiry release mid-check. Private state, read only here.
  */
 function connectionOwnership(pool: DevicePool): ReadonlyMap<string, ReadonlySet<string>> {
-  const raw: unknown = Reflect.get(pool, "mcpSessionAcquiredDeviceSessions");
+  const raw: unknown = pool.testHooks.mcpSessionAcquiredDeviceSessions;
   if (!(raw instanceof Map)) {
     throw new Error(
       "DevicePool no longer keeps mcpSessionAcquiredDeviceSessions; update the harness",
@@ -350,20 +359,20 @@ function connectionOwnership(pool: DevicePool): ReadonlyMap<string, ReadonlySet<
 class OwnershipWorld {
   constructor(
     private readonly tolerate: ReadonlySet<ViolationKind>,
-    private readonly managedSlots = false,
+    private readonly bindingsEnabled = false,
   ) {}
 
   /** Slots the steps assigned, by device index: when, the key and the live execution session. */
-  readonly slots = new Map<
+  readonly bindings = new Map<
     number,
-    { key: SlotKey; assignedAt: number; execSession: string | undefined; execStartedAt?: number }
+    { key: BindingKey; assignedAt: number; execSession: string | undefined; execStartedAt?: number }
   >();
   /** Control handlers that ran: who asked, for which device, and who held it at that moment. */
   readonly handlerRuns: Array<{ action: string; deviceIndex: number }> = [];
   private slotExecCounter = 0;
 
   readonly timer = new FakeTimer();
-  readonly slotRegistry = new FakeSlotRegistry(this.timer);
+  readonly bindingRegistry = new FakeBindingRegistry(this.timer);
   readonly persistence = new FakeDeviceSessionPersistence();
   readonly discovery = new FakeDeviceUtils();
   readonly releases: ReleaseRecord[] = [];
@@ -372,6 +381,11 @@ class OwnershipWorld {
   readonly released = new Map<string, ReleaseRecord>();
   /** Sessions created (or rehydrated) and not yet released, per the manager's callbacks. */
   readonly liveIncarnations = new Set<string>();
+  /**
+   * Per session, a refcount of its in-flight explicit rebinds and every device those rebinds (and
+   * any overlapping one that already finished) touched. See checkAlways.
+   */
+  private readonly rebinding = new Map<string, { inflight: number; devices: Set<string> }>();
   /** Who created each session: an MCP connection, or an anonymous one-shot CLI. */
   readonly origin = new Map<string, { kind: "mcp" | "cli"; client: number; connection?: string }>();
   /** Connections that were closed; they must never own a session again. */
@@ -418,7 +432,15 @@ class OwnershipWorld {
   private async createDaemon(): Promise<DaemonProcess> {
     const life: { dead: boolean } = { dead: false };
     const timer = processTimer(this.timer, () => life.dead);
-    const manager = new SessionManager(timer, this.persistence);
+    const manager = new SessionManager(timer, this.persistence, {
+      // A real restore is adb work: it keeps the old device's deferred rebind cleanup window open.
+      keepScreenAwakeRestorer: () => ({
+        restore: async () => {
+          await drainMicrotasks(RESTORE_TURNS);
+          return { status: "restored" as const };
+        },
+      }),
+    });
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, "ownership-concurrency-daemon", {
         timer,
@@ -426,10 +448,10 @@ class OwnershipWorld {
         idGenerator: new FakeIdGenerator(),
         installedAppsRepository: new FakeInstalledAppsRepository(),
         env: { ...process.env },
-        ...(this.managedSlots
+        ...(this.bindingsEnabled
           ? {
-              managedSlotExclusion: new RegistryManagedSlotExclusion(
-                async () => this.slotRegistry,
+              bindingExclusion: new RegistryBindingExclusion(
+                async () => this.bindingRegistry,
                 timer,
               ),
             }
@@ -529,7 +551,15 @@ class OwnershipWorld {
     const now = record.at;
     const lastControl = this.lastControlAt.get(record.sessionId);
     const idleReasons = ["lazy-expiry", "cleanup-expired", "cli-idle-timeout", "expired"];
-    if (idleReasons.includes(record.reason) && lastControl !== undefined) {
+    // A derived label session is released by the cascade with its base session's reason (see
+    // registerDerivedLabelSessionReleaseCascade): it has no idle window of its own then.
+    const baseRelease = this.released.get(record.sessionId.replace(/:[A-Za-z]+$/, ""));
+    const cascadedFromBase =
+      baseRelease !== undefined &&
+      baseRelease.sessionId !== record.sessionId &&
+      baseRelease.at === record.at &&
+      baseRelease.reason === record.reason;
+    if (idleReasons.includes(record.reason) && lastControl !== undefined && !cascadedFromBase) {
       // An autolock session's idle window is the device pool timeout, not the session default.
       const window = this.autolockSessions.has(record.sessionId)
         ? AUTOLOCK_IDLE_WINDOW_MS
@@ -572,6 +602,17 @@ class OwnershipWorld {
     }
   }
 
+  /**
+   * Both devices were touched by this session's overlapping rebinds. Rebinds of one session run
+   * serially in production, so a later one's real source is an earlier one's target (not the
+   * `from` read at launch), and an earlier one may finish while the later still releases its
+   * target: the exemption lasts until the last overlapping rebind ends.
+   */
+  private isInFlightRebindPair(sessionId: string, a: string, b: string): boolean {
+    const devices = this.rebinding.get(sessionId)?.devices;
+    return devices !== undefined && devices.has(a) && devices.has(b);
+  }
+
   /** Invariants that hold at every instant, even with operations in flight. */
   checkAlways(): void {
     // A close drops the connection's autolock routes synchronously, and nothing may publish them
@@ -591,7 +632,10 @@ class OwnershipWorld {
         continue;
       }
       const other = owners.get(device.sessionId);
-      if (other) {
+      // A rebind publishes the new device before it releases the old one, so the moving session
+      // legitimately names two of its in-flight rebind endpoints; any other pair, and every
+      // quiescent check, is strict.
+      if (other && !this.isInFlightRebindPair(device.sessionId, other, device.id)) {
         this.fail(
           "session-two-devices",
           `session ${device.sessionId} owns two devices: ${other} and ${device.id}`,
@@ -662,13 +706,31 @@ class OwnershipWorld {
         );
       }
     }
+    // Holder agreement (#11802): at a quiescent point the pool's answer and the session manager's
+    // reverse lookup name the same session for every pooled device.
+    for (const device of devices) {
+      const poolHolder = holderOf(this.pool.getDevice(device.id)) ?? undefined;
+      const managerHolder = this.manager.getSessionForDevice(device.id) ?? undefined;
+      if (poolHolder !== managerHolder) {
+        this.fail(
+          "pool-session-disagree",
+          `device ${device.id}: binding holderOf(pool device) is ${poolHolder ?? "nobody"} but ` +
+            `sessionManager.getSessionForDevice is ${managerHolder ?? "nobody"}`,
+        );
+      }
+    }
     const stats = this.pool.getStats();
     const busy = devices.filter((d) => d.status === "busy").length;
     const idle = devices.filter((d) => d.status === "idle" && !d.sessionId).length;
-    // An idle device a managed slot holds counts as assigned once the pool has read the registry
+    // An idle device a broker binding holds counts as assigned once the pool has read the registry
     // (its snapshot is cached), so the stats may show it either way.
+    // A restart-released session's rehydration reservation holds its idle device the same way, and
+    // the pool counts it as assigned.
     const slotIdle = devices.filter(
-      (d) => d.status === "idle" && !d.sessionId && this.slotHoldsDevice(d.id),
+      (d) =>
+        d.status === "idle" &&
+        !d.sessionId &&
+        (this.slotHoldsDevice(d.id) || this.pool.poolBucket(d.id) === "assigned"),
     ).length;
     const statsAgree =
       stats.total === devices.length &&
@@ -683,7 +745,10 @@ class OwnershipWorld {
       );
     }
     if (stats.idle + stats.assigned + stats.error > stats.total) {
-      this.fail("pool-stats", `pool slot counts exceed the device total: ${JSON.stringify(stats)}`);
+      this.fail(
+        "pool-stats",
+        `pool binding counts exceed the device total: ${JSON.stringify(stats)}`,
+      );
     }
     const acquired = connectionOwnership(this.pool);
     const connectionOwners = new Map<string, string>();
@@ -803,20 +868,14 @@ class OwnershipWorld {
               undefined,
               { autolockEnabled: true },
             )
-          : await this.pool.bindOrReuseDeviceSession(
+          : await this.pool.bindOrReuseDeviceSession({
               sessionId,
-              device.deviceId,
-              "android",
-              undefined,
-              undefined,
-              undefined,
-              false,
-              undefined,
-              undefined,
-              undefined,
-              connection,
-              kind === "cli",
-            );
+              deviceId: device.deviceId,
+              platform: "android",
+              allowSessionRebind: false,
+              mcpSessionId: connection,
+              oneShotCli: kind === "cli",
+            });
       if (bound === undefined) {
         return;
       }
@@ -831,14 +890,26 @@ class OwnershipWorld {
       if (bound !== sessionId && !(via === "autolock" && !origin)) {
         // The same client whose acquisition outlived its connection, after its reconnect restored
         // the session onto a newer one, is not handed a foreign session: the reply goes nowhere.
+        // The same client is also handed back its own session from an earlier connection that has
+        // since closed (the proxy reconnected and acquired a device that session was rebound to).
+        // An autolock acquisition is not handed anything when its connection closed mid-bind (the
+        // reply goes nowhere), even if an attach on another connection claimed the autolock
+        // session it minted in the meantime.
+        const unroutedAutolock =
+          via === "autolock" &&
+          kind === "mcp" &&
+          connection !== undefined &&
+          this.closedConnections.has(connection);
         const sameOwner =
-          kind === "cli"
+          unroutedAutolock ||
+          (kind === "cli"
             ? origin?.kind === "cli"
             : origin?.kind === "mcp" &&
               (origin.connection === connection ||
                 (origin.client === client.index &&
-                  connection !== undefined &&
-                  this.closedConnections.has(connection)));
+                  ((connection !== undefined && this.closedConnections.has(connection)) ||
+                    (origin.connection !== undefined &&
+                      this.closedConnections.has(origin.connection))))));
         if (!sameOwner) {
           this.fail(
             "foreign-session-reuse",
@@ -967,85 +1038,69 @@ class OwnershipWorld {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Managed-slot operations
+  // Broker binding operations
 
   /** The slot a device index is assigned to, once a `slotAssign` step landed. */
   private slotFor(deviceIndex: number) {
-    return this.slots.get(deviceIndex);
+    return this.bindings.get(deviceIndex);
   }
 
   /** Assign an idle, unheld device to a fresh slot (a held or already assigned device is skipped). */
   slotAssign(deviceIndex: number): void {
     const device = DEVICES[deviceIndex]!;
-    if (!this.managedSlots || this.slots.has(deviceIndex) || !this.online[deviceIndex]) {
+    if (!this.bindingsEnabled || this.bindings.has(deviceIndex) || !this.online[deviceIndex]) {
       return;
     }
     // A slot is assigned to a device nothing holds and no acquisition is racing for.
     if (this.pool.getDevice(device.deviceId)?.sessionId || this.inflight.size > 0) {
       return;
     }
-    this.log(`slot assign ${device.deviceId}`);
-    this.launch(`slot assign ${device.deviceId}`, async () => {
-      const key = await assignManagedSlotDevice(
-        this.slotRegistry,
+    this.log(`binding assign ${device.deviceId}`);
+    this.launch(`binding assign ${device.deviceId}`, async () => {
+      const key = await assignBindingDevice(
+        this.bindingRegistry,
         "android",
         device.deviceId,
         `runner-${deviceIndex}`,
       );
-      this.slots.set(deviceIndex, { key, assignedAt: this.timer.now(), execSession: undefined });
+      this.bindings.set(deviceIndex, { key, assignedAt: this.timer.now(), execSession: undefined });
     });
   }
 
   /** The slot's own execution starts: the registry records its session as the device's user. */
   slotExecStart(deviceIndex: number): void {
-    const slot = this.slotFor(deviceIndex);
-    if (!slot || slot.execSession) {
+    const binding = this.slotFor(deviceIndex);
+    if (!binding || binding.execSession) {
       return;
     }
     const sessionUuid = `slot-exec-${++this.slotExecCounter}`;
     const stableDeviceId = DEVICES[deviceIndex]!.deviceId;
-    this.log(`slot exec start ${stableDeviceId} as ${sessionUuid}`);
-    this.launch(`slot exec start ${stableDeviceId}`, async () => {
-      const claimed = await this.slotRegistry.claimExecution(
-        slot.key,
+    this.log(`binding exec start ${stableDeviceId} as ${sessionUuid}`);
+    this.launch(`binding exec start ${stableDeviceId}`, async () => {
+      const claimed = await this.bindingRegistry.claimExecution(
+        binding.key,
         { generation: 1, stableDeviceId },
         { daemonId: "daemon", pid: 1, sessionUuid },
       );
       if (claimed.kind === "claimed") {
-        slot.execSession = sessionUuid;
-        slot.execStartedAt = this.timer.now();
+        binding.execSession = sessionUuid;
+        binding.execStartedAt = this.timer.now();
       }
     });
   }
 
   slotExecEnd(deviceIndex: number): void {
-    const slot = this.slotFor(deviceIndex);
-    const sessionUuid = slot?.execSession;
-    if (!slot || !sessionUuid) {
+    const binding = this.slotFor(deviceIndex);
+    const sessionUuid = binding?.execSession;
+    if (!binding || !sessionUuid) {
       return;
     }
-    this.log(`slot exec end ${DEVICES[deviceIndex]!.deviceId} ${sessionUuid}`);
-    this.launch(`slot exec end ${DEVICES[deviceIndex]!.deviceId}`, async () => {
-      await this.slotRegistry.releaseExecution(slot.key, sessionUuid);
-      if (slot.execSession === sessionUuid) {
-        slot.execSession = undefined;
+    this.log(`binding exec end ${DEVICES[deviceIndex]!.deviceId} ${sessionUuid}`);
+    this.launch(`binding exec end ${DEVICES[deviceIndex]!.deviceId}`, async () => {
+      await this.bindingRegistry.releaseExecution(binding.key, sessionUuid);
+      if (binding.execSession === sessionUuid) {
+        binding.execSession = undefined;
       }
-    });
-  }
-
-  /**
-   * The slot's scope is reset: its device goes to the free pool. A device parked there is still
-   * managed (never generic capacity), so the slot keeps excluding it.
-   */
-  slotRelease(deviceIndex: number): void {
-    const slot = this.slotFor(deviceIndex);
-    if (!slot || slot.execSession) {
-      return;
-    }
-    this.log(`slot release ${DEVICES[deviceIndex]!.deviceId}`);
-    this.launch(`slot release ${DEVICES[deviceIndex]!.deviceId}`, async () => {
-      await this.slotRegistry.beginScopeInvalidation(slot.key.scopeKey, "operator_reset");
-      await this.slotRegistry.completeScopeInvalidation(slot.key.scopeKey);
     });
   }
 
@@ -1067,7 +1122,7 @@ class OwnershipWorld {
     this.log(`c${client.index} ${action} on ${device.deviceId} as ${requester ?? "(none)"}`);
     this.launch(`c${client.index} ${action} ${device.deviceId}`, async () => {
       try {
-        await assertInputNotOnForeignManagedSlotDevice({
+        await assertInputNotOnForeignBindingDevice({
           action,
           deviceId: device.deviceId,
           platform: "android",
@@ -1084,28 +1139,28 @@ class OwnershipWorld {
         });
       } catch (error) {
         this.log(`  ${action} refused: ${errorMessage(error).slice(0, 100)}`);
-        const slot = this.slotFor(deviceIndex);
+        const binding = this.slotFor(deviceIndex);
         if (
-          slot &&
+          binding &&
           requester !== undefined &&
-          requester === slot.execSession &&
-          this.slotSettledFor(slot, requester, askedAt)
+          requester === binding.execSession &&
+          this.slotSettledFor(binding, requester, askedAt)
         ) {
           this.fail(
             "slot-execution-refused",
-            `${action} from slot execution ${requester} was refused its own device ${device.deviceId}: ${errorMessage(error).slice(0, 100)}`,
+            `${action} from binding execution ${requester} was refused its own device ${device.deviceId}: ${errorMessage(error).slice(0, 100)}`,
           );
         }
         return;
       }
       // The handler runs here. Judge the caller against the device's holder at this instant. The
       // admission reads the registry through a snapshot cached for
-      // MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS, so a slot is only judged once it is older than that.
+      // BINDING_INPUT_SNAPSHOT_MAX_AGE_MS, so a slot is only judged once it is older than that.
       const holder = this.manager.getSessionForDevice(device.deviceId) ?? undefined;
-      const slot = this.slotFor(deviceIndex);
-      const slotUserNow = slot?.execSession;
-      const slotJudged = slot !== undefined && this.slotSettledFor(slot, requester, askedAt);
-      const allowed = slot
+      const binding = this.slotFor(deviceIndex);
+      const slotUserNow = binding?.execSession;
+      const slotJudged = binding !== undefined && this.slotSettledFor(binding, requester, askedAt);
+      const allowed = binding
         ? !slotJudged || (requester !== undefined && requester === slotUserNow)
         : holder === undefined || holder === requester;
       this.handlerRuns.push({ action, deviceIndex });
@@ -1113,7 +1168,7 @@ class OwnershipWorld {
         this.fail(
           "non-owner-control-ran",
           `${action} ran its handler on ${device.deviceId} for ${requester ?? "a sessionless caller"}, ` +
-            `but the device is held by ${slot ? `slot execution ${slotUserNow ?? "(none)"}` : (holder ?? "nobody")}`,
+            `but the device is held by ${binding ? `binding execution ${slotUserNow ?? "(none)"}` : (holder ?? "nobody")}`,
         );
       }
     });
@@ -1166,35 +1221,35 @@ class OwnershipWorld {
    * its execution (when the requester is that execution), are older than that.
    */
   private slotSettledFor(
-    slot: { assignedAt: number; execSession: string | undefined; execStartedAt?: number },
+    binding: { assignedAt: number; execSession: string | undefined; execStartedAt?: number },
     requester: string | undefined,
     admittedAt: number,
   ): boolean {
     const now = admittedAt;
-    const age = MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS;
+    const age = BINDING_INPUT_SNAPSHOT_MAX_AGE_MS;
     return (
-      now - slot.assignedAt > age &&
-      (requester !== slot.execSession || now - (slot.execStartedAt ?? 0) > age)
+      now - binding.assignedAt > age &&
+      (requester !== binding.execSession || now - (binding.execStartedAt ?? 0) > age)
     );
   }
 
   private slotHoldsDevice(deviceId: string): boolean {
-    return [...this.slots.keys()].some((index) => DEVICES[index]!.deviceId === deviceId);
+    return [...this.bindings.keys()].some((index) => DEVICES[index]!.deviceId === deviceId);
   }
 
   /** No generic session may be bound to a device a slot holds, unless it was bound before. */
   checkSlotDevices(): void {
-    for (const [deviceIndex, slot] of this.slots) {
+    for (const [deviceIndex, binding] of this.bindings) {
       const device = this.pool.getDevice(DEVICES[deviceIndex]!.deviceId);
       const holder = device?.sessionId;
-      if (!holder || holder === slot.execSession) {
+      if (!holder || holder === binding.execSession) {
         continue;
       }
       const session = this.manager.getAllSessions().find((s) => s.sessionId === holder);
-      if (session && session.createdAt > slot.assignedAt) {
+      if (session && session.createdAt > binding.assignedAt) {
         this.fail(
           "slot-device-allocated-generically",
-          `${DEVICES[deviceIndex]!.deviceId} is assigned to a managed slot (since t=${slot.assignedAt}) ` +
+          `${DEVICES[deviceIndex]!.deviceId} is assigned to a binding (since t=${binding.assignedAt}) ` +
             `but generic session ${holder} (created t=${session.createdAt}) holds it`,
         );
       }
@@ -1260,13 +1315,30 @@ class OwnershipWorld {
     this.launch(`disconnect ${device.deviceId}`, async () => {
       const pooled = this.pool.getDevice(device.deviceId);
       const sessionId = pooled?.sessionId ?? null;
-      if (sessionId && this.manager.getSession(sessionId)) {
+      const liveSession = sessionId && this.manager.getSession(sessionId) ? sessionId : null;
+      // The daemon's disconnect monitor treats a session that already moved on as a stale target
+      // (this device is only pinned for deferred rebind cleanup) and returns without removing it
+      // (daemon.ts isCapturedDisconnectTargetCurrent). Refresh-miss eviction or an identity
+      // replacement later loses the device (see refreshDevices and replaceIdentity).
+      if (liveSession && this.manager.getSessionForDevice(device.deviceId) !== liveSession) {
+        this.log(`  disconnect ${device.deviceId}: stale target, session moved on`);
+        return;
+      } else if (liveSession) {
         await releaseSessionAndDevice(
           this.manager,
           this.pool,
           device.deviceId,
-          sessionId,
-          deviceLossCancellationReason(device.deviceId),
+          liveSession,
+          undefined,
+          {
+            // cancelAndReleaseSession frees the device the release returns, which is the session's
+            // assigned device, not necessarily the one that disconnected (a rebind may be in flight).
+            release: () =>
+              this.manager.releaseSession(
+                liveSession,
+                deviceLossCancellationReason(device.deviceId),
+              ),
+          },
         );
       }
       await this.pool.removeDisconnectedDevice(
@@ -1275,6 +1347,115 @@ class OwnershipWorld {
         undefined,
         pooled ?? undefined,
       );
+    });
+  }
+
+  /** A plain refresh: offline serials accrue misses and are evicted once confirmed gone. */
+  refreshDevices(): void {
+    this.log("refresh devices");
+    this.launch("refresh devices", async () => {
+      await this.pool.refreshDevices();
+    });
+  }
+
+  /**
+   * Another AVD answers on the serial for one refresh (runtime identity replacement, which
+   * evicts the pooled entry), then discovery goes back to the harness's online set.
+   */
+  replaceIdentity(deviceIndex: number): void {
+    // Prefer a device a moved-on session only still holds for deferred rebind cleanup: the window
+    // a lost device must not release that session from.
+    const pinned = DEVICES.findIndex((candidate) => {
+      const holder = holderOf(this.pool.getDevice(candidate.deviceId));
+      return holder !== null && this.manager.getSessionForDevice(candidate.deviceId) !== holder;
+    });
+    const device = DEVICES[pinned >= 0 ? pinned : deviceIndex]!;
+    this.log(`replace identity ${device.deviceId}`);
+    this.launch(`replace identity ${device.deviceId}`, async () => {
+      this.discovery.setBootedDevices("android", [
+        ...this.onlineDevices().filter((booted) => booted.deviceId !== device.deviceId),
+        { ...device, name: `${device.name}_replacement` },
+      ]);
+      try {
+        await this.pool.refreshDevices();
+      } finally {
+        this.discovery.setBootedDevices("android", this.onlineDevices());
+      }
+    });
+  }
+
+  /**
+   * The client's live session moves to another device through the pool's non-deferred explicit
+   * rebind branch (allowSessionRebind, no deferCleanup). Rebinds of one session may overlap; production serialises
+   * them under DevicePool.assignmentMutex.
+   *
+   * `setActiveDevice` shape (`active`): src/server/setActiveDevice.ts binds with an acquisition
+   * receipt, refusePreparedForOtherRequest, and no connection id, then commits the receipt, which
+   * defers the old device's cleanup so it stays pool-bound to the session after the call returns.
+   */
+  rebind(client: ClientState, deviceIndex: number, active: boolean = false): void {
+    const sessionId = client.sessionId;
+    if (!sessionId) {
+      return;
+    }
+    const device = DEVICES[deviceIndex]!;
+    const label = active ? "rebindActive" : "rebind";
+    this.log(`c${client.index} ${label} ${sessionId} -> ${device.deviceId}`);
+    this.launch(`c${client.index} ${label} ${device.deviceId}`, async () => {
+      const from = this.manager.getSession(sessionId)?.assignedDevice;
+      if (!from || from === device.deviceId) {
+        return;
+      }
+      const group = this.rebinding.get(sessionId) ?? { inflight: 0, devices: new Set<string>() };
+      group.inflight++;
+      group.devices.add(from).add(device.deviceId);
+      this.rebinding.set(sessionId, group);
+      try {
+        if (active) {
+          this.manager.updateSessionCache(sessionId, {
+            keepScreenAwake: { applied: true, method: "svc", svcWasEnabled: false },
+          });
+          const receipt: AcquisitionReceipt = {};
+          await this.pool.bindOrReuseDeviceSession({
+            sessionId,
+            deviceId: device.deviceId,
+            platform: "android",
+            allowSessionRebind: true,
+            receipt,
+            refusePreparedForOtherRequest: true,
+          });
+          commitAcquisition(receipt);
+          await drainMicrotasks(SETTLE_TURNS);
+        } else {
+          await this.pool.bindOrReuseDeviceSession({
+            sessionId,
+            deviceId: device.deviceId,
+            platform: "android",
+            allowSessionRebind: true,
+            mcpSessionId: client.kind === "mcp" ? client.connection : undefined,
+            oneShotCli: client.kind === "cli",
+          });
+        }
+      } catch (error) {
+        // Losing the race with the session's own release is the expected outcome of a rebind.
+        if (!errorMessage(error).startsWith("Cannot rebind released session")) {
+          throw error;
+        }
+        this.log(`  c${client.index} rebind refused: ${errorMessage(error)}`);
+      } finally {
+        if (--group.inflight === 0) {
+          this.rebinding.delete(sessionId);
+        }
+      }
+    });
+  }
+
+  /** The pool drops a pooled entry; a held device refuses removal, an idle one leaves the pool. */
+  evict(deviceIndex: number): void {
+    const device = DEVICES[deviceIndex]!;
+    this.log(`evict ${device.deviceId}`);
+    this.launch(`evict ${device.deviceId}`, async () => {
+      await this.pool.removeDevice(device.deviceId, false);
     });
   }
 
@@ -1484,7 +1665,7 @@ class OwnershipWorld {
     if (this.inflight.size > 0) {
       this.fail("unsettled-operation", `${this.inflight.size} operation(s) never settled`);
     }
-    await drainMicrotasks(60);
+    await drainMicrotasks(BACKGROUND_DRAIN_TURNS);
   }
 
   async apply(step: Step): Promise<void> {
@@ -1537,6 +1718,21 @@ class OwnershipWorld {
       case "reconnect":
         this.reconnect(step.device);
         break;
+      case "rebind":
+        this.rebind(client, step.device);
+        break;
+      case "rebindActive":
+        this.rebind(client, step.device, true);
+        break;
+      case "refreshDevices":
+        this.refreshDevices();
+        break;
+      case "replaceIdentity":
+        this.replaceIdentity(step.device);
+        break;
+      case "evict":
+        this.evict(step.device);
+        break;
       case "closeConnection":
         this.closeConnection(client);
         break;
@@ -1577,9 +1773,6 @@ class OwnershipWorld {
       case "slotExecEnd":
         this.slotExecEnd(step.device);
         break;
-      case "slotRelease":
-        this.slotRelease(step.device);
-        break;
       case "toolRead":
         this.toolRead(client, step.turns % 2 === 0, "observe");
         break;
@@ -1614,7 +1807,7 @@ export async function runSteps(
   steps: readonly Step[],
   options: RunOptions = {},
 ): Promise<RunResult> {
-  const world = new OwnershipWorld(options.tolerate ?? new Set(), options.managedSlots ?? false);
+  const world = new OwnershipWorld(options.tolerate ?? new Set(), options.bindings ?? false);
   try {
     await world.start();
     for (const [index, step] of steps.entries()) {

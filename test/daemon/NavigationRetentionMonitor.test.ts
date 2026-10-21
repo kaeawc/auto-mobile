@@ -42,7 +42,7 @@ function fakeRetention(options: { onPrune?: () => void; throwOnce?: boolean } = 
         prunedAt: now,
       };
     },
-  } as unknown as NavigationRetention;
+  } as NavigationRetention;
   return { retention, prunedAt };
 }
 
@@ -96,7 +96,7 @@ describe("NavigationRetentionMonitor", () => {
           prunedAt: now,
         };
       },
-    } as unknown as NavigationRetention;
+    } as NavigationRetention;
 
     const monitor = new NavigationRetentionMonitor(retention, timer, 1_000);
     monitor.start();

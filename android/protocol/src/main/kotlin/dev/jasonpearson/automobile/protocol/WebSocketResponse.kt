@@ -5,6 +5,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Sealed class hierarchy for all outbound WebSocket messages from Android to MCP server.
@@ -66,7 +67,8 @@ data class HierarchyUpdateEvent(
 @SerialName("interaction_event")
 data class InteractionEvent(
   override val timestamp: Long,
-  val event: String, // JSON string of interaction event
+  /** Compact JSON text of the interaction; the wire embeds it as an object, not a quoted string. */
+  @Serializable(with = PerfTimingJsonSerializer::class) val event: String,
 ) : WebSocketResponse()
 
 @Serializable
@@ -76,12 +78,34 @@ data class PackageEvent(
   val event: PackageEventData,
 ) : WebSocketResponse()
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class PackageEventData(
-  val eventType: String,
+  val action: String,
   val packageName: String,
-  val className: String? = null,
+  val userId: Int,
+  val uid: Int? = null,
+  val isSystem: Boolean? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val removedForAllUsers: Boolean = false,
 )
+
+/** A display's change (add/remove/rotation/fold); carries no requestId. */
+@Serializable
+@SerialName("display_transition")
+data class DisplayTransitionEvent(
+  override val timestamp: Long,
+  val change: String,
+  val displayId: Int,
+  val panelUniqueId: String? = null,
+  val panelFingerprint: DisplayPanelFingerprint? = null,
+  val width: Int? = null,
+  val height: Int? = null,
+  val state: Int? = null,
+  val rotation: Int? = null,
+  val deviceState: Int? = null,
+) : WebSocketResponse()
+
+@Serializable data class DisplayPanelFingerprint(val width: Int, val height: Int)
 
 @Serializable
 @SerialName("navigation_event")
@@ -249,7 +273,14 @@ data class StorageChangedEvent(
   override val timestamp: Long,
   val packageName: String,
   val fileName: String,
-  val data: String, // JSON string of preferences
+  val data: String? = null, // Legacy JSON string of preferences
+  val key: String? = null,
+  val value: JsonElement? = null,
+  val valueType: String? = null,
+  val previousValue: JsonElement? = null,
+  val changeType: String? = null,
+  val eventTimestamp: Long? = null,
+  val sequenceNumber: Long? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -335,6 +366,8 @@ data class ScreenshotErrorResult(
   override val timestamp: Long,
   val requestId: String? = null,
   val error: String,
+  val displayId: Int? = null,
+  val panelUniqueId: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -350,7 +383,7 @@ data class SwipeResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -362,7 +395,7 @@ data class TapCoordinatesResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -374,7 +407,7 @@ data class DragResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -386,7 +419,7 @@ data class PinchResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -401,9 +434,10 @@ data class SetTextResult(
   val success: Boolean,
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("commit_text_result")
 data class CommitTextResult(
@@ -411,7 +445,57 @@ data class CommitTextResult(
   val requestId: String? = null,
   val success: Boolean,
   val totalTimeMs: Long,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val partialApplication: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val committedUnits: Int = 0,
+  val insertedText: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val editorConsumed: Boolean = false,
+  val trace: List<String>? = null,
   val error: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@SerialName("insert_text_result")
+data class InsertTextResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val totalTimeMs: Long,
+  val error: String? = null,
+  val warning: String? = null,
+  val caretPlaced: Boolean? = null,
+  val resultingTextLength: Int? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val partialApplication: Boolean = false,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+) : WebSocketResponse()
+
+/** The focused field's state; [state] is absent when no editable, non-password field has focus. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@SerialName("insert_text_state_result")
+data class InsertTextStateResult(
+  override val timestamp: Long,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
+  val success: Boolean = true,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val state: InsertTextState? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@SerialName("cancel_ime_commit_result")
+data class CancelImeCommitResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean = true,
+  val targetRequestId: String,
+  val partialApplication: Boolean,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val committedUnits: Int = 0,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
@@ -433,15 +517,18 @@ data class SetNetworkMockRulesResult(
   val error: String? = null,
 ) : WebSocketResponse()
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("set_keyboard_profile_result")
 data class SetKeyboardProfileResult(
   override val timestamp: Long,
-  val requestId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val success: Boolean,
-  val activeProfileId: String? = null,
-  val previousProfileId: String? = null,
-  val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val activeProfileId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val previousProfileId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
@@ -475,9 +562,10 @@ data class KeyboardProfileCatalogResult(
   val catalogVersion: Int? = null,
   val supportedCatalogVersions: List<Int> = emptyList(),
   val activeProfileId: String? = null,
-  val profiles: List<KeyboardProfileInfo> = emptyList(),
+  /** Null on failure, where the wire omits the key; a successful catalog always lists them. */
+  val profiles: List<KeyboardProfileInfo>? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -486,12 +574,12 @@ data class KeyboardProfileCatalogResult(
 data class ImeActionResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val approximated: Boolean? = null,
   val action: String? = null,
+  val success: Boolean,
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val approximated: Boolean? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -502,27 +590,30 @@ data class SelectAllResult(
   val success: Boolean,
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
 // Action Result
 // =============================================================================
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("action_result")
 data class ActionResult(
   override val timestamp: Long,
-  val requestId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val success: Boolean,
   val action: String? = null,
   val totalTimeMs: Long,
-  val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
   val perfTiming: String? = null,
   /**
    * The node was already in the requested state (e.g. focus on a focused node); nothing was sent.
    */
-  val alreadySatisfied: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val alreadySatisfied: Boolean = false,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -534,12 +625,12 @@ data class ActionResult(
 data class ClipboardResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val action: String,
-  val text: String? = null, // For 'get' action
+  val success: Boolean,
   val totalTimeMs: Long,
+  val text: String? = null, // For 'get' action
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -596,12 +687,12 @@ data class SettingsListResult(
 data class CaCertResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val action: String, // install, remove
-  val alias: String? = null,
+  val success: Boolean,
   val totalTimeMs: Long,
+  val alias: String? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -614,29 +705,32 @@ data class DeviceOwnerStatusResult(
   override val timestamp: Long,
   val requestId: String? = null,
   val success: Boolean,
+  val totalTimeMs: Long,
+  val packageName: String? = null,
   val isDeviceOwner: Boolean,
   val isAdminActive: Boolean,
-  val packageName: String? = null,
-  val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("permission_result")
 data class PermissionResult(
   override val timestamp: Long,
-  val requestId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val success: Boolean,
   val permission: String,
   val granted: Boolean,
   val requestLaunched: Boolean = false,
   val canRequest: Boolean = false,
   val requiresSettings: Boolean = false,
-  val instructions: String? = null,
-  val adbCommand: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val instructions: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val adbCommand: String? = null,
   val totalTimeMs: Long,
-  val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
@@ -700,7 +794,7 @@ data class CurrentFocusResult(
   val focusedElement: String? = null, // JSON string of focused element
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -711,7 +805,7 @@ data class TraversalOrderResult(
   val result: TraversalOrderData? = null,
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -756,7 +850,95 @@ data class PrototypeResult(
    * to (`prototype_appearance_v1`). Omitted by every other result and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val saved: SavedPrototypeInfo? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val savedPrototypes: List<SavedPrototypeEntry>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val errorCode: SavedPrototypeErrorCode? = null,
+  /** Only patch replies report revisions, including refusals for a matching shown prototype. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val revision: Long? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val conflict: PrototypePatchConflict? = null,
+  /** Navigation state after a successful show; absent from other results. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val pages: Map<String, Int>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val stacks: Map<String, PrototypeStackSnapshot>? = null,
+  /** Only a successful show reply: why the existing prototype is hidden. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val pin: SavedPrototypePinInfo? = null,
+  /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val cleared: Int? = null,
 ) : WebSocketResponse()
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class SavedPrototypeInfo(
+  val id: String,
+  val slug: String,
+  val replaced: Boolean,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shortcut: SavedPrototypeShortcutUpdate? = null,
+)
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class SavedPrototypePinInfo(
+  val id: String,
+  val status: SavedPrototypePinStatus,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shortcut: SavedPrototypeShortcutUpdate? = null,
+)
+
+@Serializable
+enum class SavedPrototypePinStatus {
+  @SerialName("requested") REQUESTED,
+  @SerialName("already_pinned") ALREADY_PINNED,
+}
+
+@Serializable
+enum class SavedPrototypeShortcutUpdate {
+  @SerialName("updated") UPDATED,
+  @SerialName("rate_limited") RATE_LIMITED,
+}
+
+@Serializable
+data class SavedPrototypeEntry(
+  val id: String,
+  val label: String,
+  val slug: String,
+  val savedAt: Long,
+  val pinned: Boolean,
+)
+
+@Serializable
+enum class SavedPrototypeErrorCode {
+  @SerialName("pin_unsupported") PIN_UNSUPPORTED,
+  @SerialName("device_locked") DEVICE_LOCKED,
+  @SerialName("pin_failed") PIN_FAILED,
+  @SerialName("invalid_id") INVALID_ID,
+  @SerialName("invalid_label") INVALID_LABEL,
+  @SerialName("spec_too_large") SPEC_TOO_LARGE,
+  @SerialName("invalid_spec") INVALID_SPEC,
+  @SerialName("invalid_asset_id") INVALID_ASSET_ID,
+  @SerialName("duplicate_asset_id") DUPLICATE_ASSET_ID,
+  @SerialName("unsupported_mime_type") UNSUPPORTED_MIME_TYPE,
+  @SerialName("empty_asset") EMPTY_ASSET,
+  @SerialName("asset_too_large") ASSET_TOO_LARGE,
+  @SerialName("count_limit") COUNT_LIMIT,
+  @SerialName("total_limit") TOTAL_LIMIT,
+  @SerialName("missing_asset") MISSING_ASSET,
+  @SerialName("saved_count_limit") SAVED_COUNT_LIMIT,
+  @SerialName("storage_failure") STORAGE_FAILURE,
+  @SerialName("unsupported_existing") UNSUPPORTED_EXISTING,
+  @SerialName("not_found") NOT_FOUND,
+  @SerialName("unsupported_format") UNSUPPORTED_FORMAT,
+  @SerialName("internal_error") INTERNAL_ERROR,
+}
+
+@Serializable
+data class PrototypePatchConflict(val revision: Long, val state: Map<String, PrototypeScalar>)
+
+@Serializable
+enum class PrototypeHiddenReason {
+  /** An attached app-layer window is absent from the accessibility windows on screen. */
+  @SerialName("app_layer_window_hidden") APP_LAYER_WINDOW_HIDDEN,
+  /** Locked, noninteractive, or unable to establish a safe device lock state. */
+  @SerialName("device_blocked") DEVICE_BLOCKED,
+}
 
 @Serializable
 enum class PrototypeAppearanceMode {
@@ -790,6 +972,14 @@ data class PrototypeAppearance(
   val deviceDark: Boolean,
 )
 
+/** Wire navigation snapshot; depth always equals the number of path entries. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class PrototypeStackSnapshot(
+  val path: List<String>,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS) val depth: Int = path.size,
+)
+
 /**
  * One prototype the device is showing. [id] is the prototype id, which is its spec id.
  * [lastSequence] is the highest `prototype_event` sequence allocated for it, so a host resumes from
@@ -807,15 +997,31 @@ data class PrototypeStatusEntry(
    * kept, and it returns with the app. Omitted when false and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val suspended: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
   /** The mode it is drawn in right now (`prototype_appearance_v1`). Omitted by older APKs. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  /** The shown spec's read-only data; absent when the spec has none. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val data: JsonObject? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  /**
+   * What the device stores for this prototype (`prototype_storage_v1`); absent without `storage`.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val storage: PrototypeStorageReport? = null,
 )
+
+/** Input validation vocabulary understood by this protocol version. */
+const val PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1"
 
 @Serializable
 enum class PrototypeEventKind {
   @SerialName("emit") EMIT,
+  @SerialName("change") CHANGE,
+  @SerialName("validation_failed") VALIDATION_FAILED,
   /** A pager settled on another page: `name` is the pager id, the payload the new page index. */
   @SerialName("page_changed") PAGE_CHANGED,
+  /** A stack changed top or depth: `name` is its id, payload is `{screen, depth}`. */
+  @SerialName("screen_changed") SCREEN_CHANGED,
   @SerialName("dismissed") DISMISSED,
   /**
    * The resolved light or dark mode of a shown prototype changed (`prototype_appearance_v1`). The
@@ -827,6 +1033,7 @@ enum class PrototypeEventKind {
 /** Unsolicited frame. Pager selection is separate from authored scalar state. */
 @Serializable
 @SerialName("prototype_event")
+@OptIn(ExperimentalSerializationApi::class)
 data class PrototypeEvent(
   override val timestamp: Long,
   val id: String,
@@ -840,7 +1047,17 @@ data class PrototypeEvent(
   val payload: JsonElement?,
   val state: Map<String, PrototypeScalar>,
   val pages: Map<String, Int> = emptyMap(),
-) : WebSocketResponse()
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val context: JsonObject? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val contextTruncated: Boolean? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val validity: Map<String, Boolean>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val keys: List<String>? = null,
+) : WebSocketResponse() {
+  init {
+    require(contextTruncated != false) { "contextTruncated must be true or absent" }
+  }
+}
 
 // =============================================================================
 // Storage Results

@@ -1,11 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { fakeWhipClient } from "../../helpers/fakeWhipClient";
 import { logger } from "../../../src/utils/logger";
-import type { RTCPeerConnection } from "werift";
+import { FakePublisherPeerConnection } from "../../fakes/FakePublisherPeerConnection";
 import {
   KEYFRAME_REQUEST_MIN_INTERVAL_MS,
   WebRtcPublisher,
 } from "../../../src/features/webrtc/WebRtcPublisher";
-import type { WhipClient, WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
+import type { WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { capturedH264AsDevicePackets } from "../../helpers/capturedH264Stream";
 
@@ -23,43 +24,11 @@ const ACCEPTED_VIDEO_AND_AUDIO_ANSWER = [
 ].join("\r\n");
 
 /** Minimal fake peer connection whose media/offer path succeeds up to publish. */
-class FakePeerConnection {
-  closed = false;
-  connectionState = "new";
-  iceGatheringState = "complete";
-  connectionStateChange = { subscribe: () => {} };
-  iceGatheringStateChange = { watch: async () => {} };
-  localDescription = { sdp: "v=0" };
-  /** PLI callbacks the publisher subscribed on video senders (fire to simulate a relayed PLI). */
-  pliSubscribers: Array<() => void> = [];
-  addTransceiver() {
-    return {
-      sender: {
-        ssrc: 1,
-        onPictureLossIndication: { subscribe: (cb: () => void) => this.pliSubscribers.push(cb) },
-      },
-    };
-  }
-  async createOffer() {
-    return { type: "offer", sdp: "v=0" };
-  }
-  async setLocalDescription() {}
-  async setRemoteDescription() {}
-  async close() {
-    this.closed = true;
-  }
-}
-
-class RecordingPeerConnection extends FakePeerConnection {
+class RecordingPeerConnection extends FakePublisherPeerConnection {
   transceiverKinds: string[] = [];
   addTransceiver(track: { kind: string }) {
     this.transceiverKinds.push(track.kind);
-    return {
-      sender: {
-        ssrc: this.transceiverKinds.length,
-        onPictureLossIndication: { subscribe: (cb: () => void) => this.pliSubscribers.push(cb) },
-      },
-    };
+    return this.createTransceiver(this.transceiverKinds.length);
   }
 }
 
@@ -85,7 +54,7 @@ describe("WebRtcPublisher WHIP endpoint", () => {
       {
         createWhipClient: (options) => {
           captured = options;
-          return {} as unknown as WhipClient;
+          return fakeWhipClient();
         },
       },
     );
@@ -115,7 +84,7 @@ describe("WebRtcPublisher establish failure", () => {
   test.each(["delete", "close"])(
     "warns with the underlying %s cleanup error without replacing the establish failure",
     async (operation) => {
-      const pc = new FakePeerConnection();
+      const pc = new FakePublisherPeerConnection();
       if (operation === "close") {
         pc.close = async () => {
           throw new Error("peer cleanup failed");
@@ -124,9 +93,9 @@ describe("WebRtcPublisher establish failure", () => {
       const publisher = new WebRtcPublisher(
         { streamId: "s", whipEndpoint: "https://coord/whip" },
         {
-          createPeerConnection: () => pc as unknown as RTCPeerConnection,
+          createPeerConnection: () => pc,
           createWhipClient: () =>
-            ({
+            fakeWhipClient({
               publish: async () => ({
                 answerSdp: "v=0",
                 resourceUrl: "https://coord/whip/s",
@@ -136,7 +105,7 @@ describe("WebRtcPublisher establish failure", () => {
                   throw new Error("session cleanup failed");
                 }
               },
-            }) as unknown as WhipClient,
+            }),
         },
       );
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
@@ -158,15 +127,15 @@ describe("WebRtcPublisher establish failure", () => {
   test.each(["delete", "close"])(
     "warns with the underlying %s cleanup error when stop wins during publish",
     async (operation) => {
-      const pc = new FakePeerConnection();
+      const pc = new FakePublisherPeerConnection();
       const publishing = deferred();
       const answer = deferred();
       const publisher = new WebRtcPublisher(
         { streamId: "s", whipEndpoint: "https://coord/whip" },
         {
-          createPeerConnection: () => pc as unknown as RTCPeerConnection,
+          createPeerConnection: () => pc,
           createWhipClient: () =>
-            ({
+            fakeWhipClient({
               publish: async () => {
                 publishing.resolve();
                 await answer.promise;
@@ -177,7 +146,7 @@ describe("WebRtcPublisher establish failure", () => {
                   throw new Error("session cleanup failed");
                 }
               },
-            }) as unknown as WhipClient,
+            }),
         },
       );
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
@@ -205,18 +174,18 @@ describe("WebRtcPublisher establish failure", () => {
   );
 
   test("closes the peer connection when WHIP publish fails on the last attempt", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip", maxReconnectAttempts: 1 },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => {
               throw new Error("ingest rejected");
             },
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -236,16 +205,16 @@ describe("WebRtcPublisher establish failure", () => {
         onBeforeEstablish: () => gate.promise,
         createPeerConnection: () => {
           peerConnections++;
-          return new FakePeerConnection() as unknown as RTCPeerConnection;
+          return new FakePublisherPeerConnection();
         },
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => {
               publishes++;
               return { answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" };
             },
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -263,16 +232,16 @@ describe("WebRtcPublisher establish failure", () => {
 
 describe("WebRtcPublisher WHIP answer validation", () => {
   async function expectRejectedAnswer(answerSdp: string): Promise<void> {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip", maxReconnectAttempts: 1 },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({ answerSdp, resourceUrl: "https://coord/whip/s" }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await expect(publisher.start()).rejects.toThrow(/WHIP answer did not accept/);
@@ -292,19 +261,19 @@ describe("WebRtcPublisher WHIP answer validation", () => {
   });
 
   test("accepts every RFC 6184 constrained-baseline profile representation", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER.replace("42e02a", "42c02a"),
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -314,13 +283,13 @@ describe("WebRtcPublisher WHIP answer validation", () => {
   });
 
   test("accepts a conforming Baseline level-1b profile variation with a sufficient receive ceiling", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
                 "profile-level-id=42e02a",
@@ -329,7 +298,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -343,13 +312,13 @@ describe("WebRtcPublisher WHIP answer validation", () => {
   });
 
   test("accepts an asymmetric answer that explicitly supports the source level", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               resourceUrl: "https://coord/resource",
               answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
@@ -358,7 +327,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
               ),
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -385,7 +354,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
-        createWhipClient: () => ({}) as unknown as WhipClient,
+        createWhipClient: () => fakeWhipClient(),
         onSourceFailure: (error) => failures.push(error),
       },
     );
@@ -396,30 +365,33 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
   });
 
   test("routes a synchronously throwing connected hook through recovery", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
+    pc.connectionState = "connected";
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
         onConnected: () => {
           throw new Error("capture start failed");
         },
-        createWhipClient: () => ({}) as unknown as WhipClient,
+        createPeerConnection: () => pc,
+        createWhipClient: () =>
+          fakeWhipClient({
+            publish: async () => ({
+              answerSdp: ACCEPTED_VIDEO_ANSWER,
+              resourceUrl: "https://coord/whip/s",
+            }),
+            delete: async () => {},
+          }),
       },
     );
-    const internals = publisher as unknown as {
-      pc: RTCPeerConnection | null;
-      fireConnected(connection: RTCPeerConnection): void;
-      notifySourceFailed: () => void;
-    };
     let recoveries = 0;
-    internals.pc = pc as unknown as RTCPeerConnection;
-    internals.notifySourceFailed = () => {
+    publisher.notifySourceFailed = () => {
       recoveries++;
     };
 
     // A synchronous hook failure used to escape `Promise.resolve(hook())` and
     // reject start. The asynchronous boundary now routes it to recovery.
-    expect(() => internals.fireConnected(pc as unknown as RTCPeerConnection)).not.toThrow();
+    await publisher.start();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -427,25 +399,24 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
   });
 
   test("recovers instead of forwarding an SPS incompatible with the advertised H.264 profile", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await publisher.start();
-    const internals = publisher as unknown as { notifySourceFailed: () => void };
     let recoveries = 0;
-    internals.notifySourceFailed = () => {
+    publisher.notifySourceFailed = () => {
       recoveries++;
     };
 
@@ -457,7 +428,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
   });
 
   test("notifies the manager when packetization rejects source H.264", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     let failure: Error | undefined;
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip", maxReconnectAttempts: 1 },
@@ -465,15 +436,15 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
         onSourceFailure: (error) => {
           failure = error;
         },
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await publisher.start();
@@ -485,21 +456,21 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
   });
 
   test("records first RTP only after the peer connection is connected", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const events: string[] = [];
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
         onLifecycleEvent: (event) => events.push(event),
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await publisher.start();
@@ -532,21 +503,21 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
 
 describe("WebRtcPublisher packet boundary (issue #10150)", () => {
   test("endOfH264Packet sends the access unit the packet completed without a later packet", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const events: string[] = [];
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
         onLifecycleEvent: (event) => events.push(event),
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await publisher.start();
@@ -566,22 +537,22 @@ describe("WebRtcPublisher packet boundary (issue #10150)", () => {
 
 describe("WebRtcPublisher keyframe requests", () => {
   test("forwards a relayed PLI to onKeyFrameRequest, throttled", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const timer = new FakeTimer();
     let requests = 0;
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
         timer,
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
         onKeyFrameRequest: () => {
           requests++;
           return true;
@@ -604,21 +575,21 @@ describe("WebRtcPublisher keyframe requests", () => {
   });
 
   test("reports IDR completion and RTP publication readiness after a relayed PLI", async () => {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     const timer = new FakeTimer();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
         timer,
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
         onKeyFrameRequest: () => true,
       },
     );
@@ -659,22 +630,22 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
     timer: FakeTimer,
     onConnected?: () => void | Promise<void>,
   ) {
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     pc.connectionState = "connected"; // establish() fires the connected hook inline
     return new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip", frameStallTimeoutMs },
       {
         timer,
         onConnected,
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
   }
@@ -682,9 +653,8 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
   test("reconnects when a connected stream produces no frames within the timeout", async () => {
     const timer = new FakeTimer();
     const publisher = connectedPublisher(4000, timer);
-    const internals = publisher as unknown as { notifySourceFailed: () => void };
     let recoveries = 0;
-    internals.notifySourceFailed = () => {
+    publisher.notifySourceFailed = () => {
       recoveries++;
     };
 
@@ -700,9 +670,8 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
     const timer = new FakeTimer();
     const sourceStarted = deferred();
     const publisher = connectedPublisher(4000, timer, () => sourceStarted.promise);
-    const internals = publisher as unknown as { notifySourceFailed: () => void };
     let recoveries = 0;
-    internals.notifySourceFailed = () => {
+    publisher.notifySourceFailed = () => {
       recoveries++;
     };
 
@@ -722,9 +691,8 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
   test("does not reconnect while frames keep advancing", async () => {
     const timer = new FakeTimer();
     const publisher = connectedPublisher(4000, timer);
-    const internals = publisher as unknown as { notifySourceFailed: () => void };
     let recoveries = 0;
-    internals.notifySourceFailed = () => {
+    publisher.notifySourceFailed = () => {
       recoveries++;
     };
 
@@ -754,27 +722,26 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
 
   test("gives an accepted PLI recovery a fresh bounded watchdog interval", async () => {
     const timer = new FakeTimer();
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     pc.connectionState = "connected";
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip", frameStallTimeoutMs: 4000 },
       {
         timer,
         onKeyFrameRequest: () => true,
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
-    const internals = publisher as unknown as { notifySourceFailed: () => void };
     let recoveries = 0;
-    internals.notifySourceFailed = () => {
+    publisher.notifySourceFailed = () => {
       recoveries++;
     };
 
@@ -797,7 +764,7 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
 
   test("does not extend the watchdog when a throttled PLI starts no recovery", async () => {
     const timer = new FakeTimer();
-    const pc = new FakePeerConnection();
+    const pc = new FakePublisherPeerConnection();
     pc.connectionState = "connected";
     let recoveryStarts = true;
     const publisher = new WebRtcPublisher(
@@ -805,20 +772,19 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
       {
         timer,
         onKeyFrameRequest: () => recoveryStarts,
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
-    const internals = publisher as unknown as { notifySourceFailed: () => void };
     let recoveries = 0;
-    internals.notifySourceFailed = () => {
+    publisher.notifySourceFailed = () => {
       recoveries++;
     };
 
@@ -844,9 +810,8 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
   test("is disabled when no timeout is configured", async () => {
     const timer = new FakeTimer();
     const publisher = connectedPublisher(undefined, timer);
-    const internals = publisher as unknown as { notifySourceFailed: () => void };
     let recoveries = 0;
-    internals.notifySourceFailed = () => {
+    publisher.notifySourceFailed = () => {
       recoveries++;
     };
 
@@ -864,15 +829,15 @@ describe("WebRtcPublisher audio", () => {
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip", audioEnabled: true },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_AND_AUDIO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -890,15 +855,15 @@ describe("WebRtcPublisher audio", () => {
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -917,9 +882,9 @@ describe("WebRtcPublisher audio", () => {
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip", audioEnabled: true },
       {
-        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createPeerConnection: () => pc,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: `${ACCEPTED_VIDEO_ANSWER}\r\nm=audio 0 UDP/TLS/RTP/SAVPF 0`,
               resourceUrl: "https://coord/whip/s",
@@ -927,7 +892,7 @@ describe("WebRtcPublisher audio", () => {
             delete: async (url: string) => {
               deleted.push(url);
             },
-          }) as unknown as WhipClient,
+          }),
       },
     );
 

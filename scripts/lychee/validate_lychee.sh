@@ -192,9 +192,6 @@ STAGED_DOCS=()
 # Generated pages that pre-existed on disk (a dev's earlier `mkdocs build`),
 # backed up under $SITE_STAGE and restored so this run never erases them.
 RESTORE_DOCS=()
-# Invoked only through `trap cleanup EXIT`, which some shellcheck versions read
-# as unreachable (SC2317) and others as never-invoked (SC2329); disable both.
-# shellcheck disable=SC2317,SC2329
 cleanup() {
     # Restore/remove staged docs BEFORE deleting the backup dir they restore from.
     local f
@@ -207,7 +204,9 @@ cleanup() {
     fi
     rm -rf "$LYCHEE_OUTPUT" "$LYCHEE_ERRORS" "$SITE_STAGE"
 }
-trap cleanup EXIT
+# Static reference for indirect callers; this branch never executes.
+if false; then cleanup "$@"; fi
+trap 'cleanup' EXIT
 
 OVERALL_STATUS=0
 record_status() {
@@ -227,11 +226,13 @@ record_status() {
 # armed inside it.
 run_lychee_pass() {
     local status=0
+    local -a optional_flags=()
+    if [[ -n "$VERBOSE_FLAG" ]]; then optional_flags+=("$VERBOSE_FLAG"); fi
+    if [[ -n "$OFFLINE_FLAG" ]]; then optional_flags+=("$OFFLINE_FLAG"); fi
     # --include-fragments verifies #anchors, not just that the target exists (a
     # renamed heading otherwise passes silently). It is a CLI flag, not a config
     # key, because the key's type changed between lychee 0.22 and 0.24.
-    # shellcheck disable=SC2086 # VERBOSE_FLAG/OFFLINE_FLAG are intentionally unquoted (empty or one flag)
-    lychee --config "$LYCHEE_CONFIG" --no-progress --include-fragments $VERBOSE_FLAG $OFFLINE_FLAG "$@" 2>&1 | tee -a "$LYCHEE_OUTPUT" || status=${PIPESTATUS[0]}
+    lychee --config "$LYCHEE_CONFIG" --no-progress --include-fragments ${optional_flags[@]+"${optional_flags[@]}"} "$@" 2>&1 | tee -a "$LYCHEE_OUTPUT" || status=${PIPESTATUS[0]}
     record_status "$status"
 }
 
@@ -248,12 +249,15 @@ run_lychee_pass() {
 # the working tree is left clean. Sets BUILD_STATUS: 0 on success, 3 when MkDocs
 # is unavailable, 1 when the build fails. Always returns 0 so set -e stays armed.
 BUILD_STATUS=0
+SITE_BASE=""
 build_site() {
-    local -a mkdocs_cmd
+    local -a mkdocs_cmd python_cmd
     if command -v uv >/dev/null 2>&1 && [[ -f "$PROJECT_ROOT/scripts/github/uv.lock" ]]; then
         mkdocs_cmd=(uv run --project "$PROJECT_ROOT/scripts/github" --locked mkdocs)
+        python_cmd=(uv run --project "$PROJECT_ROOT/scripts/github" --locked python)
     elif command -v mkdocs >/dev/null 2>&1; then
         mkdocs_cmd=(mkdocs)
+        python_cmd=(python3)
     else
         BUILD_STATUS=3
         return 0
@@ -280,6 +284,30 @@ build_site() {
 
     ( cd "$PROJECT_ROOT" && "${mkdocs_cmd[@]}" build --quiet \
         --config-file "$PROJECT_ROOT/mkdocs.yml" --site-dir "$SITE_STAGE/built" ) || BUILD_STATUS=1
+
+    # The Pages base path (the path of site_url, e.g. /auto-mobile/), read through
+    # MkDocs' own config loader in the same environment that built the site. Pages
+    # (404.html in particular) link to root-absolute /auto-mobile/... URLs, so the
+    # lychee pass must resolve those under the base path, as GitHub Pages does.
+    # Empty when site_url is unset or MkDocs cannot be imported (no base mapping).
+    SITE_BASE=$(cd "$PROJECT_ROOT" && "${python_cmd[@]}" -c \
+        'import sys; from urllib.parse import urlsplit; from mkdocs.config import load_config; print(urlsplit(load_config(sys.argv[1]).site_url or "").path)' \
+        "$PROJECT_ROOT/mkdocs.yml" 2>/dev/null) || SITE_BASE=""
+}
+
+# Directory lychee resolves root-absolute links against. GitHub Pages serves the
+# build under SITE_BASE, so mirror that: a root whose SITE_BASE path links to the
+# build. Without a base path the build itself is the root.
+site_root_dir() {
+    local base="${SITE_BASE#/}"
+    base="${base%/}"
+    if [[ -z "$base" ]]; then
+        echo "$SITE_STAGE/built"
+        return 0
+    fi
+    mkdir -p "$SITE_STAGE/root/$(dirname "$base")"
+    ln -sfn "$SITE_STAGE/built" "$SITE_STAGE/root/$base"
+    echo "$SITE_STAGE/root"
 }
 
 # Links to this repository's own blob/main and tree/main paths are excluded from
@@ -302,8 +330,20 @@ if [[ "$BUILD_STATUS" -eq 0 ]]; then
     OFFLINE_FLAG="--offline" run_lychee_pass \
         --index-files index.html \
         --extensions html \
-        --root-dir "$SITE_STAGE/built" \
+        --root-dir "$(site_root_dir)" \
         "$SITE_STAGE/built"
+    # Same build, structural pass: no root-absolute or missing local asset URLs
+    # (a 404.html built without site_url once shipped unstyled). See
+    # scripts/docs/check-built-site.ts.
+    # bun is absent in the post-merge links job (the docs.yml PR job and Fast
+    # Validation both have it), so skip with a warning rather than fail there.
+    if command -v bun >/dev/null 2>&1; then
+        site_status=0
+        bun "$PROJECT_ROOT/scripts/docs/check-built-site.ts" "$SITE_STAGE/built" || site_status=2
+        record_status "$site_status"
+    else
+        print_warning "Skipping built-site reference check: bun not available"
+    fi
 elif [[ "$BUILD_STATUS" -eq 3 ]]; then
     if [[ "${LYCHEE_REQUIRE_SITE:-false}" == "true" ]]; then
         print_error "MkDocs is not available (need uv or mkdocs) and LYCHEE_REQUIRE_SITE=true"

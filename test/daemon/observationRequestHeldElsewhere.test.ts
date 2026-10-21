@@ -3,17 +3,19 @@ import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import type { OnObservationRequestedCallback } from "../../src/daemon/deviceDataStreamSocketServer";
-import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import type { ObserveResult } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createPooledDevice } from "./helpers/DaemonDisconnectHarness";
+import { createFakeSession } from "./helpers/inputSocketHarness";
 
 // A read must never perform control-like side effects (service rebind, CtrlProxy setup) on a
-// device another session, a managed slot or another daemon holds: request_observation on such a
+// device another session, a broker binding or another daemon holds: request_observation on such a
 // device takes the connect-only read, never the session observe pipeline, and is never refused.
 
 const SLOT_EXEC = "slot-exec-session";
@@ -30,28 +32,20 @@ class FakeStreamServer extends DeviceDataStreamSocketServer {
   }
 }
 
-interface Internals {
-  sessionManager: {
-    getSession(sessionUuid: string): unknown | null;
-    getSessionForDevice(deviceId: string): string | null;
-    getDeviceLabels(sessionUuid: string): Record<string, string> | undefined;
-  };
-  devicePool: {
-    getDevice(deviceId: string): unknown;
-    getAllDevices(): unknown[];
-    assertDeviceActionable(deviceId: string, purpose: string): void;
-    assertNotAssignedToManagedSlot(input: {
-      requesterSessionUuid?: string;
-      deviceId: string;
-    }): Promise<void>;
-    assertNotClaimedByForeignDaemon(deviceId: string): Promise<void>;
-  };
-  deviceDataStreamServer: unknown;
-  setupDeviceDataStreamCallback(): void;
+/** A real `Daemon` whose data-stream server and observation callback wiring a test drives. */
+class ObservationDaemon extends Daemon {
+  useStreamServer(stream: DeviceDataStreamSocketServer): void {
+    this.deviceDataStreamServer = stream;
+  }
+
+  wireObservationCallback(): void {
+    this.setupDeviceDataStreamCallback();
+  }
 }
 
 const observation: ObserveResult = {
   observationId: "observed",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: 0,
   screenSize: { width: 1, height: 1 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -65,43 +59,44 @@ async function observeAs(options: {
   slotCheckFails?: boolean;
 }): Promise<{ paths: string[]; error: string | undefined; foreignChecks: number }> {
   const db = await createTestDatabase();
-  const daemon = new Daemon(
+  const daemon = new ObservationDaemon(
     {},
-    undefined,
-    new FakeTimer(),
-    new DeviceSessionRepository(db),
-    new CountingIdGenerator("device-session"),
+    {
+      timer: new FakeTimer(),
+      deviceSessionRepository: new DeviceSessionRepository(db),
+      idGenerator: new CountingIdGenerator("device-session"),
+    },
   );
-  const internals = daemon as unknown as Internals;
-  const pooled = {
-    id: "device-1",
+  const pool = daemon.getDevicePool();
+  const sessions = daemon.getSessionManager();
+  const pooled = createPooledDevice("device-1", {
     platform: "ios",
-    sessionId: options.localHolder,
-  };
-  internals.devicePool.getDevice = () => pooled;
-  internals.devicePool.getAllDevices = () => [pooled];
-  internals.devicePool.assertDeviceActionable = () => {};
-  internals.sessionManager.getSession = () => ({});
-  internals.sessionManager.getSessionForDevice = () => options.localHolder ?? null;
-  internals.sessionManager.getDeviceLabels = () => undefined;
-  internals.devicePool.assertNotAssignedToManagedSlot = async (input) => {
+    sessionId: options.localHolder ?? null,
+  });
+  spyOn(pool, "getDevice").mockImplementation(() => pooled);
+  spyOn(pool, "getAllDevices").mockImplementation(() => [pooled]);
+  spyOn(pool, "assertDeviceActionable").mockImplementation(() => {});
+  spyOn(sessions, "getSession").mockImplementation(() =>
+    createFakeSession("held-session", "device-1", "ios"),
+  );
+  spyOn(sessions, "getSessionForDevice").mockImplementation(() => options.localHolder ?? null);
+  spyOn(sessions, "getDeviceLabels").mockImplementation(() => undefined);
+  spyOn(pool, "assertNotAssignedToBinding").mockImplementation(async (input) => {
     if (options.slotCheckFails) {
-      throw new Error("slot registry unreadable");
+      throw new Error("binding registry unreadable");
     }
     if (options.slotHeld && input.requesterSessionUuid !== SLOT_EXEC) {
-      throw new DeviceAssignedToManagedSlotError("observe", input.deviceId, {
+      throw new DeviceAssignedToBindingError("observe", input.deviceId, {
         platform: "ios",
         stableDeviceId: "Pixel_9",
-        holder: "slot",
+        holder: "session_broker",
         scopeKey: "scope",
-        slotIndex: 0,
-        scopeState: null,
-        execSessionUuid: SLOT_EXEC,
+        bindingIndex: 0,
       });
     }
-  };
+  });
   let foreignChecks = 0;
-  internals.devicePool.assertNotClaimedByForeignDaemon = async (deviceId) => {
+  spyOn(pool, "assertNotClaimedByForeignDaemon").mockImplementation(async (deviceId) => {
     foreignChecks += 1;
     // The real pool skips a device a local session holds.
     if (pooled.sessionId || !options.foreign) {
@@ -114,9 +109,9 @@ async function observeAs(options: {
       deviceId,
       options.foreign === "claimed" ? 4242 : undefined,
     );
-  };
+  });
   const stream = new FakeStreamServer();
-  internals.deviceDataStreamServer = stream;
+  daemon.useStreamServer(stream);
   const paths: string[] = [];
   const deviceRead = spyOn(RealObserveScreen.prototype, "executeDeviceRead").mockImplementation(
     async () => {
@@ -131,7 +126,7 @@ async function observeAs(options: {
     },
   );
   try {
-    internals.setupDeviceDataStreamCallback();
+    daemon.wireObservationCallback();
     const observations = await stream.handler!({
       deviceId: "device-1",
       sessionUuid: options.requester,
@@ -149,13 +144,13 @@ async function observeAs(options: {
 }
 
 describe("request_observation on a device someone else holds", () => {
-  test("a viewer on an idle managed-slot device takes the connect-only read", async () => {
+  test("a viewer on an idle binding device takes the connect-only read", async () => {
     const { paths, error } = await observeAs({ requester: "viewer", slotHeld: true });
     expect(error).toBeUndefined();
     expect(paths).toEqual(["device-read"]);
   });
 
-  test("the slot's own execution keeps the session pipeline", async () => {
+  test("the binding's own execution keeps the session pipeline", async () => {
     const { paths } = await observeAs({ requester: SLOT_EXEC, slotHeld: true });
     expect(paths).toEqual(["session-pipeline"]);
   });
@@ -174,8 +169,8 @@ describe("request_observation on a device someone else holds", () => {
   test("an ownership lookup that fails outright takes the connect-only read", async () => {
     const foreign = await observeAs({ requester: "viewer", foreign: "unexpectedFailure" });
     expect(foreign.paths).toEqual(["device-read"]);
-    const slot = await observeAs({ requester: "viewer", slotCheckFails: true });
-    expect(slot.paths).toEqual(["device-read"]);
+    const binding = await observeAs({ requester: "viewer", slotCheckFails: true });
+    expect(binding.paths).toEqual(["device-read"]);
   });
 
   test("a free device keeps the session pipeline", async () => {

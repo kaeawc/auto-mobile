@@ -1,7 +1,7 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
@@ -17,9 +17,12 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
- * End-to-end guard for issue #3053 part 2: run a real `DefaultPlanExecutor` step
+ * End-to-end guard for issue #3053 part 2: run a real `createDefaultPlanExecutor()` step
  * through the wrapped `tool.handler` → `finalizeToolResponse` chain with
  * `--actions-diff-observe` on, and prove the plan step's observation is NEVER
  * diffed and NEVER advances the agent-facing diff baseline. The two halves are
@@ -33,9 +36,11 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     platform: "android",
   };
 
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
+  let originalDeviceSessionManager: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["deviceSessionManager"];
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let restorePipelineOverrides: () => void;
@@ -43,16 +48,18 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   function sameScreenObserve(): ObserveResult {
     return {
       updatedAt: 1,
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      observationId: "obs-no-diff",
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
       viewHierarchy: {
         packageName: "com.example",
         hierarchy: {
-          node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any,
+          node: { $: { "resource-id": "com.example:id/root", "content-desc": "keep" } },
         },
       },
-    } as ObserveResult;
+    };
   }
 
   const baseSchema = z.object({
@@ -80,11 +87,11 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   }
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     // The default provider reads the device's displays over adb, and "emulator-5554" is a real
     // emulator on a developer's machine.
@@ -102,7 +109,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
 
   afterEach(() => {
     restorePipelineOverrides();
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

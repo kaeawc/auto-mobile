@@ -1,13 +1,7 @@
 package dev.jasonpearson.automobile.junit
 
-import ai.koog.agents.core.agent.AIAgent
 import dev.jasonpearson.automobile.validation.GenericToolResponse
 import dev.jasonpearson.automobile.validation.TapOnResponse
-import io.mockk.coEvery
-import io.mockk.every
-import io.mockk.just
-import io.mockk.mockk
-import io.mockk.runs
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -43,6 +37,7 @@ import org.yaml.snakeyaml.constructor.SafeConstructor
  * `captured/execute-plan-failed-step.json` (test/server/executePlanToolResultsCapture.test.ts).
  */
 class PlanRecoveryInteractionTest {
+  private lateinit var collaborators: PlanExecutorCollaborators
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var daemon: PlanInteractionDaemon
   private lateinit var recordingAgent: PlanInteractionRecordingAgent
@@ -52,22 +47,20 @@ class PlanRecoveryInteractionTest {
   fun setup() {
     daemon = PlanInteractionDaemon()
     recordingAgent = PlanInteractionRecordingAgent()
-    DaemonSocketClientManager.testClient = daemon
-    AutoMobileSharedUtils.testDeviceChecker = PlanInteractionDeviceChecker()
     heartbeat = PlanInteractionHeartbeat()
-    DaemonHeartbeat.testController = heartbeat
-    AutoMobilePlanExecutor.testAgent = recordingAgent
+    collaborators =
+      PlanExecutorCollaborators(
+        agent = { recordingAgent },
+        deviceChecker = PlanInteractionDeviceChecker(),
+        daemon = daemon,
+        heartbeat = heartbeat,
+      )
     System.setProperty("automobile.ci.mode", "false")
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
-    AutoMobilePlanExecutor.testAgent = null
     System.clearProperty("automobile.ci.mode")
-    AutoMobilePlanExecutor.retryBackoffMs = 2000L
   }
 
   // ── #10090 x #10093 x recovery ──────────────────────────────────────────
@@ -124,15 +117,14 @@ class PlanRecoveryInteractionTest {
   fun `recovery prompt lists succeeded steps by plan index across a skipped step`() {
     daemon.failAtStep = 3
     daemon.succeedOnResume = true
-    val prompts = mutableListOf<String>()
-    val aiAgent = mockk<AIAgent<String, String>>(relaxed = true)
-    coEvery { aiAgent.run(capture(prompts)) } returns "done"
-    AutoMobilePlanExecutor.testAgent = realRecoveryAgent(aiAgent)
+    val aiAgent = FakeAIAgent().apply { response = "done" }
+    val recoveryAgent = realRecoveryAgent(aiAgent)
+    collaborators = collaborators.copy(agent = { recoveryAgent })
 
     val result = executePlaceholderPlan()
 
     assertTrue(result.success)
-    val prompt = prompts.single()
+    val prompt = aiAgent.prompts.single()
     assertTrue(prompt, prompt.contains("FAILED STEP: Step 4 using tool \"tapOn\""))
     assertTrue(prompt, prompt.contains("- Step 1: inputText (completed)"))
     assertTrue(prompt, prompt.contains("- Step 3: tapOn (completed)"))
@@ -227,11 +219,11 @@ class PlanRecoveryInteractionTest {
 
   @Test
   fun `a resumed run retried under a fresh session releases the held one first`() {
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
     daemon.cannedFailure = failedPayload { it }
     daemon.setToolEnabledFailures[1] = "Request timed out"
 
-    val result = executeSimplePlan(maxRetries = 1)
+    val result =
+      executeSimplePlan(maxRetries = 1, timings = PlanExecutorTimings(retryBackoffMs = 0L))
 
     assertTrue(result.success)
     val heldSession = daemon.sessionUuidArgs[0]
@@ -343,11 +335,12 @@ class PlanRecoveryInteractionTest {
   fun `a failure with no recovery to follow holds nothing`() {
     daemon.cannedFailure = failedPayload { it }
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertFalse(result.success)
     assertEquals(listOf<Boolean?>(null), daemon.holdSessionOnFailureArgs)
@@ -391,11 +384,12 @@ class PlanRecoveryInteractionTest {
   fun `a failure payload with no device id falls back to the configured device, not auto`() {
     daemon.cannedFailure = failedPayload { it.without("deviceId") }
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = true, device = "emulator-5558"),
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = true, device = "emulator-5558"),
+        )
 
     assertTrue(result.success)
     assertEquals("emulator-5558", recordingAgent.contexts.single().deviceId)
@@ -413,23 +407,28 @@ class PlanRecoveryInteractionTest {
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   private fun executePlaceholderPlan(): AutoMobilePlanExecutionResult =
-    AutoMobilePlanExecutor.execute(
-      "test-plans/recovery-interaction.yaml",
-      mapOf(
-        "greeting" to HOSTILE_GREETING,
-        "dismiss" to "Dismiss",
-        "second" to "Second step",
-        "target" to "Confirm",
-      ),
-      AutoMobilePlanExecutionOptions(aiAssistance = true),
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/recovery-interaction.yaml",
+        mapOf(
+          "greeting" to HOSTILE_GREETING,
+          "dismiss" to "Dismiss",
+          "second" to "Second step",
+          "target" to "Confirm",
+        ),
+        AutoMobilePlanExecutionOptions(aiAssistance = true),
+      )
 
-  private fun executeSimplePlan(maxRetries: Int = 0): AutoMobilePlanExecutionResult =
-    AutoMobilePlanExecutor.execute(
-      "test-plans/launch-clock-app.yaml",
-      emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = true, maxRetries = maxRetries),
-    )
+  private fun executeSimplePlan(
+    maxRetries: Int = 0,
+    timings: PlanExecutorTimings = PlanExecutorTimings(),
+  ): AutoMobilePlanExecutionResult =
+    PlanExecutor(collaborators.copy(timings = timings))
+      .execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = true, maxRetries = maxRetries),
+      )
 
   private fun resultMessage(result: AutoMobilePlanExecutionResult, stepIndex: Int): String? {
     val entry = result.getToolResult(stepIndex)
@@ -478,28 +477,15 @@ class PlanRecoveryInteractionTest {
 
   private fun JsonObject.without(key: String): JsonObject = JsonObject(this - key)
 
-  private fun realRecoveryAgent(aiAgent: AIAgent<String, String>): AutoMobileAgent {
-    val config = mockk<AutoMobileAgent.ConfigProvider>()
-    every { config.getMcpServerUrl() } returns "http://localhost:0"
-    every { config.getModelConfig() } returns
-      AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
-    val factory = mockk<AutoMobileAgent.AIAgentFactory>()
-    every { factory.createAIAgentWithMCPTools(any(), any(), any(), any()) } returns aiAgent
-    val mcp = mockk<AutoMobileAgent.MCPClient>()
-    every { mcp.isConnected() } returns true
-    every { mcp.disconnect() } just runs
-    every { mcp.callTool("observe", any()) } returns "{}"
-    val time = mockk<AutoMobileAgent.TimeProvider>()
-    every { time.currentTimeMillis() } returns 1000L
-    return AutoMobileAgent(
-      configProvider = config,
-      fileSystemOperations = mockk(relaxed = true),
-      aiAgentFactory = factory,
-      timeProvider = time,
-      mcpClient = mcp,
+  private fun realRecoveryAgent(aiAgent: FakeAIAgent): AutoMobileAgent =
+    AutoMobileAgent(
+      configProvider = FakeAgentConfigProvider(),
+      fileSystemOperations = FakeAgentFileSystemOperations(),
+      aiAgentFactory = FakeAgentAIAgentFactory(aiAgent),
+      timeProvider = FakeAgentTimeProvider().apply { times = ArrayDeque(listOf(1000L)) },
+      mcpClient = FakeAgentMCPClient().apply { connected = true },
       recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true, maxToolCalls = 5),
     )
-  }
 
   private companion object {
     // Breaks the old text splice in a double-quoted scalar (quote, backslash, ` #`, `: `).
@@ -704,9 +690,11 @@ private class PlanInteractionRecordingAgent :
   var recoverySucceeds = true
   var onRecovery: (FailedStepContext) -> Unit = {}
 
-  override fun attemptAiRecovery(
+  internal override fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
+    timings: PlanExecutorTimings,
+    heartbeat: DaemonHeartbeatController,
   ): RecoveryOutcome {
     contexts.add(context)
     onRecovery(context)

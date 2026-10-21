@@ -1,5 +1,4 @@
 import { expect, describe, test, beforeEach } from "bun:test";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { Clipboard } from "../../../src/features/action/Clipboard";
 import { BootedDevice, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
@@ -22,10 +21,9 @@ import { spyOn } from "bun:test";
 import { createExecResult } from "../../../src/utils/execResult";
 import { wrapCommandError } from "../../../src/utils/CommandError";
 import { errorMessage } from "../../../src/utils/describeUnknownError";
-import {
-  IosRunnerBusyError,
-  IosRunnerStalledError,
-} from "../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerBusyError } from "../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerStalledError } from "../../../src/features/observe/ios/IosRunnerStalledError";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Synthetic focused-value variants of the representative iOS forms fixture, not captures.
 function focusedIOSForm(value?: string): ViewHierarchyResult {
@@ -482,8 +480,8 @@ describe("Clipboard iOS", () => {
       invalidateCache: () => {
         invalidations.push(timer.now());
       },
-    } as IOSCtrlProxyClient;
-    const ios = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    };
+    const ios = spyOnIosClientInstance(client);
     const read = spyOn(ViewHierarchy.prototype, "getViewHierarchy")
       .mockResolvedValueOnce(focusedIOSForm("AB"))
       .mockResolvedValueOnce(focusedIOSForm("Z1"));
@@ -498,7 +496,11 @@ describe("Clipboard iOS", () => {
       expect((await action.execute("paste")).success).toBe(true);
       expect(invalidations).toHaveLength(2);
       expect(read).toHaveBeenCalledTimes(2);
-      expect(read.mock.calls[0]?.slice(2)).toEqual([false, 0, undefined, 1500]);
+      expect(read.mock.calls[0]?.[1]).toEqual({
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        timeoutMs: 1500,
+      });
     } finally {
       ios.mockRestore();
       read.mockRestore();
@@ -631,7 +633,7 @@ describe("Clipboard Android", () => {
   ])("paste delivery: %s", async (reason) => {
     const adb = new FakeAdbExecutor();
     const factory = new FakeAdbClientFactory(adb);
-    adb.setCommandResponse("shell cmd clipboard get", { stdout: "hello", stderr: "" });
+    adb.setCommandResponse("shell cmd clipboard get", createExecResult("hello", ""));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const undelivered = reason === "WebSocket not connected" || reason === "send failed";
@@ -1072,7 +1074,7 @@ describe("Clipboard iOS dispatch outcomes", () => {
         new FakeKeyboardHierarchyProvider(),
         new FakeTimer(),
       );
-      const result = await clipboard.execute("paste", undefined, controller.signal);
+      const result = await clipboard.execute("paste", undefined, { signal: controller.signal });
       if (["timeout", "socket closed", "abort"].includes(outcome)) {
         expect(result).toEqual({
           success: false,
@@ -1119,9 +1121,9 @@ describe("Clipboard iOS dispatch outcomes", () => {
         return { success: true, totalTimeMs: 0 };
       },
     }));
-    await expect(clipboard.execute("paste", undefined, controller.signal)).rejects.toThrow(
-      "Operation cancelled",
-    );
+    await expect(
+      clipboard.execute("paste", undefined, { signal: controller.signal }),
+    ).rejects.toThrow("Operation cancelled");
     expect(requests).toBe(0);
   });
 

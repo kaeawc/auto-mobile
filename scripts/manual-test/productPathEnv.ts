@@ -22,6 +22,7 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   { name: "AUTOMOBILE_DAEMON_SOCKET_PATH", kind: "state", owner: "harness", scope: "daemon" },
   { name: "AUTOMOBILE_DAEMON_PID_FILE_PATH", kind: "state", owner: "harness", scope: "daemon" },
   { name: "AUTOMOBILE_DAEMON_LOCK_FILE_PATH", kind: "state", owner: "harness", scope: "daemon" },
+  { name: "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH", kind: "state", owner: "harness", scope: "daemon" },
   { name: "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH", kind: "state", owner: "harness", scope: "daemon" },
   {
     name: "AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR",
@@ -102,10 +103,16 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Test preload isolation marker, not a state destination.",
   },
   {
-    name: "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+    name: "AUTOMOBILE_SESSION_CONFIG",
     kind: "input",
-    reason:
-      "Read-only managed-slot config source (inline JSON or file path); explicitly unset by clients.",
+    owner: "harness",
+    reason: "Harness-owned session request source; stripped from inherited client env.",
+  },
+  {
+    name: "AUTOMOBILE_SESSION_BROKER_CONFIG",
+    kind: "input",
+    owner: "harness",
+    reason: "Harness-owned operator configuration file; stripped from inherited client env.",
   },
   {
     name: "AUTOMOBILE_FFMPEG",
@@ -124,6 +131,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Read-only helper executable.",
   },
   { name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT", kind: "input", reason: "Read-only agent dylib." },
+  {
+    name: "AUTOMOBILE_IOS_PROTOTYPE_VIEWER",
+    kind: "input",
+    reason: "Read-only viewer template archive.",
+  },
 ];
 /** Non-path product reads, derived from the same AST scan as docs conformance.
  * URLs, hashes, identities, lists, numeric settings and flags are values, not filesystem paths.
@@ -162,7 +174,9 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS",
   "AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE",
   "AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
+  "AUTOMOBILE_DAEMON_HTTP_TOKEN",
   "AUTOMOBILE_DAEMON_LAUNCHER_PID",
+  "AUTOMOBILE_DAEMON_LAUNCH_NONCE",
   "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET",
   "AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS",
   "AUTOMOBILE_DAEMON_STREAM_AUTH",
@@ -208,7 +222,6 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_LOG_LEVEL",
   "AUTOMOBILE_LOG_SINK",
   "AUTOMOBILE_MANAGED_ADB_SERVER",
-  "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
   "AUTOMOBILE_MAX_OBSERVATION_AGE_MS",
   "AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS",
   "AUTOMOBILE_MIGRATION_RECOVERY",
@@ -241,6 +254,7 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED",
   "AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD",
   "AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD",
+  "AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD",
   "AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD",
   "AUTOMOBILE_STARTUP_BENCHMARK",
   "AUTOMOBILE_STARTUP_BENCHMARK_LABEL",

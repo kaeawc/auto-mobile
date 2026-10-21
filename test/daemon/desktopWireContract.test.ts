@@ -197,6 +197,34 @@ describe("desktop wire contract (#10669, #10730)", () => {
     );
   });
 
+  test("a bound desktop session can rotate its device", async () => {
+    const wire = await startHarness();
+    await startWatching(wire, DESKTOP_1, 2);
+    const bind = await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
+    expect(isToolError(bind)).toBe(false);
+    await wire.heartbeats("heartbeat", DESKTOP_1, 2);
+    const rotate = await wire.send("desktop", "rotate", "tools/call", {
+      name: "rotate",
+      arguments: {
+        orientation: "landscape",
+        platform: "android",
+        deviceId: PIXEL.deviceId,
+        sessionUuid: DESKTOP_1,
+        [DAEMON_OWNED_SESSIONS_PARAM]: [DESKTOP_1],
+      },
+    });
+    expect(isToolError(rotate)).toBe(false);
+    expect(wire.holderOf(PIXEL.deviceId)).toBe(DESKTOP_1);
+    checkFixture(
+      wire.fixture(
+        "bound-device-control",
+        "Watch and bind a free device, keep the desktop session alive, then successfully rotate " +
+          "the device while the session still holds it.",
+        { "desktop-1": DESKTOP_1 },
+      ),
+    );
+  });
+
   test("app start with no pane registers an observer and allocates nothing", async () => {
     const wire = await startHarness();
     const register = await wire.send(

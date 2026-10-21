@@ -1,0 +1,41 @@
+{
+  "id": "rich",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "as": "item",
+      "items": [
+        {
+          "title": "First"
+        }
+      ]
+    },
+    "children": [
+      {
+        "type": "text",
+        "spans": [
+          {
+            "text": "{name}"
+          },
+          {
+            "text": "{data:/title}"
+          },
+          {
+            "text": "{index}: {item.title}"
+          }
+        ]
+      }
+    ]
+  },
+  "state": {
+    "name": "Ada"
+  },
+  "data": {
+    "title": "Heading"
+  }
+}

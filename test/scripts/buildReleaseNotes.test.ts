@@ -12,6 +12,7 @@ const checksums = {
   videoJar: "c".repeat(64),
   screenCaptureHelper: "d".repeat(64),
   prototypeAgent: "e".repeat(64),
+  prototypeViewer: "1".repeat(64),
   networkFilter: "f".repeat(64),
 };
 const input = { version: "0.0.82", tag: "0.0.82", repository: "kaeawc/auto-mobile", checksums };
@@ -47,6 +48,12 @@ Download screen-capture-helper-macos-universal.zip from the release assets below
 **SHA256 Checksum:** \`${checksums.prototypeAgent}\`
 
 Download AutoMobilePrototypeAgent.dylib (universal arm64 + x86_64, ad-hoc signed) from the release assets below.
+
+## iOS simulator prototype viewer
+
+**SHA256 Checksum:** \`${checksums.prototypeViewer}\`
+
+Download AutoMobilePrototypeViewer.zip (universal arm64 + x86_64, ad-hoc signed) from the release assets below.
 
 ## macOS network-filter
 

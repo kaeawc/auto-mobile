@@ -31,7 +31,6 @@ import {
   OUTPUT_REDUCTION_FLAG_SPECS,
   parseOutputReductionFlags,
 } from "../../utils/outputReductionFlags";
-import { MANAGED_SLOT_CONFIG_FLAG } from "../../models/managedSlotConfig";
 import type { DaemonOptions } from "../types";
 
 const numericFlags: Partial<
@@ -327,11 +326,7 @@ export function parseDaemonArgs(
  * launcher flags `parseArgs` resolves from the same argv. `--daemon-socket-path` is a discovery
  * marker only.
  */
-const SHARED_LAUNCH_VALUE_FLAGS = [
-  EVENT_ALL_MARKERS_FLAG,
-  MANAGED_SLOT_CONFIG_FLAG,
-  "--daemon-socket-path",
-];
+const SHARED_LAUNCH_VALUE_FLAGS = [EVENT_ALL_MARKERS_FLAG, "--daemon-socket-path"];
 
 /** Boolean shared launcher flags a daemon command tail may carry besides parseDaemonArgs' own. */
 const SHARED_LAUNCH_BOOLEAN_FLAGS = [

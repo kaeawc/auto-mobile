@@ -1,6 +1,7 @@
 import { Timer, defaultTimer } from "./SystemTimer";
 import { logger } from "./logger";
-import { readEnvPositiveInteger } from "./envNumbers";
+import { ENV } from "../config/env";
+import { readEnvInt } from "./envNumbers";
 import { errorMessage } from "./describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { SingleFlightInterval } from "./SingleFlightInterval";
@@ -81,12 +82,7 @@ export function resolveWorkProfilePollIntervalMs(
 ): number {
   return (
     explicit ??
-    readEnvPositiveInteger(
-      "AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS",
-      undefined,
-      { fallback: DEFAULT_POLL_INTERVAL_MS },
-      env,
-    )
+    readEnvInt(ENV.WORK_PROFILE_POLL_INTERVAL_MS, env, { fallback: DEFAULT_POLL_INTERVAL_MS })
   );
 }
 
@@ -179,12 +175,10 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     logger.info(`[WORK_PROFILE_MONITOR] Refreshing packages for user ${userId}`);
 
     try {
-      const result = await this.adb.executeCommand(
-        `shell pm list packages --user ${userId}`,
-        ADB_COMMAND_TIMEOUT_MS,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand(`shell pm list packages --user ${userId}`, {
+        timeoutMs: ADB_COMMAND_TIMEOUT_MS,
+        noRetry: true,
+      });
 
       const packages = this.parsePackageList(result.stdout);
       const timestampMs = this.timer.now();

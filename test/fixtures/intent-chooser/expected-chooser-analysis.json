@@ -1,0 +1,1091 @@
+{
+  "detectAll": true,
+  "detectWithout": [
+    true,
+    true,
+    true
+  ],
+  "detectStripped": false,
+  "detectSingleIndicator": {
+    "textOnly": true,
+    "contentDescOnly": true,
+    "resourceIdOnly": true,
+    "classOnly": true,
+    "blankTextWithDescription": false,
+    "emptyTextWithDescription": true
+  },
+  "original": {
+    "anchors": [
+      [
+        "s2-e463212d84da9d12",
+        {
+          "top": 2386,
+          "bottom": 2400,
+          "signature": "[null,null,null,null,null,\"android.widget.LinearLayout\"]"
+        }
+      ]
+    ],
+    "list": {
+      "bounds": {
+        "left": 0,
+        "top": 1646,
+        "right": 1080,
+        "bottom": 2400
+      },
+      "resourceId": "android:id/resolver_list"
+    },
+    "apps": {
+      "android": {
+        "ok": false,
+        "error": "No exact clickable chooser row for android. Verify the app is installed and handles this link."
+      },
+      "com.android.systemui": {
+        "ok": false,
+        "error": "No exact clickable chooser row for com.android.systemui. Verify the app is installed and handles this link."
+      },
+      "com.example.nomatch": {
+        "ok": false,
+        "error": "No exact clickable chooser row for com.example.nomatch. Verify the app is installed and handles this link."
+      }
+    },
+    "labels": {
+      "android": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.android.systemui": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.example.nomatch": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      }
+    }
+  },
+  "namespaced": {
+    "anchors": [
+      [
+        "s2-e463212d84da9d12",
+        {
+          "top": 2386,
+          "bottom": 2400,
+          "signature": "[null,null,null,null,null,\"android.widget.LinearLayout\"]"
+        }
+      ]
+    ],
+    "list": {
+      "bounds": {
+        "left": 0,
+        "top": 1646,
+        "right": 1080,
+        "bottom": 2400
+      },
+      "resourceId": "android:id/resolver_list"
+    },
+    "apps": {
+      "android": {
+        "ok": false,
+        "error": "No exact clickable chooser row for android. Verify the app is installed and handles this link."
+      },
+      "com.pkg0": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 1646,
+          "right": 1080,
+          "bottom": 1794
+        }
+      },
+      "com.pkg1": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 1794,
+          "right": 1080,
+          "bottom": 1942
+        }
+      },
+      "com.pkg2": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 1942,
+          "right": 1080,
+          "bottom": 2090
+        }
+      },
+      "com.pkg3": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 2090,
+          "right": 1080,
+          "bottom": 2238
+        }
+      },
+      "com.pkg4": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 2238,
+          "right": 1080,
+          "bottom": 2386
+        }
+      },
+      "com.android.systemui": {
+        "ok": false,
+        "error": "No exact clickable chooser row for com.android.systemui. Verify the app is installed and handles this link."
+      },
+      "com.example.nomatch": {
+        "ok": false,
+        "error": "No exact clickable chooser row for com.example.nomatch. Verify the app is installed and handles this link."
+      }
+    },
+    "labels": {
+      "android": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.pkg0": {
+        "candidates": [
+          "s2-dfc010a67d818f32~843e4e04"
+        ],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.pkg1": {
+        "candidates": [
+          "s2-dfc010a67d818f32~69d7ba3c"
+        ],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.pkg2": {
+        "candidates": [
+          "s2-dfc010a67d818f32~f73bb4e6"
+        ],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.pkg3": {
+        "candidates": [
+          "s2-d0425955b6d1c474~f412b815"
+        ],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.pkg4": {
+        "candidates": [
+          "s2-d0425955b6d1c474~56bf769a"
+        ],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.android.systemui": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      },
+      "com.example.nomatch": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-dfc010a67d818f32~843e4e04",
+            [
+              "Chrome"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~69d7ba3c",
+            [
+              "Quick Share"
+            ]
+          ],
+          [
+            "s2-dfc010a67d818f32~f73bb4e6",
+            [
+              "Bluetooth"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~f412b815",
+            [
+              "Gmail",
+              "Chat"
+            ]
+          ],
+          [
+            "s2-d0425955b6d1c474~56bf769a",
+            [
+              "Drive",
+              "Copy to clipboard"
+            ]
+          ],
+          [
+            "s2-e463212d84da9d12",
+            []
+          ]
+        ]
+      }
+    }
+  },
+  "mixed": {
+    "anchors": [
+      [
+        "s2-0000000000000000",
+        {
+          "top": 1646,
+          "bottom": 1794,
+          "signature": "[\"\",null,null,null,null,\"android.widget.LinearLayout\"]|[\"  \",\"\",null,null,\"android:id/icon\",\"android.widget.ImageView\"]|[null,null,null,null,null,\"android.widget.LinearLayout\"]|[null,\"description 17\",null,null,\"com.pkg0:id/text1\",null]"
+        }
+      ],
+      [
+        "s2-0000000000000001",
+        {
+          "top": 1794,
+          "bottom": 1942,
+          "signature": "[\"\",null,null,null,null,\"android.widget.LinearLayout\"]|[\"  \",\"\",null,null,\"android:id/icon\",\"android.widget.ImageView\"]|[null,null,null,null,null,\"android.widget.LinearLayout\"]|[null,\"description 21\",null,null,\"com.pkg1:id/text1\",null]"
+        }
+      ],
+      [
+        "s2-0000000000000002",
+        {
+          "top": 1942,
+          "bottom": 2090,
+          "signature": "[\"\",null,null,null,null,\"android.widget.LinearLayout\"]|[\"  \",\"\",null,null,\"android:id/icon\",\"android.widget.ImageView\"]|[null,null,null,null,null,\"android.widget.LinearLayout\"]|[null,\"description 25\",null,null,\"com.pkg2:id/text1\",null]"
+        }
+      ],
+      [
+        "s2-0000000000000003",
+        {
+          "top": 2090,
+          "bottom": 2238,
+          "signature": "[\"\",null,null,null,null,\"android.widget.LinearLayout\"]|[\"  \",\"\",null,null,\"android:id/icon\",\"android.widget.ImageView\"]|[null,null,null,null,null,\"android.widget.LinearLayout\"]|[null,\"description 29\",null,null,\"com.pkg3:id/text1\",null]|[\"\",null,null,null,\"android:id/text2\",null]"
+        }
+      ],
+      [
+        "s2-0000000000000004",
+        {
+          "top": 2238,
+          "bottom": 2386,
+          "signature": "[\"  \",\"\",null,null,null,\"android.widget.LinearLayout\"]|[null,null,null,null,\"android:id/icon\",\"android.widget.ImageView\"]|[null,\"description 33\",null,null,null,\"android.widget.LinearLayout\"]|[\"\",null,null,null,\"com.pkg4:id/text1\",null]|[\"  \",\"\",null,null,\"android:id/text2\",null]"
+        }
+      ],
+      [
+        "s2-0000000000000005",
+        {
+          "top": 2386,
+          "bottom": 2400,
+          "signature": "[null,null,null,null,null,\"android.widget.LinearLayout\"]"
+        }
+      ]
+    ],
+    "list": {
+      "bounds": {
+        "left": 0,
+        "top": 1646,
+        "right": 1080,
+        "bottom": 2400
+      },
+      "resourceId": "android:id/resolver_list"
+    },
+    "apps": {
+      "android": {
+        "ok": false,
+        "error": "No exact clickable chooser row for android. Verify the app is installed and handles this link."
+      },
+      "com.pkg0": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 1646,
+          "right": 1080,
+          "bottom": 1794
+        }
+      },
+      "com.pkg1": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 1794,
+          "right": 1080,
+          "bottom": 1942
+        }
+      },
+      "com.pkg2": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 1942,
+          "right": 1080,
+          "bottom": 2090
+        }
+      },
+      "com.pkg3": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 2090,
+          "right": 1080,
+          "bottom": 2238
+        }
+      },
+      "com.pkg4": {
+        "ok": true,
+        "packageVerified": true,
+        "bounds": {
+          "left": 0,
+          "top": 2238,
+          "right": 1080,
+          "bottom": 2386
+        }
+      },
+      "com.android.systemui": {
+        "ok": false,
+        "error": "No exact clickable chooser row for com.android.systemui. Verify the app is installed and handles this link."
+      },
+      "com.example.nomatch": {
+        "ok": false,
+        "error": "No exact clickable chooser row for com.example.nomatch. Verify the app is installed and handles this link."
+      }
+    },
+    "labels": {
+      "android": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-0000000000000000",
+            [
+              "  ",
+              "description 17"
+            ]
+          ],
+          [
+            "s2-0000000000000001",
+            [
+              "  ",
+              "description 21"
+            ]
+          ],
+          [
+            "s2-0000000000000002",
+            [
+              "  ",
+              "description 25"
+            ]
+          ],
+          [
+            "s2-0000000000000003",
+            [
+              "  ",
+              "description 29"
+            ]
+          ],
+          [
+            "s2-0000000000000004",
+            [
+              "  ",
+              "description 33"
+            ]
+          ],
+          [
+            "s2-0000000000000005",
+            []
+          ]
+        ]
+      },
+      "com.pkg0": {
+        "candidates": [
+          "s2-0000000000000000"
+        ],
+        "labelRows": [
+          [
+            "s2-0000000000000000",
+            [
+              "  ",
+              "description 17"
+            ]
+          ],
+          [
+            "s2-0000000000000001",
+            [
+              "  ",
+              "description 21"
+            ]
+          ],
+          [
+            "s2-0000000000000002",
+            [
+              "  ",
+              "description 25"
+            ]
+          ],
+          [
+            "s2-0000000000000003",
+            [
+              "  ",
+              "description 29"
+            ]
+          ],
+          [
+            "s2-0000000000000004",
+            [
+              "  ",
+              "description 33"
+            ]
+          ],
+          [
+            "s2-0000000000000005",
+            []
+          ]
+        ]
+      },
+      "com.pkg1": {
+        "candidates": [
+          "s2-0000000000000001"
+        ],
+        "labelRows": [
+          [
+            "s2-0000000000000000",
+            [
+              "  ",
+              "description 17"
+            ]
+          ],
+          [
+            "s2-0000000000000001",
+            [
+              "  ",
+              "description 21"
+            ]
+          ],
+          [
+            "s2-0000000000000002",
+            [
+              "  ",
+              "description 25"
+            ]
+          ],
+          [
+            "s2-0000000000000003",
+            [
+              "  ",
+              "description 29"
+            ]
+          ],
+          [
+            "s2-0000000000000004",
+            [
+              "  ",
+              "description 33"
+            ]
+          ],
+          [
+            "s2-0000000000000005",
+            []
+          ]
+        ]
+      },
+      "com.pkg2": {
+        "candidates": [
+          "s2-0000000000000002"
+        ],
+        "labelRows": [
+          [
+            "s2-0000000000000000",
+            [
+              "  ",
+              "description 17"
+            ]
+          ],
+          [
+            "s2-0000000000000001",
+            [
+              "  ",
+              "description 21"
+            ]
+          ],
+          [
+            "s2-0000000000000002",
+            [
+              "  ",
+              "description 25"
+            ]
+          ],
+          [
+            "s2-0000000000000003",
+            [
+              "  ",
+              "description 29"
+            ]
+          ],
+          [
+            "s2-0000000000000004",
+            [
+              "  ",
+              "description 33"
+            ]
+          ],
+          [
+            "s2-0000000000000005",
+            []
+          ]
+        ]
+      },
+      "com.pkg3": {
+        "candidates": [
+          "s2-0000000000000003"
+        ],
+        "labelRows": [
+          [
+            "s2-0000000000000000",
+            [
+              "  ",
+              "description 17"
+            ]
+          ],
+          [
+            "s2-0000000000000001",
+            [
+              "  ",
+              "description 21"
+            ]
+          ],
+          [
+            "s2-0000000000000002",
+            [
+              "  ",
+              "description 25"
+            ]
+          ],
+          [
+            "s2-0000000000000003",
+            [
+              "  ",
+              "description 29"
+            ]
+          ],
+          [
+            "s2-0000000000000004",
+            [
+              "  ",
+              "description 33"
+            ]
+          ],
+          [
+            "s2-0000000000000005",
+            []
+          ]
+        ]
+      },
+      "com.pkg4": {
+        "candidates": [
+          "s2-0000000000000004"
+        ],
+        "labelRows": [
+          [
+            "s2-0000000000000000",
+            [
+              "  ",
+              "description 17"
+            ]
+          ],
+          [
+            "s2-0000000000000001",
+            [
+              "  ",
+              "description 21"
+            ]
+          ],
+          [
+            "s2-0000000000000002",
+            [
+              "  ",
+              "description 25"
+            ]
+          ],
+          [
+            "s2-0000000000000003",
+            [
+              "  ",
+              "description 29"
+            ]
+          ],
+          [
+            "s2-0000000000000004",
+            [
+              "  ",
+              "description 33"
+            ]
+          ],
+          [
+            "s2-0000000000000005",
+            []
+          ]
+        ]
+      },
+      "com.android.systemui": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-0000000000000000",
+            [
+              "  ",
+              "description 17"
+            ]
+          ],
+          [
+            "s2-0000000000000001",
+            [
+              "  ",
+              "description 21"
+            ]
+          ],
+          [
+            "s2-0000000000000002",
+            [
+              "  ",
+              "description 25"
+            ]
+          ],
+          [
+            "s2-0000000000000003",
+            [
+              "  ",
+              "description 29"
+            ]
+          ],
+          [
+            "s2-0000000000000004",
+            [
+              "  ",
+              "description 33"
+            ]
+          ],
+          [
+            "s2-0000000000000005",
+            []
+          ]
+        ]
+      },
+      "com.example.nomatch": {
+        "candidates": [],
+        "labelRows": [
+          [
+            "s2-0000000000000000",
+            [
+              "  ",
+              "description 17"
+            ]
+          ],
+          [
+            "s2-0000000000000001",
+            [
+              "  ",
+              "description 21"
+            ]
+          ],
+          [
+            "s2-0000000000000002",
+            [
+              "  ",
+              "description 25"
+            ]
+          ],
+          [
+            "s2-0000000000000003",
+            [
+              "  ",
+              "description 29"
+            ]
+          ],
+          [
+            "s2-0000000000000004",
+            [
+              "  ",
+              "description 33"
+            ]
+          ],
+          [
+            "s2-0000000000000005",
+            []
+          ]
+        ]
+      }
+    }
+  }
+}

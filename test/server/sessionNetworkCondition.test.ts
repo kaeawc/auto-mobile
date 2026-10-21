@@ -21,26 +21,30 @@ describe("runSessionNetworkMutation", () => {
       persistence = new FakeDeviceSessionPersistence(),
     }: { persistence?: DeviceSessionPersistence } = {},
   ) =>
-    new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
-      () => ({ restore: async () => {} }),
-      () => ({ restore: async (profile) => restored.push(profile) }),
-    );
+    new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+      biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+      restorers: {
+        networkCondition: () => ({
+          restore: async (profile) => {
+            restored.push(profile);
+          },
+        }),
+      },
+    });
 
   test("refused setup publishes nothing, mutates nothing, restores nothing", async () => {
     class DeferredRebindPersistence extends FakeDeviceSessionPersistence {
       readonly started = Promise.withResolvers<void>();
       readonly finished = Promise.withResolvers<void>();
 
-      override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+      override async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
         if (record.deviceId === "emulator-5556") {
           this.started.resolve();
           await this.finished.promise;
         }
-        await super.upsertActiveSession(record);
+        return await super.upsertActiveSession(record);
       }
     }
 
@@ -173,11 +177,9 @@ describe("runSessionNetworkMutation", () => {
   });
 
   test("does not shape an old device after the session rebinds", async () => {
-    const manager = new SessionManager(
-      new FakeTimer(),
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     let mutationStarted = false;
     try {
       await manager.createSession("net-rebind", "emulator-5554", "android");

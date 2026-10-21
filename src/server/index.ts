@@ -1,367 +1,47 @@
-import { SessionOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
-import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
-import { managedConnectionPlatformRefusal } from "../daemon/managedSlots/managedConnectionScope";
-import {
-  getLiveDeadlineMs,
-  getLiveTextRequestState,
-  subscribeLiveDeadline,
-} from "../daemon/liveDeadlineRegistry";
-import {
-  TextRequestState,
-  runWithTextRequestContext,
-} from "../features/action/textTransportTimeout";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
+import { createSdkMcpServer } from "./sdkMcpServer";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
-import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import {
-  installToolCallDispatcher,
-  type McpToolCallExtra,
-  type McpToolCallResult,
-  type ToolCall,
-  type ToolCallRequest,
-} from "./toolCallDispatch";
-import { timingSafeEqual } from "node:crypto";
-import { ActionableError } from "../models";
-import { getRemovedToolHint } from "../models/removedTools";
+
+import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
+
 import { formatToolParamError } from "./toolParamError";
-import { stripUndeclaredSessionUuid } from "../utils/toolParams";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
-import { stringifyToolResponse } from "../utils/toolUtils";
+
 import { logger } from "../utils/logger";
-import { errorMessage } from "../utils/describeUnknownError";
-import { defaultTimer } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import {
-  executionTracker,
-  sessionExecutionMetadataOf,
-  subscribeRequestCancellation,
-} from "./executionTracker";
-import { withAdmittedSessionEcho } from "./routedSessionEcho";
-import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
-import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
-import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
+
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
-import { sessionForToolBinding } from "./sessionForToolBinding";
-import { dropToolCallRecording } from "./toolCallRecordingManager";
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
-import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
-import { SessionReleasedDuringCreationError } from "../daemon/deviceAcquisitionRefusals";
-import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
-import { ToolUnavailableError } from "./toolUnavailableError";
+import type { SessionToolBindingStore } from "./sessionToolBindingStore";
+import {
+  createReleaseSubscribedBindingStore,
+  daemonSessionToolBindingStore,
+} from "./daemonSessionToolBindingStore";
+import { dropToolCallRecording } from "../daemon/toolCallRecordingManager";
+
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
-import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
+export { enrichAcquisitionResult } from "./pipeline/ingress/acquisition";
+import { createListSessionTools } from "./pipeline/ingress/listSessionTools";
+import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
+import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
+import { installTasksProtocol } from "./tasks/installTasksProtocol";
+import type { TaskManager } from "../daemon/tasks/TaskManager";
+import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
 import {
-  DaemonRestartPendingError,
-  daemonRestartPendingToolResult,
-} from "../daemon/daemonRestartAdmission";
-import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
-import {
-  INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
-  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_EXECUTION_START_TIME_PARAM,
-  INTERNAL_EXECUTION_ID_PARAM,
-  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-  INTERNAL_MCP_SESSION_PARAM,
-  INTERNAL_ONE_SHOT_CLI_PARAM,
-  INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
-  INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
-} from "../daemon/constants";
-import {
-  deviceLostErrorFromAbortSignal,
-  deviceLossOutcomeFromError,
-  enrichDeviceLossOutcome,
-  remainingDeviceLossIncidentWaitMs,
-  type DeviceLossOutcome,
-} from "./deviceLossOutcome";
-
-import {
-  isControlCallOnNamedSession,
-  isSessionOwnedByAnotherConnection,
-  namedSessionAccess,
-  refuseControlOnForeignOwnedSession,
-} from "./foreignOwnedSessionRefusal";
+  createTaskAwareToolCallExecutor,
+  TASK_ELIGIBILITY,
+  type TaskEligibility,
+} from "./tasks/toolCallTasks";
+import { namesLiveSessionOfBoundPlan } from "./pipeline/ingress/namesLiveSessionOfBoundPlan";
 
 // Import the tool registry
-import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
-import {
-  stripToolResultStructuredContent,
-  structuredContentOmissionReason,
-  responseCarriesStructuredContent,
-} from "./stripToolResultStructuredContent";
-import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
-import { forwardingLeaseConflictCause } from "./forwardingLeaseConflictOutcome";
+import { ToolRegistry } from "./toolRegistry";
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
 
-/**
- * Fail a `getAndroid`/`getApple` call whose request was cancelled while its
- * post-acquisition enrichment ran. The client discards this response, so the
- * handler still fails the call — but it deliberately releases NOTHING in daemon
- * mode. The pool publishes a minted autolock session to the MCP connection
- * BEFORE enrichment runs (`DevicePool.autolockDevice` sets
- * `mcpSessionAutolockMap` ahead of the return), so by the time this fires the
- * session may already be resolved by a sibling acquisition or by any ordinary
- * device tool on the same connection; an eager release here would strand that
- * caller and idle the device underneath it. A session nobody actually picks up
- * is collected by the `missing-first-heartbeat` reap in
- * `src/daemon/sessionManager.ts` (grace before the first heartbeat, then
- * `cleanupExpiredSessions`), which is the backstop this path relies on.
- */
-function failCancelledAcquisition(acquiredSessionUuid: string): never {
-  if (!DaemonState.getInstance().isInitialized()) {
-    // Direct (non-daemon) mode has no SessionManager and no reap, and it has no
-    // reuse path either: `bindBootedDeviceSession` always mints a fresh UUID and
-    // registers a process-local mapping, so dropping that mapping needs no
-    // ownership information and can strand nobody.
-    unregisterDirectSession(acquiredSessionUuid);
-  }
-  throw new ActionableError("MCP request was cancelled during acquisition.");
-}
+import { registerAllTools } from "./registerAllTools";
 
-/**
- * The `enableTools` a device-acquisition call declared (#6869). The three
- * acquisition tools advertise the field (`enableToolsSchemaField` in
- * `src/server/toolSelectionTools.ts`); their handlers ignore it, because the
- * grant is applied here — against the session the handler MINTS, which only the
- * result carries.
- */
-function resolveRequestedEnableTools(toolName: string, parsedParams: unknown): string[] {
-  if (
-    !isDeviceSessionAcquisitionTool(toolName) ||
-    !parsedParams ||
-    typeof parsedParams !== "object"
-  ) {
-    return [];
-  }
-  const requested = (parsedParams as { enableTools?: unknown }).enableTools;
-  if (!Array.isArray(requested) || requested.length === 0) {
-    return [];
-  }
-  const names = requested.filter((name): name is string => typeof name === "string");
-  // Reject an unknown or non-configurable name BEFORE the device work starts. A
-  // caller that misspelled one capability should not pay for a boot and a
-  // session mint to find out.
-  assertUserConfigurableToolNames(names);
-  return names;
-}
-
-/**
- * The response field that states a lost `enableTools` declaration — empty when
- * the declaration landed, so it can always be spread into an enrichment.
- */
-type CapabilityDeclarationResult = {
-  enableToolsError?: string;
-  skipped?: import("./toolSelectionTools").SkippedToolSelection[];
-};
-
-/**
- * Grant the declared capabilities against the session an acquisition handler
- * MINTED (only its result carries that UUID), and refresh discovery.
- *
- * Returns the message to report when the grant did NOT land (#6886 review).
- * Folding this failure into the surrounding enrichment catch made a rejected
- * capability write indistinguishable from a successful acquisition, so the
- * caller's next call hit a tool that was never enabled with nothing in the
- * response to explain it. The device is acquired and the session minted by the
- * time this runs, so neither may be discarded — the failure is reported as an
- * explicit `enableToolsError` field on an otherwise intact acquisition result.
- */
-async function applyAcquisitionToolSelection(
-  service: McpServerOptions["sessionToolSelectionService"],
-  sessionUuid: string,
-  enableTools: readonly string[],
-): Promise<CapabilityDeclarationResult> {
-  if (enableTools.length === 0) {
-    return {};
-  }
-  try {
-    const selection = await applyToolSelection(service, sessionUuid, enableTools, true);
-    if (selection.requested.length > 0) {
-      ToolRegistry.notifyToolListChanged();
-    }
-    return selection.skipped.length > 0 ? { skipped: selection.skipped } : {};
-  } catch (error) {
-    const enableToolsError =
-      `Could not enable ${enableTools.join(", ")} for session ${sessionUuid}: ` +
-      `${errorMessage(error)}. The device session is usable; re-declare the ` +
-      `capabilities with ${SET_TOOL_ENABLED_TOOL_NAME}.`;
-    logger.warn(`[MCP] ${enableToolsError}`, error);
-    return { enableToolsError };
-  }
-}
-
-/**
- * Report a lost capability declaration on its own, for the path where the
- * optional enabled/gated report could not be built either (#6886 review). A
- * successful declaration leaves the result untouched.
- */
-function withCapabilityDeclarationFailure<
-  T extends { content: Array<{ type: string; text?: string }> },
->(result: T, failure: CapabilityDeclarationResult): T {
-  return failure.enableToolsError || failure.skipped
-    ? enrichAcquisitionResult(result, failure)
-    : result;
-}
-
-/**
- * provisionDevice mints a session too, so it accepts `enableTools` and reports
- * the resulting `enabledTools` (#6869). It deliberately does NOT reuse the
- * getAndroid/getApple discovery path: that one also computes `gatedTools` and
- * fails a cancelled acquisition, neither of which is part of provisionDevice's
- * existing contract. The device is provisioned and the session minted by the
- * time this runs, so a failed capability report must not discard either.
- *
- * The RETAINED session — not `isError` — is what makes this an acquisition
- * (#6886 review). When optional resource configuration fails, provisionDevice
- * deliberately returns `isError: true` alongside a usable `sessionUuid`
- * (`createProvisionDeviceResponse` in `src/server/deviceTools.ts`), and
- * `DaemonMcpProxy` binds that session; gating on `isError` left the caller
- * bound to a live session with none of its declared capabilities and neither
- * `enabledTools` nor `enableToolsError` to say so. A truly failed acquisition
- * mints nothing, so `!sessionUuid` still grants nothing.
- */
-async function enrichProvisionDeviceResult<
-  T extends { content: Array<{ type: string; text?: string }> },
->(
-  toolName: string,
-  result: T,
-  sessionUuid: string | undefined,
-  service: McpServerOptions["sessionToolSelectionService"],
-  enableTools: readonly string[],
-  connectionProfileUuid: string | undefined,
-): Promise<T> {
-  if (toolName !== "provisionDevice" || !sessionUuid) {
-    return result;
-  }
-  const failure = await applyAcquisitionToolSelection(service, sessionUuid, enableTools);
-  try {
-    return enrichAcquisitionResult(result, {
-      // The connection profile is the other half of the union `tools/list` and
-      // the call gate apply, and the session this call just minted carries no
-      // override of its own — so a capability enabled on the profile is
-      // callable and belongs in this report (#6886 review).
-      enabledTools: await listEnabledToolNames(
-        service,
-        [sessionUuid],
-        connectionProfileUuid,
-        [],
-        undefined,
-      ),
-      ...failure,
-    });
-  } catch (error) {
-    logger.warn("[MCP] Could not enrich provisionDevice with enabled tools", { error });
-    // A failed capability declaration still has to reach the caller even when
-    // the optional enabled-set report cannot be built (#6886 review).
-    return withCapabilityDeclarationFailure(result, failure);
-  }
-}
-
-/**
- * Merge server-computed session fields (`gatedTools`, `enabledTools`) into an
- * acquisition result, in both the text envelope and `structuredContent`.
- */
-function enrichAcquisitionResult<T extends { content: Array<{ type: string; text?: string }> }>(
-  result: T,
-  fields: Record<string, unknown>,
-): T {
-  let enriched = false;
-  return {
-    ...result,
-    content: result.content.map((item: { type: string; text?: string }) => {
-      if (enriched || item.type !== "text" || typeof item.text !== "string") {
-        return item;
-      }
-      enriched = true;
-      return { ...item, text: stringifyToolResponse({ ...JSON.parse(item.text), ...fields }) };
-    }),
-    ...((result as { structuredContent?: Record<string, unknown> }).structuredContent
-      ? {
-          structuredContent: {
-            ...(result as { structuredContent?: Record<string, unknown> }).structuredContent,
-            ...fields,
-          },
-        }
-      : {}),
-  };
-}
-
-async function awaitWithCancellation<T>(
-  promise: Promise<T>,
-  signal: AbortSignal | undefined,
-): Promise<T> {
-  if (!signal) {
-    return promise;
-  }
-  if (signal.aborted) {
-    promise.catch(() => undefined);
-    throw new ActionableError("MCP request was cancelled during acquisition.");
-  }
-  try {
-    return await raceWithDeadline(promise, {
-      timer: defaultTimer,
-      signal,
-      label: "MCP request acquisition",
-    });
-  } catch (error) {
-    if (signal.aborted && error === signal.reason) {
-      throw new ActionableError("MCP request was cancelled during acquisition.");
-    }
-    throw error;
-  }
-}
-
-// Import all tool registration functions
-import { registerObserveTools } from "./observeTools";
-import { registerInteractionTools } from "./interactionTools";
-import { registerAppTools } from "./appTools";
-import { registerUtilityTools } from "./utilityTools";
-import { registerDeviceTools } from "./deviceTools";
-import { registerDeepLinkTools } from "./deepLinkTools";
-import { registerNavigationTools } from "./navigationTools";
-import { registerNotificationTools } from "./notificationTools";
-import { registerPlanTools } from "./planTools";
-import { registerCriticalSectionTools } from "./criticalSectionTools";
-import { registerBarrierTools } from "./barrierTools";
-import { registerVideoRecordingTools } from "./videoRecordingTools";
-import { registerSnapshotTools } from "./snapshotTools";
-import { registerSnapshotOfTools } from "./snapshotOfTools";
-import { registerBiometricTools } from "./biometricTools";
-import { registerTelephonyTools } from "./telephonyTools";
-import { registerPrototypeTools } from "./prototypeTools";
-import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
-import { registerHighlightTools } from "./highlightTools";
-import { registerDatabaseTools } from "./databaseTools";
-import { registerStorageTools } from "./storageTools";
-import { registerPreferenceTools } from "./preferenceTools";
-import { registerAppFileTools } from "./appFileTools";
-import { registerSessionLogTools } from "./sessionLogTools";
-import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
-import { registerFormTools } from "./formTools";
-import { registerAccessibilityTools } from "./accessibilityTools";
-import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
-import { registerNetworkTools } from "./networkTools";
-import {
-  applyToolSelection,
-  assertUserConfigurableToolNames,
-  listEnabledToolNames,
-  requestedToolNamesFromSetToolEnabledArgs,
-  registerToolSelectionTools,
-  SET_TOOL_ENABLED_TOOL_NAME,
-} from "./toolSelectionTools";
-import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
-import {
-  sessionOwnershipLostPayload,
-  sessionReleasedDuringCallPayload,
-  getActiveDeviceSelectionFromResult,
-  getDeviceSessionIdFromResult,
-  isDeviceSessionAcquisitionTool,
-} from "./deviceSessionResult";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
 // Import resource registration functions
@@ -370,7 +50,8 @@ import { registerToolOutputResources } from "./toolOutputResources";
 import { registerObserveAppResource } from "./observeAppResource";
 import { registerBootedDeviceResources } from "./bootedDeviceResources";
 import { registerDeviceImageResources } from "./deviceImageResources";
-import { registerAppResources } from "./appResources";
+import { registerAppResources, syncInstalledAppResources } from "./appResources";
+import { registerInstalledAppResourceListRefresher } from "./installedAppResourceResync";
 import { registerNavigationResources } from "./navigationResources";
 import { registerTestTimingResources } from "./testTimingResources";
 import { registerTestRunResources } from "./testRunResources";
@@ -398,27 +79,17 @@ import { registerEmulatorLossIncidentResources } from "./emulatorLossIncidentRes
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import {
-  getSessionToolSelectionService,
   type SessionToolSelectionService,
   validateConfiguredToolSelectionDefaults,
 } from "../features/toolSelection/SessionToolSelectionService";
-import {
-  buildToolSelectionCandidateRoutes,
-  isToolEnabledForAnyRoute,
-} from "../features/toolSelection/toolSelectionPolicy";
-import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { serverConfig } from "../utils/ServerConfig";
-import {
-  resolveToolSelectionBaseSessionUuid,
-  type ToolSelectionSessionManager,
-} from "../features/toolSelection/selectionSessionResolver";
-import { DaemonState } from "../daemon/daemonState";
-import { assertManagedConnectionPlainToolCall } from "./managedConnectionToolGate";
+
+import { type ToolSelectionSessionManager } from "../features/toolSelection/selectionSessionResolver";
+
 import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
-} from "./toolSelectionProfileRegistry";
+} from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
   iosDependencies?: IosDoctorDependencies;
@@ -431,6 +102,29 @@ export interface McpServerOptions {
   };
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
+  /**
+   * The request's session key (#4678): the `MCP_SESSION_KEY_HEADER` value the
+   * daemon's HTTP endpoint read for this request. Session-tool bindings are keyed
+   * on it, so a binding survives across per-request servers that present the same key.
+   * The header wins over an in-band `__mcpSessionId` unless {@link trustForwardedMcpSessionId}
+   * is set (#13315).
+   */
+  requestMcpSessionId?: string;
+  /**
+   * The server answers the daemon's own in-process forward (stdio proxy / socket-forwarded
+   * calls): the in-band `__mcpSessionId` it carries names the originating client and takes
+   * precedence over {@link requestMcpSessionId}, the connection key. Never set for direct HTTP
+   * clients, whose in-band id is only a fallback when they sent no header (#13315).
+   */
+  trustForwardedMcpSessionId?: boolean;
+  /**
+   * The server answers a single request and is closed after it (#4678). Keyed
+   * bindings then live in the daemon-scoped {@link daemonSessionToolBindingStore}
+   * instead of a store private to this server.
+   */
+  stateless?: boolean;
+  /** Overrides where keyed bindings live; tests share one store across servers. */
+  sessionToolBindingStore?: SessionToolBindingStore;
   /**
    * Per-daemon live-acceptance capability captured at startup. Unlike tool
    * arguments, this is a server-construction boundary clients cannot set.
@@ -450,194 +144,19 @@ export interface McpServerOptions {
    * that explicitly simulate that hop with more than one instance.
    */
   toolSelectionProfileRegistry?: ToolSelectionProfileRegistry;
-}
-
-async function resolveDeviceLossOutcome(
-  deviceLoss: DeviceLossOutcome,
-  timeoutMs?: number,
-): Promise<DeviceLossOutcome> {
-  const daemonState = DaemonState.getInstance();
-  if (!deviceLoss.incidentId || !daemonState.isInitialized()) {
-    return deviceLoss;
-  }
-  try {
-    const incident = await daemonState
-      .getDevicePool()
-      .waitForEmulatorLossIncident(deviceLoss.incidentId, timeoutMs);
-    return enrichDeviceLossOutcome(deviceLoss, incident);
-  } catch (incidentError) {
-    logger.warn(
-      `[MCP] Failed to resolve device-loss incident ${deviceLoss.incidentId}: ${incidentError}`,
-      incidentError,
-    );
-    return deviceLoss;
-  }
-}
-
-function extractInternalMcpSessionId(params: unknown): string | undefined {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return undefined;
-  }
-
-  const value = (params as Record<string, unknown>)[INTERNAL_MCP_SESSION_PARAM];
-  return typeof value === "string" ? value : undefined;
-}
-
-function extractInternalOneShotCli(params: unknown): boolean {
-  return (
-    !!params &&
-    typeof params === "object" &&
-    !Array.isArray(params) &&
-    (params as Record<string, unknown>)[INTERNAL_ONE_SHOT_CLI_PARAM] === true
-  );
-}
-
-function extractInternalMcpRequestTimeoutMs(params: unknown): number | undefined {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return undefined;
-  }
-  const value = (params as Record<string, unknown>)[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-/**
- * Extract {@link INTERNAL_MCP_REQUEST_DEADLINE_PARAM} -- the ABSOLUTE
- * deadline the daemon anchored at capture time, before this process's own
- * HTTP dispatch and admission/tool-selection repo reads could consume any of
- * `requestTimeoutMs`'s budget (issue #6222 review, PRRT_kwDOP-GF5M6fuyts P1).
- * A handler that receives this should prefer it outright over recomputing
- * `execution.startTime + requestTimeoutMs`, which re-grants that gap.
- */
-function extractInternalMcpRequestDeadlineMs(params: unknown): number | undefined {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return undefined;
-  }
-  const value = (params as Record<string, unknown>)[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-function extractInternalLiveDeadlineKey(params: unknown): string | undefined {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return undefined;
-  }
-  const value = (params as Record<string, unknown>)[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function extractInternalToolResultsNoStructuredContent(params: unknown): boolean | undefined {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return undefined;
-  }
-  const value = (params as Record<string, unknown>)[
-    INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM
-  ];
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function resolveToolResultsNoStructuredContent(
-  registry: ToolSelectionProfileRegistry,
-  connectionProfileUuid: string | undefined,
-): boolean {
-  const daemonDefault = serverConfig.isToolResultsNoStructuredContentEnabled();
-  if (!connectionProfileUuid) {
-    return daemonDefault;
-  }
-  try {
-    return registry.getToolResultsNoStructuredContent(connectionProfileUuid) ?? daemonDefault;
-  } catch (error) {
-    // Presentation lookup is fail-safe: keep serving with the daemon default.
-    logger.warn("[MCP] Could not resolve connection structured-content preference", {
-      connectionProfileUuid,
-      error,
-    });
-    return daemonDefault;
-  }
-}
-
-function rememberToolResultsNoStructuredContent(
-  registry: ToolSelectionProfileRegistry,
-  connectionProfileUuid: string | undefined,
-  preference: boolean | undefined,
-): void {
-  if (!connectionProfileUuid || preference === undefined) {
-    return;
-  }
-  try {
-    registry.setToolResultsNoStructuredContent(connectionProfileUuid, preference);
-  } catch (error) {
-    // Presentation storage is best-effort: this request uses the daemon default.
-    logger.warn("[MCP] Could not store connection structured-content preference", {
-      connectionProfileUuid,
-      error,
-    });
-  }
-}
-
-function extractInternalActionsCompactMetadata(params: unknown): boolean | undefined {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return undefined;
-  }
-  const value = (params as Record<string, unknown>)[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM];
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function resolveActionsCompactMetadata(
-  registry: ToolSelectionProfileRegistry,
-  connectionProfileUuid: string | undefined,
-): boolean {
-  const daemonDefault = serverConfig.isActionsCompactMetadataEnabled();
-  if (!connectionProfileUuid) {
-    return daemonDefault;
-  }
-  try {
-    return registry.getActionsCompactMetadata(connectionProfileUuid) ?? daemonDefault;
-  } catch (error) {
-    // Presentation lookup is fail-safe: keep serving with the daemon default.
-    logger.warn("[MCP] Could not resolve connection compact-metadata preference", {
-      connectionProfileUuid,
-      error,
-    });
-    return daemonDefault;
-  }
-}
-
-function rememberActionsCompactMetadata(
-  registry: ToolSelectionProfileRegistry,
-  connectionProfileUuid: string | undefined,
-  preference: boolean | undefined,
-): void {
-  if (!connectionProfileUuid || preference === undefined) {
-    return;
-  }
-  try {
-    registry.setActionsCompactMetadata(connectionProfileUuid, preference);
-  } catch (error) {
-    // Presentation storage is best-effort: this request uses the daemon default.
-    logger.warn("[MCP] Could not store connection compact-metadata preference", {
-      connectionProfileUuid,
-      error,
-    });
-  }
-}
-
-function extractInternalAcceptanceDiscoveryOrder(
-  params: unknown,
-  expectedCapability: string | undefined,
-): "forward" | "reverse" | undefined {
-  if (!expectedCapability || !params || typeof params !== "object" || Array.isArray(params)) {
-    return undefined;
-  }
-  const values = params as Record<string, unknown>;
-  const suppliedCapability = values[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
-  if (
-    typeof suppliedCapability !== "string" ||
-    suppliedCapability.length !== expectedCapability.length ||
-    !timingSafeEqual(Buffer.from(suppliedCapability), Buffer.from(expectedCapability))
-  ) {
-    return undefined;
-  }
-  const value = values[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
-  return value === "forward" || value === "reverse" ? value : undefined;
+  /**
+   * MCP Tasks extension (#4668). The daemon serves tasks from its daemon-scoped manager;
+   * direct stdio does not. Tests inject a manager, the eligible tools and the keepalive.
+   */
+  taskManager?: TaskManager;
+  /**
+   * Who owns the tasks this server creates and serves, when not the request's session key: a
+   * control-socket forward from the stdio proxy names the proxy, so its tasks survive the proxy's
+   * reconnects (a socket session id does not).
+   */
+  taskOwnerKey?: string;
+  taskEligibleTools?: TaskEligibility;
+  taskLeaseKeepalive?: TaskLeaseKeepalive;
 }
 
 // `formatToolParamError` lives in its own module so non-server callers (e.g.
@@ -645,6 +164,8 @@ function extractInternalAcceptanceDiscoveryOrder(
 // importing the whole server entrypoint (which would be circular). Re-exported
 // here to preserve the historical import path used by existing tests.
 export { formatToolParamError };
+
+let lastToolRegistration: { daemonMode: boolean; removalEpoch: number } | undefined;
 
 /**
  * Populate the canonical production registry and validate exact-tool startup
@@ -655,66 +176,150 @@ export { formatToolParamError };
  */
 export function registerMcpTools(daemonMode: boolean): void {
   installDefaultProvisionedDeviceTransportFence();
-  registerObserveTools();
-  registerInteractionTools();
-  registerAppTools();
-  registerUtilityTools();
-  registerDeviceTools();
-  registerDeepLinkTools();
-  registerNavigationTools();
-  registerNotificationTools();
-  // Plan tools (executePlan, recordToolCalls, recordDeviceGestures, exportPlan)
-  // registered outside the daemonMode gate so tool call recording works in stdio mode
-  // (the standard MCP transport agents use). executePlan multi-device allocation
-  // still requires daemon and throws a clear error without it.
-  // Critical section tools remain daemon-only (DaemonState lock manager).
-  registerPlanTools();
-  if (daemonMode) {
-    registerCriticalSectionTools();
-    registerBarrierTools();
+  // Re-registering rebuilds every definition and drops the tool-schema cache, which a
+  // stateless endpoint (one createMcpServer per request) would pay on every tools/list.
+  // The registered set only changes when something is removed, so skip while the
+  // same mode's set is still present. Session-gated tools are unaffected: callability
+  // is evaluated per request against the registry, not captured at registration.
+  const removalEpoch = ToolRegistry.removalEpochForRegistration;
+  if (
+    lastToolRegistration?.daemonMode !== daemonMode ||
+    lastToolRegistration.removalEpoch !== removalEpoch
+  ) {
+    registerAllTools({ daemonMode });
+    lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };
   }
-  registerVideoRecordingTools();
-  registerSnapshotTools();
-  registerSnapshotOfTools();
-  registerBiometricTools();
-  registerTelephonyTools();
-  registerHighlightTools();
-  registerPrototypeTools({ agentConnections: prototypeAgentRegistry });
-  registerDatabaseTools();
-  registerStorageTools();
-  registerPreferenceTools();
-  registerAppFileTools();
-  registerSessionLogTools();
-  registerDownloadsFixtureTools();
-  registerFormTools();
-  registerAccessibilityTools();
-  registerAccessibilityFocusTools();
-  registerNetworkTools();
-  registerToolSelectionTools();
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
 }
 
+let lastResourceRegistration:
+  | { iosDependencies: IosDoctorDependencies; clearEpoch: number }
+  | undefined;
+
 /**
- * Whether `sessionUuid` is a live session of the plan `boundSessionUuid` belongs to (#11602). The
- * one answer for a connection's seeded binding ({@link SessionToolBinding}) and for the binding
- * its calls recorded, read without holding, extending or releasing either session.
+ * Register every resource once per process (#13068). The registry is keyed by URI, so
+ * re-registering is redundant, and registering app resources starts a booted-device
+ * discovery (adb + simctl), which every stateless request (#4678) used to pay. Device
+ * inventory changes resync app resources through the device lifecycle instead.
  */
-function namesLiveSessionOfBoundPlan(sessionUuid: string, boundSessionUuid: string): boolean {
-  const daemonState = DaemonState.getInstance();
-  return (
-    daemonState.isInitialized() &&
-    daemonState.getSessionManager().isLiveSessionOfSamePlan(sessionUuid, boundSessionUuid)
-  );
+function registerAllResourcesOnce(iosDependencies: IosDoctorDependencies): void {
+  if (
+    lastResourceRegistration?.iosDependencies === iosDependencies &&
+    lastResourceRegistration.clearEpoch === ResourceRegistry.clearEpochForRegistration
+  ) {
+    return;
+  }
+  registerAllResources(iosDependencies);
+  lastResourceRegistration = {
+    iosDependencies,
+    clearEpoch: ResourceRegistry.clearEpochForRegistration,
+  };
+}
+
+function registerAllResources(iosDependencies: IosDoctorDependencies): void {
+  registerObservationResources();
+  registerToolOutputResources();
+  registerObserveAppResource();
+  registerBootedDeviceResources();
+  registerDeviceImageResources();
+  registerAppResources();
+  registerInstalledAppResourceListRefresher(() => syncInstalledAppResources());
+  registerNavigationResources();
+  registerTestTimingResources();
+  registerTestRunResources();
+  registerPerformanceResources();
+  registerVideoRecordingResources();
+  registerLocalizationResources();
+  registerDeviceSnapshotResources();
+  registerDatabaseResources();
+  registerFailuresResources();
+  registerStorageResources();
+  registerStorageCapabilityResources();
+  registerSdkCapabilityResources();
+  registerDataStoreResources();
+  registerAppFileResources();
+  registerSessionLogResources();
+  registerSharedStorageResources();
+  registerFeatureFlagResources();
+  registerPrototypeResources();
+  registerHostToolchainResources({ iosDependencies });
+  registerToolCatalogResources();
+  registerNetworkResources();
+  registerEmulatorLossIncidentResources();
+}
+
+/**
+ * The key this server's request-less paths (tools/list, resources) bind under:
+ * the request's session key, else the stateful transport's own session id.
+ */
+function serverBindingKey(options: McpServerOptions): string | undefined {
+  return options.requestMcpSessionId ?? options.sessionContext?.sessionId;
+}
+
+/**
+ * The session key a request's tasks belong to (#4668): the explicit key header on a stateless
+ * daemon server (its scope id is one-off and would orphan the task), else the stateful
+ * transport's session id. Keyless stateless requests own no tasks and run synchronously.
+ */
+function taskOwnerKey(options: McpServerOptions): string | undefined {
+  if (options.taskOwnerKey?.trim()) {
+    return options.taskOwnerKey;
+  }
+  const key = options.stateless ? options.requestMcpSessionId : serverBindingKey(options);
+  return key?.trim() ? key : undefined;
+}
+
+function resolveTaskManager(options: McpServerOptions): TaskManager | undefined {
+  return options.taskManager ?? (options.daemonMode ? daemonTaskManager() : undefined);
+}
+
+/**
+ * Serves the Tasks extension on this server when a task manager is available, and wraps the
+ * `tools/call` executor so an eligible tool can answer a declaring request with a task.
+ */
+function installTasks(
+  server: McpServer,
+  options: McpServerOptions,
+  execute: ReturnType<typeof createToolCallExecutor>,
+): ReturnType<typeof createTaskAwareToolCallExecutor> {
+  const taskManager = resolveTaskManager(options);
+  const ownerKey = taskOwnerKey(options);
+  if (taskManager) {
+    installTasksProtocol(server, { taskManager, ownerKey });
+  }
+  return createTaskAwareToolCallExecutor({
+    execute,
+    taskManager,
+    ownerKey,
+    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBILITY,
+    ...(options.taskLeaseKeepalive && { keepalive: options.taskLeaseKeepalive }),
+  });
+}
+
+function resolveBindingStore(options: McpServerOptions): {
+  store: SessionToolBindingStore;
+  owned: boolean;
+} {
+  if (options.sessionToolBindingStore) {
+    return { store: options.sessionToolBindingStore, owned: false };
+  }
+  if (options.daemonMode && options.stateless) {
+    return { store: daemonSessionToolBindingStore(), owned: false };
+  }
+  return { store: createReleaseSubscribedBindingStore(), owned: true };
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
+  const bindingStore = resolveBindingStore(options);
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
     undefined,
     options.sessionContext?.initialReleasedSession,
     namesLiveSessionOfBoundPlan,
+    bindingStore.store,
   );
+  const bindingKey = serverBindingKey(options);
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
   const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
@@ -739,56 +344,30 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register all resources
   startupBenchmark.startPhase("resourceRegistration");
-  registerObservationResources();
-  registerToolOutputResources();
-  registerObserveAppResource();
-  registerBootedDeviceResources();
-  registerDeviceImageResources();
-  registerAppResources();
-  registerNavigationResources();
-  registerTestTimingResources();
-  registerTestRunResources();
-  registerPerformanceResources();
-  registerVideoRecordingResources();
-  registerLocalizationResources();
-  registerDeviceSnapshotResources();
-  registerDatabaseResources();
-  registerFailuresResources();
-  registerStorageResources();
-  registerStorageCapabilityResources();
-  registerSdkCapabilityResources();
-  registerDataStoreResources();
-  registerAppFileResources();
-  registerSessionLogResources();
-  registerSharedStorageResources();
-  registerFeatureFlagResources();
-  registerPrototypeResources();
-  registerHostToolchainResources({ iosDependencies });
-  registerToolCatalogResources();
-  registerNetworkResources();
-  registerEmulatorLossIncidentResources();
+  registerAllResourcesOnce(iosDependencies);
   startupBenchmark.endPhase("resourceRegistration");
 
   // Create a new MCP server
   startupBenchmark.startPhase("sdkInitialization");
-  const server = new McpServer(
+  const server = createSdkMcpServer(
     {
       name: "AutoMobile",
       version: getMcpServerVersion(),
     },
     {
-      capabilities: {
-        resources: { subscribe: true, listChanged: true },
-        tools: {},
-        prompts: {},
-      },
+      resources: { subscribe: true, listChanged: true },
+      tools: {},
+      prompts: {},
     },
   );
   startupBenchmark.endPhase("sdkInitialization");
 
   // Register all tools with the server
   startupBenchmark.startPhase("serverHandlerRegistration");
-  ToolRegistry.registerWithServer(server);
+  // A stateless server answers one request: track it only until it closes and never
+  // notify it (#4678).
+  const registration = { ephemeral: options.stateless === true };
+  ToolRegistry.registerWithServer(server, registration);
 
   // Emit notifications/tools/list_changed when a runtime feature-flag toggle
   // changes tool definitions (outputSchema advertisement or tool availability),
@@ -808,139 +387,70 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   });
 
   // Register all resources with the server
-  ResourceRegistry.registerWithServer(server, (signal) => ({
-    sessionUuid: sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
-    ownsSession: (sessionUuid) =>
-      sessionToolBinding.ownsSession(options.sessionContext?.sessionId, sessionUuid),
-    releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(
-      options.sessionContext?.sessionId,
-    ),
-    signal,
-  }));
-
-  // Tear down this transport's server-side SessionToolBinding when the daemon
-  // actually releases a session (issue #4611 Gap D). Two release sources funnel
-  // through the same idempotent `unbindSession`:
-  //   - the plan-release path, via ToolRegistry's injected teardown handler
-  //     (executePlan auto-release, deterministic, works in stdio mode too); and
-  //   - heartbeat/idle/explicit releases, via the process-wide
-  //     SessionReleaseBroadcaster (issue #4610), active in daemon mode.
-  // Clearing the binding stops a later sessionless tools/list or tools/call on
-  // this same MCP transport from enforcing the released session's stale profile.
-  // A list-changed notification is emitted only when a binding actually changed,
-  // so a duplicate release signal for the same session is a no-op.
-  const clearReleasedSessionBinding = (sessionUuid: string): void => {
-    if (sessionToolBinding.unbindSession(sessionUuid)) {
-      ToolRegistry.notifyToolListChanged();
-    }
-  };
-  const unregisterSessionBindingRelease = ToolRegistry.registerSessionBindingReleaseHandler({
-    onSessionReleased: clearReleasedSessionBinding,
-  });
-  const unsubscribeSessionReleaseBroadcast = SessionReleaseBroadcaster.subscribe(
-    clearReleasedSessionBinding,
+  ResourceRegistry.registerWithServer(
+    server,
+    (signal) => ({
+      sessionUuid: sessionToolBinding.effectiveSessionUuid(bindingKey),
+      ownsSession: (sessionUuid) => sessionToolBinding.ownsSession(bindingKey, sessionUuid),
+      releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(bindingKey),
+      signal,
+    }),
+    registration,
   );
-  // Chain onto the existing onclose (set by ToolRegistry.registerWithServer's
-  // server tracking) so the per-transport teardown subscriptions are dropped when
-  // the transport closes, and no other lifecycle hook is clobbered.
+
+  if (registration.ephemeral) {
+    // A server closed before it connects has no transport, so the SDK never fires
+    // onclose and the prune hooks would leave it tracked forever.
+    const closeServer = server.close.bind(server);
+    server.close = async () => {
+      try {
+        await closeServer();
+      } finally {
+        // A never-connected server never fires onclose, which is what detaches its binding.
+        sessionToolBinding.dispose();
+        ToolRegistry.untrackServer(server);
+        ResourceRegistry.untrackServer(server);
+      }
+    };
+  }
+
+  // Release teardown is subscribed by the binding store, once per store (see
+  // createReleaseSubscribedBindingStore); this server's binding is attached to it
+  // until the transport closes. Chain onto the existing onclose (set by
+  // ToolRegistry.registerWithServer's server tracking) so no other lifecycle hook
+  // is clobbered. A shared store keeps its keyed bindings and its subscription.
   const existingServerOnClose = server.server.onclose;
   server.server.onclose = () => {
-    unregisterSessionBindingRelease();
-    unsubscribeSessionReleaseBroadcast();
+    sessionToolBinding.dispose();
+    if (bindingStore.owned) {
+      bindingStore.store.dispose();
+    }
     if (!daemonMode) {
       dropToolCallRecording(options.sessionContext?.sessionId);
     }
     existingServerOnClose?.();
   };
 
-  // Register tool definitions using the lower-level interface
-  const listSessionTools = async (
-    routingSessionUuid = sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
-  ) => {
-    const sessionId = options.sessionContext?.sessionId;
-    const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
-    const selectionSessionManager =
-      options.toolSelectionSessionManager ??
-      (DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined);
-    const routingBaseSessionUuid = resolveToolSelectionBaseSessionUuid(
-      routingSessionUuid,
-      selectionSessionManager,
-    );
-    const definitions = ToolRegistry.getToolDefinitions({
-      suppressOutputSchema: resolveToolResultsNoStructuredContent(
-        toolSelectionProfileRegistry,
-        connectionProfileUuid,
-      ),
-    });
-    // Advertise a tool when EITHER the bound base session OR any of its derived
-    // `${base}:${label}` device-label sessions enables it — the same UNION the
-    // `tools/call` gate applies (issue #4611). The call-gate accepts a
-    // `{ sessionUuid: base, device: label }` call whenever a label re-enables a
-    // tool the base narrowed away; filtering discovery on the base alone would
-    // then leave that tool callable but never discovered. Each label remains an
-    // independent `[base, label]` route before those route results are unioned;
-    // flattening every label into one override set would let one label's explicit
-    // disable hide a tool that is still callable through a sibling. The base's
-    // label map is a read-only lookup (no device allocation); a session with no
-    // labels collapses to the base, preserving prior single-session filtering.
-    //
-    // The union is per-tool and DEVICE-AWARE only, mirroring the call gate: a
-    // plain (non-`requiresDevice`) tool ignores any `device` argument, so its
-    // discovery only evaluates the bound routing session. Advertising a plain
-    // tool that only a sibling label enables would leave it listed but rejected
-    // by the call gate — a label-only grant must not surface a plain tool.
-    const labelSessionUuids = routingBaseSessionUuid
-      ? Array.from(
-          new Set(
-            Object.values(selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid) ?? {}),
-          ),
-        )
-      : [];
-    return {
-      tools: (
-        await Promise.all(
-          definitions.map(async (definition) => {
-            const registeredTool = ToolRegistry.getTool(definition.name);
-            const deviceAware = registeredTool?.requiresDevice ?? false;
-            const candidateRoutes = buildToolSelectionCandidateRoutes(
-              deviceAware,
-              routingBaseSessionUuid,
-              labelSessionUuids,
-              [routingBaseSessionUuid, routingSessionUuid],
-            );
-            return isAlwaysOnTool(definition.name) ||
-              (await isToolEnabledForAnyRoute(
-                definition.name,
-                registeredTool?.defaultEnabled ?? true,
-                candidateRoutes,
-                options.sessionToolSelectionService,
-                connectionProfileUuid,
-              ))
-              ? definition
-              : undefined;
-          }),
-        )
-      ).filter(
-        (definition): definition is (typeof definitions)[number] => definition !== undefined,
-      ),
-    };
-  };
-  server.server.setRequestHandler(ListToolsRequestSchema, () => listSessionTools());
+  const listSessionTools = createListSessionTools({
+    options,
+    bindingKey,
+    sessionToolBinding,
+    toolSelectionProfileRegistry,
+  });
+  // The advertised definitions are built from our own JSON Schemas, which the SDK
+  // types only as `Record<string, unknown>`; the wire value is unchanged.
+  server.server.setRequestHandler(
+    "tools/list",
+    async () => (await listSessionTools()) as ListToolsResult,
+  );
 
   // Add ping handler as per MCP specification
-  // Note: Using runtime access since TypeScript import has issues
-  const PingRequestSchema = require("@modelcontextprotocol/sdk/types.js").PingRequestSchema;
-  server.server.setRequestHandler(PingRequestSchema, async () => {
+  server.server.setRequestHandler("ping", async () => {
     return {};
   });
 
   // Register prompts list handler (currently returns empty list since no prompts are implemented)
-  // Note: Using runtime access since TypeScript import has issues
-  const ListPromptsRequestSchema =
-    require("@modelcontextprotocol/sdk/types.js").ListPromptsRequestSchema;
-  server.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  server.server.setRequestHandler("prompts/list", async () => {
     return {
       prompts: [],
     };
@@ -980,1020 +490,26 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     });
   };
 
-  // The shared envelope (`dispatchToolCall`, #6545) has already read the tool
-  // name and arguments and rejected a missing name.
-  const executeToolCallBody = async ({
-    name,
-    args: toolParams,
-    progress,
-    extra,
-  }: ToolCall<McpToolCallExtra>): Promise<McpToolCallResult> => {
-    const sessionId = options.sessionContext?.sessionId;
-    // Forwarded identity is trusted only on the daemon's internal transport.
-    // Direct callers cannot override their connection's autolock ownership.
-    const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
-    // Trusted only on the daemon's internal transport, like the connection identity (#11096).
-    const requestOneShotCli = daemonMode && extractInternalOneShotCli(toolParams);
-    const implicitAutolockMcpSessionId =
-      requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-    let routingSessionUuid: string | undefined;
-    let readOutsideBoundSession = false;
-    try {
-      routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams, {
-        readOnly: ToolRegistry.getTool(name)?.isDeviceReadOnlyCall?.(toolParams) === true,
-        onReadOutsideBoundSession: () => {
-          readOutsideBoundSession = true;
-        },
-      });
-    } catch (error) {
-      // Match the existing tool-error boundary below: the SDK handler alias
-      // is narrower than the protocol's text-only tool error result.
-      return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
-    }
-    let resolvedImplicitAutolockSessionUuid: string | undefined;
-    let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
-    const requestedToolResultsNoStructuredContent = daemonMode
-      ? extractInternalToolResultsNoStructuredContent(toolParams)
-      : undefined;
-    const requestedActionsCompactMetadata = daemonMode
-      ? extractInternalActionsCompactMetadata(toolParams)
-      : undefined;
-    const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
-      .sessionUuid;
-    const requestedToolSelectionProfileUuid =
-      typeof rawRequestedToolSelectionProfileUuid === "string"
-        ? rawRequestedToolSelectionProfileUuid
-        : undefined;
-
-    // Get the registered tool
-    const tool = ToolRegistry.getTool(name);
-    if (!tool) {
-      const registeredTool = ToolRegistry.getRegisteredTool(name);
-      if (registeredTool) {
-        // Registered but gated: say so structurally so the daemon proxy does not
-        // mistake this for a stale daemon and reset the shared connection (#10177).
-        throw new ToolUnavailableError(
-          name,
-          ToolRegistry.getToolAvailabilityGateReasons(registeredTool),
-        );
-      }
-      const hint = getRemovedToolHint(name);
-      throw new ActionableError(`Unknown tool: ${name}${hint ? `. ${hint}` : ""}`);
-    }
-
-    if (name === SET_TOOL_ENABLED_TOOL_NAME) {
-      const selectionArgs = toolParams as { toolName?: unknown; toolNames?: unknown };
-      // The handler's Zod schema remains the authority for malformed requests.
-      // Valid requests are checked here so a rejected hidden tool cannot mint a
-      // connection profile before the handler reaches the same validation.
-      if (
-        (typeof selectionArgs.toolName === "string" && selectionArgs.toolNames === undefined) ||
-        (Array.isArray(selectionArgs.toolNames) &&
-          selectionArgs.toolNames.every((toolName) => typeof toolName === "string"))
-      ) {
-        assertUserConfigurableToolNames(
-          requestedToolNamesFromSetToolEnabledArgs(
-            selectionArgs as {
-              toolName?: string;
-              toolNames?: readonly string[];
-            },
-          ),
-        );
-      }
-    }
-
-    if (name === "setActiveDevice") {
-      // Refused here, before session routing: a bound session that does not match the target would
-      // otherwise surface as a generic routing error instead of the typed refusal (#11268).
-      const rawSessionArg = (toolParams as Record<string, unknown>)?.sessionUuid;
-      assertManagedConnectionPlainToolCall({
-        daemonMode,
-        requiresDevice: false,
-        toolName: name,
-        mcpSessionId: requestMcpSessionId,
-        args: toolParams,
-        sessionUuid:
-          typeof rawSessionArg === "string" && rawSessionArg.trim().length > 0
-            ? rawSessionArg
-            : undefined,
-      });
-    }
-
-    if (
-      (tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) ||
-      name === "setActiveDevice"
-    ) {
-      const daemonState = DaemonState.getInstance();
-      const rawArgs = toolParams as Record<string, unknown>;
-      if (
-        daemonState.isInitialized() &&
-        implicitAutolockMcpSessionId &&
-        !options.sessionContext?.initialSessionToolBinding &&
-        !rawArgs.sessionUuid &&
-        !rawArgs.device
-      ) {
-        // Loopback MCP clients are reused by execution scope, not by socket.
-        // Their local bindings are partial; only the pool owns all acquisitions.
-        const platform =
-          rawArgs.platform === "android" || rawArgs.platform === "ios"
-            ? rawArgs.platform
-            : undefined;
-        const deviceId = typeof rawArgs.deviceId === "string" ? rawArgs.deviceId : undefined;
-        routingSessionUuid = daemonState
-          .getDevicePool()
-          .resolveAutolockSessionForMcpSession(
-            implicitAutolockMcpSessionId,
-            platform,
-            undefined,
-            deviceId,
-          );
-        if (!routingSessionUuid && name === "setActiveDevice") {
-          routingSessionUuid = daemonState
-            .getDevicePool()
-            .resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId);
-        }
-        resolvedImplicitAutolockSessionUuid = routingSessionUuid;
-      } else {
-        const managedBinding =
-          daemonMode && daemonState.isInitialized()
-            ? daemonState.getManagedConnectionScopes().get(requestMcpSessionId)
-            : undefined;
-        const refusal = managedConnectionPlatformRefusal({
-          binding:
-            !rawArgs.deviceId && !rawArgs.device && !rawArgs.sessionUuid
-              ? managedBinding
-              : undefined,
-          action: name,
-          platform:
-            rawArgs.platform === "android" || rawArgs.platform === "ios"
-              ? rawArgs.platform
-              : undefined,
-          slotPlatformOf: (sessionUuid) => {
-            const session = daemonState.getSessionManager().peekSession(sessionUuid);
-            return session?.assignedDevice
-              ? daemonState.getDevicePool().getDevice(session.assignedDevice)?.platform
-              : undefined;
-          },
-        });
-        if (refusal) {
-          throw refusal;
-        }
-        routingSessionUuid = sessionToolBinding.resolveDeviceSessionUuid(
-          sessionId,
-          toolParams,
-          (id) => {
-            if (!DaemonState.getInstance().isInitialized()) {
-              return resolveDirectSessionDevice(id)?.device;
-            }
-            const manager = DaemonState.getInstance().getSessionManager();
-            const session = manager.getSession(id);
-            if (!session || !manager.isAdmittedForAutomation(session) || !session.assignedDevice) {
-              return undefined;
-            }
-            const device = DaemonState.getInstance()
-              .getDevicePool()
-              .getDevice(session.assignedDevice);
-            return device ? { deviceId: device.id, platform: device.platform } : undefined;
-          },
-          name === "setActiveDevice",
-          name !== "setActiveDevice" &&
-            (tool.isDeviceReadOnlyCall?.(toolParams) === true ||
-              (daemonMode &&
-                daemonState.isInitialized() &&
-                daemonState.getManagedConnectionScopes().get(requestMcpSessionId) !== undefined)),
-          tool.isDeviceReadOnlyCall?.(toolParams) === true,
-        );
-      }
-    }
-
-    // #6069: enforce connection ownership on the DEVICE-routing path. If this
-    // connection already holds an active device session — whether seeded at
-    // construction or acquired mid-connection via getAndroid/getApple (recorded
-    // by `bind()`), or held in the pool by this client through autolock (#6729)
-    // — a control tool that names a DIFFERENT `sessionUuid` must be
-    // rejected. Reads pass read-only without changing the binding. Without this,
-    // a later call carrying a fabricated, typo'd, or stale id on a connection that
-    // already owns a device was handed off to session admission/creation and auto-assigned a SECOND, foreign
-    // device (the residual #6019/#6045 bypass behind an active-session
-    // precondition). This is scoped to `requiresDevice` tools on purpose:
-    // `effectiveSessionUuid`'s own cross-routing throw fires for every tool and
-    // so is deliberately limited to construction-seeded bindings, leaving plain
-    // tools free to carry any sessionUuid (e.g. a tool-selection profile).
-    // Acquisition tools are excluded — they legitimately mint/rebind a session.
-    if (tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) {
-      const rawExplicitSessionUuid = (toolParams as Record<string, unknown>).sessionUuid;
-      const explicitSessionUuid =
-        typeof rawExplicitSessionUuid === "string" && rawExplicitSessionUuid.trim().length > 0
-          ? rawExplicitSessionUuid
-          : undefined;
-      const boundDeviceSessionUuid =
-        sessionToolBinding.boundDeviceSessionUuid(sessionId) ??
-        (explicitSessionUuid && DaemonState.getInstance().isInitialized()
-          ? DaemonState.getInstance()
-              .getDevicePool()
-              .resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId)
-          : undefined);
-      if (
-        boundDeviceSessionUuid &&
-        explicitSessionUuid &&
-        explicitSessionUuid !== boundDeviceSessionUuid &&
-        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid) &&
-        // #11602: a derived `${base}:${label}` session counts as its base, so a connection bound
-        // to the base or to one of its labels may name any live session of that plan. It is no
-        // second device: the session is already allocated. Whose base it is stays the owner
-        // rule's question below.
-        !namesLiveSessionOfBoundPlan(explicitSessionUuid, boundDeviceSessionUuid)
-      ) {
-        if (tool.isDeviceReadOnlyCall?.(toolParams) === true) {
-          readOutsideBoundSession = true;
-        } else {
-          throw new SessionOutsideBoundSessionError(boundDeviceSessionUuid, explicitSessionUuid);
-        }
-      }
-    }
-    // An omitted selection target always belongs to an independent
-    // transport-local profile, even after device routing binds. Device-session
-    // release must not erase choices for a still-open MCP connection.
-    if (
-      name === SET_TOOL_ENABLED_TOOL_NAME &&
-      !connectionProfileUuid &&
-      !requestedToolSelectionProfileUuid?.trim().length
-    ) {
-      connectionProfileUuid = sessionToolBinding.createAndBindToolSelectionProfile(sessionId);
-      toolSelectionProfileRegistry.record(connectionProfileUuid);
-    }
-    rememberToolResultsNoStructuredContent(
-      toolSelectionProfileRegistry,
-      connectionProfileUuid,
-      name === SET_TOOL_ENABLED_TOOL_NAME ? requestedToolResultsNoStructuredContent : undefined,
-    );
-    const toolResultsNoStructuredContent = resolveToolResultsNoStructuredContent(
-      toolSelectionProfileRegistry,
-      connectionProfileUuid,
-    );
-    rememberActionsCompactMetadata(
-      toolSelectionProfileRegistry,
-      connectionProfileUuid,
-      name === SET_TOOL_ENABLED_TOOL_NAME ? requestedActionsCompactMetadata : undefined,
-    );
-    const actionsCompactMetadata = resolveActionsCompactMetadata(
-      toolSelectionProfileRegistry,
-      connectionProfileUuid,
-    );
-    // Resolve the base and derived `${base}:${label}` sessions for device routing
-    // and post-acquisition `tools/list` enrichment. Per-connection selection
-    // curates discovery only; every registered, available MCP tool remains
-    // callable regardless of that selection.
-    //
-    // Gate the derived-label candidate to DEVICE-AWARE tools only. A plain tool
-    // (registered via `register`, not `registerDeviceAware`) strips the `device`
-    // field via its `z.object` schema and always executes under the base session,
-    // so it never runs on the labeled device — consulting `base:label`'s profile
-    // would let a caller borrow the label's grants for a base-disabled plain tool
-    // with `{ sessionUuid: base, device: label }`. For a plain tool, enforcement
-    // is base-only; only a `requiresDevice` tool actually uses the device field.
-    const rawRequestedDeviceLabel = (toolParams as Record<string, unknown>).device;
-    const requestedDeviceLabel =
-      typeof rawRequestedDeviceLabel === "string" && rawRequestedDeviceLabel.trim().length > 0
-        ? rawRequestedDeviceLabel
-        : undefined;
-    const selectionSessionManager =
-      options.toolSelectionSessionManager ??
-      (DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined);
-    // `setToolEnabled` is a plain tool, so an explicit connection-profile UUID
-    // remains its routing session. Its readback still has to enumerate labels
-    // from this connection's acquired device session, not from that profile.
-    const routingSessionUuidForLabelLookup =
-      name === SET_TOOL_ENABLED_TOOL_NAME &&
-      requestedToolSelectionProfileUuid !== undefined &&
-      requestedToolSelectionProfileUuid === connectionProfileUuid
-        ? (sessionToolBinding.boundDeviceSessionUuid(sessionId) ?? routingSessionUuid)
-        : routingSessionUuid;
-    const routingBaseSessionUuid = isDeviceInventoryTool(name)
-      ? routingSessionUuidForLabelLookup
-      : resolveToolSelectionBaseSessionUuid(
-          routingSessionUuidForLabelLookup,
-          selectionSessionManager,
-        );
-    const derivedLabelSessionUuid =
-      tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
-        ? selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid)?.[requestedDeviceLabel]
-        : undefined;
-    const labelSessionUuids =
-      routingBaseSessionUuid && !isDeviceInventoryTool(name)
-        ? Array.from(
-            new Set(
-              Object.values(selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid) ?? {}),
-            ),
-          )
-        : [];
-    // Only ever honor these two when the call is DAEMON-forwarded. Extraction
-    // happens on the RAW `toolParams` before schema validation, and a direct
-    // (non-daemon, e.g. stdio) caller controls those raw arguments outright --
-    // `daemonMode` is a server-CONSTRUCTION boundary such a caller cannot
-    // influence (see the `reviveNonFiniteArguments` gate above for the same
-    // reasoning), so gating on it is the only thing that stops a direct
-    // caller from forging its own transport deadline: a huge value would
-    // silently disable `setUIState`'s internal fallback budget, and a tiny
-    // one would make it discard already-completed work immediately (issue
-    // #6222 P1 review, fuQ8_ / fuTtS). Only a daemon-forwarded request ever
-    // legitimately sets either of these (`withSocketSessionAutolockKey` in
-    // `src/daemon/socketServer.ts`).
-    const requestTimeoutMs = daemonMode
-      ? extractInternalMcpRequestTimeoutMs(toolParams)
-      : undefined;
-    const requestDeadlineMs = daemonMode
-      ? extractInternalMcpRequestDeadlineMs(toolParams)
-      : undefined;
-    const requestLiveDeadlineKey = daemonMode
-      ? extractInternalLiveDeadlineKey(toolParams)
-      : undefined;
-    const requestAcceptanceDiscoveryOrder = daemonMode
-      ? extractInternalAcceptanceDiscoveryOrder(toolParams, options.acceptanceDiscoveryCapability)
-      : undefined;
-    const rawSessionUuid =
-      toolParams && typeof toolParams === "object" && "sessionUuid" in toolParams
-        ? (toolParams as { sessionUuid?: string }).sessionUuid
-        : undefined;
-    const providedSessionUuid =
-      typeof rawSessionUuid === "string" && rawSessionUuid.trim().length > 0
-        ? rawSessionUuid
-        : undefined;
-    const executionSessionUuid =
-      derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
-
-    // Check if tool call should be blocked due to active executePlan in this session
-    const decision = planExecutionLock.evaluate({
-      toolName: name,
-      sessionId,
-      sessionUuid: executionSessionUuid,
-      readOnly: tool.isDeviceReadOnlyCall?.(toolParams) === true,
-    });
-    if (decision.blocked) {
-      logger.warn(
-        `[MCP] Rejecting tool ${name} due to active executePlan (scope=${decision.scope}, sessionId=${sessionId ?? "none"}, sessionUuid=${routingSessionUuid ?? "none"})`,
-      );
-      throw new PlanExecutionInProgressError(decision.scope, decision.reason);
-    }
-
-    // Parse and validate the parameters
-    let parsedParams;
-    const strippedToolParams = stripUndeclaredSessionUuid(
-      stripInternalToolParams(toolParams),
-      tool.schema,
-    );
-    try {
-      parsedParams = tool.schema.parse(strippedToolParams);
-    } catch (error) {
-      throw new ActionableError(
-        `Invalid parameters for tool ${name}: ${formatToolParamError(name, error, strippedToolParams, tool.schema)}`,
-      );
-    }
-
-    // A managed connection controls only its own slots (#11178).
-    assertManagedConnectionPlainToolCall({
-      daemonMode,
-      requiresDevice: tool.requiresDevice === true,
-      toolName: name,
-      mcpSessionId: requestMcpSessionId,
-      args: parsedParams,
-      sessionUuid: providedSessionUuid,
-    });
-
-    // A plain read (inventory, diagnostics, status) names a session only to watch it: it is
-    // admitted read-only (no activity refresh), so neither its start nor its end is use (#11107).
-    const plainReadCall =
-      !tool.requiresDevice &&
-      (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
-    // #11344: a control call never runs on a session another connected client owns. Refused
-    // before the execution starts, so naming the session neither extends nor binds it. A plain
-    // control tool (killDevice, recordToolCalls) is admitted on the session it names, so it is judged
-    // like a device call (#11542); nested internal calls are judged by the same predicate (#11555).
-    if (daemonMode && isControlCallOnNamedSession(tool, parsedParams)) {
-      // The session the call names, and the one a `device` label resolves to, which is the one
-      // the call runs on (#11542). The implicit routing session of a call that names none is not
-      // judged: a connection's bound session reaches here unnamed, and whether a binding another
-      // connection merely declares may drive the session is an open owner question (#11555,
-      // pinned in test/daemon/implicitRoutingForeignOwnedSession.test.ts).
-      for (const sessionUuid of new Set([providedSessionUuid, derivedLabelSessionUuid])) {
-        refuseControlOnForeignOwnedSession(name, sessionUuid, requestMcpSessionId, parsedParams);
-      }
-    }
-
-    // #6869: the capabilities this acquisition declares, validated up front.
-    const requestedEnableTools = resolveRequestedEnableTools(name, parsedParams);
-
-    const handlerRoutingSessionUuid =
-      tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
-        ? routingBaseSessionUuid
-        : routingSessionUuid;
-    const executionSessionId = requestMcpSessionId ?? sessionId;
-    const targetArgs = toolParams as Record<string, unknown>;
-    const untargetedDeviceCall =
-      tool.requiresDevice &&
-      !executionSessionUuid &&
-      !("deviceId" in targetArgs) &&
-      !("platform" in targetArgs) &&
-      !("device" in targetArgs) &&
-      !("sessionUuid" in targetArgs);
-    let execution: ReturnType<typeof executionTracker.startExecution>;
-    try {
-      execution = executionTracker.startExecution(
-        name,
-        executionSessionId,
-        executionSessionUuid,
-        sessionId,
-        untargetedDeviceCall ? implicitAutolockMcpSessionId : undefined,
-      );
-    } catch (error) {
-      if (error instanceof DaemonRestartPendingError) {
-        return daemonRestartPendingToolResult(error);
-      }
-      throw error;
-    }
-    if (plainReadCall) {
-      executionTracker.markReadOnlySessionAccess(execution.id);
-    }
-    if (resolvedImplicitAutolockSessionUuid) {
-      // Routing resolved before ToolRegistry, so retain its implicit-session
-      // tracking here without following later changes to the socket's default.
-      executionTracker.setResolvedAutolockSessionUuid(
-        execution.id,
-        resolvedImplicitAutolockSessionUuid,
-      );
-    }
-    const textState =
-      (requestLiveDeadlineKey ? getLiveTextRequestState(requestLiveDeadlineKey) : undefined) ??
-      new TextRequestState();
-    const getRequestDeadlineMs = () =>
-      (requestLiveDeadlineKey ? getLiveDeadlineMs(requestLiveDeadlineKey) : undefined) ??
-      requestDeadlineMs;
-    // A release vetoed by this call is bounded by the call's own deadline (#10712).
-    executionTracker.setExecutionDeadline(
-      execution.id,
-      getRequestDeadlineMs,
-      requestLiveDeadlineKey
-        ? (onExtended) => subscribeLiveDeadline(requestLiveDeadlineKey, onExtended)
-        : undefined,
-    );
-    // The daemon echoes the session it routed an admitted, non-read call to, so a proxy credits
-    // exactly that session instead of guessing it from a selector (#10974). Read before the
-    // execution ends.
-    // #11235, #11344: an explicitly named session another connected client owns, with autolock
-    // on or off. Naming a UUID is not proof of ownership (#11164): a read may still watch that
-    // session, but this connection must never bind it for later sessionless calls. Decided
-    // before any bind, and read at bind time so an ownership change during the handler is honored.
-    const foreignOwnedExplicitSessionUuid = (): string | undefined => {
-      const state = DaemonState.getInstance();
-      if (!providedSessionUuid || !state.isInitialized()) {
-        return undefined;
-      }
-      const pool = state.getDevicePool();
-      if (pool.isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)) {
-        return providedSessionUuid;
-      }
-      // A read never adopts an ownerless session or starts the proxy's owner heartbeat (#11557).
-      const session =
-        daemonMode &&
-        tool.isDeviceReadOnlyCall?.(parsedParams) === true &&
-        implicitAutolockMcpSessionId
-          ? state.getSessionManager().getSession(providedSessionUuid)
-          : undefined;
-      return session &&
-        holdsOwnerHeartbeatLease(session.livenessPolicy) &&
-        !pool.isSessionOwnedByConnection(providedSessionUuid, implicitAutolockMcpSessionId)
-        ? providedSessionUuid
-        : undefined;
-    };
-    // The proxy learns from the marker not to remember a foreign-owned session it named.
-    const withRoutedSession = <T>(result: T): T =>
-      daemonMode
-        ? withForeignOwnedSessionMeta(
-            withAdmittedSessionEcho(result, execution.id),
-            foreignOwnedExplicitSessionUuid(),
-          )
-        : result;
-    let executionEnded = false;
-    const endExecutionOnce = (): void => {
-      if (!executionEnded) {
-        executionEnded = true;
-        unsubscribeRequestCancellation();
-        executionTracker.endExecution(execution.id);
-      }
-    };
-    const requestSignal = combineRequestAbortSignals(
-      execution.abortController.signal,
-      extra.signal,
-    );
-    const unsubscribeRequestCancellation = subscribeRequestCancellation(
-      executionTracker,
-      execution.id,
-      extra.signal,
-    );
-    const handlerParams =
-      parsedParams && typeof parsedParams === "object"
-        ? {
-            ...parsedParams,
-            ...(name === "setActiveDevice" && routingSessionUuid
-              ? { sessionUuid: routingSessionUuid }
-              : {}),
-            ...(implicitAutolockMcpSessionId
-              ? { [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
-              : {}),
-            ...(requestOneShotCli ? { [INTERNAL_ONE_SHOT_CLI_PARAM]: true } : {}),
-            [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-            [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-            // Forwarded back onto handlerParams (rather than only used locally
-            // above) so a handler that needs the ACTUAL transport deadline --
-            // not a fresh internal budget -- can recover it: this value plus
-            // `execution.startTime` is the absolute wall-clock deadline of the
-            // current request. Only present on a daemon-forwarded call (see
-            // `withSocketSessionAutolockKey` in `src/daemon/socketServer.ts`);
-            // absent on a direct/non-daemon call, which a handler must treat as
-            // "no transport deadline known" (issue #6222 P1, `setUIStateHandler`
-            // is the first consumer).
-            ...(requestTimeoutMs !== undefined
-              ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: requestTimeoutMs }
-              : {}),
-            // The daemon's own capture-time-anchored absolute deadline, when
-            // present -- see `INTERNAL_MCP_REQUEST_DEADLINE_PARAM`. Forwarded
-            // through unchanged so a handler can prefer it over recomputing
-            // `execution.startTime + requestTimeoutMs`, which would re-grant
-            // whatever time this dispatch/admission step itself consumed
-            // (issue #6222 review, PRRT_kwDOP-GF5M6fuyts P1).
-            ...(requestDeadlineMs !== undefined
-              ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: requestDeadlineMs }
-              : {}),
-            // Same daemon-only provenance as `requestTimeoutMs` above -- lets
-            // `setUIStateHandler` resolve the LIVE (possibly progress-extended)
-            // deadline via `liveDeadlineRegistry` instead of only this frozen
-            // snapshot (issue #6222 P1 reopen).
-            ...(requestLiveDeadlineKey !== undefined
-              ? { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: requestLiveDeadlineKey }
-              : {}),
-            ...(requestAcceptanceDiscoveryOrder !== undefined
-              ? { [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: requestAcceptanceDiscoveryOrder }
-              : {}),
-          }
-        : parsedParams;
-
-    // `progress` echoes the client's own token and is undefined when the
-    // client did not ask for progress (issue #6118); only tools that report
-    // progress receive it.
-    const progressCallback = tool.supportsProgress ? progress : undefined;
-
-    let cleanupAcquisitionRelease: (() => void) | undefined;
-    const releasedAcquisitionSessions = new Set<string>();
-    // The explicit-UUID attach below runs after the handler. Claim the bind for the whole call, so
-    // a connection that closes mid-handler is refused as owner instead of recorded dead (#11348).
-    const endExplicitSessionBindClaim =
-      providedSessionUuid &&
-      tool.requiresDevice &&
-      tool.isDeviceReadOnlyCall?.(parsedParams) !== true &&
-      implicitAutolockMcpSessionId &&
-      DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getDevicePool().beginMcpBind(implicitAutolockMcpSessionId)
-        : undefined;
-    try {
-      if (isDeviceSessionAcquisitionTool(name)) {
-        // A handler can mint and release a session before returning its UUID.
-        // Retain release identities for this call only, through publication.
-        const onSessionReleased = (sessionUuid: string) => {
-          releasedAcquisitionSessions.add(sessionUuid);
-        };
-        const unregister = ToolRegistry.registerSessionBindingReleaseHandler({ onSessionReleased });
-        const unsubscribe = SessionReleaseBroadcaster.subscribe(onSessionReleased);
-        cleanupAcquisitionRelease = () => {
-          try {
-            unregister();
-          } finally {
-            unsubscribe();
-          }
-        };
-      }
-      if (
-        daemonMode &&
-        providedSessionUuid &&
-        !tool.requiresDevice &&
-        !isDeviceSessionAcquisitionTool(name) &&
-        name !== "setActiveDevice" &&
-        // #6148 (#6069 residual, review round 4): setToolEnabled is exempt ONLY
-        // when the explicit sessionUuid is a profile THIS DAEMON PROCESS itself
-        // minted (toolSelectionProfileRegistry.has — populated only alongside
-        // createAndBindToolSelectionProfile). Round 3 keyed this check on the
-        // exact mcpSessionId that minted the profile, which broke in the DEFAULT
-        // daemon-proxy loopback topology (src/server/proxyServer.ts ->
-        // DaemonMcpProxy -> src/daemon/socketServer.ts -> an internal HTTP call
-        // back into this same server): the mint call and a later explicit
-        // reaffirm route through DIFFERENT internal client keys
-        // (sharedMcpForwardRoute vs sessionScopedForwardRoute /
-        // toolSelectionProfileScopedForwardRoute), each spinning up its OWN
-        // createMcpServer()/SessionToolBinding instance with no memory of the
-        // other's mint. toolSelectionProfileRegistry is process-wide instead,
-        // so it survives that hop. It is deliberately narrower than
-        // `connectionProfileUuid`, which also falls back to the unauthenticated
-        // `initialToolSelectionProfileUuid` threaded verbatim from a
-        // caller-controlled HTTP header (DAEMON_TOOL_SELECTION_PROFILE_HEADER,
-        // see src/daemon/daemon.ts) with no issuance check — a proxied caller
-        // could set that header to the same fabricated string it also sends as
-        // `arguments.sessionUuid` and satisfy a plain equality check (round 2's
-        // bug); a fabricated value is never recorded in the registry either, so
-        // it still fails this check. The cross-connection resume path never
-        // puts the profile in `arguments.sessionUuid` at all (it flows solely
-        // through that header/DAEMON_TOOL_SELECTION_PROFILE_PARAM), so it never
-        // reaches this branch; a caller that DOES pass its own server-minted
-        // profile back as `sessionUuid` (the documented "update this
-        // connection's profile" contract) is legitimate and must not be forced
-        // through device-session admission. Any other explicit sessionUuid —
-        // including one that merely echoes the unverified header value — clears
-        // the same admission check every sibling plain session tool enforces.
-        !(
-          name === SET_TOOL_ENABLED_TOOL_NAME &&
-          toolSelectionProfileRegistry.has(providedSessionUuid)
-        )
-      ) {
-        // Plain tools can strip or ignore sessionUuid themselves. Device-aware
-        // tools carry their admitted identity into execution in ToolRegistry.
-        // #11555: naming a session another connected client owns is not use of it, for any
-        // plain tool the owner rule lets through (`setToolEnabled`). Such a call passes the
-        // same refusals as the owner's, but neither its admission nor its end stamps the
-        // session, and while in flight it holds the session no more than a read does.
-        const namesForeignOwnedSession = isSessionOwnedByAnotherConnection(
-          providedSessionUuid,
-          requestMcpSessionId,
-        );
-        await DaemonState.getInstance()
-          .getSessionManager()
-          .admitIssuedSessionForAutomation(
-            providedSessionUuid,
-            sessionExecutionMetadataOf(execution),
-            namedSessionAccess(plainReadCall, namesForeignOwnedSession),
-          );
-        if (namesForeignOwnedSession) {
-          executionTracker.markReadOnlySessionAccess(execution.id);
-        } else {
-          // Only an admitted call's end is session use (#10824).
-          executionTracker.markSessionAdmitted(execution.id);
-        }
-      }
-      const runToolHandler = () =>
-        runWithToolSelectionContext(
-          {
-            explicitObserveDeviceRead:
-              name === "observe" &&
-              Object.hasOwn(toolParams, "deviceId") &&
-              !providedSessionUuid &&
-              !handlerRoutingSessionUuid,
-            // A bound derived session may still target a sibling label. Resolve
-            // that label from the base map; unlabeled calls retain the derived
-            // ambient session.
-            routingSessionUuid: handlerRoutingSessionUuid,
-            // #11469: nested internal calls and plan steps run for this daemon connection.
-            callerMcpSessionId: requestMcpSessionId,
-            ownsDeviceSession: (sessionUuid) =>
-              sessionToolBinding.ownsSession(sessionId, sessionUuid),
-            execution: {
-              deviceBinding: {
-                bindDeviceExecution: (deviceId) =>
-                  executionTracker.bindDeviceExecution(execution.id, deviceId),
-              },
-              ...sessionExecutionMetadataOf(execution),
-            },
-            // A routing session already carries its own base/label union in
-            // ToolRegistry. Carry only a distinct connection profile so it
-            // cannot suppress that derived-label resolution.
-            toolSelectionProfileUuid: connectionProfileUuid,
-            actionsCompactMetadata,
-            labelSessionUuids,
-            routingBaseSessionUuid,
-            // Keep profile persistence lazy for ordinary core-tool calls while
-            // giving an admitted plan its service instance for release cleanup.
-            sessionToolSelectionService:
-              options.sessionToolSelectionService ??
-              (name === "executePlan" ? getSessionToolSelectionService() : undefined),
-          },
-          () => tool.handler(handlerParams, progressCallback, requestSignal),
-        );
-      let result = await runWithTextRequestContext(
-        { textState, getDeadlineMs: getRequestDeadlineMs },
-        () => runWithAbortSignal(requestSignal, runToolHandler),
-      );
-      const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
-        ? getDeviceSessionIdFromResult(result)
-        : undefined;
-      // Evaluate the returned session directly: a seeded transport may retain
-      // its old binding, and a concurrent acquisition may publish another one.
-      // Reuse the same route/label union as tools/list without publishing yet.
-      if (
-        (name === "getAndroid" || name === "getApple" || name === "startDevice") &&
-        !result?.isError &&
-        acquiredSessionUuid
-      ) {
-        let acquisitionEnrichmentCancelled = false;
-        // #6869: the caller's `enableTools` declaration lands BEFORE discovery,
-        // so the gatedTools/enabledTools pair below reports the session as the
-        // caller's next call will find it. #6886 review: a failure here is
-        // reported as `enableToolsError` rather than swallowed by the enrichment
-        // catch below, which made a lost declaration look like a plain success —
-        // while still never stranding the session the handler just minted.
-        const capabilityFailure = await applyAcquisitionToolSelection(
-          options.sessionToolSelectionService,
-          acquiredSessionUuid,
-          requestedEnableTools,
-        );
-        try {
-          const listed = new Set(
-            (
-              await awaitWithCancellation(listSessionTools(acquiredSessionUuid), requestSignal)
-            ).tools.map((tool) => tool.name),
-          );
-          const configurable = ToolRegistry.getAllTools()
-            .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
-            .map((tool) => tool.name)
-            .sort();
-          const gatedTools = configurable.filter((toolName) => !listed.has(toolName));
-          const enabledTools = configurable.filter((toolName) => listed.has(toolName));
-          result = enrichAcquisitionResult(result, {
-            gatedTools,
-            enabledTools,
-            ...capabilityFailure,
-          });
-        } catch (error) {
-          acquisitionEnrichmentCancelled ||= Boolean(requestSignal?.aborted);
-          // Acquisition already succeeded. Preserve its session handle so the
-          // proxy can bind and heartbeat it even if optional discovery fails.
-          logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
-          // A failed capability declaration is not optional detail; report it
-          // even when the gated/enabled pair cannot be computed.
-          result = withCapabilityDeclarationFailure(result, capabilityFailure);
-        }
-        // Scoped to the acquisition enrichment on purpose. At the
-        // top level this ran for EVERY tool, so a cancellation landing while any
-        // handler was finishing discarded that handler's complete, correct
-        // result and replaced it with an error naming an acquisition the tool
-        // never performed. A non-acquisition tool keeps its result here; a
-        // genuine cancellation is still classified by the outer catch.
-        if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
-          failCancelledAcquisition(acquiredSessionUuid);
-        }
-      }
-      // #6869 — a no-op for every tool but provisionDevice (guard inside).
-      result = await enrichProvisionDeviceResult(
-        name,
-        result,
-        acquiredSessionUuid,
-        options.sessionToolSelectionService,
-        requestedEnableTools,
-        connectionProfileUuid,
-      );
-      if (
-        name === "setActiveDevice" &&
-        !result?.isError &&
-        sessionToolBinding.bind(
-          sessionId,
-          getActiveDeviceSelectionFromResult(result)?.sessionUuid ?? routingSessionUuid,
-        )
-      ) {
-        ToolRegistry.notifyToolListChanged();
-      }
-      const isRecordingIdCleanup =
-        name === "videoRecording" &&
-        parsedParams &&
-        typeof parsedParams === "object" &&
-        parsedParams.action === "stop" &&
-        typeof parsedParams.recordingId === "string";
-      const daemonSessionManager = DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined;
-      // Reads exempted from either bound-session routing refusal never bind or adopt.
-      const sessionForBinding =
-        daemonSessionManager &&
-        providedSessionUuid &&
-        !readOutsideBoundSession &&
-        !isRecordingIdCleanup &&
-        !isDeviceInventoryTool(name)
-          ? sessionForToolBinding(
-              daemonSessionManager,
-              providedSessionUuid,
-              sessionExecutionMetadataOf(execution),
-              tool.isDeviceReadOnlyCall?.(parsedParams) === true,
-            )
-          : undefined;
-      if (
-        !isDeviceSessionAcquisitionTool(name) &&
-        !isDeviceInventoryTool(name) &&
-        name !== SET_TOOL_ENABLED_TOOL_NAME &&
-        !readOutsideBoundSession &&
-        !result?.isError &&
-        providedSessionUuid &&
-        // Ownership first (#11235): a foreign-owned session never binds this connection.
-        (!daemonSessionManager ||
-          !DaemonState.getInstance()
-            .getDevicePool()
-            .isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)) &&
-        !isRecordingIdCleanup &&
-        (daemonSessionManager
-          ? sessionForBinding !== null &&
-            sessionForBinding !== undefined &&
-            daemonSessionManager.isAdmittedForAutomation(sessionForBinding)
-          : resolveDirectSessionDevice(providedSessionUuid) !== undefined)
-      ) {
-        if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
-          ToolRegistry.notifyToolListChanged();
-        }
-        if (
-          tool.requiresDevice &&
-          tool.isDeviceReadOnlyCall?.(parsedParams) !== true &&
-          daemonSessionManager &&
-          implicitAutolockMcpSessionId
-        ) {
-          await DaemonState.getInstance()
-            .getDevicePool()
-            .attachExplicitSessionUuidCall(providedSessionUuid, implicitAutolockMcpSessionId);
-        }
-      }
-      // Wire-boundary output policy: strip the duplicated `structuredContent`
-      // tree for no-schema tools unconditionally (issue #2759) and for schema
-      // tools when the `--tool-results-no-structured-content` flag is on (issue
-      // #2899). Applied here — not inside a tool handler — so internal handler
-      // callers keep reading `structuredContent`, and so plain-registered tools
-      // are covered.
-      // Field-debuggability trace (issue #2962): when the wire boundary actually
-      // drops a `structuredContent` tree, emit one debug trace naming the tool and
-      // WHY, so a client that reads both paths can tell an intentional omission
-      // from an accidental miss. The reason is resolved once here and passed into
-      // the strip (single source of truth), and the trace is gated on the same
-      // "a field is actually present" condition as the strip, so it never
-      // over-reports on non-envelope responses. Debug level → dropped at the
-      // default INFO level, so no per-call noise beyond the guard. Aligns with the
-      // "log-and-continue with a why" convention. The tool/reason ride as a
-      // structured second argument (issue #3216) so field extraction is stable
-      // (grep `"tool":"..."`) without coupling consumers to the message text.
-      // The live-acceptance harness authenticates this private presentation
-      // request at the daemon boundary. Its controlled discovery assertions
-      // consume the structured payload directly, including from no-schema
-      // tools such as listDevices. Keep that accepted request's envelope
-      // intact without changing normal client output reduction.
-      const omissionReason =
-        requestAcceptanceDiscoveryOrder === undefined
-          ? structuredContentOmissionReason(
-              toolHasOutputSchema(tool),
-              toolResultsNoStructuredContent,
-            )
-          : null;
-      if (omissionReason !== null && responseCarriesStructuredContent(result)) {
-        logger.debug("[MCP] Omitted structuredContent", { tool: name, reason: omissionReason });
-      }
-      const response = stripToolResultStructuredContent(result, omissionReason);
-      // Publish only after all asynchronous enrichment finishes, so concurrent
-      // direct acquisitions bind in response order. Keep this path synchronous.
-      if (acquiredSessionUuid && releasedAcquisitionSessions.has(acquiredSessionUuid)) {
-        throw new ActionableError(
-          `Device session ${acquiredSessionUuid} was released during acquisition. Call ${name} again to acquire a device.`,
-        );
-      }
-      if (acquiredSessionUuid && sessionToolBinding.bind(sessionId, acquiredSessionUuid)) {
-        ToolRegistry.notifyToolListChanged();
-      }
-      return withRoutedSession(response);
-    } catch (error) {
-      if (error instanceof DaemonSessionCreationRejectedError) {
-        const shutdown = daemonShuttingDownMcpOutcome();
-        const result = {
-          content: [{ type: "text" as const, text: JSON.stringify(shutdown) }],
-          structuredContent: shutdown,
-          isError: true,
-        };
-        // The private daemon loopback needs this marker to classify the
-        // shutdown outcome before it reaches the public proxy boundary.
-        return daemonMode
-          ? result
-          : stripToolResultStructuredContent(
-              result,
-              structuredContentOmissionReason(
-                toolHasOutputSchema(tool),
-                toolResultsNoStructuredContent,
-              ),
-            );
-      }
-      if (error instanceof TerminalSessionError) {
-        const sessionOwnershipLost = sessionOwnershipLostPayload({
-          message: error.message,
-          sessionUuid: error.sessionUuid,
-          reason: error.release.releaseReason,
-          release: error.release,
-        });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(sessionOwnershipLost) }],
-          isError: true,
-        };
-      }
-      if (error instanceof SessionReleasedDuringCreationError) {
-        // Creation never published a session: the admission mark is not session use (#11351).
-        executionTracker.unmarkSessionAdmitted(execution.id);
-      }
-      // The heartbeat monitor released this call's session under it and cancelled the call
-      // (#11322): the same terminal refusal a call arriving after the release gets.
-      const releasedDuringCall = sessionReleasedDuringCallPayload(execution.cancelReason);
-      if (releasedDuringCall) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(releasedDuringCall) }],
-          isError: true,
-        };
-      }
-      if (error instanceof SessionReleasedDuringCreationError) {
-        return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
-      }
-      const leaseConflict = forwardingLeaseConflictCause(error, execution.deviceIds);
-      if (leaseConflict) {
-        // The device is fine; another AutoMobile process kept its CtrlProxy
-        // forwarding. Report that instead of a missing hierarchy or device loss (#10485).
-        return shapeToolCallError(leaseConflict, {
-          toolName: name,
-          source: "MCP",
-        }) as McpToolCallResult;
-      }
-      const deviceLoss =
-        deviceLossOutcomeFromError(error, executionSessionUuid) ??
-        deviceLossOutcomeFromError(
-          deviceLostErrorFromAbortSignal(execution.abortController.signal),
-          executionSessionUuid,
-        );
-      if (deviceLoss) {
-        // Recovery drains cancelled executions before rebooting. This handler's
-        // remaining work only enriches the response from that same recovery, so
-        // stop tracking it first to avoid making recovery wait on itself.
-        endExecutionOnce();
-        const elapsedMs = Math.max(0, defaultTimer.now() - execution.startTime);
-        const incidentWaitTimeoutMs = remainingDeviceLossIncidentWaitMs(
-          requestTimeoutMs,
-          elapsedMs,
-        );
-        const outcome = await resolveDeviceLossOutcome(deviceLoss, incidentWaitTimeoutMs);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(outcome) }],
-          isError: true,
-        };
-      }
-      // The SDK's request-handler result alias is narrower than its exported
-      // CallToolResult type, though this text-only error result satisfies the
-      // protocol schema.
-      // An admitted call that then failed still used its session (#10824).
-      return withRoutedSession(
-        shapeToolCallError(textState.timeoutError(error) ?? error, {
-          toolName: name,
-          source: "MCP",
-        }) as McpToolCallResult,
-      );
-    } finally {
-      endExplicitSessionBindClaim?.();
-      try {
-        cleanupAcquisitionRelease?.();
-      } finally {
-        endExecutionOnce();
-      }
-    }
-  };
-  // A typed refusal thrown while routing, before the body's own `try`, would otherwise escape into
-  // the SDK as an untyped -32603 error. Shape it here so every typed refusal reaches the client in
-  // the same result shape; untyped pre-`try` failures (unknown tool, ...) still throw (#11292).
-  // #11618: the device ids a call names, as the pool's canonical ids, before anything below routes,
-  // judges or queues it. The socket server resolves a forwarded call's ids from the pool's cached
-  // fold only, and a client on the daemon's HTTP endpoint reaches this server with the ids as sent.
-  // Synchronous unless a control call names a transport the pool has never seen.
-  const withCanonicalDeviceIds = (
-    call: ToolCall<McpToolCallExtra>,
-  ): ToolCall<McpToolCallExtra> | Promise<ToolCall<McpToolCallExtra>> => {
-    const tool = daemonMode ? ToolRegistry.getTool(call.name) : undefined;
-    if (!tool) {
-      return call;
-    }
-    const args = ToolRegistry.resolveToolCallDeviceIds(tool, call.args, call.extra.signal);
-    return args instanceof Promise
-      ? args.then((resolved) => ({ ...call, args: resolved }))
-      : args === call.args
-        ? call
-        : { ...call, args };
-  };
-  const executeToolCall = async (call: ToolCall<McpToolCallExtra>): Promise<McpToolCallResult> => {
-    try {
-      const canonical = withCanonicalDeviceIds(call);
-      return await executeToolCallBody(canonical instanceof Promise ? await canonical : canonical);
-    } catch (error) {
-      if (!isTypedToolRefusal(error)) {
-        throw error;
-      }
-      return shapeToolCallError(error, { toolName: call.name, source: "MCP" }) as McpToolCallResult;
-    }
-  };
+  const executeToolCall = createToolCallExecutor({
+    options,
+    daemonMode,
+    serverBindingKey: bindingKey,
+    sessionToolBinding,
+    planExecutionLock,
+    toolSelectionProfileRegistry,
+    listSessionTools,
+  });
   installToolCallDispatcher(server, {
     progressFailureMessage: "Failed to send progress notification",
     prepare: prepareToolCallRequest,
-    execute: executeToolCall,
+    execute: installTasks(server, options, executeToolCall),
   });
   startupBenchmark.endPhase("serverHandlerRegistration");
 
   return server;
 };
+
+/** Refresh externally changed resource rosters before a cached control-socket discovery reply. */
+export function refreshMcpResourceList(): Promise<void> {
+  return ResourceRegistry.refreshBeforeList();
+}

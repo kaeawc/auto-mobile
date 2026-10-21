@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { buildAsciiKeyEventPlan } from "../../../src/features/action/asciiKeyEvents";
+import { buildAsciiKeyEventPlan } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import {
   buildAndroidInputTextCommand,
+  ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS,
+  buildAndroidInputTextPlan,
   canJoinAndroidInputText,
 } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import { decodeInputTextCommand } from "./SendKeysTestHarness";
@@ -91,5 +93,84 @@ describe("canJoinAndroidInputText", () => {
     expect(canJoinAndroidInputText("%", "S")).toBe(true);
     expect(canJoinAndroidInputText("%", " ")).toBe(true);
     expect(canJoinAndroidInputText("a", "s")).toBe(true);
+  });
+});
+
+describe("buildAndroidInputTextPlan", () => {
+  const text = "it's a long run of text, 1234567890 and more";
+
+  test("emits one command for the whole run on API 30 and older", () => {
+    for (const apiLevel of [21, 29, 30]) {
+      expect(buildAndroidInputTextPlan(text, apiLevel)).toEqual({
+        commands: [buildAndroidInputTextCommand(text)],
+        textLength: text.length,
+      });
+    }
+  });
+
+  test("bounds each command below the argv limit on API 30 and older", () => {
+    const long = "a".repeat(ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS * 2 + 10);
+    const plan = buildAndroidInputTextPlan(long, 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand("a".repeat(ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS)),
+      buildAndroidInputTextCommand("a".repeat(ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS)),
+      buildAndroidInputTextCommand("a".repeat(10)),
+    ]);
+  });
+
+  test("a pre-31 chunk types in at most half of the 15 s ADB command timeout (#13172)", () => {
+    // Measured on an API 30 emulator: 13 ms per character (1000 chars took 13 s, 4096 took 47 s).
+    const measuredMsPerChar = 13;
+    const adbCommandTimeoutMs = 15_000;
+    const plan = buildAndroidInputTextPlan("a".repeat(6000), 30);
+    const longest = Math.max(
+      ...plan.commands.map((command) => (decodeInputTextCommand(command) ?? "").length),
+    );
+    expect(longest * measuredMsPerChar).toBeLessThanOrEqual(adbCommandTimeoutMs / 2);
+  });
+
+  test("keeps a space with the character after it at a pre-31 chunk boundary", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan("a".repeat(size - 1) + " b", 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand("a".repeat(size - 1)),
+      buildAndroidInputTextCommand(" b"),
+    ]);
+  });
+
+  test("keeps a run of spaces with the next character at a chunk boundary", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan("a".repeat(size - 2) + "   b", 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand("a".repeat(size - 2)),
+      buildAndroidInputTextCommand("   b"),
+    ]);
+  });
+
+  test("still advances when a whole chunk is spaces", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan(" ".repeat(size + 1), 30);
+    expect(plan.commands.length).toBe(2);
+  });
+
+  test("keeps one space with the next letter after a whole chunk of spaces", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan(" ".repeat(size) + "b", 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand(" ".repeat(size - 1)),
+      buildAndroidInputTextCommand(" b"),
+    ]);
+  });
+
+  test("chunks at 32 characters on API 31+ and when the level is unknown", () => {
+    for (const apiLevel of [31, 36, null]) {
+      expect(buildAndroidInputTextPlan(text, apiLevel)).toEqual({
+        commands: [
+          buildAndroidInputTextCommand(text.slice(0, 32)),
+          buildAndroidInputTextCommand(text.slice(32)),
+        ],
+        textLength: 32,
+      });
+    }
   });
 });

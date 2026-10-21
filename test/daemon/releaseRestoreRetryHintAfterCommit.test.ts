@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, expect, spyOn, test } from "bun:test";
 import { SESSION_RELEASE_TEARDOWN_CAP_MS, SessionManager } from "../../src/daemon/sessionManager";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
@@ -8,6 +8,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const deviceId = "emulator-5554";
 const dispose: Array<() => void> = [];
@@ -24,11 +28,9 @@ test("keep-awake retries pending at commit advertise their remaining teardown ca
   timer.setCurrentTime(1_000);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   let attempts = 0;
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => {
         attempts++;
         if (attempts === 1) {
@@ -38,9 +40,11 @@ test("keep-awake retries pending at commit advertise their remaining teardown ca
           const signal = getAbortSignal();
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
         });
+
+        return { status: "restored" as const };
       },
     }),
-  );
+  });
   dispose.push(() => {
     manager.stopCleanupTimer();
     timer.reset();
@@ -69,7 +73,7 @@ test("keep-awake retries pending at commit advertise their remaining teardown ca
   expect(timer.now()).toBe(committedAt + hint);
   expect(manager.hasDeviceCleanupInProgress(deviceId)).toBe(false);
   expect(manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(1_000);
-  expect(manager["pendingDeviceCleanupBounds"].has(deviceId)).toBe(false);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(0);
 });
 
 test("only the capped cleanup contributes a bound while an own-budget clock retry stays pending", async () => {
@@ -79,13 +83,13 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
   const clockRetry = Promise.withResolvers<void>();
   let clockAttempts = 0;
   let clockSignal: AbortSignal | undefined;
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
-    () => ({ restore: async () => {} }),
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
+      restore: async () => ({ status: "restored" as const }),
+    }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({
         restore: () =>
           new Promise<void>((_resolve, reject) => {
@@ -104,10 +108,10 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
         },
       }),
     },
-  );
+  });
   dispose.push(() => {
     clockRetry.resolve();
-    manager.retireClockRestoration(deviceId);
+    manager.retireRestorations(deviceId, "removal");
     defaultDeviceClockRestoreRegistry.retire(deviceId);
     manager.stopCleanupTimer();
     timer.reset();
@@ -123,8 +127,8 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
   await release;
 
   expect(manager.getSessionForDevice(deviceId)).toBeNull();
-  expect(manager["pendingDeviceCleanupWork"].get(deviceId)?.size).toBe(2);
-  expect(manager["pendingDeviceCleanupBounds"].get(deviceId)?.size).toBe(1);
+  expect(manager["deviceCleanupQuarantine"].workCount(deviceId)).toBe(2);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(1);
   expect(manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(
     SESSION_RELEASE_TEARDOWN_CAP_MS - 1_000,
   );
@@ -137,8 +141,8 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
   expect(manager.hasDeviceCleanupInProgress(deviceId)).toBe(true);
   expect(clockSignal).toBeDefined();
   expect(clockSignal?.aborted).toBe(false);
-  expect(manager["pendingDeviceCleanupWork"].get(deviceId)?.size).toBe(1);
-  expect(manager["pendingDeviceCleanupBounds"].has(deviceId)).toBe(false);
+  expect(manager["deviceCleanupQuarantine"].workCount(deviceId)).toBe(1);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(0);
   expect(manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(1_000);
   clockRetry.resolve();
   await flush();
@@ -147,14 +151,14 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
 
 test("a release with no pending restores leaves no cleanup bound or timer", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
-    () => ({ restore: async () => {} }),
-    () => ({ restore: async () => {} }),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
+      restore: async () => ({ status: "restored" as const }),
+    }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: { networkCondition: () => ({ restore: async () => {} }) },
+  });
   dispose.push(() => {
     manager.stopCleanupTimer();
     timer.reset();
@@ -170,7 +174,7 @@ test("a release with no pending restores leaves no cleanup bound or timer", asyn
   expect(manager.getSessionForDevice(deviceId)).toBeNull();
   expect(manager.hasDeviceCleanupInProgress(deviceId)).toBe(false);
   expect(manager.getPendingDeviceCleanup(deviceId)).toBeNull();
-  expect(manager["pendingDeviceCleanupBounds"].has(deviceId)).toBe(false);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
   expect(timer.getPendingSleepCount()).toBe(0);
   expect(timer.getPendingIntervalCount()).toBe(cleanupIntervals);
@@ -181,20 +185,22 @@ test("a bind refused while a released session's capped network restore is still 
   timer.setCurrentTime(1_000);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   // A wedged emulator console: the restore settles only when the teardown shield aborts it.
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
-    () => ({ restore: async () => {} }),
-    () => ({
-      restore: () =>
-        new Promise<void>((_resolve, reject) => {
-          const signal = getAbortSignal();
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-        }),
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
+      restore: async () => ({ status: "restored" as const }),
     }),
-  );
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
+      networkCondition: () => ({
+        restore: () =>
+          new Promise<void>((_resolve, reject) => {
+            const signal = getAbortSignal();
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+      }),
+    },
+  });
   dispose.push(() => {
     manager.stopCleanupTimer();
     timer.reset();
@@ -230,7 +236,7 @@ test("a bind refused while a released session's capped network restore is still 
   await flush();
   expect(manager.hasDeviceCleanupInProgress(deviceId)).toBe(false);
   expect(manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(1_000);
-  expect(manager["pendingDeviceCleanupBounds"].has(deviceId)).toBe(false);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(0);
 
   // Contract (#11360 / #12105): `retryAfterMs` is a time the device actually leaves quarantine
   // within. 9 s of the cap remained when the hint was read.

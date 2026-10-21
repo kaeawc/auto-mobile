@@ -1,0 +1,50 @@
+{
+  "id": "orders",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": {
+        "path": "/orders"
+      },
+      "as": "item",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{item.title} {data:/cartCount}",
+        "visibleWhen": {
+          "data": "/cartCount",
+          "gt": 0
+        },
+        "onTap": [
+          {
+            "type": "toggle",
+            "key": "liked_{item.id}"
+          }
+        ]
+      }
+    ]
+  },
+  "data": {
+    "orders": [
+      {
+        "id": 7,
+        "title": "Latte",
+        "total": 4.5,
+        "details": {
+          "size": "large"
+        }
+      }
+    ],
+    "cartCount": 1
+  },
+  "state": {
+    "liked_7": false
+  }
+}

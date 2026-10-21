@@ -9,22 +9,20 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeWindow } from "../fakes/FakeWindow";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { DaemonState } from "../../src/daemon/daemonState";
-import {
-  rotateHandler,
-  setRotateFactory,
-  resetRotateFactory,
-} from "../../src/server/interactionTools";
+import { type InteractionToolDependencies, rotateHandler } from "../../src/server/interactionTools";
 import type { ExecResult } from "../../src/models";
 import { logger } from "../../src/utils/logger";
 import { ActionableError } from "../../src/models/ActionableError";
 import { RotationSettingManagedError } from "../../src/models/RotationSettingManagedError";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { buildObserveResult } from "../helpers/observeFixture";
 
+const interactionDeps: InteractionToolDependencies = {};
 // Captured `cmd device_state print-states` output from a foldable and a phone emulator.
 const FOLD_STATES = readFileSync(
   join(__dirname, "..", "fixtures", "android-display", "fold-states.txt"),
@@ -49,13 +47,15 @@ const output = (stdout: string): ExecResult => ({
   includes: (s) => stdout.includes(s),
 });
 
+type MutablePooledDevice = { -readonly [K in keyof PooledDevice]: PooledDevice[K] };
+
 class RotationAdb extends FakeAdbExecutor {
   auto: number | null = 1;
   user: number | null = 2;
   live = 0;
   mismatch = false;
   /** `cmd device_state print-states` output; empty reads as a single-state device. */
-  deviceStates = "";
+  printStatesOutput = "";
   blockRead?: () => Promise<void>;
   /**
    * `secure device_state_rotation_lock`; null models a device without the setting. When set,
@@ -70,7 +70,7 @@ class RotationAdb extends FakeAdbExecutor {
   override async executeCommand(command: string): Promise<ExecResult> {
     await super.executeCommand(command);
     if (command === "shell cmd device_state print-states") {
-      return output(this.deviceStates);
+      return output(this.printStatesOutput);
     }
     const words = command.split(" ");
     const key = words[4];
@@ -132,13 +132,11 @@ function harness() {
   const adb = new RotationAdb();
   const restored: string[] = [];
   const signals: Array<AbortSignal | undefined> = [];
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
-    () => ({ restore: async () => {} }),
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: () => ({ restore: async () => {} }),
       rotation: (target) => ({
@@ -149,7 +147,7 @@ function harness() {
         },
       }),
     },
-  );
+  });
   const rotate = new Rotate(device, adb, timer, {
     sessionRotation: async (mutation) => {
       const { runSessionRotationMutation } = await import("../../src/server/sessionRotation");
@@ -158,12 +156,14 @@ function harness() {
   });
   const observe = new FakeObserveScreen();
   observe.enableAutoVaryHierarchy();
-  observe.setObserveResult(() => ({
-    timestamp: timer.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-  }));
+  observe.setObserveResult(() =>
+    buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: {} },
+    }),
+  );
   const window = new FakeWindow();
   window.configureCachedActiveWindow(null);
   window.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 123 });
@@ -187,7 +187,7 @@ describe("session rotation restoration", () => {
       await h.rotate.execute("landscape");
       expect(h.adb.auto).toBe(0);
       await h.rotate.execute("portrait");
-      await h.rotate.execute("landscape", undefined, true);
+      await h.rotate.execute("landscape", { lockOrientation: true });
       expect(h.manager.getRotation("rotation-session")).toEqual({
         accelerometerRotation: 1,
         userRotation: 2,
@@ -214,7 +214,7 @@ describe("session rotation restoration", () => {
     const h = harness();
     h.adb.lock = "0:1:1:2:2:0";
     h.adb.lockBaseline = "0:1:1:2:2:0";
-    h.adb.deviceStates = FOLD_STATES;
+    h.adb.printStatesOutput = FOLD_STATES;
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
       await h.rotate.execute("landscape");
@@ -330,7 +330,7 @@ describe("session rotation restoration", () => {
       const session = await h.manager.createSession("rotation-session", device.deviceId, "android");
       await h.rotate.execute("landscape");
       h.adb.mismatch = true;
-      h.adb.deviceStates = FOLD_STATES;
+      h.adb.printStatesOutput = FOLD_STATES;
       await h.manager.releaseSession("rotation-session");
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
       await flush();
@@ -368,7 +368,7 @@ describe("session rotation restoration", () => {
       await flush();
       expect(h.restored).toHaveLength(1);
       // A fold lands before the first retry; that read-back is now managed.
-      h.adb.deviceStates = FOLD_STATES;
+      h.adb.printStatesOutput = FOLD_STATES;
       h.timer.advanceTime(250);
       await flush();
       await pending;
@@ -477,7 +477,7 @@ describe("session rotation restoration", () => {
         await h.manager.createSession("rotation-session", device.deviceId, "android");
         await h.rotate.execute("landscape");
         h.adb.mismatch = true;
-        h.adb.deviceStates = FOLD_STATES;
+        h.adb.printStatesOutput = FOLD_STATES;
         await h.manager.releaseSession("rotation-session");
         await flush();
         await h.manager.getPendingDeviceCleanup(device.deviceId);
@@ -502,7 +502,7 @@ describe("session rotation restoration", () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         await abandonedRelease(h);
-        h.manager.retireRotationRestoration(device.deviceId);
+        h.manager.retireRestorations(device.deviceId, "removal");
         h.adb.mismatch = false;
         await h.manager.createSession("next-session", device.deviceId, "android");
         expect(h.restored).toHaveLength(6);
@@ -594,7 +594,7 @@ describe("session rotation restoration", () => {
       try {
         await h.manager.createSession("rotation-session", device.deviceId, "android");
         await h.rotate.execute("landscape");
-        const result = await h.rotate.execute("portrait", undefined, false);
+        const result = await h.rotate.execute("portrait", { lockOrientation: false });
         expect(result.orientationLockState).toBe("unlocked");
         expect(h.adb.auto).toBe(1);
         expect(h.adb.user).toBe(2);
@@ -616,7 +616,7 @@ describe("session rotation restoration", () => {
     const setter = spyOn(h.manager, "setRotation");
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
-      await h.rotate.execute("landscape", undefined, false);
+      await h.rotate.execute("landscape", { lockOrientation: false });
       expect(setter).toHaveBeenCalledTimes(1);
       expect(setter.mock.calls[0][1]).toEqual({ accelerometerRotation: 1, userRotation: 2 });
       expect(h.adb.user).toBe(2);
@@ -644,7 +644,7 @@ describe("session rotation restoration", () => {
         h.adb.mismatch = false;
         return result;
       };
-      const result = await h.rotate.execute("portrait", undefined, false);
+      const result = await h.rotate.execute("portrait", { lockOrientation: false });
       expect(result.warning).toContain("user_rotation");
       expect(h.manager.getRotation("rotation-session")).toBeDefined();
       h.adb.executeCommand = execute;
@@ -690,7 +690,10 @@ describe("session rotation restoration", () => {
       await pool.releaseDevice(device.deviceId, "rotation-session");
       expect(pool.getDevice(device.deviceId)?.status).not.toBe("idle");
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
-      pool.getDevice(device.deviceId)!.sessionId = null;
+      const pooled: MutablePooledDevice | null = pool.getDevice(device.deviceId);
+      if (pooled) {
+        pooled.sessionId = null;
+      }
       await pool.removeDevice(device.deviceId);
       expect(h.signals.at(-1)?.aborted).toBe(true);
       const writes = h.adb.writes().length;
@@ -709,7 +712,7 @@ describe("session rotation restoration", () => {
     );
     const daemon = DaemonState.getInstance();
     daemon.initialize(h.manager, pool);
-    setRotateFactory((target, options) => {
+    interactionDeps.rotateFactory = (target, options) => {
       const feature = new Rotate(target, h.adb, h.timer, options);
       Object.assign(feature, {
         awaitIdle: h.rotate.awaitIdle,
@@ -717,17 +720,23 @@ describe("session rotation restoration", () => {
         window: h.rotate.window,
       });
       return feature;
-    });
+    };
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
-      await rotateHandler(device, { orientation: "landscape", sessionUuid: "rotation-session" });
+      await rotateHandler(
+        device,
+        { orientation: "landscape", sessionUuid: "rotation-session" },
+        undefined,
+        undefined,
+        interactionDeps,
+      );
       expect(h.adb.auto).toBe(0);
       expect(h.manager.getRotation("rotation-session")).toEqual({
         accelerometerRotation: 1,
         userRotation: 2,
       });
     } finally {
-      resetRotateFactory();
+      delete interactionDeps.rotateFactory;
       daemon.reset();
       h.manager.stopCleanupTimer();
     }
@@ -749,7 +758,7 @@ describe("session rotation restoration", () => {
         }
         return execute(command);
       };
-      const restoring = h.rotate.execute("portrait", undefined, false);
+      const restoring = h.rotate.execute("portrait", { lockOrientation: false });
       await started.promise;
       h.timer.advanceTime(1000);
       const result = await restoring;
@@ -819,7 +828,7 @@ describe("session rotation restoration", () => {
       };
       const mutation = h.rotate.execute("landscape");
       await started.promise;
-      h.manager.retireRotationRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       h.adb.blockRead = undefined;
       finish.resolve();
       await expect(mutation).rejects.toThrow("removed");
@@ -857,7 +866,7 @@ describe("session rotation restoration", () => {
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
       await h.rotate.execute("landscape");
-      await h.rotate.execute("portrait", undefined, false);
+      await h.rotate.execute("portrait", { lockOrientation: false });
       expect(h.adb.auto).toBe(1);
       expect(h.adb.user).toBe(2);
       const rememberedAfterUnlock = h.manager.getRotation("rotation-session");
@@ -890,7 +899,7 @@ describe("session rotation restoration", () => {
               : "shell settings put system user_rotation 1")
           ) {
             if (stage !== "catch rollback") {
-              h.manager.retireRotationRestoration(device.deviceId);
+              h.manager.retireRestorations(device.deviceId, "removal");
               writesAtRemoval = h.adb.writes().length;
             }
             if (stage === "final mismatch") {
@@ -905,7 +914,7 @@ describe("session rotation restoration", () => {
             command === "shell settings get system user_rotation" &&
             ++userReads === 2
           ) {
-            h.manager.retireRotationRestoration(device.deviceId);
+            h.manager.retireRestorations(device.deviceId, "removal");
             writesAtRemoval = h.adb.writes().length;
           }
           if (
@@ -917,11 +926,9 @@ describe("session rotation restoration", () => {
           return result;
         };
         // Explicit false also exercises catch-path automatic-rotation restoration.
-        const result = await h.rotate.execute(
-          "landscape",
-          undefined,
-          stage === "final mismatch" ? true : false,
-        );
+        const result = await h.rotate.execute("landscape", {
+          lockOrientation: stage === "final mismatch" ? true : false,
+        });
         expect(result.success).toBe(false);
         expect(writesAtRemoval).toBeGreaterThan(0);
         expect(h.adb.writes()).toHaveLength(writesAtRemoval);

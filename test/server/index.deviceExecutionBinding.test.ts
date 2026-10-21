@@ -4,9 +4,9 @@ import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { AdmittingAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { permissiveDeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import { permissiveDeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 
@@ -36,7 +36,7 @@ describe("MCP ingress device execution binding", () => {
 
   afterAll(async () => {
     await fixture.teardown();
-    ToolRegistry["tools"].delete(TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
     restore();
   });
 

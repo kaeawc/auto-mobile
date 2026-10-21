@@ -1,4 +1,5 @@
 import { basename, dirname } from "node:path";
+import { compareCodeUnits } from "../../src/utils/io";
 import type { LockFileSystem } from "../../src/utils/lockFileSystem";
 
 interface FileNode {
@@ -13,8 +14,11 @@ export class FakeLockFileSystem implements LockFileSystem {
   private readonly directories = new Set<string>(["/", "."]);
   private readonly descriptors = new Map<number, FileNode>();
   private nextInode = 1;
+  /** Test-only: simulate filesystem inode reuse on the next created file. */
+  nextInodeOverride?: number;
   private nextDescriptor = 1;
   readonly operations: { op: keyof LockFileSystem; path: string }[] = [];
+  failure?: (op: keyof LockFileSystem, path: string) => string | undefined;
   linkError?: string;
   openError?: string;
   writeError?: string;
@@ -25,6 +29,10 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   private record(op: keyof LockFileSystem, path: string): void {
     this.operations.push({ op, path });
+    const failure = this.failure?.(op, path);
+    if (failure) {
+      throw this.error(failure, path);
+    }
   }
 
   private error(code: string, path: string): NodeJS.ErrnoException {
@@ -46,7 +54,9 @@ export class FakeLockFileSystem implements LockFileSystem {
     if (!this.directories.has(dirname(path))) {
       throw this.error("ENOENT", path);
     }
-    const node = { ino: this.nextInode++, mtimeMs: this.now(), raw };
+    const ino = this.nextInodeOverride ?? this.nextInode++;
+    this.nextInodeOverride = undefined;
+    const node = { ino, mtimeMs: this.now(), raw };
     this.files.set(path, node);
     return node;
   }
@@ -64,8 +74,35 @@ export class FakeLockFileSystem implements LockFileSystem {
     node.mtimeMs = mtimeMs;
   }
 
+  /**
+   * A distinct `LockFileSystem` object over this same namespace: one per simulated process, so
+   * state the lock keeps per filesystem object (pending back-outs) is per process. Every call
+   * delegates here, so operations and injected failures are recorded/applied exactly once.
+   */
+  view(): LockFileSystem {
+    return {
+      mkdir: (path) => this.mkdir(path),
+      list: (directory) => this.list(directory),
+      openExclusive: (path) => this.openExclusive(path),
+      write: (fd, content) => this.write(fd, content),
+      close: (fd) => this.close(fd),
+      writeFile: (path, content) => this.writeFile(path, content),
+      readText: (path) => this.readText(path),
+      stat: (path) => this.stat(path),
+      rename: (from, to) => this.rename(from, to),
+      link: (from, to) => this.link(from, to),
+      unlink: (path) => this.unlink(path),
+      exists: (path) => this.exists(path),
+    };
+  }
+
   paths(): string[] {
     return [...this.files.keys()].sort();
+  }
+
+  /** Fixture inspection without recording an operation or injecting an I/O failure. */
+  peek(path: string): Readonly<FileNode> | undefined {
+    return this.files.get(path);
   }
 
   mkdir(path: string): void {
@@ -93,7 +130,8 @@ export class FakeLockFileSystem implements LockFileSystem {
     }
     return [...new Set([...this.files.keys(), ...this.directories])]
       .filter((path) => path !== directory && dirname(path) === directory)
-      .map((path) => basename(path));
+      .map((path) => basename(path))
+      .sort(compareCodeUnits); // Like nodeLockFileSystem.list: entry order is deterministic.
   }
 
   openExclusive(path: string): number {
@@ -119,7 +157,8 @@ export class FakeLockFileSystem implements LockFileSystem {
     if (!node) {
       throw this.error("EBADF", String(fd));
     }
-    node.raw = content;
+    // A descriptor keeps its file offset, so successive writes append like fs.writeFileSync(fd).
+    node.raw += content;
     node.mtimeMs = this.now();
   }
 

@@ -1,3 +1,14 @@
+import type { ChildProcess } from "node:child_process";
+import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import {
+  NativeHelperRegistry,
+  getNativeHelperRegistry,
+} from "../../src/utils/nativeHelpers/NativeHelperRegistry";
+import { FakeNativeHelperRecordStore } from "../fakes/FakeNativeHelperRecordStore";
+import { FakeNativeHelperProcessControl } from "../fakes/FakeNativeHelperProcessControl";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
+import { FakeLogger } from "../fakes/FakeLogger";
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
@@ -17,7 +28,7 @@ import { IosSimulatorCaptureHelperPool } from "../../src/features/screen-stream/
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import type { BootedDevice } from "../../src/models";
-import { resetVideoRecordingManagerDependencies } from "../../src/server/videoRecordingManager";
+import { resetVideoRecordingManagerDependencies } from "../../src/daemon/videoRecordingManager";
 import * as shutdownCleanupModule from "../../src/shutdownCleanup";
 import {
   DAEMON_SHUTDOWN_STAGES,
@@ -108,16 +119,13 @@ async function daemonShutdownStages(
 ): Promise<Map<string, ShutdownCleanupStage>> {
   const daemon = new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    process.env,
-    managedAdbShutdown(timer, adbCommands),
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      recoveryPolicyEnvironment: process.env,
+      managedAdbServerShutdown: managedAdbShutdown(timer, adbCommands),
+    },
   );
   let captured: readonly ShutdownCleanupStage[] = [];
   const run = spyOn(shutdownCleanupModule, "runShutdownCleanupStages").mockImplementation(
@@ -209,7 +217,7 @@ class FakeSimulatorHelper extends EventEmitter {
     event: E,
     listener: IosScreenCaptureHelperEvents[E],
   ): this {
-    return super.on(event, listener as (...args: never[]) => void);
+    return super.on(event, listener);
   }
 }
 
@@ -249,6 +257,15 @@ function probes(): Record<string, Probe> {
   const helper = new FakeSimulatorHelper();
   const daemonStage = (name: string) => async (timer: FakeTimer) =>
     (await daemonShutdownStages(timer, adbCommands)).get(name);
+  const nativeControl = new FakeNativeHelperProcessControl();
+  const nativeStore = new FakeNativeHelperRecordStore();
+  let hostChild: FakeChildProcess | undefined;
+  const nativeRegistry = new NativeHelperRegistry({
+    store: nativeStore,
+    control: nativeControl,
+    ownPid: 30,
+    logger: new FakeLogger(),
+  });
   const adbStopped = () => adbCommands.some((command) => command.join(" ") === "kill-server");
   return {
     "daemon: video stream socket server": {
@@ -260,6 +277,48 @@ function probes(): Record<string, Probe> {
       arrange: (timer) => helperPoolWithRunningHelper(timer, helper),
       stage: daemonStage("iOS simulator capture helper pool"),
       tornDown: () => helper.stops === 1 && !helper.isRunning,
+    },
+    "daemon: native helper registry": {
+      arrange: async (timer) => {
+        const child = new FakeChildProcess(timer);
+        nativeControl.processes.set(30, "owner");
+        nativeControl.processes.set(child.pid!, "helper");
+        nativeRegistry.track(child, { kind: "adb", processGroup: false });
+        nativeControl.onSignal = (pid) => {
+          nativeControl.processes.delete(pid);
+          child.emit("exit");
+        };
+        const spy = spyOn(getNativeHelperRegistry(), "shutdown").mockImplementation((options) =>
+          nativeRegistry.shutdown(options),
+        );
+        restores.push(() => spy.mockRestore());
+      },
+      stage: daemonStage("native helper registry"),
+      tornDown: () => nativeControl.signals.length === 1 && nativeStore.list().length === 0,
+    },
+    "daemon: host adb children": {
+      arrange: async (timer) => {
+        const child = new FakeChildProcess(timer);
+        hostChild = child;
+        const kill = spyOn(child, "kill").mockImplementation((signal) => {
+          child.signalCode = typeof signal === "string" ? signal : "SIGTERM";
+          child.emit("exit");
+          return true;
+        });
+        restores.push(() => kill.mockRestore());
+        const host = new FakeHostCommandExecutor();
+        const adb = new AdbClient(null, () => host.executeCommand("adb"), {
+          spawnFn: () => {
+            queueMicrotask(() => child.emit("spawn"));
+            return child as ChildProcess;
+          },
+          timer,
+          nativeHelperRegistry: nativeRegistry,
+        });
+        await adb.spawn(["shell", "getevent"]);
+      },
+      stage: daemonStage("host adb children"),
+      tornDown: () => hostChild?.signalCode === "SIGTERM",
     },
     "daemon: managed ADB server": {
       arrange: async () => {},
@@ -361,4 +420,14 @@ describe("shutdown stages declared database-free (#11601)", () => {
 
     expect(databaseUses).toContain("getDatabase");
   });
+});
+
+test("daemon helper cleanup follows the capture pool in order", async () => {
+  const stages = [...(await daemonShutdownStages(new FakeTimer(), [])).keys()];
+  const pool = stages.indexOf("iOS simulator capture helper pool");
+  expect(stages.slice(pool, pool + 3)).toEqual([
+    "iOS simulator capture helper pool",
+    "native helper registry",
+    "host adb children",
+  ]);
 });

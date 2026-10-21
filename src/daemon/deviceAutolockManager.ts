@@ -1,3 +1,5 @@
+import { McpSessionRecoveryInProgressError } from "./McpSessionRecoveryInProgressError";
+import { bindDevice, holderOf } from "./deviceBinding";
 import { launchProcessLiveness } from "./transitionalAdbBindWait";
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
 import { heldDeviceBindRefusal, InputDeviceOwnedError } from "./inputDeviceOwnership";
@@ -6,13 +8,12 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
-import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
-import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
+import type { DeviceReadinessLevel } from "./readiness/DeviceReadiness";
 import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
-import { freshStartAlreadyBoundError } from "./deviceAcquisitionRefusals";
+import { freshStartAlreadyBoundError } from "../models/deviceAcquisitionRefusals";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
 import { mintedSession, receiptOrNew, type AcquisitionReceipt } from "./acquisitionReceipt";
@@ -38,14 +39,6 @@ export type AutolockClient = {
   oneShotCli?: boolean;
 };
 
-export class McpSessionRecoveryInProgressError extends ActionableError {
-  constructor(mcpSessionId: string) {
-    super(
-      `MCP session '${mcpSessionId}' is recovering a device and cannot remap until recovery finishes.`,
-    );
-  }
-}
-
 type ExpectedIdentity = Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
 
 interface AutolockAcquisitionOptions {
@@ -62,6 +55,8 @@ interface AutolockAcquisitionOptions {
   collectCancellationSettlement?: (settlement: Promise<void>) => void;
   /** Records the session this acquisition minted (never a reused one) once it is committed. */
   receipt: AcquisitionReceipt;
+  /** The caller's cancel signal, threaded explicitly (#11817); DevicePool supplies it. */
+  signal?: AbortSignal;
 }
 
 export interface DeviceAutolockPoolPort {
@@ -112,8 +107,8 @@ export interface DeviceAutolockPoolPort {
   isAdbServerResetQuarantined(id: string): boolean;
   /** Refuse a device another live daemon claims, like an explicit bind (#10980). */
   assertNotClaimedByForeignDaemon(deviceId: string, platform: Platform): Promise<void>;
-  /** Refuse a device a managed slot holds, like an explicit bind (#11174). Optional for fakes. */
-  assertNotAssignedToManagedSlot?(
+  /** Refuse a device a broker binding holds, like an explicit bind (#11174). Optional for fakes. */
+  assertNotAssignedToBinding?(
     deviceId: string,
     platform: Platform,
     sourceImage?: DeviceInfo,
@@ -181,7 +176,7 @@ export class DeviceAutolockManager {
       verifiedAndroidAvdIdentity?: DeviceInfo,
       achievedReadiness?: DeviceReadinessLevel,
       collectCancellationSettlement?: (settlement: Promise<void>) => void,
-      policy?: { autolockEnabled?: boolean; receipt?: AcquisitionReceipt },
+      policy?: { autolockEnabled?: boolean; receipt?: AcquisitionReceipt; signal?: AbortSignal },
     ]
   ): Promise<string | undefined> {
     if (!(policy.autolockEnabled ?? captureAutolockPolicy(this.env))) {
@@ -190,12 +185,12 @@ export class DeviceAutolockManager {
     // Two daemons must never drive one device (#10980, #11071): check before assigning, then
     // publish the claim or roll the acquisition back, as an explicit bind does.
     await this.pool.assertNotClaimedByForeignDaemon(deviceId, platform);
-    await this.pool.assertNotAssignedToManagedSlot?.(
+    await this.pool.assertNotAssignedToBinding?.(
       deviceId,
       platform,
       verifiedAndroidAvdIdentity ?? sourceImage,
     );
-    const heldBefore = this.pool.getDevice(deviceId)?.sessionId ?? null;
+    const heldBefore = holderOf(this.pool.getDevice(deviceId)) ?? null;
     const receipt = receiptOrNew(policy.receipt);
     const sessionId = await this.pool.withTargetDeviceDiscovery({
       deviceId,
@@ -219,6 +214,7 @@ export class DeviceAutolockManager {
           achievedReadiness,
           collectCancellationSettlement,
           receipt,
+          signal: policy.signal,
         }),
     });
     if (sessionId) {
@@ -246,14 +242,16 @@ export class DeviceAutolockManager {
     achievedReadiness,
     collectCancellationSettlement,
     receipt,
+    signal,
   }: AutolockAcquisitionOptions): Promise<string | undefined> {
-    throwIfRequestAborted();
+    const throwIfAborted = () => signal?.throwIfAborted();
+    throwIfAborted();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
     // The shared discovery pass has added a freshly booted target under the lock.
     const alreadyPooled = snapshot.capturedEntry !== undefined;
     // Assign the device to the generated session
-    throwIfRequestAborted();
+    throwIfAborted();
     let device = this.pool.getDevice(deviceId);
     if (!device) {
       throw new ActionableError(this.unavailableMessage(deviceId));
@@ -299,11 +297,12 @@ export class DeviceAutolockManager {
     }
     device = validatedDevice;
 
-    throwIfRequestAborted();
+    throwIfAborted();
     const reusedSessionId = await this.reuseOwnedAutolockSession(
       device,
       mcpSessionId,
       achievedReadiness,
+      signal,
     );
     if (reusedSessionId) {
       return reusedSessionId;
@@ -315,8 +314,7 @@ export class DeviceAutolockManager {
     this.pool.assertDeviceCleanupComplete(deviceId);
     const sessionId = this.idGenerator.next();
     const assignmentSnapshot = this.pool.snapshotSessionAssignment(device);
-    device.sessionId = sessionId;
-    device.status = "busy";
+    bindDevice(device, sessionId);
     device.lastUsedAt = this.pool.nextLastUsedAt();
     device.assignmentCount++;
     device.autolockSessionId = sessionId;
@@ -333,16 +331,11 @@ export class DeviceAutolockManager {
     // declares the CLI liveness policy, which moves the session onto wall-clock
     // idleness instead.
     const session = await this.pool.createSessionOrRestore(device, assignmentSnapshot, () =>
-      this.pool
-        .getSessionManager()
-        .createSession(
-          sessionId,
-          deviceId,
-          platform,
-          timeoutMs,
-          undefined,
-          this.pool.stableDeviceIdFor(device),
-        ),
+      this.pool.getSessionManager().createSession(sessionId, deviceId, platform, {
+        timeoutMs,
+        stableDeviceId: this.pool.stableDeviceIdFor(device),
+        signal,
+      }),
     );
     // #6227 (round 9): record the achieved readiness BEFORE publishing the
     // autolock route below. `mcpSessionAutolockMap.set` makes this session
@@ -372,6 +365,7 @@ export class DeviceAutolockManager {
       assignmentSnapshot,
       owner,
       collectCancellationSettlement,
+      signal,
     );
     receipt.minted = mintedSession(session, deviceId);
     this.noteStateChanged(device);
@@ -403,8 +397,8 @@ export class DeviceAutolockManager {
     snapshot: SessionAssignmentSnapshot,
     mcpSessionId?: string,
     collectCancellationSettlement?: (settlement: Promise<void>) => void,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const signal = getAbortSignal();
     const cancelPublishedSession = async () => {
       // Only this newly minted session may be compensated; never a replacement.
       await this.pool
@@ -419,6 +413,7 @@ export class DeviceAutolockManager {
         mcpSessionId: mcpSessionId ?? null,
         daemonSessionId: this.pool.getDaemonSessionId(),
         lastUsedAtMs: sessions.sessionClockToWall(session.lastUsedAt),
+        activitySeq: session.lastUsedAt,
         expiresAtMs: sessions.sessionClockToWall(session.expiresAt),
       });
       try {
@@ -470,7 +465,7 @@ export class DeviceAutolockManager {
     }
     if (
       this.pool.getDevice(device.id) === device &&
-      device.sessionId === session.sessionId &&
+      holderOf(device) === session.sessionId &&
       device.assignmentCount === snapshot.assignmentCount + 1 &&
       this.pool.getPooledSessionIdentity(device) === session
     ) {
@@ -496,6 +491,7 @@ export class DeviceAutolockManager {
     device: PooledDevice,
     mcpSessionId: string | undefined,
     achievedReadiness: DeviceReadinessLevel,
+    signal?: AbortSignal,
   ): Promise<string | undefined> {
     const session = this.getOwnedAutolockSession(device, { mcpSessionId });
     if (!session) {
@@ -507,6 +503,7 @@ export class DeviceAutolockManager {
       .getSessionManager()
       .getOrCreateSession(session.sessionId, undefined, undefined, undefined, false, {
         callerExecutionId: getToolSelectionContext()?.execution?.executionId,
+        signal,
       });
     // Release can finish while activity persistence yields, even under the
     // assignment mutex. Do not report success for a retired ownership identity.
@@ -537,13 +534,13 @@ export class DeviceAutolockManager {
       throw heldDeviceBindRefusal(
         this.pool,
         device.id,
-        device.sessionId ?? undefined,
+        holderOf(device) ?? undefined,
         undefined,
         "another",
       );
     }
-    const session = device.sessionId
-      ? this.pool.getSessionManager().getSession(device.sessionId)
+    const session = holderOf(device)
+      ? this.pool.getSessionManager().getSession(holderOf(device)!)
       : null;
     if (!session) {
       return undefined;
@@ -552,7 +549,7 @@ export class DeviceAutolockManager {
       throw heldDeviceBindRefusal(
         this.pool,
         device.id,
-        device.sessionId ?? undefined,
+        holderOf(device) ?? undefined,
         undefined,
         "another",
       );
@@ -583,10 +580,10 @@ export class DeviceAutolockManager {
     sourceImage: DeviceInfo | undefined,
     mcpSessionId: string | undefined,
   ): void {
-    if (!sourceImage || !device.sessionId) {
+    if (!sourceImage || !holderOf(device)) {
       return;
     }
-    const existingSession = this.pool.getSessionManager().getSession(device.sessionId);
+    const existingSession = this.pool.getSessionManager().getSession(holderOf(device)!);
     if (
       existingSession &&
       existingSession.assignedDevice === device.id &&
@@ -681,7 +678,7 @@ export class DeviceAutolockManager {
           return [];
         }
         const device = this.pool.getDevice(session.assignedDevice);
-        if (device && device.autolockSessionId === id && device.sessionId === id) {
+        if (device && device.autolockSessionId === id && holderOf(device) === id) {
           return [
             { sessionId: id, deviceId: device.id, platform: device.platform, recovering: false },
           ];
@@ -824,7 +821,7 @@ export class DeviceAutolockManager {
       if (
         !session ||
         !device ||
-        device.sessionId !== sessionId ||
+        holderOf(device) !== sessionId ||
         device.autolockSessionId !== sessionId
       ) {
         return "not-attached";
@@ -863,6 +860,7 @@ export class DeviceAutolockManager {
         mcpSessionId: mcpSessionId ?? null,
         daemonSessionId: this.pool.getDaemonSessionId(),
         lastUsedAtMs: sessions.sessionClockToWall(session.lastUsedAt),
+        activitySeq: session.lastUsedAt,
         expiresAtMs: sessions.sessionClockToWall(session.expiresAt),
       });
       return "attached";
@@ -903,7 +901,7 @@ export class DeviceAutolockManager {
     if (
       this.pool.getDevice(expectedDevice.id) !== expectedDevice ||
       expectedDevice.assignmentCount !== expectedAssignmentCount ||
-      expectedDevice.sessionId !== null ||
+      holderOf(expectedDevice) !== null ||
       expectedDevice.autolockSessionId !== sessionId
     ) {
       return;
@@ -1021,5 +1019,16 @@ export class DeviceAutolockManager {
   releaseMcpSessionBindings(mcpSessionId: string): void {
     this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
     this.mcpSessionAutolockMap.delete(mcpSessionId);
+  }
+
+  /** @internal Read-only state used by deterministic ownership tests. */
+  get testHooks() {
+    return {
+      mcpSessionAutolockMap: this.mcpSessionAutolockMap as ReadonlyMap<string, string>,
+      mcpSessionAcquiredAutolocks: this.mcpSessionAcquiredAutolocks as ReadonlyMap<
+        string,
+        ReadonlySet<string>
+      >,
+    };
   }
 }

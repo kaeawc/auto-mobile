@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyWindowInfo } from "../../../src/models";
 import {
@@ -12,7 +13,12 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
+import {
+  android,
+  createSendKeysHarness,
+  decodeInputTextCommand,
+  focused,
+} from "./SendKeysTestHarness";
 
 const multiDisplay: BootedDevice = {
   ...android,
@@ -33,11 +39,13 @@ const commands: SendKeysCommand[] = [
 
 function harness(device: BootedDevice, key: string, windows?: ViewHierarchyWindowInfo[]) {
   const h = createSendKeysHarness(device);
-  h.adb.setCommandResponse("cmd display get-displays", {
-    stdout:
+  h.adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:inside" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:outside" type EXTERNAL, real 100 x 100}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   const transitions = new FakeDisplayTransitionReader();
   const observation: ObserveResult = {
     ...focused,
@@ -222,11 +230,13 @@ describe("sendKeys Android focus read routing", () => {
       },
     };
     const h = createSendKeysHarness(multiDisplay, observer);
-    h.adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    h.adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:inside" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:outside" type EXTERNAL, real 100 x 100}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     h.client.clear = async () => {
       h.clientCalls.push("clear");
       return { success: false, error: "Accessibility clear unavailable" };
@@ -279,7 +289,11 @@ describe("sendKeys Android focus read routing", () => {
           expect(
             h.adb
               .getExecutedCommands()
-              .some((command) => /^shell input (keyevent|text) /.test(command)),
+              .some(
+                (command) =>
+                  command.startsWith("shell input keyevent ") ||
+                  decodeInputTextCommand(command) !== undefined,
+              ),
           ).toBe(true);
         }
       });
@@ -377,10 +391,13 @@ describe("sendKeys Android focus read routing", () => {
 
     test(`${route}: a disconnected requested display refuses before any dispatch`, async () => {
       const h = recordingHarness("cover");
-      h.adb.setCommandResponse("cmd display get-displays", {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inside" type INTERNAL, real 100 x 100}',
-        stderr: "",
-      });
+      h.adb.setCommandResponse(
+        "cmd display get-displays",
+        createExecResult(
+          'Display id 0: DisplayInfo{uniqueId "local:inside" type INTERNAL, real 100 x 100}',
+          "",
+        ),
+      );
       const result = await runWithSelectedDisplayPin(
         route === "pin" ? { pin: "cover", inventory: multiDisplay.displays } : undefined,
         () => h.action.execute(commands, undefined, undefined, undefined, "cover"),

@@ -63,7 +63,7 @@ export class AppLifecycle {
     this.timer = dependencies.timer ?? defaultTimer;
     this.home = dependencies.home ?? {
       execute: async (signal) => {
-        await new HomeScreen(device, null, this.timer).execute(undefined, signal);
+        await new HomeScreen(device, null, this.timer).execute({ signal });
       },
     };
     this.cacheInvalidator =
@@ -213,13 +213,11 @@ export class AppLifecycle {
     signal?.throwIfAborted();
     options.onMutation?.();
     try {
-      await this.adb.executeCommand(
-        `shell am kill --user ${userId} ${shellQuote(base.appId)}`,
-        COMMAND_TIMEOUT_MS,
-        undefined,
-        true,
+      await this.adb.executeCommand(`shell am kill --user ${userId} ${shellQuote(base.appId)}`, {
+        timeoutMs: COMMAND_TIMEOUT_MS,
+        noRetry: true,
         signal,
-      );
+      });
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(`[AppLifecycle] Android kill command failed for ${base.appId}`, error);

@@ -13,7 +13,6 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
 } from "../../src/daemon/sessionLivenessWindows";
-import { errorMessage } from "../../src/utils/describeUnknownError";
 import type { Random } from "../../src/utils/Random";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -348,7 +347,11 @@ class ScheduleWorld {
     const { pool } = this.daemon;
     const sessionId = autolock
       ? await pool.autolockDevice(DEVICE, "android")
-      : await pool.bindOrReuseDeviceSession("expiry-property-session", DEVICE, "android");
+      : await pool.bindOrReuseDeviceSession({
+          sessionId: "expiry-property-session",
+          deviceId: DEVICE,
+          platform: "android",
+        });
     if (!sessionId) {
       throw new Error("the pool did not acquire the device");
     }
@@ -663,32 +666,4 @@ export async function assertProperty(
       );
     }
   }
-}
-
-/**
- * A property a tracked bug still violates. It runs, and passes only while some seed in `seeds`
- * still produces a counterexample, so the known failure is visible in every run instead of
- * skipped (`test.todo` never runs in CI). When the fix lands the seeds stop failing, this
- * throws, and the fix PR flips the property to enforced. `issue` names the bug.
- */
-export async function expectKnownFailure(
-  seeds: readonly number[],
-  profile: ScheduleProfile,
-  check: PropertyCheck,
-  issue: string,
-): Promise<void> {
-  try {
-    await assertProperty(seeds, profile, check);
-  } catch (counterexample) {
-    // A counterexample is the expected state: the bug is still present. Printed on request so
-    // the report for the bug can quote it.
-    if (process.env.AUTOMOBILE_EXPIRY_PROPERTY_SHOW_KNOWN === "1") {
-      console.log(`Known failure ${issue}:\n${errorMessage(counterexample)}`);
-    }
-    return;
-  }
-  throw new Error(
-    `Known failure (${issue}) no longer fails for seeds ${seeds[0]}-${seeds.at(-1)}. ` +
-      `Flip the property to enforced in the PR that fixed ${issue}.`,
-  );
 }

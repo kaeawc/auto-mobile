@@ -1,14 +1,26 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import {
   registerStorageTools,
-  resetStorageToolsDependencies,
-  setStorageToolsDependenciesForTesting,
   type AndroidKeyValueClient,
+  type StorageToolsDependencies,
 } from "../../src/server/storageTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolJson } from "../helpers/toolResponse";
+
+isolateToolRegistry();
+
+let deps: Partial<StorageToolsDependencies> = {};
+function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {
+  deps = { ...deps, ...value };
+  registerStorageTools(deps);
+}
+function clearStorageToolsDependencies(): void {
+  deps = {};
+}
 
 const device: BootedDevice = { deviceId: "fake-device", name: "Fake", platform: "android" };
 const args = {
@@ -61,16 +73,16 @@ function fakeClient(failure?: Error): AndroidKeyValueClient {
 beforeEach(() => {
   ToolRegistry.clearTools();
   const adb = new FakeAdbExecutor();
-  setStorageToolsDependenciesForTesting({
+  useStorageToolsDependenciesForTesting({
     androidClientFactory: () => fakeClient(),
     adbClientFactory: { create: () => adb },
   });
-  registerStorageTools();
+  registerStorageTools(deps);
 });
 
 afterEach(() => {
   ToolRegistry.clearTools();
-  resetStorageToolsDependencies();
+  clearStorageToolsDependencies();
 });
 
 test("preserves registration order", () => {
@@ -81,11 +93,7 @@ test("preserves registration order", () => {
 
 test.each(["listDataStores", "getDataStore"])("%s preserves the read result", async (name) => {
   const result = await handler(name)(device, args);
-  const content = result.content[0];
-  if (content.type !== "text") {
-    throw new Error("Expected text result");
-  }
-  expect(JSON.parse(content.text)).toEqual(
+  expect(toolJson(result)).toEqual(
     name === "listDataStores"
       ? {
           success: true,
@@ -104,7 +112,7 @@ test.each(["listDataStores", "getDataStore"])("%s preserves the read result", as
 });
 
 test.each(["listDataStores", "getDataStore"])("%s explains disabled inspection", async (name) => {
-  setStorageToolsDependenciesForTesting({
+  useStorageToolsDependenciesForTesting({
     androidClientFactory: () => fakeClient(new Error("SharedPreferences inspection is disabled")),
   });
   await expect(handler(name)(device, args)).rejects.toThrow("inspection");
@@ -112,13 +120,13 @@ test.each(["listDataStores", "getDataStore"])("%s explains disabled inspection",
 
 test.each(toolNames)("%s preserves ActionableError identity", async (name) => {
   const failure = new ActionableError("failed");
-  setStorageToolsDependenciesForTesting({ androidClientFactory: () => fakeClient(failure) });
+  useStorageToolsDependenciesForTesting({ androidClientFactory: () => fakeClient(failure) });
   await expect(handler(name)(device, args)).rejects.toBe(failure);
 });
 
 test.each(toolNames)("%s wraps unrelated client failures", async (name) => {
   const failure = new Error("failed");
-  setStorageToolsDependenciesForTesting({ androidClientFactory: () => fakeClient(failure) });
+  useStorageToolsDependenciesForTesting({ androidClientFactory: () => fakeClient(failure) });
   const result = handler(name)(device, args);
   await expect(result).rejects.toBeInstanceOf(ActionableError);
   await expect(result).rejects.toMatchObject({ cause: failure });
@@ -128,7 +136,7 @@ test.each(["listDataStores", "getDataStore"])(
   "%s rejects iOS before creating a client",
   async (name) => {
     let created = false;
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => {
         created = true;
         return fakeClient();
@@ -154,7 +162,7 @@ test.each(["setKeyValue", "removeKeyValue", "clearKeyValueFile"])(
       await mutation;
       events.push("completed");
     };
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => ({
         ...fakeClient(),
         setPreference: write,
@@ -185,7 +193,7 @@ test.each(["setKeyValue", "removeKeyValue", "clearKeyValueFile"])(
 
 test("null set values remove Android preferences without validating a write-only type", async () => {
   const calls: string[] = [];
-  setStorageToolsDependenciesForTesting({
+  useStorageToolsDependenciesForTesting({
     androidClientFactory: () => ({
       ...fakeClient(),
       setPreference: async () => {

@@ -5,12 +5,8 @@
  * the live getter (when present) is what lets `execute()` see a
  * progress-driven extension the frozen snapshot alone can never reflect.
  */
-import { afterEach, describe, expect, test } from "bun:test";
-import {
-  resetSetUIStateFactory,
-  setSetUIStateFactory,
-  setUIStateHandler,
-} from "../../src/server/formTools";
+import { describe, expect, test } from "bun:test";
+import { createSetUIStateHandler } from "../../src/server/formTools";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -23,7 +19,6 @@ import {
 } from "../../src/daemon/liveDeadlineRegistry";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import type { BootedDevice } from "../../src/models";
-import type { SetUIStateArgs } from "../../src/server/formTools";
 import type { LiveDeadlineSubscriber } from "../../src/features/action/SetUIState";
 
 const androidDevice: BootedDevice = {
@@ -34,13 +29,9 @@ const androidDevice: BootedDevice = {
 
 const baseArgs = {
   fields: [{ selector: { elementId: "firstName" }, value: "Grace" }],
-} as unknown as SetUIStateArgs;
+};
 
 describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", () => {
-  afterEach(() => {
-    resetSetUIStateFactory();
-  });
-
   test("passes both the frozen transportDeadlineMs snapshot and a live getter through to execute()", async () => {
     const executionStartTime = 1_000;
     const remainingMs = 10_000;
@@ -50,26 +41,28 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
 
     let capturedTransportDeadlineMs: number | undefined;
     let capturedGetLiveTransportDeadlineMs: (() => number | undefined) | undefined;
-    setSetUIStateFactory(() => ({
-      execute: async (
-        _options,
-        _progress,
-        _signal,
-        transportDeadlineMs,
-        getLiveTransportDeadlineMs,
-      ) => {
-        capturedTransportDeadlineMs = transportDeadlineMs;
-        capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (
+          _options,
+          _progress,
+          _signal,
+          transportDeadlineMs,
+          getLiveTransportDeadlineMs,
+        ) => {
+          capturedTransportDeadlineMs = transportDeadlineMs;
+          capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
 
     const argsWithInternalParams = {
       ...baseArgs,
       [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
       [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveKey,
-    } as unknown as SetUIStateArgs;
+    };
 
     await setUIStateHandler(androidDevice, argsWithInternalParams);
 
@@ -89,18 +82,20 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
 
   test("resolves no live getter when no live-deadline key is present (direct/non-daemon call)", async () => {
     let capturedGetLiveTransportDeadlineMs: (() => number | undefined) | undefined = () => 0;
-    setSetUIStateFactory(() => ({
-      execute: async (
-        _options,
-        _progress,
-        _signal,
-        _transportDeadlineMs,
-        getLiveTransportDeadlineMs,
-      ) => {
-        capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (
+          _options,
+          _progress,
+          _signal,
+          _transportDeadlineMs,
+          getLiveTransportDeadlineMs,
+        ) => {
+          capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
 
     await setUIStateHandler(androidDevice, baseArgs);
 
@@ -113,19 +108,21 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     registerLiveDeadline(liveKey, deadline);
 
     let capturedSubscriber: LiveDeadlineSubscriber | undefined;
-    setSetUIStateFactory(() => ({
-      execute: async (
-        _options,
-        _progress,
-        _signal,
-        _transportDeadlineMs,
-        _getLiveTransportDeadlineMs,
-        subscribeLiveTransportDeadline,
-      ) => {
-        capturedSubscriber = subscribeLiveTransportDeadline;
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (
+          _options,
+          _progress,
+          _signal,
+          _transportDeadlineMs,
+          _getLiveTransportDeadlineMs,
+          subscribeLiveTransportDeadline,
+        ) => {
+          capturedSubscriber = subscribeLiveTransportDeadline;
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
 
     await setUIStateHandler(
       androidDevice,
@@ -147,12 +144,14 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
 
   test("resolves no live-deadline subscriber on a direct/non-daemon call (issue #6283)", async () => {
     let capturedSubscriber: LiveDeadlineSubscriber | undefined = () => undefined;
-    setSetUIStateFactory(() => ({
-      execute: async (_o, _p, _s, _t, _g, subscribeLiveTransportDeadline) => {
-        capturedSubscriber = subscribeLiveTransportDeadline;
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (_o, _p, _s, _t, _g, subscribeLiveTransportDeadline) => {
+          capturedSubscriber = subscribeLiveTransportDeadline;
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
 
     await setUIStateHandler(androidDevice, baseArgs);
 
@@ -163,23 +162,25 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     const liveKey = "test-live-key-2";
     // Never registered -- models a call whose deadline already expired.
     let capturedGetLiveTransportDeadlineMs: (() => number | undefined) | undefined;
-    setSetUIStateFactory(() => ({
-      execute: async (
-        _options,
-        _progress,
-        _signal,
-        _transportDeadlineMs,
-        getLiveTransportDeadlineMs,
-      ) => {
-        capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (
+          _options,
+          _progress,
+          _signal,
+          _transportDeadlineMs,
+          getLiveTransportDeadlineMs,
+        ) => {
+          capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
 
     const argsWithLiveKeyOnly = {
       ...baseArgs,
       [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveKey,
-    } as unknown as SetUIStateArgs;
+    };
 
     await setUIStateHandler(androidDevice, argsWithLiveKeyOnly);
 
@@ -198,19 +199,21 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     const remainingMs = 10_000; // captured BEFORE that delay
 
     let capturedTransportDeadlineMs: number | undefined;
-    setSetUIStateFactory(() => ({
-      execute: async (_options, _progress, _signal, transportDeadlineMs) => {
-        capturedTransportDeadlineMs = transportDeadlineMs;
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (_options, _progress, _signal, transportDeadlineMs) => {
+          capturedTransportDeadlineMs = transportDeadlineMs;
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
 
     const argsWithBothParams = {
       ...baseArgs,
       [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
       [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: anchoredDeadlineMs,
-    } as unknown as SetUIStateArgs;
+    };
 
     await setUIStateHandler(androidDevice, argsWithBothParams);
 
@@ -225,18 +228,20 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     const remainingMs = 10_000;
 
     let capturedTransportDeadlineMs: number | undefined;
-    setSetUIStateFactory(() => ({
-      execute: async (_options, _progress, _signal, transportDeadlineMs) => {
-        capturedTransportDeadlineMs = transportDeadlineMs;
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (_options, _progress, _signal, transportDeadlineMs) => {
+          capturedTransportDeadlineMs = transportDeadlineMs;
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
 
     const argsWithLegacyParamsOnly = {
       ...baseArgs,
       [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
-    } as unknown as SetUIStateArgs;
+    };
 
     await setUIStateHandler(androidDevice, argsWithLegacyParamsOnly);
 

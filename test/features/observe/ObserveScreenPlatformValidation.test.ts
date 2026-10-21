@@ -48,7 +48,7 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
         screenHeight: 844,
         wakefulness: "Awake",
         packageName: "com.apple.springboard",
-      } as unknown as ObserveResult["viewHierarchy"];
+      };
       result.focusedElement = { text: "Stale iOS field" } as never;
       result.intentChooserDetected = true;
     },

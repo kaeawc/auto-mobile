@@ -1,13 +1,16 @@
+import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
+import { readToolResponse, toolJson } from "../helpers/toolResponse";
 import { NotificationPolicy } from "../../src/features/utility/NotificationPolicy";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  postNotificationHandler,
+  createPostNotificationHandler,
   postNotificationSchema,
   registerNotificationTools,
-  resetPostNotificationFactory,
-  setPostNotificationFactory,
 } from "../../src/server/notificationTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("notification tools", () => {
   beforeEach(() => {
@@ -106,13 +109,13 @@ describe("notification tools", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     // #6154: platform is optional wherever deviceId/session resolves it.
     expect(schema.required).toEqual(["title", "body"]);
     // #6154: platform now comes from the shared `platformSchema` (android, ios)
     // instead of a per-branch literal union, so the enum order flipped.
-    expect(schema.properties.platform.enum).toEqual(["android", "ios"]);
-    expect(schema.properties.appId.description).toContain(
+    expect(schema.properties?.platform?.enum).toEqual(["android", "ios"]);
+    expect(schema.properties?.appId?.description).toContain(
       "Android defaults to the live foreground app",
     );
     expect(schema.anyOf).toBeUndefined();
@@ -126,7 +129,7 @@ describe("notification tools", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     // #6154: platform is optional wherever deviceId/session resolves it.
     expect(schema.required).toEqual(["title", "body"]);
     expect(schema.if).toBeUndefined();
@@ -135,26 +138,25 @@ describe("notification tools", () => {
   });
 
   test("surfaces a postNotification warning in the message and payload (#10014)", async () => {
-    setPostNotificationFactory(() => ({
-      execute: async () => ({
-        success: true,
-        supported: true,
-        method: "sdk" as const,
-        warning: "imagePath was ignored",
+    const postNotificationHandler = createPostNotificationHandler({
+      postNotificationFactory: () => ({
+        execute: async () => ({
+          success: true,
+          supported: true,
+          method: "sdk" as const,
+          warning: "imagePath was ignored",
+        }),
       }),
-    }));
-    try {
-      const response = await postNotificationHandler(
-        { name: "Fake", deviceId: "fake", platform: "android" },
-        { title: "T", body: "B", imagePath: "./hero.png" },
-      );
-      const payload = JSON.parse(response.content[0].text);
-      expect(payload.success).toBe(true);
-      expect(payload.warning).toBe("imagePath was ignored");
-      expect(payload.message).toBe("Posted notification via sdk (warning: imagePath was ignored)");
-    } finally {
-      resetPostNotificationFactory();
-    }
+    });
+
+    const response = await postNotificationHandler(
+      { name: "Fake", deviceId: "fake", platform: "android" },
+      { title: "T", body: "B", imagePath: "./hero.png" },
+    );
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.success).toBe(true);
+    expect(payload.warning).toBe("imagePath was ignored");
+    expect(payload.message).toBe("Posted notification via sdk (warning: imagePath was ignored)");
   });
 });
 
@@ -189,7 +191,9 @@ for (const name of ["getNotificationPolicy", "setNotificationPolicy"] as const) 
           : result.error;
         expect(response).toEqual({
           content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
-          ...(success ? {} : { isError: true }),
+          structuredContent: { message, ...result },
+          success: result.success,
+          ...(success ? {} : { error: result.error, isError: true }),
         });
       } finally {
         policy.mockRestore();
@@ -224,15 +228,19 @@ test.each([
         { name: "Fake", deviceId: "fake", platform: "android" },
         { appId: result.appId, policyAccess },
       );
-      const payload = JSON.parse(response.content[0].text);
+      const payload = toolJson(response);
       expect(payload.message).toStartWith(expectedPrefix);
       expect(payload.message).toContain("not verified");
       expect(payload.message).not.toStartWith("Allowed");
       expect(payload.message).not.toStartWith("Revoked");
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
     } finally {
       policy.mockRestore();
       ToolRegistry.clearTools();
     }
   },
 );
+
+afterEach(() => {
+  mock.restore();
+});

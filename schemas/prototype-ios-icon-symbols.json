@@ -1,0 +1,5051 @@
+{
+  "minimumIOS": "17.0",
+  "placeholder": "questionmark.square",
+  "mapped": {
+    "abc": {
+      "symbol": "textformat.abc"
+    },
+    "ac_unit": {
+      "symbol": "snowflake"
+    },
+    "access_alarm": {
+      "symbol": "alarm",
+      "filled": "alarm.fill",
+      "outlined": "alarm"
+    },
+    "access_alarms": {
+      "symbol": "alarm",
+      "filled": "alarm.fill",
+      "outlined": "alarm"
+    },
+    "access_time": {
+      "symbol": "clock",
+      "filled": "clock.fill",
+      "outlined": "clock"
+    },
+    "access_time_filled": {
+      "symbol": "clock.fill",
+      "filled": "clock.fill"
+    },
+    "accessibility": {
+      "symbol": "figure.arms.open"
+    },
+    "accessibility_new": {
+      "symbol": "figure.arms.open"
+    },
+    "accessible": {
+      "symbol": "figure.roll"
+    },
+    "accessible_forward": {
+      "symbol": "figure.roll.runningpace"
+    },
+    "account_balance": {
+      "symbol": "building.columns",
+      "filled": "building.columns.fill",
+      "outlined": "building.columns"
+    },
+    "account_balance_wallet": {
+      "symbol": "wallet.pass",
+      "filled": "wallet.pass.fill",
+      "outlined": "wallet.pass"
+    },
+    "account_box": {
+      "symbol": "person.crop.square",
+      "filled": "person.crop.square.fill",
+      "outlined": "person.crop.square"
+    },
+    "account_circle": {
+      "symbol": "person.crop.circle",
+      "filled": "person.crop.circle.fill",
+      "outlined": "person.crop.circle"
+    },
+    "add": {
+      "symbol": "plus"
+    },
+    "add_box": {
+      "symbol": "plus.square.fill",
+      "filled": "plus.square.fill",
+      "outlined": "plus.square"
+    },
+    "add_circle": {
+      "symbol": "plus.circle.fill",
+      "filled": "plus.circle.fill",
+      "outlined": "plus.circle"
+    },
+    "add_circle_outline": {
+      "symbol": "plus.circle",
+      "outlined": "plus.circle"
+    },
+    "add_comment": {
+      "symbol": "plus.bubble",
+      "filled": "plus.bubble.fill",
+      "outlined": "plus.bubble"
+    },
+    "add_ic_call": {
+      "symbol": "phone.badge.plus",
+      "filled": "phone.fill.badge.plus",
+      "outlined": "phone.badge.plus"
+    },
+    "add_link": {
+      "symbol": "link.badge.plus"
+    },
+    "add_photo_alternate": {
+      "symbol": "photo.badge.plus",
+      "filled": "photo.badge.plus.fill",
+      "outlined": "photo.badge.plus"
+    },
+    "add_shopping_cart": {
+      "symbol": "cart.badge.plus",
+      "filled": "cart.fill.badge.plus",
+      "outlined": "cart.badge.plus"
+    },
+    "add_to_photos": {
+      "symbol": "rectangle.stack.badge.plus",
+      "filled": "rectangle.stack.fill.badge.plus",
+      "outlined": "rectangle.stack.badge.plus"
+    },
+    "adf_scanner": {
+      "symbol": "scanner",
+      "filled": "scanner.fill",
+      "outlined": "scanner"
+    },
+    "air": {
+      "symbol": "wind"
+    },
+    "airplanemode_active": {
+      "symbol": "airplane"
+    },
+    "airplay": {
+      "symbol": "airplayvideo"
+    },
+    "airport_shuttle": {
+      "symbol": "bus",
+      "filled": "bus.fill",
+      "outlined": "bus"
+    },
+    "alarm": {
+      "symbol": "alarm",
+      "filled": "alarm.fill",
+      "outlined": "alarm"
+    },
+    "album": {
+      "symbol": "opticaldisc",
+      "filled": "opticaldisc.fill",
+      "outlined": "opticaldisc"
+    },
+    "align_horizontal_center": {
+      "symbol": "align.horizontal.center",
+      "filled": "align.horizontal.center.fill",
+      "outlined": "align.horizontal.center"
+    },
+    "align_horizontal_left": {
+      "symbol": "align.horizontal.left",
+      "filled": "align.horizontal.left.fill",
+      "outlined": "align.horizontal.left"
+    },
+    "align_horizontal_right": {
+      "symbol": "align.horizontal.right",
+      "filled": "align.horizontal.right.fill",
+      "outlined": "align.horizontal.right"
+    },
+    "align_vertical_bottom": {
+      "symbol": "align.vertical.bottom",
+      "filled": "align.vertical.bottom.fill",
+      "outlined": "align.vertical.bottom"
+    },
+    "align_vertical_center": {
+      "symbol": "align.vertical.center",
+      "filled": "align.vertical.center.fill",
+      "outlined": "align.vertical.center"
+    },
+    "align_vertical_top": {
+      "symbol": "align.vertical.top",
+      "filled": "align.vertical.top.fill",
+      "outlined": "align.vertical.top"
+    },
+    "all_inbox": {
+      "symbol": "tray.2",
+      "filled": "tray.2.fill",
+      "outlined": "tray.2"
+    },
+    "all_inclusive": {
+      "symbol": "infinity"
+    },
+    "alt_route": {
+      "symbol": "arrow.triangle.branch"
+    },
+    "alternate_email": {
+      "symbol": "at"
+    },
+    "analytics": {
+      "symbol": "chart.bar",
+      "filled": "chart.bar.fill",
+      "outlined": "chart.bar"
+    },
+    "apartment": {
+      "symbol": "building.2",
+      "filled": "building.2.fill",
+      "outlined": "building.2"
+    },
+    "approval": {
+      "symbol": "checkmark.seal",
+      "filled": "checkmark.seal.fill",
+      "outlined": "checkmark.seal"
+    },
+    "apps": {
+      "symbol": "square.grid.3x3",
+      "filled": "square.grid.3x3.fill",
+      "outlined": "square.grid.3x3"
+    },
+    "archive": {
+      "symbol": "archivebox",
+      "filled": "archivebox.fill",
+      "outlined": "archivebox"
+    },
+    "arrow_back": {
+      "symbol": "arrow.left"
+    },
+    "arrow_back_ios": {
+      "symbol": "chevron.left"
+    },
+    "arrow_back_ios_new": {
+      "symbol": "chevron.left"
+    },
+    "arrow_circle_down": {
+      "symbol": "arrow.down.circle",
+      "filled": "arrow.down.circle.fill",
+      "outlined": "arrow.down.circle"
+    },
+    "arrow_circle_left": {
+      "symbol": "arrow.left.circle",
+      "filled": "arrow.left.circle.fill",
+      "outlined": "arrow.left.circle"
+    },
+    "arrow_circle_right": {
+      "symbol": "arrow.right.circle",
+      "filled": "arrow.right.circle.fill",
+      "outlined": "arrow.right.circle"
+    },
+    "arrow_circle_up": {
+      "symbol": "arrow.up.circle",
+      "filled": "arrow.up.circle.fill",
+      "outlined": "arrow.up.circle"
+    },
+    "arrow_downward": {
+      "symbol": "arrow.down"
+    },
+    "arrow_drop_down": {
+      "symbol": "arrowtriangle.down.fill",
+      "filled": "arrowtriangle.down.fill",
+      "outlined": "arrowtriangle.down"
+    },
+    "arrow_drop_up": {
+      "symbol": "arrowtriangle.up.fill",
+      "filled": "arrowtriangle.up.fill",
+      "outlined": "arrowtriangle.up"
+    },
+    "arrow_forward": {
+      "symbol": "arrow.right"
+    },
+    "arrow_forward_ios": {
+      "symbol": "chevron.right"
+    },
+    "arrow_left": {
+      "symbol": "arrowtriangle.left.fill",
+      "filled": "arrowtriangle.left.fill",
+      "outlined": "arrowtriangle.left"
+    },
+    "arrow_outward": {
+      "symbol": "arrow.up.right"
+    },
+    "arrow_right": {
+      "symbol": "arrowtriangle.right.fill",
+      "filled": "arrowtriangle.right.fill",
+      "outlined": "arrowtriangle.right"
+    },
+    "arrow_right_alt": {
+      "symbol": "arrow.right"
+    },
+    "arrow_upward": {
+      "symbol": "arrow.up"
+    },
+    "article": {
+      "symbol": "doc.text",
+      "filled": "doc.text.fill",
+      "outlined": "doc.text"
+    },
+    "aspect_ratio": {
+      "symbol": "aspectratio",
+      "filled": "aspectratio.fill",
+      "outlined": "aspectratio"
+    },
+    "assessment": {
+      "symbol": "chart.bar",
+      "filled": "chart.bar.fill",
+      "outlined": "chart.bar"
+    },
+    "assignment": {
+      "symbol": "clipboard",
+      "filled": "clipboard.fill",
+      "outlined": "clipboard"
+    },
+    "assignment_ind": {
+      "symbol": "person.crop.rectangle",
+      "filled": "person.crop.rectangle.fill",
+      "outlined": "person.crop.rectangle"
+    },
+    "assistant_photo": {
+      "symbol": "flag",
+      "filled": "flag.fill",
+      "outlined": "flag"
+    },
+    "attach_file": {
+      "symbol": "paperclip"
+    },
+    "attach_money": {
+      "symbol": "dollarsign"
+    },
+    "attachment": {
+      "symbol": "paperclip"
+    },
+    "audiotrack": {
+      "symbol": "music.note"
+    },
+    "auto_awesome": {
+      "symbol": "sparkles"
+    },
+    "auto_awesome_mosaic": {
+      "symbol": "square.grid.2x2",
+      "filled": "square.grid.2x2.fill",
+      "outlined": "square.grid.2x2"
+    },
+    "auto_fix_high": {
+      "symbol": "wand.and.stars"
+    },
+    "auto_stories": {
+      "symbol": "book",
+      "filled": "book.fill",
+      "outlined": "book"
+    },
+    "autorenew": {
+      "symbol": "arrow.triangle.2.circlepath"
+    },
+    "av_timer": {
+      "symbol": "timer"
+    },
+    "backpack": {
+      "symbol": "backpack",
+      "filled": "backpack.fill",
+      "outlined": "backpack"
+    },
+    "backspace": {
+      "symbol": "delete.left",
+      "filled": "delete.left.fill",
+      "outlined": "delete.left"
+    },
+    "badge": {
+      "symbol": "person.text.rectangle",
+      "filled": "person.text.rectangle.fill",
+      "outlined": "person.text.rectangle"
+    },
+    "ballot": {
+      "symbol": "checklist"
+    },
+    "bar_chart": {
+      "symbol": "chart.bar",
+      "filled": "chart.bar.fill",
+      "outlined": "chart.bar"
+    },
+    "bathroom": {
+      "symbol": "bathtub",
+      "filled": "bathtub.fill",
+      "outlined": "bathtub"
+    },
+    "bathtub": {
+      "symbol": "bathtub",
+      "filled": "bathtub.fill",
+      "outlined": "bathtub"
+    },
+    "battery_0_bar": {
+      "symbol": "battery.0percent"
+    },
+    "battery_3_bar": {
+      "symbol": "battery.50percent"
+    },
+    "battery_charging_full": {
+      "symbol": "battery.100percent.bolt"
+    },
+    "battery_full": {
+      "symbol": "battery.100percent"
+    },
+    "battery_std": {
+      "symbol": "battery.100percent"
+    },
+    "beach_access": {
+      "symbol": "beach.umbrella",
+      "filled": "beach.umbrella.fill",
+      "outlined": "beach.umbrella"
+    },
+    "bed": {
+      "symbol": "bed.double",
+      "filled": "bed.double.fill",
+      "outlined": "bed.double"
+    },
+    "bedtime": {
+      "symbol": "moon",
+      "filled": "moon.fill",
+      "outlined": "moon"
+    },
+    "blinds": {
+      "symbol": "blinds.horizontal.open"
+    },
+    "blinds_closed": {
+      "symbol": "blinds.horizontal.closed"
+    },
+    "block": {
+      "symbol": "nosign"
+    },
+    "bolt": {
+      "symbol": "bolt",
+      "filled": "bolt.fill",
+      "outlined": "bolt"
+    },
+    "book": {
+      "symbol": "book",
+      "filled": "book.fill",
+      "outlined": "book"
+    },
+    "bookmark": {
+      "symbol": "bookmark",
+      "filled": "bookmark.fill",
+      "outlined": "bookmark"
+    },
+    "bookmark_border": {
+      "symbol": "bookmark",
+      "outlined": "bookmark"
+    },
+    "bookmark_remove": {
+      "symbol": "bookmark.slash",
+      "filled": "bookmark.slash.fill",
+      "outlined": "bookmark.slash"
+    },
+    "border_all": {
+      "symbol": "square.grid.3x3",
+      "filled": "square.grid.3x3.fill",
+      "outlined": "square.grid.3x3"
+    },
+    "border_clear": {
+      "symbol": "square.dashed"
+    },
+    "border_outer": {
+      "symbol": "square",
+      "filled": "square.fill",
+      "outlined": "square"
+    },
+    "brightness_1": {
+      "symbol": "circle.fill",
+      "filled": "circle.fill",
+      "outlined": "circle"
+    },
+    "brightness_3": {
+      "symbol": "moon",
+      "filled": "moon.fill",
+      "outlined": "moon"
+    },
+    "brightness_5": {
+      "symbol": "sun.min",
+      "filled": "sun.min.fill",
+      "outlined": "sun.min"
+    },
+    "brightness_7": {
+      "symbol": "sun.max",
+      "filled": "sun.max.fill",
+      "outlined": "sun.max"
+    },
+    "brightness_high": {
+      "symbol": "sun.max",
+      "filled": "sun.max.fill",
+      "outlined": "sun.max"
+    },
+    "brightness_low": {
+      "symbol": "sun.min",
+      "filled": "sun.min.fill",
+      "outlined": "sun.min"
+    },
+    "browser_not_supported": {
+      "symbol": "rectangle.slash",
+      "filled": "rectangle.slash.fill",
+      "outlined": "rectangle.slash"
+    },
+    "brush": {
+      "symbol": "paintbrush",
+      "filled": "paintbrush.fill",
+      "outlined": "paintbrush"
+    },
+    "build": {
+      "symbol": "wrench.and.screwdriver",
+      "filled": "wrench.and.screwdriver.fill",
+      "outlined": "wrench.and.screwdriver"
+    },
+    "burst_mode": {
+      "symbol": "square.stack",
+      "filled": "square.stack.fill",
+      "outlined": "square.stack"
+    },
+    "business": {
+      "symbol": "building.2",
+      "filled": "building.2.fill",
+      "outlined": "building.2"
+    },
+    "business_center": {
+      "symbol": "briefcase",
+      "filled": "briefcase.fill",
+      "outlined": "briefcase"
+    },
+    "cable": {
+      "symbol": "cable.connector"
+    },
+    "cached": {
+      "symbol": "arrow.triangle.2.circlepath"
+    },
+    "cake": {
+      "symbol": "birthday.cake",
+      "filled": "birthday.cake.fill",
+      "outlined": "birthday.cake"
+    },
+    "calendar_month": {
+      "symbol": "calendar"
+    },
+    "calendar_today": {
+      "symbol": "calendar"
+    },
+    "calendar_view_day": {
+      "symbol": "calendar.day.timeline.left"
+    },
+    "call": {
+      "symbol": "phone",
+      "filled": "phone.fill",
+      "outlined": "phone"
+    },
+    "call_end": {
+      "symbol": "phone.down",
+      "filled": "phone.down.fill",
+      "outlined": "phone.down"
+    },
+    "call_made": {
+      "symbol": "phone.arrow.up.right",
+      "filled": "phone.arrow.up.right.fill",
+      "outlined": "phone.arrow.up.right"
+    },
+    "call_merge": {
+      "symbol": "arrow.merge"
+    },
+    "call_received": {
+      "symbol": "phone.arrow.down.left",
+      "filled": "phone.arrow.down.left.fill",
+      "outlined": "phone.arrow.down.left"
+    },
+    "call_split": {
+      "symbol": "arrow.branch"
+    },
+    "camera_alt": {
+      "symbol": "camera",
+      "filled": "camera.fill",
+      "outlined": "camera"
+    },
+    "camera_roll": {
+      "symbol": "photo.on.rectangle"
+    },
+    "cameraswitch": {
+      "symbol": "arrow.triangle.2.circlepath.camera",
+      "filled": "arrow.triangle.2.circlepath.camera.fill",
+      "outlined": "arrow.triangle.2.circlepath.camera"
+    },
+    "campaign": {
+      "symbol": "megaphone",
+      "filled": "megaphone.fill",
+      "outlined": "megaphone"
+    },
+    "cancel": {
+      "symbol": "xmark.circle",
+      "filled": "xmark.circle.fill",
+      "outlined": "xmark.circle"
+    },
+    "cancel_presentation": {
+      "symbol": "rectangle.badge.xmark",
+      "filled": "rectangle.fill.badge.xmark",
+      "outlined": "rectangle.badge.xmark"
+    },
+    "card_giftcard": {
+      "symbol": "giftcard",
+      "filled": "giftcard.fill",
+      "outlined": "giftcard"
+    },
+    "card_membership": {
+      "symbol": "creditcard",
+      "filled": "creditcard.fill",
+      "outlined": "creditcard"
+    },
+    "card_travel": {
+      "symbol": "suitcase",
+      "filled": "suitcase.fill",
+      "outlined": "suitcase"
+    },
+    "casino": {
+      "symbol": "dice",
+      "filled": "dice.fill",
+      "outlined": "dice"
+    },
+    "celebration": {
+      "symbol": "party.popper",
+      "filled": "party.popper.fill",
+      "outlined": "party.popper"
+    },
+    "cell_tower": {
+      "symbol": "antenna.radiowaves.left.and.right"
+    },
+    "chair": {
+      "symbol": "chair",
+      "filled": "chair.fill",
+      "outlined": "chair"
+    },
+    "chair_alt": {
+      "symbol": "chair",
+      "filled": "chair.fill",
+      "outlined": "chair"
+    },
+    "change_circle": {
+      "symbol": "arrow.triangle.2.circlepath.circle",
+      "filled": "arrow.triangle.2.circlepath.circle.fill",
+      "outlined": "arrow.triangle.2.circlepath.circle"
+    },
+    "change_history": {
+      "symbol": "triangle",
+      "filled": "triangle.fill",
+      "outlined": "triangle"
+    },
+    "chat_bubble": {
+      "symbol": "bubble.left",
+      "filled": "bubble.left.fill",
+      "outlined": "bubble.left"
+    },
+    "chat_bubble_outline": {
+      "symbol": "bubble.left",
+      "outlined": "bubble.left"
+    },
+    "check": {
+      "symbol": "checkmark"
+    },
+    "check_box": {
+      "symbol": "checkmark.square.fill",
+      "filled": "checkmark.square.fill",
+      "outlined": "checkmark.square"
+    },
+    "check_box_outline_blank": {
+      "symbol": "square",
+      "outlined": "square"
+    },
+    "check_circle": {
+      "symbol": "checkmark.circle",
+      "filled": "checkmark.circle.fill",
+      "outlined": "checkmark.circle"
+    },
+    "check_circle_outline": {
+      "symbol": "checkmark.circle",
+      "outlined": "checkmark.circle"
+    },
+    "checklist": {
+      "symbol": "checklist"
+    },
+    "chevron_left": {
+      "symbol": "chevron.left"
+    },
+    "chevron_right": {
+      "symbol": "chevron.right"
+    },
+    "child_friendly": {
+      "symbol": "stroller",
+      "filled": "stroller.fill",
+      "outlined": "stroller"
+    },
+    "circle": {
+      "symbol": "circle.fill",
+      "filled": "circle.fill",
+      "outlined": "circle"
+    },
+    "class": {
+      "symbol": "book.closed",
+      "filled": "book.closed.fill",
+      "outlined": "book.closed"
+    },
+    "clean_hands": {
+      "symbol": "hands.sparkles",
+      "filled": "hands.sparkles.fill",
+      "outlined": "hands.sparkles"
+    },
+    "clear": {
+      "symbol": "xmark"
+    },
+    "close": {
+      "symbol": "xmark"
+    },
+    "close_fullscreen": {
+      "symbol": "arrow.down.right.and.arrow.up.left"
+    },
+    "closed_caption": {
+      "symbol": "captions.bubble",
+      "filled": "captions.bubble.fill",
+      "outlined": "captions.bubble"
+    },
+    "cloud": {
+      "symbol": "cloud",
+      "filled": "cloud.fill",
+      "outlined": "cloud"
+    },
+    "cloud_circle": {
+      "symbol": "cloud.circle",
+      "filled": "cloud.circle.fill",
+      "outlined": "cloud.circle"
+    },
+    "co_2": {
+      "symbol": "carbon.dioxide.cloud",
+      "filled": "carbon.dioxide.cloud.fill",
+      "outlined": "carbon.dioxide.cloud"
+    },
+    "code": {
+      "symbol": "chevron.left.forwardslash.chevron.right"
+    },
+    "coffee": {
+      "symbol": "cup.and.saucer",
+      "filled": "cup.and.saucer.fill",
+      "outlined": "cup.and.saucer"
+    },
+    "collections": {
+      "symbol": "photo.on.rectangle"
+    },
+    "color_lens": {
+      "symbol": "paintpalette",
+      "filled": "paintpalette.fill",
+      "outlined": "paintpalette"
+    },
+    "colorize": {
+      "symbol": "eyedropper"
+    },
+    "comment": {
+      "symbol": "bubble.left",
+      "filled": "bubble.left.fill",
+      "outlined": "bubble.left"
+    },
+    "compare_arrows": {
+      "symbol": "arrow.left.arrow.right"
+    },
+    "compost": {
+      "symbol": "leaf.arrow.triangle.circlepath"
+    },
+    "computer": {
+      "symbol": "desktopcomputer"
+    },
+    "confirmation_number": {
+      "symbol": "ticket",
+      "filled": "ticket.fill",
+      "outlined": "ticket"
+    },
+    "contact_page": {
+      "symbol": "person.text.rectangle",
+      "filled": "person.text.rectangle.fill",
+      "outlined": "person.text.rectangle"
+    },
+    "contact_support": {
+      "symbol": "questionmark.bubble",
+      "filled": "questionmark.bubble.fill",
+      "outlined": "questionmark.bubble"
+    },
+    "contacts": {
+      "symbol": "person.crop.rectangle",
+      "filled": "person.crop.rectangle.fill",
+      "outlined": "person.crop.rectangle"
+    },
+    "content_copy": {
+      "symbol": "doc.on.doc",
+      "filled": "doc.on.doc.fill",
+      "outlined": "doc.on.doc"
+    },
+    "content_cut": {
+      "symbol": "scissors"
+    },
+    "content_paste": {
+      "symbol": "clipboard",
+      "filled": "clipboard.fill",
+      "outlined": "clipboard"
+    },
+    "contrast": {
+      "symbol": "circle.lefthalf.filled"
+    },
+    "control_point": {
+      "symbol": "plus.circle",
+      "filled": "plus.circle.fill",
+      "outlined": "plus.circle"
+    },
+    "copy_all": {
+      "symbol": "doc.on.doc",
+      "filled": "doc.on.doc.fill",
+      "outlined": "doc.on.doc"
+    },
+    "copyright": {
+      "symbol": "c.circle",
+      "filled": "c.circle.fill",
+      "outlined": "c.circle"
+    },
+    "coronavirus": {
+      "symbol": "microbe",
+      "filled": "microbe.fill",
+      "outlined": "microbe"
+    },
+    "corporate_fare": {
+      "symbol": "building.2",
+      "filled": "building.2.fill",
+      "outlined": "building.2"
+    },
+    "create": {
+      "symbol": "pencil"
+    },
+    "create_new_folder": {
+      "symbol": "folder.badge.plus",
+      "filled": "folder.fill.badge.plus",
+      "outlined": "folder.badge.plus"
+    },
+    "credit_card": {
+      "symbol": "creditcard",
+      "filled": "creditcard.fill",
+      "outlined": "creditcard"
+    },
+    "crop": {
+      "symbol": "crop"
+    },
+    "crop_free": {
+      "symbol": "viewfinder"
+    },
+    "crop_rotate": {
+      "symbol": "crop.rotate"
+    },
+    "currency_franc": {
+      "symbol": "francsign"
+    },
+    "currency_lira": {
+      "symbol": "turkishlirasign"
+    },
+    "currency_pound": {
+      "symbol": "sterlingsign"
+    },
+    "currency_ruble": {
+      "symbol": "rublesign"
+    },
+    "currency_rupee": {
+      "symbol": "indianrupeesign"
+    },
+    "currency_yen": {
+      "symbol": "yensign"
+    },
+    "currency_yuan": {
+      "symbol": "yensign"
+    },
+    "curtains": {
+      "symbol": "curtains.open"
+    },
+    "curtains_closed": {
+      "symbol": "curtains.closed"
+    },
+    "cyclone": {
+      "symbol": "hurricane"
+    },
+    "dangerous": {
+      "symbol": "xmark.octagon",
+      "filled": "xmark.octagon.fill",
+      "outlined": "xmark.octagon"
+    },
+    "dark_mode": {
+      "symbol": "moon",
+      "filled": "moon.fill",
+      "outlined": "moon"
+    },
+    "dashboard": {
+      "symbol": "square.grid.2x2",
+      "filled": "square.grid.2x2.fill",
+      "outlined": "square.grid.2x2"
+    },
+    "data_object": {
+      "symbol": "curlybraces"
+    },
+    "dataset": {
+      "symbol": "tablecells",
+      "filled": "tablecells.fill",
+      "outlined": "tablecells"
+    },
+    "date_range": {
+      "symbol": "calendar"
+    },
+    "dehaze": {
+      "symbol": "line.3.horizontal"
+    },
+    "delete": {
+      "symbol": "trash",
+      "filled": "trash.fill",
+      "outlined": "trash"
+    },
+    "delete_outline": {
+      "symbol": "trash",
+      "outlined": "trash"
+    },
+    "description": {
+      "symbol": "doc.text",
+      "filled": "doc.text.fill",
+      "outlined": "doc.text"
+    },
+    "design_services": {
+      "symbol": "pencil.and.ruler",
+      "filled": "pencil.and.ruler.fill",
+      "outlined": "pencil.and.ruler"
+    },
+    "desktop_mac": {
+      "symbol": "desktopcomputer"
+    },
+    "desktop_windows": {
+      "symbol": "desktopcomputer"
+    },
+    "device_thermostat": {
+      "symbol": "thermometer.medium"
+    },
+    "dialpad": {
+      "symbol": "circle.grid.3x3",
+      "filled": "circle.grid.3x3.fill",
+      "outlined": "circle.grid.3x3"
+    },
+    "diamond": {
+      "symbol": "diamond",
+      "filled": "diamond.fill",
+      "outlined": "diamond"
+    },
+    "dining": {
+      "symbol": "fork.knife"
+    },
+    "dinner_dining": {
+      "symbol": "fork.knife"
+    },
+    "directions": {
+      "symbol": "arrow.triangle.turn.up.right.diamond",
+      "filled": "arrow.triangle.turn.up.right.diamond.fill",
+      "outlined": "arrow.triangle.turn.up.right.diamond"
+    },
+    "directions_bike": {
+      "symbol": "bicycle"
+    },
+    "directions_boat": {
+      "symbol": "ferry",
+      "filled": "ferry.fill",
+      "outlined": "ferry"
+    },
+    "directions_boat_filled": {
+      "symbol": "ferry.fill",
+      "filled": "ferry.fill"
+    },
+    "directions_bus": {
+      "symbol": "bus",
+      "filled": "bus.fill",
+      "outlined": "bus"
+    },
+    "directions_bus_filled": {
+      "symbol": "bus.fill",
+      "filled": "bus.fill"
+    },
+    "directions_car": {
+      "symbol": "car",
+      "filled": "car.fill",
+      "outlined": "car"
+    },
+    "directions_car_filled": {
+      "symbol": "car.fill",
+      "filled": "car.fill"
+    },
+    "directions_railway": {
+      "symbol": "tram",
+      "filled": "tram.fill",
+      "outlined": "tram"
+    },
+    "directions_railway_filled": {
+      "symbol": "tram.fill",
+      "filled": "tram.fill"
+    },
+    "directions_run": {
+      "symbol": "figure.run"
+    },
+    "directions_subway": {
+      "symbol": "tram",
+      "filled": "tram.fill",
+      "outlined": "tram"
+    },
+    "directions_subway_filled": {
+      "symbol": "tram.fill",
+      "filled": "tram.fill"
+    },
+    "directions_transit": {
+      "symbol": "tram",
+      "filled": "tram.fill",
+      "outlined": "tram"
+    },
+    "directions_transit_filled": {
+      "symbol": "tram.fill",
+      "filled": "tram.fill"
+    },
+    "directions_walk": {
+      "symbol": "figure.walk"
+    },
+    "disabled_by_default": {
+      "symbol": "xmark.square",
+      "filled": "xmark.square.fill",
+      "outlined": "xmark.square"
+    },
+    "discount": {
+      "symbol": "tag",
+      "filled": "tag.fill",
+      "outlined": "tag"
+    },
+    "dns": {
+      "symbol": "server.rack"
+    },
+    "do_disturb": {
+      "symbol": "minus.circle",
+      "filled": "minus.circle.fill",
+      "outlined": "minus.circle"
+    },
+    "do_disturb_on": {
+      "symbol": "minus.circle",
+      "filled": "minus.circle.fill",
+      "outlined": "minus.circle"
+    },
+    "do_not_disturb": {
+      "symbol": "minus.circle",
+      "filled": "minus.circle.fill",
+      "outlined": "minus.circle"
+    },
+    "do_not_disturb_alt": {
+      "symbol": "nosign"
+    },
+    "do_not_disturb_on": {
+      "symbol": "minus.circle",
+      "filled": "minus.circle.fill",
+      "outlined": "minus.circle"
+    },
+    "document_scanner": {
+      "symbol": "doc.viewfinder",
+      "filled": "doc.viewfinder.fill",
+      "outlined": "doc.viewfinder"
+    },
+    "domain": {
+      "symbol": "building.2",
+      "filled": "building.2.fill",
+      "outlined": "building.2"
+    },
+    "done": {
+      "symbol": "checkmark.circle",
+      "filled": "checkmark.circle.fill",
+      "outlined": "checkmark.circle"
+    },
+    "done_outline": {
+      "symbol": "checkmark"
+    },
+    "door_front": {
+      "symbol": "door.left.hand.closed"
+    },
+    "door_sliding": {
+      "symbol": "door.sliding.left.hand.closed"
+    },
+    "double_arrow": {
+      "symbol": "chevron.right.2"
+    },
+    "downhill_skiing": {
+      "symbol": "figure.skiing.downhill"
+    },
+    "download": {
+      "symbol": "arrow.down.to.line"
+    },
+    "download_for_offline": {
+      "symbol": "arrow.down.circle",
+      "filled": "arrow.down.circle.fill",
+      "outlined": "arrow.down.circle"
+    },
+    "downloading": {
+      "symbol": "arrow.down.circle.dotted"
+    },
+    "drafts": {
+      "symbol": "envelope.open",
+      "filled": "envelope.open.fill",
+      "outlined": "envelope.open"
+    },
+    "drag_handle": {
+      "symbol": "equal"
+    },
+    "draw": {
+      "symbol": "pencil.and.outline"
+    },
+    "drive_eta": {
+      "symbol": "car",
+      "filled": "car.fill",
+      "outlined": "car"
+    },
+    "drive_file_rename_outline": {
+      "symbol": "pencil"
+    },
+    "dry_cleaning": {
+      "symbol": "hanger"
+    },
+    "earbuds": {
+      "symbol": "earbuds"
+    },
+    "east": {
+      "symbol": "arrow.right"
+    },
+    "eco": {
+      "symbol": "leaf",
+      "filled": "leaf.fill",
+      "outlined": "leaf"
+    },
+    "edit": {
+      "symbol": "pencil"
+    },
+    "edit_note": {
+      "symbol": "square.and.pencil"
+    },
+    "edit_off": {
+      "symbol": "pencil.slash"
+    },
+    "eject": {
+      "symbol": "eject",
+      "filled": "eject.fill",
+      "outlined": "eject"
+    },
+    "electric_bolt": {
+      "symbol": "bolt",
+      "filled": "bolt.fill",
+      "outlined": "bolt"
+    },
+    "electric_scooter": {
+      "symbol": "scooter"
+    },
+    "electrical_services": {
+      "symbol": "powerplug",
+      "filled": "powerplug.fill",
+      "outlined": "powerplug"
+    },
+    "email": {
+      "symbol": "envelope",
+      "filled": "envelope.fill",
+      "outlined": "envelope"
+    },
+    "emergency": {
+      "symbol": "cross",
+      "filled": "cross.fill",
+      "outlined": "cross"
+    },
+    "emoji_emotions": {
+      "symbol": "face.smiling",
+      "filled": "face.smiling.fill",
+      "outlined": "face.smiling"
+    },
+    "emoji_events": {
+      "symbol": "trophy",
+      "filled": "trophy.fill",
+      "outlined": "trophy"
+    },
+    "emoji_flags": {
+      "symbol": "flag",
+      "filled": "flag.fill",
+      "outlined": "flag"
+    },
+    "emoji_food_beverage": {
+      "symbol": "cup.and.saucer",
+      "filled": "cup.and.saucer.fill",
+      "outlined": "cup.and.saucer"
+    },
+    "emoji_objects": {
+      "symbol": "lightbulb",
+      "filled": "lightbulb.fill",
+      "outlined": "lightbulb"
+    },
+    "emoji_people": {
+      "symbol": "figure.wave"
+    },
+    "emoji_transportation": {
+      "symbol": "car",
+      "filled": "car.fill",
+      "outlined": "car"
+    },
+    "equalizer": {
+      "symbol": "slider.vertical.3"
+    },
+    "error": {
+      "symbol": "exclamationmark.circle",
+      "filled": "exclamationmark.circle.fill",
+      "outlined": "exclamationmark.circle"
+    },
+    "error_outline": {
+      "symbol": "exclamationmark.circle",
+      "outlined": "exclamationmark.circle"
+    },
+    "euro": {
+      "symbol": "eurosign"
+    },
+    "euro_symbol": {
+      "symbol": "eurosign"
+    },
+    "ev_station": {
+      "symbol": "ev.charger",
+      "filled": "ev.charger.fill",
+      "outlined": "ev.charger"
+    },
+    "event": {
+      "symbol": "calendar"
+    },
+    "event_available": {
+      "symbol": "calendar.badge.checkmark"
+    },
+    "event_busy": {
+      "symbol": "calendar.badge.minus"
+    },
+    "event_seat": {
+      "symbol": "chair",
+      "filled": "chair.fill",
+      "outlined": "chair"
+    },
+    "exit_to_app": {
+      "symbol": "rectangle.portrait.and.arrow.right",
+      "filled": "rectangle.portrait.and.arrow.right.fill",
+      "outlined": "rectangle.portrait.and.arrow.right"
+    },
+    "expand": {
+      "symbol": "arrow.up.and.down"
+    },
+    "expand_circle_down": {
+      "symbol": "chevron.down.circle",
+      "filled": "chevron.down.circle.fill",
+      "outlined": "chevron.down.circle"
+    },
+    "expand_less": {
+      "symbol": "chevron.up"
+    },
+    "expand_more": {
+      "symbol": "chevron.down"
+    },
+    "exposure": {
+      "symbol": "plusminus"
+    },
+    "extension": {
+      "symbol": "puzzlepiece.extension",
+      "filled": "puzzlepiece.extension.fill",
+      "outlined": "puzzlepiece.extension"
+    },
+    "family_restroom": {
+      "symbol": "figure.2.and.child.holdinghands"
+    },
+    "fast_forward": {
+      "symbol": "forward",
+      "filled": "forward.fill",
+      "outlined": "forward"
+    },
+    "fast_rewind": {
+      "symbol": "backward",
+      "filled": "backward.fill",
+      "outlined": "backward"
+    },
+    "fastfood": {
+      "symbol": "takeoutbag.and.cup.and.straw",
+      "filled": "takeoutbag.and.cup.and.straw.fill",
+      "outlined": "takeoutbag.and.cup.and.straw"
+    },
+    "favorite": {
+      "symbol": "heart",
+      "filled": "heart.fill",
+      "outlined": "heart"
+    },
+    "favorite_border": {
+      "symbol": "heart",
+      "outlined": "heart"
+    },
+    "fax": {
+      "symbol": "faxmachine",
+      "filled": "faxmachine.fill",
+      "outlined": "faxmachine"
+    },
+    "featured_play_list": {
+      "symbol": "list.bullet.rectangle",
+      "filled": "list.bullet.rectangle.fill",
+      "outlined": "list.bullet.rectangle"
+    },
+    "feed": {
+      "symbol": "newspaper",
+      "filled": "newspaper.fill",
+      "outlined": "newspaper"
+    },
+    "feedback": {
+      "symbol": "exclamationmark.bubble",
+      "filled": "exclamationmark.bubble.fill",
+      "outlined": "exclamationmark.bubble"
+    },
+    "festival": {
+      "symbol": "tent",
+      "filled": "tent.fill",
+      "outlined": "tent"
+    },
+    "fiber_manual_record": {
+      "symbol": "circle.fill",
+      "filled": "circle.fill",
+      "outlined": "circle"
+    },
+    "file_copy": {
+      "symbol": "doc.on.doc",
+      "filled": "doc.on.doc.fill",
+      "outlined": "doc.on.doc"
+    },
+    "file_download": {
+      "symbol": "arrow.down.to.line"
+    },
+    "file_upload": {
+      "symbol": "arrow.up.to.line"
+    },
+    "filter_alt": {
+      "symbol": "line.3.horizontal.decrease"
+    },
+    "filter_center_focus": {
+      "symbol": "viewfinder"
+    },
+    "filter_list": {
+      "symbol": "line.3.horizontal.decrease"
+    },
+    "filter_none": {
+      "symbol": "square.on.square",
+      "filled": "square.fill.on.square",
+      "outlined": "square.on.square"
+    },
+    "find_in_page": {
+      "symbol": "doc.text.magnifyingglass"
+    },
+    "fireplace": {
+      "symbol": "fireplace",
+      "filled": "fireplace.fill",
+      "outlined": "fireplace"
+    },
+    "first_page": {
+      "symbol": "backward.end",
+      "filled": "backward.end.fill",
+      "outlined": "backward.end"
+    },
+    "fitness_center": {
+      "symbol": "dumbbell",
+      "filled": "dumbbell.fill",
+      "outlined": "dumbbell"
+    },
+    "flag": {
+      "symbol": "flag",
+      "filled": "flag.fill",
+      "outlined": "flag"
+    },
+    "flag_circle": {
+      "symbol": "flag.circle",
+      "filled": "flag.circle.fill",
+      "outlined": "flag.circle"
+    },
+    "flash_auto": {
+      "symbol": "bolt.badge.a",
+      "filled": "bolt.badge.a.fill",
+      "outlined": "bolt.badge.a"
+    },
+    "flash_off": {
+      "symbol": "bolt.slash",
+      "filled": "bolt.slash.fill",
+      "outlined": "bolt.slash"
+    },
+    "flash_on": {
+      "symbol": "bolt",
+      "filled": "bolt.fill",
+      "outlined": "bolt"
+    },
+    "flashlight_off": {
+      "symbol": "flashlight.off.fill"
+    },
+    "flashlight_on": {
+      "symbol": "flashlight.on.fill"
+    },
+    "flatware": {
+      "symbol": "fork.knife"
+    },
+    "flight": {
+      "symbol": "airplane"
+    },
+    "flight_land": {
+      "symbol": "airplane.arrival"
+    },
+    "flight_takeoff": {
+      "symbol": "airplane.departure"
+    },
+    "flip": {
+      "symbol": "arrow.left.and.right.righttriangle.left.righttriangle.right",
+      "filled": "arrow.left.and.right.righttriangle.left.righttriangle.right.fill",
+      "outlined": "arrow.left.and.right.righttriangle.left.righttriangle.right"
+    },
+    "flip_camera_android": {
+      "symbol": "arrow.triangle.2.circlepath.camera",
+      "filled": "arrow.triangle.2.circlepath.camera.fill",
+      "outlined": "arrow.triangle.2.circlepath.camera"
+    },
+    "flip_camera_ios": {
+      "symbol": "arrow.triangle.2.circlepath.camera",
+      "filled": "arrow.triangle.2.circlepath.camera.fill",
+      "outlined": "arrow.triangle.2.circlepath.camera"
+    },
+    "flourescent": {
+      "symbol": "light.cylindrical.ceiling",
+      "filled": "light.cylindrical.ceiling.fill",
+      "outlined": "light.cylindrical.ceiling"
+    },
+    "fluorescent": {
+      "symbol": "light.cylindrical.ceiling",
+      "filled": "light.cylindrical.ceiling.fill",
+      "outlined": "light.cylindrical.ceiling"
+    },
+    "fmd_good": {
+      "symbol": "mappin.and.ellipse"
+    },
+    "folder": {
+      "symbol": "folder",
+      "filled": "folder.fill",
+      "outlined": "folder"
+    },
+    "folder_delete": {
+      "symbol": "folder.badge.minus",
+      "filled": "folder.fill.badge.minus",
+      "outlined": "folder.badge.minus"
+    },
+    "folder_shared": {
+      "symbol": "folder.badge.person.crop",
+      "filled": "folder.fill.badge.person.crop",
+      "outlined": "folder.badge.person.crop"
+    },
+    "format_align_center": {
+      "symbol": "text.aligncenter"
+    },
+    "format_align_justify": {
+      "symbol": "text.justify"
+    },
+    "format_align_left": {
+      "symbol": "text.alignleft"
+    },
+    "format_align_right": {
+      "symbol": "text.alignright"
+    },
+    "format_bold": {
+      "symbol": "bold"
+    },
+    "format_indent_decrease": {
+      "symbol": "decrease.indent"
+    },
+    "format_indent_increase": {
+      "symbol": "increase.indent"
+    },
+    "format_italic": {
+      "symbol": "italic"
+    },
+    "format_list_bulleted": {
+      "symbol": "list.bullet"
+    },
+    "format_list_numbered": {
+      "symbol": "list.number"
+    },
+    "format_quote": {
+      "symbol": "quote.opening"
+    },
+    "format_size": {
+      "symbol": "textformat.size"
+    },
+    "format_strikethrough": {
+      "symbol": "strikethrough"
+    },
+    "format_underlined": {
+      "symbol": "underline"
+    },
+    "forum": {
+      "symbol": "bubble.left.and.bubble.right",
+      "filled": "bubble.left.and.bubble.right.fill",
+      "outlined": "bubble.left.and.bubble.right"
+    },
+    "forward": {
+      "symbol": "arrowshape.turn.up.right",
+      "filled": "arrowshape.turn.up.right.fill",
+      "outlined": "arrowshape.turn.up.right"
+    },
+    "forward_10": {
+      "symbol": "goforward.10"
+    },
+    "forward_30": {
+      "symbol": "goforward.30"
+    },
+    "forward_5": {
+      "symbol": "goforward.5"
+    },
+    "forward_to_inbox": {
+      "symbol": "envelope.arrow.triangle.branch",
+      "filled": "envelope.arrow.triangle.branch.fill",
+      "outlined": "envelope.arrow.triangle.branch"
+    },
+    "front_hand": {
+      "symbol": "hand.raised",
+      "filled": "hand.raised.fill",
+      "outlined": "hand.raised"
+    },
+    "fullscreen": {
+      "symbol": "arrow.up.left.and.arrow.down.right"
+    },
+    "fullscreen_exit": {
+      "symbol": "arrow.down.right.and.arrow.up.left"
+    },
+    "functions": {
+      "symbol": "function"
+    },
+    "gamepad": {
+      "symbol": "gamecontroller",
+      "filled": "gamecontroller.fill",
+      "outlined": "gamecontroller"
+    },
+    "games": {
+      "symbol": "gamecontroller",
+      "filled": "gamecontroller.fill",
+      "outlined": "gamecontroller"
+    },
+    "garage": {
+      "symbol": "door.garage.closed"
+    },
+    "get_app": {
+      "symbol": "arrow.down.to.line"
+    },
+    "gpp_bad": {
+      "symbol": "xmark.shield",
+      "filled": "xmark.shield.fill",
+      "outlined": "xmark.shield"
+    },
+    "gpp_good": {
+      "symbol": "checkmark.shield",
+      "filled": "checkmark.shield.fill",
+      "outlined": "checkmark.shield"
+    },
+    "gpp_maybe": {
+      "symbol": "exclamationmark.shield",
+      "filled": "exclamationmark.shield.fill",
+      "outlined": "exclamationmark.shield"
+    },
+    "gps_fixed": {
+      "symbol": "scope"
+    },
+    "gps_not_fixed": {
+      "symbol": "location.circle",
+      "filled": "location.circle.fill",
+      "outlined": "location.circle"
+    },
+    "gps_off": {
+      "symbol": "location.slash",
+      "filled": "location.slash.fill",
+      "outlined": "location.slash"
+    },
+    "grade": {
+      "symbol": "star",
+      "filled": "star.fill",
+      "outlined": "star"
+    },
+    "grading": {
+      "symbol": "checklist"
+    },
+    "graphic_eq": {
+      "symbol": "waveform"
+    },
+    "grid_3x_3": {
+      "symbol": "square.grid.3x3",
+      "filled": "square.grid.3x3.fill",
+      "outlined": "square.grid.3x3"
+    },
+    "grid_on": {
+      "symbol": "square.grid.3x3",
+      "filled": "square.grid.3x3.fill",
+      "outlined": "square.grid.3x3"
+    },
+    "grid_view": {
+      "symbol": "square.grid.2x2",
+      "filled": "square.grid.2x2.fill",
+      "outlined": "square.grid.2x2"
+    },
+    "group": {
+      "symbol": "person.2",
+      "filled": "person.2.fill",
+      "outlined": "person.2"
+    },
+    "group_off": {
+      "symbol": "person.2.slash",
+      "filled": "person.2.slash.fill",
+      "outlined": "person.2.slash"
+    },
+    "groups": {
+      "symbol": "person.3",
+      "filled": "person.3.fill",
+      "outlined": "person.3"
+    },
+    "handyman": {
+      "symbol": "wrench.and.screwdriver",
+      "filled": "wrench.and.screwdriver.fill",
+      "outlined": "wrench.and.screwdriver"
+    },
+    "hardware": {
+      "symbol": "hammer",
+      "filled": "hammer.fill",
+      "outlined": "hammer"
+    },
+    "headphones": {
+      "symbol": "headphones"
+    },
+    "headset": {
+      "symbol": "headphones"
+    },
+    "healing": {
+      "symbol": "bandage",
+      "filled": "bandage.fill",
+      "outlined": "bandage"
+    },
+    "health_and_safety": {
+      "symbol": "cross.case",
+      "filled": "cross.case.fill",
+      "outlined": "cross.case"
+    },
+    "hearing": {
+      "symbol": "ear",
+      "filled": "ear.fill",
+      "outlined": "ear"
+    },
+    "height": {
+      "symbol": "arrow.up.and.down"
+    },
+    "help": {
+      "symbol": "questionmark.circle",
+      "filled": "questionmark.circle.fill",
+      "outlined": "questionmark.circle"
+    },
+    "help_center": {
+      "symbol": "questionmark.square",
+      "filled": "questionmark.square.fill",
+      "outlined": "questionmark.square"
+    },
+    "help_outline": {
+      "symbol": "questionmark.circle",
+      "outlined": "questionmark.circle"
+    },
+    "hexagon": {
+      "symbol": "hexagon",
+      "filled": "hexagon.fill",
+      "outlined": "hexagon"
+    },
+    "highlight": {
+      "symbol": "highlighter"
+    },
+    "highlight_off": {
+      "symbol": "xmark.circle",
+      "filled": "xmark.circle.fill",
+      "outlined": "xmark.circle"
+    },
+    "hiking": {
+      "symbol": "figure.hiking"
+    },
+    "history": {
+      "symbol": "clock.arrow.circlepath"
+    },
+    "home": {
+      "symbol": "house",
+      "filled": "house.fill",
+      "outlined": "house"
+    },
+    "horizontal_rule": {
+      "symbol": "minus"
+    },
+    "horizontal_split": {
+      "symbol": "rectangle.split.1x2",
+      "filled": "rectangle.split.1x2.fill",
+      "outlined": "rectangle.split.1x2"
+    },
+    "hotel": {
+      "symbol": "bed.double",
+      "filled": "bed.double.fill",
+      "outlined": "bed.double"
+    },
+    "house": {
+      "symbol": "house",
+      "filled": "house.fill",
+      "outlined": "house"
+    },
+    "how_to_reg": {
+      "symbol": "person.crop.circle.badge.checkmark",
+      "filled": "person.crop.circle.fill.badge.checkmark",
+      "outlined": "person.crop.circle.badge.checkmark"
+    },
+    "https": {
+      "symbol": "lock",
+      "filled": "lock.fill",
+      "outlined": "lock"
+    },
+    "ice_skating": {
+      "symbol": "figure.skating"
+    },
+    "image": {
+      "symbol": "photo",
+      "filled": "photo.fill",
+      "outlined": "photo"
+    },
+    "image_aspect_ratio": {
+      "symbol": "aspectratio",
+      "filled": "aspectratio.fill",
+      "outlined": "aspectratio"
+    },
+    "import_contacts": {
+      "symbol": "book",
+      "filled": "book.fill",
+      "outlined": "book"
+    },
+    "import_export": {
+      "symbol": "arrow.up.arrow.down"
+    },
+    "inbox": {
+      "symbol": "tray",
+      "filled": "tray.fill",
+      "outlined": "tray"
+    },
+    "indeterminate_check_box": {
+      "symbol": "minus.square.fill",
+      "filled": "minus.square.fill",
+      "outlined": "minus.square"
+    },
+    "info": {
+      "symbol": "info.circle",
+      "filled": "info.circle.fill",
+      "outlined": "info.circle"
+    },
+    "input": {
+      "symbol": "arrow.right.to.line"
+    },
+    "insert_chart": {
+      "symbol": "chart.bar",
+      "filled": "chart.bar.fill",
+      "outlined": "chart.bar"
+    },
+    "insert_chart_outlined": {
+      "symbol": "chart.bar",
+      "outlined": "chart.bar"
+    },
+    "insert_comment": {
+      "symbol": "bubble.left",
+      "filled": "bubble.left.fill",
+      "outlined": "bubble.left"
+    },
+    "insert_drive_file": {
+      "symbol": "doc",
+      "filled": "doc.fill",
+      "outlined": "doc"
+    },
+    "insert_emoticon": {
+      "symbol": "face.smiling",
+      "filled": "face.smiling.fill",
+      "outlined": "face.smiling"
+    },
+    "insert_invitation": {
+      "symbol": "calendar"
+    },
+    "insert_link": {
+      "symbol": "link"
+    },
+    "insert_photo": {
+      "symbol": "photo",
+      "filled": "photo.fill",
+      "outlined": "photo"
+    },
+    "inventory": {
+      "symbol": "shippingbox",
+      "filled": "shippingbox.fill",
+      "outlined": "shippingbox"
+    },
+    "invert_colors": {
+      "symbol": "drop.halffull"
+    },
+    "ios_share": {
+      "symbol": "square.and.arrow.up",
+      "filled": "square.and.arrow.up.fill",
+      "outlined": "square.and.arrow.up"
+    },
+    "key": {
+      "symbol": "key",
+      "filled": "key.fill",
+      "outlined": "key"
+    },
+    "key_off": {
+      "symbol": "key.slash",
+      "filled": "key.slash.fill",
+      "outlined": "key.slash"
+    },
+    "keyboard": {
+      "symbol": "keyboard",
+      "filled": "keyboard.fill",
+      "outlined": "keyboard"
+    },
+    "keyboard_alt": {
+      "symbol": "keyboard",
+      "filled": "keyboard.fill",
+      "outlined": "keyboard"
+    },
+    "keyboard_arrow_down": {
+      "symbol": "chevron.down"
+    },
+    "keyboard_arrow_left": {
+      "symbol": "chevron.left"
+    },
+    "keyboard_arrow_right": {
+      "symbol": "chevron.right"
+    },
+    "keyboard_arrow_up": {
+      "symbol": "chevron.up"
+    },
+    "keyboard_backspace": {
+      "symbol": "arrow.left"
+    },
+    "keyboard_capslock": {
+      "symbol": "capslock",
+      "filled": "capslock.fill",
+      "outlined": "capslock"
+    },
+    "keyboard_command_key": {
+      "symbol": "command"
+    },
+    "keyboard_control_key": {
+      "symbol": "control"
+    },
+    "keyboard_double_arrow_left": {
+      "symbol": "chevron.left.2"
+    },
+    "keyboard_double_arrow_right": {
+      "symbol": "chevron.right.2"
+    },
+    "keyboard_hide": {
+      "symbol": "keyboard.chevron.compact.down",
+      "filled": "keyboard.chevron.compact.down.fill",
+      "outlined": "keyboard.chevron.compact.down"
+    },
+    "keyboard_option_key": {
+      "symbol": "option"
+    },
+    "keyboard_return": {
+      "symbol": "return"
+    },
+    "keyboard_voice": {
+      "symbol": "mic",
+      "filled": "mic.fill",
+      "outlined": "mic"
+    },
+    "kitchen": {
+      "symbol": "refrigerator",
+      "filled": "refrigerator.fill",
+      "outlined": "refrigerator"
+    },
+    "label": {
+      "symbol": "tag",
+      "filled": "tag.fill",
+      "outlined": "tag"
+    },
+    "lan": {
+      "symbol": "network"
+    },
+    "landscape": {
+      "symbol": "mountain.2",
+      "filled": "mountain.2.fill",
+      "outlined": "mountain.2"
+    },
+    "language": {
+      "symbol": "globe"
+    },
+    "laptop": {
+      "symbol": "laptopcomputer"
+    },
+    "laptop_mac": {
+      "symbol": "laptopcomputer"
+    },
+    "last_page": {
+      "symbol": "forward.end",
+      "filled": "forward.end.fill",
+      "outlined": "forward.end"
+    },
+    "launch": {
+      "symbol": "arrow.up.forward.square",
+      "filled": "arrow.up.forward.square.fill",
+      "outlined": "arrow.up.forward.square"
+    },
+    "layers": {
+      "symbol": "square.3.layers.3d"
+    },
+    "lens": {
+      "symbol": "circle.fill",
+      "filled": "circle.fill",
+      "outlined": "circle"
+    },
+    "library_add": {
+      "symbol": "rectangle.stack.badge.plus",
+      "filled": "rectangle.stack.fill.badge.plus",
+      "outlined": "rectangle.stack.badge.plus"
+    },
+    "library_books": {
+      "symbol": "books.vertical",
+      "filled": "books.vertical.fill",
+      "outlined": "books.vertical"
+    },
+    "library_music": {
+      "symbol": "music.note.list"
+    },
+    "light": {
+      "symbol": "lamp.ceiling",
+      "filled": "lamp.ceiling.fill",
+      "outlined": "lamp.ceiling"
+    },
+    "light_mode": {
+      "symbol": "sun.max",
+      "filled": "sun.max.fill",
+      "outlined": "sun.max"
+    },
+    "lightbulb": {
+      "symbol": "lightbulb",
+      "filled": "lightbulb.fill",
+      "outlined": "lightbulb"
+    },
+    "lightbulb_circle": {
+      "symbol": "lightbulb.circle",
+      "filled": "lightbulb.circle.fill",
+      "outlined": "lightbulb.circle"
+    },
+    "link": {
+      "symbol": "link"
+    },
+    "liquor": {
+      "symbol": "wineglass",
+      "filled": "wineglass.fill",
+      "outlined": "wineglass"
+    },
+    "list": {
+      "symbol": "list.bullet"
+    },
+    "list_alt": {
+      "symbol": "list.bullet.rectangle",
+      "filled": "list.bullet.rectangle.fill",
+      "outlined": "list.bullet.rectangle"
+    },
+    "live_help": {
+      "symbol": "questionmark.bubble",
+      "filled": "questionmark.bubble.fill",
+      "outlined": "questionmark.bubble"
+    },
+    "living": {
+      "symbol": "sofa",
+      "filled": "sofa.fill",
+      "outlined": "sofa"
+    },
+    "local_activity": {
+      "symbol": "ticket",
+      "filled": "ticket.fill",
+      "outlined": "ticket"
+    },
+    "local_airport": {
+      "symbol": "airplane"
+    },
+    "local_atm": {
+      "symbol": "dollarsign.circle",
+      "filled": "dollarsign.circle.fill",
+      "outlined": "dollarsign.circle"
+    },
+    "local_bar": {
+      "symbol": "wineglass",
+      "filled": "wineglass.fill",
+      "outlined": "wineglass"
+    },
+    "local_cafe": {
+      "symbol": "cup.and.saucer",
+      "filled": "cup.and.saucer.fill",
+      "outlined": "cup.and.saucer"
+    },
+    "local_dining": {
+      "symbol": "fork.knife"
+    },
+    "local_fire_department": {
+      "symbol": "flame",
+      "filled": "flame.fill",
+      "outlined": "flame"
+    },
+    "local_gas_station": {
+      "symbol": "fuelpump",
+      "filled": "fuelpump.fill",
+      "outlined": "fuelpump"
+    },
+    "local_grocery_store": {
+      "symbol": "cart",
+      "filled": "cart.fill",
+      "outlined": "cart"
+    },
+    "local_hospital": {
+      "symbol": "cross.case",
+      "filled": "cross.case.fill",
+      "outlined": "cross.case"
+    },
+    "local_hotel": {
+      "symbol": "bed.double",
+      "filled": "bed.double.fill",
+      "outlined": "bed.double"
+    },
+    "local_laundry_service": {
+      "symbol": "washer",
+      "filled": "washer.fill",
+      "outlined": "washer"
+    },
+    "local_mall": {
+      "symbol": "bag",
+      "filled": "bag.fill",
+      "outlined": "bag"
+    },
+    "local_movies": {
+      "symbol": "film",
+      "filled": "film.fill",
+      "outlined": "film"
+    },
+    "local_offer": {
+      "symbol": "tag",
+      "filled": "tag.fill",
+      "outlined": "tag"
+    },
+    "local_parking": {
+      "symbol": "parkingsign"
+    },
+    "local_phone": {
+      "symbol": "phone",
+      "filled": "phone.fill",
+      "outlined": "phone"
+    },
+    "local_play": {
+      "symbol": "ticket",
+      "filled": "ticket.fill",
+      "outlined": "ticket"
+    },
+    "local_police": {
+      "symbol": "shield",
+      "filled": "shield.fill",
+      "outlined": "shield"
+    },
+    "local_printshop": {
+      "symbol": "printer",
+      "filled": "printer.fill",
+      "outlined": "printer"
+    },
+    "local_see": {
+      "symbol": "camera",
+      "filled": "camera.fill",
+      "outlined": "camera"
+    },
+    "local_shipping": {
+      "symbol": "truck.box",
+      "filled": "truck.box.fill",
+      "outlined": "truck.box"
+    },
+    "location_city": {
+      "symbol": "building.2",
+      "filled": "building.2.fill",
+      "outlined": "building.2"
+    },
+    "location_disabled": {
+      "symbol": "location.slash",
+      "filled": "location.slash.fill",
+      "outlined": "location.slash"
+    },
+    "location_off": {
+      "symbol": "mappin.slash"
+    },
+    "location_on": {
+      "symbol": "mappin.and.ellipse"
+    },
+    "location_searching": {
+      "symbol": "location.circle",
+      "filled": "location.circle.fill",
+      "outlined": "location.circle"
+    },
+    "lock": {
+      "symbol": "lock",
+      "filled": "lock.fill",
+      "outlined": "lock"
+    },
+    "lock_open": {
+      "symbol": "lock.open",
+      "filled": "lock.open.fill",
+      "outlined": "lock.open"
+    },
+    "login": {
+      "symbol": "rectangle.portrait.and.arrow.forward",
+      "filled": "rectangle.portrait.and.arrow.forward.fill",
+      "outlined": "rectangle.portrait.and.arrow.forward"
+    },
+    "logout": {
+      "symbol": "rectangle.portrait.and.arrow.right",
+      "filled": "rectangle.portrait.and.arrow.right.fill",
+      "outlined": "rectangle.portrait.and.arrow.right"
+    },
+    "looks_3": {
+      "symbol": "3.square",
+      "filled": "3.square.fill",
+      "outlined": "3.square"
+    },
+    "looks_4": {
+      "symbol": "4.square",
+      "filled": "4.square.fill",
+      "outlined": "4.square"
+    },
+    "looks_5": {
+      "symbol": "5.square",
+      "filled": "5.square.fill",
+      "outlined": "5.square"
+    },
+    "looks_6": {
+      "symbol": "6.square",
+      "filled": "6.square.fill",
+      "outlined": "6.square"
+    },
+    "looks_one": {
+      "symbol": "1.square",
+      "filled": "1.square.fill",
+      "outlined": "1.square"
+    },
+    "looks_two": {
+      "symbol": "2.square",
+      "filled": "2.square.fill",
+      "outlined": "2.square"
+    },
+    "loop": {
+      "symbol": "arrow.triangle.2.circlepath"
+    },
+    "loupe": {
+      "symbol": "plus.magnifyingglass"
+    },
+    "luggage": {
+      "symbol": "suitcase.rolling",
+      "filled": "suitcase.rolling.fill",
+      "outlined": "suitcase.rolling"
+    },
+    "mail": {
+      "symbol": "envelope",
+      "filled": "envelope.fill",
+      "outlined": "envelope"
+    },
+    "mail_outline": {
+      "symbol": "envelope",
+      "outlined": "envelope"
+    },
+    "man": {
+      "symbol": "figure.stand"
+    },
+    "manage_search": {
+      "symbol": "text.magnifyingglass"
+    },
+    "map": {
+      "symbol": "map",
+      "filled": "map.fill",
+      "outlined": "map"
+    },
+    "mark_as_unread": {
+      "symbol": "envelope.badge",
+      "filled": "envelope.badge.fill",
+      "outlined": "envelope.badge"
+    },
+    "mark_email_unread": {
+      "symbol": "envelope.badge",
+      "filled": "envelope.badge.fill",
+      "outlined": "envelope.badge"
+    },
+    "markunread": {
+      "symbol": "envelope",
+      "filled": "envelope.fill",
+      "outlined": "envelope"
+    },
+    "masks": {
+      "symbol": "facemask",
+      "filled": "facemask.fill",
+      "outlined": "facemask"
+    },
+    "medical_services": {
+      "symbol": "cross.case",
+      "filled": "cross.case.fill",
+      "outlined": "cross.case"
+    },
+    "medication": {
+      "symbol": "pills",
+      "filled": "pills.fill",
+      "outlined": "pills"
+    },
+    "meeting_room": {
+      "symbol": "door.left.hand.closed"
+    },
+    "memory": {
+      "symbol": "memorychip",
+      "filled": "memorychip.fill",
+      "outlined": "memorychip"
+    },
+    "menu": {
+      "symbol": "line.3.horizontal"
+    },
+    "menu_book": {
+      "symbol": "book",
+      "filled": "book.fill",
+      "outlined": "book"
+    },
+    "merge": {
+      "symbol": "arrow.merge"
+    },
+    "merge_type": {
+      "symbol": "arrow.merge"
+    },
+    "message": {
+      "symbol": "bubble.left",
+      "filled": "bubble.left.fill",
+      "outlined": "bubble.left"
+    },
+    "mic": {
+      "symbol": "mic",
+      "filled": "mic.fill",
+      "outlined": "mic"
+    },
+    "mic_none": {
+      "symbol": "mic",
+      "outlined": "mic"
+    },
+    "mic_off": {
+      "symbol": "mic.slash",
+      "filled": "mic.slash.fill",
+      "outlined": "mic.slash"
+    },
+    "microwave": {
+      "symbol": "microwave",
+      "filled": "microwave.fill",
+      "outlined": "microwave"
+    },
+    "military_tech": {
+      "symbol": "medal",
+      "filled": "medal.fill",
+      "outlined": "medal"
+    },
+    "miscellaneous_services": {
+      "symbol": "gearshape.2",
+      "filled": "gearshape.2.fill",
+      "outlined": "gearshape.2"
+    },
+    "mode_comment": {
+      "symbol": "bubble.left",
+      "filled": "bubble.left.fill",
+      "outlined": "bubble.left"
+    },
+    "mode_edit": {
+      "symbol": "pencil"
+    },
+    "mode_edit_outline": {
+      "symbol": "pencil"
+    },
+    "mode_night": {
+      "symbol": "moon",
+      "filled": "moon.fill",
+      "outlined": "moon"
+    },
+    "monetization_on": {
+      "symbol": "dollarsign.circle",
+      "filled": "dollarsign.circle.fill",
+      "outlined": "dollarsign.circle"
+    },
+    "money": {
+      "symbol": "banknote",
+      "filled": "banknote.fill",
+      "outlined": "banknote"
+    },
+    "monitor": {
+      "symbol": "desktopcomputer"
+    },
+    "monitor_heart": {
+      "symbol": "waveform.path.ecg.rectangle",
+      "filled": "waveform.path.ecg.rectangle.fill",
+      "outlined": "waveform.path.ecg.rectangle"
+    },
+    "monitor_weight": {
+      "symbol": "scalemass",
+      "filled": "scalemass.fill",
+      "outlined": "scalemass"
+    },
+    "mood": {
+      "symbol": "face.smiling",
+      "filled": "face.smiling.fill",
+      "outlined": "face.smiling"
+    },
+    "more_horiz": {
+      "symbol": "ellipsis"
+    },
+    "more_vert": {
+      "symbol": "ellipsis"
+    },
+    "mouse": {
+      "symbol": "computermouse",
+      "filled": "computermouse.fill",
+      "outlined": "computermouse"
+    },
+    "move_to_inbox": {
+      "symbol": "tray.and.arrow.down",
+      "filled": "tray.and.arrow.down.fill",
+      "outlined": "tray.and.arrow.down"
+    },
+    "music_note": {
+      "symbol": "music.note"
+    },
+    "my_location": {
+      "symbol": "scope"
+    },
+    "nature": {
+      "symbol": "tree",
+      "filled": "tree.fill",
+      "outlined": "tree"
+    },
+    "navigate_before": {
+      "symbol": "chevron.left"
+    },
+    "navigate_next": {
+      "symbol": "chevron.right"
+    },
+    "navigation": {
+      "symbol": "location.north",
+      "filled": "location.north.fill",
+      "outlined": "location.north"
+    },
+    "near_me": {
+      "symbol": "location",
+      "filled": "location.fill",
+      "outlined": "location"
+    },
+    "near_me_disabled": {
+      "symbol": "location.slash",
+      "filled": "location.slash.fill",
+      "outlined": "location.slash"
+    },
+    "network_cell": {
+      "symbol": "cellularbars"
+    },
+    "network_wifi": {
+      "symbol": "wifi"
+    },
+    "newspaper": {
+      "symbol": "newspaper",
+      "filled": "newspaper.fill",
+      "outlined": "newspaper"
+    },
+    "next_plan": {
+      "symbol": "arrow.forward.circle",
+      "filled": "arrow.forward.circle.fill",
+      "outlined": "arrow.forward.circle"
+    },
+    "nightlight": {
+      "symbol": "moon",
+      "filled": "moon.fill",
+      "outlined": "moon"
+    },
+    "nightlight_round": {
+      "symbol": "moon",
+      "filled": "moon.fill",
+      "outlined": "moon"
+    },
+    "no_accounts": {
+      "symbol": "person.slash",
+      "filled": "person.slash.fill",
+      "outlined": "person.slash"
+    },
+    "no_encryption": {
+      "symbol": "lock.slash",
+      "filled": "lock.slash.fill",
+      "outlined": "lock.slash"
+    },
+    "no_encryption_gmailerrorred": {
+      "symbol": "lock.slash",
+      "filled": "lock.slash.fill",
+      "outlined": "lock.slash"
+    },
+    "no_flash": {
+      "symbol": "bolt.slash",
+      "filled": "bolt.slash.fill",
+      "outlined": "bolt.slash"
+    },
+    "north": {
+      "symbol": "arrow.up"
+    },
+    "north_east": {
+      "symbol": "arrow.up.right"
+    },
+    "north_west": {
+      "symbol": "arrow.up.left"
+    },
+    "not_interested": {
+      "symbol": "nosign"
+    },
+    "note": {
+      "symbol": "note.text"
+    },
+    "note_add": {
+      "symbol": "doc.badge.plus",
+      "filled": "doc.fill.badge.plus",
+      "outlined": "doc.badge.plus"
+    },
+    "notes": {
+      "symbol": "note.text"
+    },
+    "notifications": {
+      "symbol": "bell",
+      "filled": "bell.fill",
+      "outlined": "bell"
+    },
+    "notifications_active": {
+      "symbol": "bell.and.waves.left.and.right",
+      "filled": "bell.and.waves.left.and.right.fill",
+      "outlined": "bell.and.waves.left.and.right"
+    },
+    "notifications_none": {
+      "symbol": "bell",
+      "outlined": "bell"
+    },
+    "notifications_off": {
+      "symbol": "bell.slash",
+      "filled": "bell.slash.fill",
+      "outlined": "bell.slash"
+    },
+    "numbers": {
+      "symbol": "number"
+    },
+    "ondemand_video": {
+      "symbol": "play.rectangle",
+      "filled": "play.rectangle.fill",
+      "outlined": "play.rectangle"
+    },
+    "opacity": {
+      "symbol": "drop.halffull"
+    },
+    "open_in_full": {
+      "symbol": "arrow.up.left.and.arrow.down.right"
+    },
+    "open_in_new": {
+      "symbol": "arrow.up.forward.square",
+      "filled": "arrow.up.forward.square.fill",
+      "outlined": "arrow.up.forward.square"
+    },
+    "open_with": {
+      "symbol": "arrow.up.and.down.and.arrow.left.and.right"
+    },
+    "outbond": {
+      "symbol": "arrow.up.right.circle",
+      "filled": "arrow.up.right.circle.fill",
+      "outlined": "arrow.up.right.circle"
+    },
+    "outbound": {
+      "symbol": "arrow.up.right.circle",
+      "filled": "arrow.up.right.circle.fill",
+      "outlined": "arrow.up.right.circle"
+    },
+    "outbox": {
+      "symbol": "tray.and.arrow.up",
+      "filled": "tray.and.arrow.up.fill",
+      "outlined": "tray.and.arrow.up"
+    },
+    "outlet": {
+      "symbol": "poweroutlet.type.b",
+      "filled": "poweroutlet.type.b.fill",
+      "outlined": "poweroutlet.type.b"
+    },
+    "pageview": {
+      "symbol": "doc.text.magnifyingglass"
+    },
+    "paid": {
+      "symbol": "dollarsign.circle",
+      "filled": "dollarsign.circle.fill",
+      "outlined": "dollarsign.circle"
+    },
+    "palette": {
+      "symbol": "paintpalette",
+      "filled": "paintpalette.fill",
+      "outlined": "paintpalette"
+    },
+    "pan_tool": {
+      "symbol": "hand.raised",
+      "filled": "hand.raised.fill",
+      "outlined": "hand.raised"
+    },
+    "pan_tool_alt": {
+      "symbol": "hand.point.up",
+      "filled": "hand.point.up.fill",
+      "outlined": "hand.point.up"
+    },
+    "panorama": {
+      "symbol": "pano",
+      "filled": "pano.fill",
+      "outlined": "pano"
+    },
+    "panorama_fish_eye": {
+      "symbol": "circle",
+      "filled": "circle.fill",
+      "outlined": "circle"
+    },
+    "panorama_horizontal": {
+      "symbol": "pano",
+      "filled": "pano.fill",
+      "outlined": "pano"
+    },
+    "panorama_horizontal_select": {
+      "symbol": "pano.fill",
+      "filled": "pano.fill",
+      "outlined": "pano"
+    },
+    "park": {
+      "symbol": "tree",
+      "filled": "tree.fill",
+      "outlined": "tree"
+    },
+    "pause": {
+      "symbol": "pause.fill",
+      "filled": "pause.fill",
+      "outlined": "pause"
+    },
+    "pause_circle": {
+      "symbol": "pause.circle",
+      "filled": "pause.circle.fill",
+      "outlined": "pause.circle"
+    },
+    "pause_circle_filled": {
+      "symbol": "pause.circle.fill",
+      "filled": "pause.circle.fill"
+    },
+    "pause_circle_outline": {
+      "symbol": "pause.circle",
+      "outlined": "pause.circle"
+    },
+    "pause_presentation": {
+      "symbol": "pause.rectangle",
+      "filled": "pause.rectangle.fill",
+      "outlined": "pause.rectangle"
+    },
+    "payment": {
+      "symbol": "creditcard",
+      "filled": "creditcard.fill",
+      "outlined": "creditcard"
+    },
+    "payments": {
+      "symbol": "banknote",
+      "filled": "banknote.fill",
+      "outlined": "banknote"
+    },
+    "pedal_bike": {
+      "symbol": "bicycle"
+    },
+    "pending": {
+      "symbol": "ellipsis.circle",
+      "filled": "ellipsis.circle.fill",
+      "outlined": "ellipsis.circle"
+    },
+    "pentagon": {
+      "symbol": "pentagon",
+      "filled": "pentagon.fill",
+      "outlined": "pentagon"
+    },
+    "people": {
+      "symbol": "person.2",
+      "filled": "person.2.fill",
+      "outlined": "person.2"
+    },
+    "people_alt": {
+      "symbol": "person.2",
+      "filled": "person.2.fill",
+      "outlined": "person.2"
+    },
+    "people_outline": {
+      "symbol": "person.2",
+      "outlined": "person.2"
+    },
+    "percent": {
+      "symbol": "percent"
+    },
+    "perm_identity": {
+      "symbol": "person",
+      "filled": "person.fill",
+      "outlined": "person"
+    },
+    "perm_phone_msg": {
+      "symbol": "phone.bubble",
+      "filled": "phone.bubble.fill",
+      "outlined": "phone.bubble"
+    },
+    "person": {
+      "symbol": "person",
+      "filled": "person.fill",
+      "outlined": "person"
+    },
+    "person_add": {
+      "symbol": "person.badge.plus",
+      "filled": "person.badge.plus.fill",
+      "outlined": "person.badge.plus"
+    },
+    "person_add_alt": {
+      "symbol": "person.badge.plus",
+      "filled": "person.badge.plus.fill",
+      "outlined": "person.badge.plus"
+    },
+    "person_add_alt_1": {
+      "symbol": "person.badge.plus",
+      "filled": "person.badge.plus.fill",
+      "outlined": "person.badge.plus"
+    },
+    "person_off": {
+      "symbol": "person.slash",
+      "filled": "person.slash.fill",
+      "outlined": "person.slash"
+    },
+    "person_outline": {
+      "symbol": "person",
+      "outlined": "person"
+    },
+    "person_remove": {
+      "symbol": "person.badge.minus",
+      "filled": "person.badge.minus.fill",
+      "outlined": "person.badge.minus"
+    },
+    "person_remove_alt_1": {
+      "symbol": "person.badge.minus",
+      "filled": "person.badge.minus.fill",
+      "outlined": "person.badge.minus"
+    },
+    "personal_video": {
+      "symbol": "tv",
+      "filled": "tv.fill",
+      "outlined": "tv"
+    },
+    "pest_control": {
+      "symbol": "ant",
+      "filled": "ant.fill",
+      "outlined": "ant"
+    },
+    "pets": {
+      "symbol": "pawprint",
+      "filled": "pawprint.fill",
+      "outlined": "pawprint"
+    },
+    "phone": {
+      "symbol": "phone",
+      "filled": "phone.fill",
+      "outlined": "phone"
+    },
+    "phone_enabled": {
+      "symbol": "phone",
+      "filled": "phone.fill",
+      "outlined": "phone"
+    },
+    "phone_forwarded": {
+      "symbol": "phone.arrow.right",
+      "filled": "phone.arrow.right.fill",
+      "outlined": "phone.arrow.right"
+    },
+    "phone_in_talk": {
+      "symbol": "phone.and.waveform",
+      "filled": "phone.and.waveform.fill",
+      "outlined": "phone.and.waveform"
+    },
+    "photo": {
+      "symbol": "photo",
+      "filled": "photo.fill",
+      "outlined": "photo"
+    },
+    "photo_album": {
+      "symbol": "photo.on.rectangle"
+    },
+    "photo_camera": {
+      "symbol": "camera",
+      "filled": "camera.fill",
+      "outlined": "camera"
+    },
+    "photo_library": {
+      "symbol": "photo.on.rectangle"
+    },
+    "piano": {
+      "symbol": "pianokeys"
+    },
+    "picture_in_picture": {
+      "symbol": "pip",
+      "filled": "pip.fill",
+      "outlined": "pip"
+    },
+    "picture_in_picture_alt": {
+      "symbol": "pip",
+      "filled": "pip.fill",
+      "outlined": "pip"
+    },
+    "pie_chart": {
+      "symbol": "chart.pie",
+      "filled": "chart.pie.fill",
+      "outlined": "chart.pie"
+    },
+    "pie_chart_outline": {
+      "symbol": "chart.pie",
+      "outlined": "chart.pie"
+    },
+    "pin": {
+      "symbol": "pin",
+      "filled": "pin.fill",
+      "outlined": "pin"
+    },
+    "place": {
+      "symbol": "mappin.and.ellipse"
+    },
+    "play_arrow": {
+      "symbol": "play.fill",
+      "filled": "play.fill",
+      "outlined": "play"
+    },
+    "play_circle": {
+      "symbol": "play.circle",
+      "filled": "play.circle.fill",
+      "outlined": "play.circle"
+    },
+    "play_circle_filled": {
+      "symbol": "play.circle.fill",
+      "filled": "play.circle.fill"
+    },
+    "play_circle_outline": {
+      "symbol": "play.circle",
+      "outlined": "play.circle"
+    },
+    "playlist_add": {
+      "symbol": "text.badge.plus"
+    },
+    "playlist_add_check": {
+      "symbol": "text.badge.checkmark"
+    },
+    "playlist_remove": {
+      "symbol": "text.badge.minus"
+    },
+    "plumbing": {
+      "symbol": "wrench.adjustable",
+      "filled": "wrench.adjustable.fill",
+      "outlined": "wrench.adjustable"
+    },
+    "poll": {
+      "symbol": "chart.bar",
+      "filled": "chart.bar.fill",
+      "outlined": "chart.bar"
+    },
+    "pool": {
+      "symbol": "figure.pool.swim"
+    },
+    "portrait": {
+      "symbol": "person.crop.square",
+      "filled": "person.crop.square.fill",
+      "outlined": "person.crop.square"
+    },
+    "post_add": {
+      "symbol": "doc.badge.plus",
+      "filled": "doc.fill.badge.plus",
+      "outlined": "doc.badge.plus"
+    },
+    "power": {
+      "symbol": "powerplug",
+      "filled": "powerplug.fill",
+      "outlined": "powerplug"
+    },
+    "power_settings_new": {
+      "symbol": "power"
+    },
+    "preview": {
+      "symbol": "eye",
+      "filled": "eye.fill",
+      "outlined": "eye"
+    },
+    "print": {
+      "symbol": "printer",
+      "filled": "printer.fill",
+      "outlined": "printer"
+    },
+    "priority_high": {
+      "symbol": "exclamationmark"
+    },
+    "privacy_tip": {
+      "symbol": "exclamationmark.shield",
+      "filled": "exclamationmark.shield.fill",
+      "outlined": "exclamationmark.shield"
+    },
+    "psychology": {
+      "symbol": "brain.head.profile",
+      "filled": "brain.head.profile.fill",
+      "outlined": "brain.head.profile"
+    },
+    "public": {
+      "symbol": "globe"
+    },
+    "publish": {
+      "symbol": "arrow.up.to.line"
+    },
+    "push_pin": {
+      "symbol": "pin",
+      "filled": "pin.fill",
+      "outlined": "pin"
+    },
+    "qr_code": {
+      "symbol": "qrcode"
+    },
+    "qr_code_2": {
+      "symbol": "qrcode"
+    },
+    "qr_code_scanner": {
+      "symbol": "qrcode.viewfinder"
+    },
+    "query_builder": {
+      "symbol": "clock",
+      "filled": "clock.fill",
+      "outlined": "clock"
+    },
+    "question_answer": {
+      "symbol": "bubble.left.and.bubble.right",
+      "filled": "bubble.left.and.bubble.right.fill",
+      "outlined": "bubble.left.and.bubble.right"
+    },
+    "question_mark": {
+      "symbol": "questionmark"
+    },
+    "queue_music": {
+      "symbol": "music.note.list"
+    },
+    "radio": {
+      "symbol": "radio",
+      "filled": "radio.fill",
+      "outlined": "radio"
+    },
+    "radio_button_checked": {
+      "symbol": "largecircle.fill.circle"
+    },
+    "radio_button_unchecked": {
+      "symbol": "circle",
+      "outlined": "circle"
+    },
+    "rate_review": {
+      "symbol": "square.and.pencil"
+    },
+    "read_more": {
+      "symbol": "text.line.last.and.arrowtriangle.forward"
+    },
+    "rectangle": {
+      "symbol": "rectangle",
+      "filled": "rectangle.fill",
+      "outlined": "rectangle"
+    },
+    "recycling": {
+      "symbol": "arrow.3.trianglepath"
+    },
+    "redeem": {
+      "symbol": "giftcard",
+      "filled": "giftcard.fill",
+      "outlined": "giftcard"
+    },
+    "redo": {
+      "symbol": "arrow.uturn.forward"
+    },
+    "refresh": {
+      "symbol": "arrow.clockwise"
+    },
+    "remove": {
+      "symbol": "minus"
+    },
+    "remove_circle": {
+      "symbol": "minus.circle.fill",
+      "filled": "minus.circle.fill",
+      "outlined": "minus.circle"
+    },
+    "remove_circle_outline": {
+      "symbol": "minus.circle",
+      "outlined": "minus.circle"
+    },
+    "remove_red_eye": {
+      "symbol": "eye",
+      "filled": "eye.fill",
+      "outlined": "eye"
+    },
+    "reorder": {
+      "symbol": "line.3.horizontal"
+    },
+    "repeat": {
+      "symbol": "repeat"
+    },
+    "repeat_one": {
+      "symbol": "repeat.1"
+    },
+    "replay": {
+      "symbol": "arrow.counterclockwise"
+    },
+    "replay_10": {
+      "symbol": "gobackward.10"
+    },
+    "replay_30": {
+      "symbol": "gobackward.30"
+    },
+    "replay_5": {
+      "symbol": "gobackward.5"
+    },
+    "replay_circle_filled": {
+      "symbol": "arrow.counterclockwise.circle.fill",
+      "filled": "arrow.counterclockwise.circle.fill"
+    },
+    "reply": {
+      "symbol": "arrowshape.turn.up.left",
+      "filled": "arrowshape.turn.up.left.fill",
+      "outlined": "arrowshape.turn.up.left"
+    },
+    "reply_all": {
+      "symbol": "arrowshape.turn.up.left.2",
+      "filled": "arrowshape.turn.up.left.2.fill",
+      "outlined": "arrowshape.turn.up.left.2"
+    },
+    "report": {
+      "symbol": "exclamationmark.octagon",
+      "filled": "exclamationmark.octagon.fill",
+      "outlined": "exclamationmark.octagon"
+    },
+    "report_gmailerrorred": {
+      "symbol": "exclamationmark.octagon",
+      "filled": "exclamationmark.octagon.fill",
+      "outlined": "exclamationmark.octagon"
+    },
+    "report_problem": {
+      "symbol": "exclamationmark.triangle",
+      "filled": "exclamationmark.triangle.fill",
+      "outlined": "exclamationmark.triangle"
+    },
+    "restart_alt": {
+      "symbol": "arrow.clockwise"
+    },
+    "restaurant": {
+      "symbol": "fork.knife"
+    },
+    "restaurant_menu": {
+      "symbol": "fork.knife"
+    },
+    "restore": {
+      "symbol": "clock.arrow.circlepath"
+    },
+    "reviews": {
+      "symbol": "text.bubble",
+      "filled": "text.bubble.fill",
+      "outlined": "text.bubble"
+    },
+    "ring_volume": {
+      "symbol": "phone.down.waves.left.and.right"
+    },
+    "roller_shades": {
+      "symbol": "blinds.horizontal.open"
+    },
+    "roller_shades_closed": {
+      "symbol": "blinds.horizontal.closed"
+    },
+    "roller_skating": {
+      "symbol": "figure.rolling"
+    },
+    "room": {
+      "symbol": "mappin.and.ellipse"
+    },
+    "rotate_90_degrees_ccw": {
+      "symbol": "rotate.left",
+      "filled": "rotate.left.fill",
+      "outlined": "rotate.left"
+    },
+    "rotate_90_degrees_cw": {
+      "symbol": "rotate.right",
+      "filled": "rotate.right.fill",
+      "outlined": "rotate.right"
+    },
+    "rotate_left": {
+      "symbol": "rotate.left",
+      "filled": "rotate.left.fill",
+      "outlined": "rotate.left"
+    },
+    "rotate_right": {
+      "symbol": "rotate.right",
+      "filled": "rotate.right.fill",
+      "outlined": "rotate.right"
+    },
+    "route": {
+      "symbol": "point.topleft.down.curvedto.point.bottomright.up",
+      "filled": "point.topleft.down.curvedto.point.bottomright.up.fill",
+      "outlined": "point.topleft.down.curvedto.point.bottomright.up"
+    },
+    "router": {
+      "symbol": "wifi.router",
+      "filled": "wifi.router.fill",
+      "outlined": "wifi.router"
+    },
+    "rowing": {
+      "symbol": "figure.rower"
+    },
+    "rss_feed": {
+      "symbol": "dot.radiowaves.up.forward"
+    },
+    "run_circle": {
+      "symbol": "figure.run.circle",
+      "filled": "figure.run.circle.fill",
+      "outlined": "figure.run.circle"
+    },
+    "sailing": {
+      "symbol": "sailboat",
+      "filled": "sailboat.fill",
+      "outlined": "sailboat"
+    },
+    "save": {
+      "symbol": "square.and.arrow.down",
+      "filled": "square.and.arrow.down.fill",
+      "outlined": "square.and.arrow.down"
+    },
+    "save_alt": {
+      "symbol": "arrow.down.to.line"
+    },
+    "scatter_plot": {
+      "symbol": "chart.dots.scatter"
+    },
+    "schedule": {
+      "symbol": "clock",
+      "filled": "clock.fill",
+      "outlined": "clock"
+    },
+    "school": {
+      "symbol": "graduationcap",
+      "filled": "graduationcap.fill",
+      "outlined": "graduationcap"
+    },
+    "science": {
+      "symbol": "testtube.2"
+    },
+    "screen_search_desktop": {
+      "symbol": "rectangle.and.text.magnifyingglass"
+    },
+    "sd": {
+      "symbol": "sdcard",
+      "filled": "sdcard.fill",
+      "outlined": "sdcard"
+    },
+    "sd_card": {
+      "symbol": "sdcard",
+      "filled": "sdcard.fill",
+      "outlined": "sdcard"
+    },
+    "sd_storage": {
+      "symbol": "sdcard",
+      "filled": "sdcard.fill",
+      "outlined": "sdcard"
+    },
+    "search": {
+      "symbol": "magnifyingglass"
+    },
+    "security": {
+      "symbol": "shield",
+      "filled": "shield.fill",
+      "outlined": "shield"
+    },
+    "select_all": {
+      "symbol": "square.dashed.inset.filled"
+    },
+    "self_improvement": {
+      "symbol": "figure.mind.and.body"
+    },
+    "sell": {
+      "symbol": "tag",
+      "filled": "tag.fill",
+      "outlined": "tag"
+    },
+    "send": {
+      "symbol": "paperplane",
+      "filled": "paperplane.fill",
+      "outlined": "paperplane"
+    },
+    "sensors": {
+      "symbol": "sensor",
+      "filled": "sensor.fill",
+      "outlined": "sensor"
+    },
+    "sentiment_satisfied": {
+      "symbol": "face.smiling",
+      "filled": "face.smiling.fill",
+      "outlined": "face.smiling"
+    },
+    "sentiment_satisfied_alt": {
+      "symbol": "face.smiling",
+      "filled": "face.smiling.fill",
+      "outlined": "face.smiling"
+    },
+    "settings": {
+      "symbol": "gearshape",
+      "filled": "gearshape.fill",
+      "outlined": "gearshape"
+    },
+    "settings_input_antenna": {
+      "symbol": "antenna.radiowaves.left.and.right"
+    },
+    "share": {
+      "symbol": "square.and.arrow.up",
+      "filled": "square.and.arrow.up.fill",
+      "outlined": "square.and.arrow.up"
+    },
+    "shield": {
+      "symbol": "shield",
+      "filled": "shield.fill",
+      "outlined": "shield"
+    },
+    "shopping_bag": {
+      "symbol": "bag",
+      "filled": "bag.fill",
+      "outlined": "bag"
+    },
+    "shopping_basket": {
+      "symbol": "basket",
+      "filled": "basket.fill",
+      "outlined": "basket"
+    },
+    "shopping_cart": {
+      "symbol": "cart",
+      "filled": "cart.fill",
+      "outlined": "cart"
+    },
+    "short_text": {
+      "symbol": "text.alignleft"
+    },
+    "shortcut": {
+      "symbol": "arrow.turn.up.right"
+    },
+    "show_chart": {
+      "symbol": "chart.xyaxis.line"
+    },
+    "shower": {
+      "symbol": "shower",
+      "filled": "shower.fill",
+      "outlined": "shower"
+    },
+    "shuffle": {
+      "symbol": "shuffle"
+    },
+    "signal_cellular_4_bar": {
+      "symbol": "cellularbars"
+    },
+    "signal_cellular_alt": {
+      "symbol": "cellularbars"
+    },
+    "signal_wifi_4_bar": {
+      "symbol": "wifi"
+    },
+    "signal_wifi_bad": {
+      "symbol": "wifi.exclamationmark"
+    },
+    "signal_wifi_connected_no_internet_4": {
+      "symbol": "wifi.exclamationmark"
+    },
+    "signal_wifi_off": {
+      "symbol": "wifi.slash"
+    },
+    "signal_wifi_statusbar_4_bar": {
+      "symbol": "wifi"
+    },
+    "signal_wifi_statusbar_connected_no_internet_4": {
+      "symbol": "wifi.exclamationmark"
+    },
+    "signpost": {
+      "symbol": "signpost.right",
+      "filled": "signpost.right.fill",
+      "outlined": "signpost.right"
+    },
+    "sim_card": {
+      "symbol": "simcard",
+      "filled": "simcard.fill",
+      "outlined": "simcard"
+    },
+    "skip_next": {
+      "symbol": "forward.end.fill",
+      "filled": "forward.end.fill",
+      "outlined": "forward.end"
+    },
+    "skip_previous": {
+      "symbol": "backward.end.fill",
+      "filled": "backward.end.fill",
+      "outlined": "backward.end"
+    },
+    "slideshow": {
+      "symbol": "play.rectangle",
+      "filled": "play.rectangle.fill",
+      "outlined": "play.rectangle"
+    },
+    "slow_motion_video": {
+      "symbol": "slowmo"
+    },
+    "smart_display": {
+      "symbol": "play.rectangle",
+      "filled": "play.rectangle.fill",
+      "outlined": "play.rectangle"
+    },
+    "smartphone": {
+      "symbol": "smartphone"
+    },
+    "sms": {
+      "symbol": "bubble.left",
+      "filled": "bubble.left.fill",
+      "outlined": "bubble.left"
+    },
+    "snowboarding": {
+      "symbol": "figure.snowboarding"
+    },
+    "sort": {
+      "symbol": "arrow.up.arrow.down"
+    },
+    "south": {
+      "symbol": "arrow.down"
+    },
+    "south_america": {
+      "symbol": "globe.americas",
+      "filled": "globe.americas.fill",
+      "outlined": "globe.americas"
+    },
+    "south_east": {
+      "symbol": "arrow.down.right"
+    },
+    "south_west": {
+      "symbol": "arrow.down.left"
+    },
+    "speaker_group": {
+      "symbol": "hifispeaker.2",
+      "filled": "hifispeaker.2.fill",
+      "outlined": "hifispeaker.2"
+    },
+    "speaker_notes": {
+      "symbol": "text.bubble",
+      "filled": "text.bubble.fill",
+      "outlined": "text.bubble"
+    },
+    "speed": {
+      "symbol": "speedometer"
+    },
+    "spellcheck": {
+      "symbol": "text.badge.checkmark"
+    },
+    "splitscreen": {
+      "symbol": "rectangle.split.1x2",
+      "filled": "rectangle.split.1x2.fill",
+      "outlined": "rectangle.split.1x2"
+    },
+    "sports_baseball": {
+      "symbol": "baseball",
+      "filled": "baseball.fill",
+      "outlined": "baseball"
+    },
+    "sports_basketball": {
+      "symbol": "basketball",
+      "filled": "basketball.fill",
+      "outlined": "basketball"
+    },
+    "sports_cricket": {
+      "symbol": "cricket.ball",
+      "filled": "cricket.ball.fill",
+      "outlined": "cricket.ball"
+    },
+    "sports_esports": {
+      "symbol": "gamecontroller",
+      "filled": "gamecontroller.fill",
+      "outlined": "gamecontroller"
+    },
+    "sports_football": {
+      "symbol": "football",
+      "filled": "football.fill",
+      "outlined": "football"
+    },
+    "sports_gymnastics": {
+      "symbol": "figure.gymnastics"
+    },
+    "sports_handball": {
+      "symbol": "figure.handball"
+    },
+    "sports_hockey": {
+      "symbol": "hockey.puck",
+      "filled": "hockey.puck.fill",
+      "outlined": "hockey.puck"
+    },
+    "sports_martial_arts": {
+      "symbol": "figure.martial.arts"
+    },
+    "sports_rugby": {
+      "symbol": "figure.rugby"
+    },
+    "sports_score": {
+      "symbol": "flag.checkered"
+    },
+    "sports_soccer": {
+      "symbol": "soccerball"
+    },
+    "sports_tennis": {
+      "symbol": "tennisball",
+      "filled": "tennisball.fill",
+      "outlined": "tennisball"
+    },
+    "sports_volleyball": {
+      "symbol": "volleyball",
+      "filled": "volleyball.fill",
+      "outlined": "volleyball"
+    },
+    "square": {
+      "symbol": "square",
+      "filled": "square.fill",
+      "outlined": "square"
+    },
+    "stairs": {
+      "symbol": "stairs"
+    },
+    "star": {
+      "symbol": "star",
+      "filled": "star.fill",
+      "outlined": "star"
+    },
+    "star_border": {
+      "symbol": "star",
+      "outlined": "star"
+    },
+    "star_half": {
+      "symbol": "star.leadinghalf.filled"
+    },
+    "star_outline": {
+      "symbol": "star",
+      "outlined": "star"
+    },
+    "star_purple_500": {
+      "symbol": "star",
+      "filled": "star.fill",
+      "outlined": "star"
+    },
+    "star_rate": {
+      "symbol": "star",
+      "filled": "star.fill",
+      "outlined": "star"
+    },
+    "stars": {
+      "symbol": "star.circle",
+      "filled": "star.circle.fill",
+      "outlined": "star.circle"
+    },
+    "sticky_note_2": {
+      "symbol": "note.text"
+    },
+    "stop": {
+      "symbol": "stop.fill",
+      "filled": "stop.fill",
+      "outlined": "stop"
+    },
+    "stop_circle": {
+      "symbol": "stop.circle",
+      "filled": "stop.circle.fill",
+      "outlined": "stop.circle"
+    },
+    "store": {
+      "symbol": "storefront",
+      "filled": "storefront.fill",
+      "outlined": "storefront"
+    },
+    "store_mall_directory": {
+      "symbol": "storefront",
+      "filled": "storefront.fill",
+      "outlined": "storefront"
+    },
+    "storefront": {
+      "symbol": "storefront",
+      "filled": "storefront.fill",
+      "outlined": "storefront"
+    },
+    "storm": {
+      "symbol": "hurricane"
+    },
+    "straight": {
+      "symbol": "arrow.up"
+    },
+    "straighten": {
+      "symbol": "ruler",
+      "filled": "ruler.fill",
+      "outlined": "ruler"
+    },
+    "stream": {
+      "symbol": "dot.radiowaves.left.and.right"
+    },
+    "strikethrough_s": {
+      "symbol": "strikethrough"
+    },
+    "stroller": {
+      "symbol": "stroller",
+      "filled": "stroller.fill",
+      "outlined": "stroller"
+    },
+    "subdirectory_arrow_left": {
+      "symbol": "arrow.turn.down.left"
+    },
+    "subdirectory_arrow_right": {
+      "symbol": "arrow.turn.down.right"
+    },
+    "subject": {
+      "symbol": "text.alignleft"
+    },
+    "subscript": {
+      "symbol": "textformat.subscript"
+    },
+    "subscriptions": {
+      "symbol": "play.rectangle.on.rectangle",
+      "filled": "play.rectangle.on.rectangle.fill",
+      "outlined": "play.rectangle.on.rectangle"
+    },
+    "subtitles": {
+      "symbol": "captions.bubble",
+      "filled": "captions.bubble.fill",
+      "outlined": "captions.bubble"
+    },
+    "subway": {
+      "symbol": "tram",
+      "filled": "tram.fill",
+      "outlined": "tram"
+    },
+    "summarize": {
+      "symbol": "doc.text",
+      "filled": "doc.text.fill",
+      "outlined": "doc.text"
+    },
+    "superscript": {
+      "symbol": "textformat.superscript"
+    },
+    "support": {
+      "symbol": "lifepreserver",
+      "filled": "lifepreserver.fill",
+      "outlined": "lifepreserver"
+    },
+    "surfing": {
+      "symbol": "figure.surfing"
+    },
+    "swap_horiz": {
+      "symbol": "arrow.left.arrow.right"
+    },
+    "swap_horizontal_circle": {
+      "symbol": "arrow.left.arrow.right.circle",
+      "filled": "arrow.left.arrow.right.circle.fill",
+      "outlined": "arrow.left.arrow.right.circle"
+    },
+    "swap_vert": {
+      "symbol": "arrow.up.arrow.down"
+    },
+    "swap_vertical_circle": {
+      "symbol": "arrow.up.arrow.down.circle",
+      "filled": "arrow.up.arrow.down.circle.fill",
+      "outlined": "arrow.up.arrow.down.circle"
+    },
+    "switch_camera": {
+      "symbol": "arrow.triangle.2.circlepath.camera",
+      "filled": "arrow.triangle.2.circlepath.camera.fill",
+      "outlined": "arrow.triangle.2.circlepath.camera"
+    },
+    "sync": {
+      "symbol": "arrow.triangle.2.circlepath"
+    },
+    "sync_alt": {
+      "symbol": "arrow.left.arrow.right"
+    },
+    "sync_problem": {
+      "symbol": "exclamationmark.arrow.triangle.2.circlepath"
+    },
+    "table_restaurant": {
+      "symbol": "table.furniture",
+      "filled": "table.furniture.fill",
+      "outlined": "table.furniture"
+    },
+    "tag": {
+      "symbol": "number"
+    },
+    "tag_faces": {
+      "symbol": "face.smiling",
+      "filled": "face.smiling.fill",
+      "outlined": "face.smiling"
+    },
+    "task_alt": {
+      "symbol": "checkmark.circle",
+      "filled": "checkmark.circle.fill",
+      "outlined": "checkmark.circle"
+    },
+    "terminal": {
+      "symbol": "terminal",
+      "filled": "terminal.fill",
+      "outlined": "terminal"
+    },
+    "terrain": {
+      "symbol": "mountain.2",
+      "filled": "mountain.2.fill",
+      "outlined": "mountain.2"
+    },
+    "text_decrease": {
+      "symbol": "textformat.size.smaller"
+    },
+    "text_fields": {
+      "symbol": "textformat"
+    },
+    "text_format": {
+      "symbol": "textformat"
+    },
+    "text_increase": {
+      "symbol": "textformat.size.larger"
+    },
+    "text_snippet": {
+      "symbol": "doc.text",
+      "filled": "doc.text.fill",
+      "outlined": "doc.text"
+    },
+    "textsms": {
+      "symbol": "bubble.left",
+      "filled": "bubble.left.fill",
+      "outlined": "bubble.left"
+    },
+    "theater_comedy": {
+      "symbol": "theatermasks",
+      "filled": "theatermasks.fill",
+      "outlined": "theatermasks"
+    },
+    "theaters": {
+      "symbol": "film",
+      "filled": "film.fill",
+      "outlined": "film"
+    },
+    "thermostat": {
+      "symbol": "thermometer.medium"
+    },
+    "thumb_down": {
+      "symbol": "hand.thumbsdown",
+      "filled": "hand.thumbsdown.fill",
+      "outlined": "hand.thumbsdown"
+    },
+    "thumb_down_alt": {
+      "symbol": "hand.thumbsdown",
+      "filled": "hand.thumbsdown.fill",
+      "outlined": "hand.thumbsdown"
+    },
+    "thumb_down_off_alt": {
+      "symbol": "hand.thumbsdown",
+      "outlined": "hand.thumbsdown"
+    },
+    "thumb_up": {
+      "symbol": "hand.thumbsup",
+      "filled": "hand.thumbsup.fill",
+      "outlined": "hand.thumbsup"
+    },
+    "thumb_up_alt": {
+      "symbol": "hand.thumbsup",
+      "filled": "hand.thumbsup.fill",
+      "outlined": "hand.thumbsup"
+    },
+    "thumb_up_off_alt": {
+      "symbol": "hand.thumbsup",
+      "outlined": "hand.thumbsup"
+    },
+    "thunderstorm": {
+      "symbol": "cloud.bolt.rain",
+      "filled": "cloud.bolt.rain.fill",
+      "outlined": "cloud.bolt.rain"
+    },
+    "time_to_leave": {
+      "symbol": "car",
+      "filled": "car.fill",
+      "outlined": "car"
+    },
+    "timeline": {
+      "symbol": "chart.xyaxis.line"
+    },
+    "timer": {
+      "symbol": "timer"
+    },
+    "title": {
+      "symbol": "textformat"
+    },
+    "toc": {
+      "symbol": "list.bullet"
+    },
+    "today": {
+      "symbol": "calendar"
+    },
+    "tornado": {
+      "symbol": "tornado"
+    },
+    "touch_app": {
+      "symbol": "hand.tap",
+      "filled": "hand.tap.fill",
+      "outlined": "hand.tap"
+    },
+    "train": {
+      "symbol": "tram",
+      "filled": "tram.fill",
+      "outlined": "tram"
+    },
+    "tram": {
+      "symbol": "tram",
+      "filled": "tram.fill",
+      "outlined": "tram"
+    },
+    "translate": {
+      "symbol": "character.bubble",
+      "filled": "character.bubble.fill",
+      "outlined": "character.bubble"
+    },
+    "trending_flat": {
+      "symbol": "arrow.right"
+    },
+    "tune": {
+      "symbol": "slider.horizontal.3"
+    },
+    "turn_left": {
+      "symbol": "arrow.turn.up.left"
+    },
+    "turn_right": {
+      "symbol": "arrow.turn.up.right"
+    },
+    "turned_in": {
+      "symbol": "bookmark",
+      "filled": "bookmark.fill",
+      "outlined": "bookmark"
+    },
+    "turned_in_not": {
+      "symbol": "bookmark",
+      "outlined": "bookmark"
+    },
+    "tv": {
+      "symbol": "tv",
+      "filled": "tv.fill",
+      "outlined": "tv"
+    },
+    "tv_off": {
+      "symbol": "tv.slash"
+    },
+    "u_turn_left": {
+      "symbol": "arrow.uturn.left"
+    },
+    "u_turn_right": {
+      "symbol": "arrow.uturn.right"
+    },
+    "umbrella": {
+      "symbol": "umbrella",
+      "filled": "umbrella.fill",
+      "outlined": "umbrella"
+    },
+    "unarchive": {
+      "symbol": "tray.and.arrow.up",
+      "filled": "tray.and.arrow.up.fill",
+      "outlined": "tray.and.arrow.up"
+    },
+    "undo": {
+      "symbol": "arrow.uturn.backward"
+    },
+    "unfold_more": {
+      "symbol": "arrow.up.and.down"
+    },
+    "update": {
+      "symbol": "clock.arrow.circlepath"
+    },
+    "upgrade": {
+      "symbol": "arrow.up.to.line"
+    },
+    "upload": {
+      "symbol": "arrow.up.to.line"
+    },
+    "upload_file": {
+      "symbol": "doc.badge.arrow.up",
+      "filled": "doc.badge.arrow.up.fill",
+      "outlined": "doc.badge.arrow.up"
+    },
+    "vaccines": {
+      "symbol": "syringe",
+      "filled": "syringe.fill",
+      "outlined": "syringe"
+    },
+    "verified": {
+      "symbol": "checkmark.seal",
+      "filled": "checkmark.seal.fill",
+      "outlined": "checkmark.seal"
+    },
+    "verified_user": {
+      "symbol": "checkmark.shield",
+      "filled": "checkmark.shield.fill",
+      "outlined": "checkmark.shield"
+    },
+    "vertical_align_bottom": {
+      "symbol": "align.vertical.bottom",
+      "filled": "align.vertical.bottom.fill",
+      "outlined": "align.vertical.bottom"
+    },
+    "vertical_align_center": {
+      "symbol": "align.vertical.center",
+      "filled": "align.vertical.center.fill",
+      "outlined": "align.vertical.center"
+    },
+    "vertical_align_top": {
+      "symbol": "align.vertical.top",
+      "filled": "align.vertical.top.fill",
+      "outlined": "align.vertical.top"
+    },
+    "vertical_shades": {
+      "symbol": "blinds.vertical.open"
+    },
+    "vertical_shades_closed": {
+      "symbol": "blinds.vertical.closed"
+    },
+    "vertical_split": {
+      "symbol": "rectangle.split.2x1",
+      "filled": "rectangle.split.2x1.fill",
+      "outlined": "rectangle.split.2x1"
+    },
+    "video_chat": {
+      "symbol": "video.bubble.left",
+      "filled": "video.bubble.left.fill",
+      "outlined": "video.bubble.left"
+    },
+    "videogame_asset": {
+      "symbol": "gamecontroller",
+      "filled": "gamecontroller.fill",
+      "outlined": "gamecontroller"
+    },
+    "view_agenda": {
+      "symbol": "rectangle.split.1x2",
+      "filled": "rectangle.split.1x2.fill",
+      "outlined": "rectangle.split.1x2"
+    },
+    "view_column": {
+      "symbol": "rectangle.split.3x1",
+      "filled": "rectangle.split.3x1.fill",
+      "outlined": "rectangle.split.3x1"
+    },
+    "view_headline": {
+      "symbol": "line.3.horizontal"
+    },
+    "view_list": {
+      "symbol": "list.bullet"
+    },
+    "view_sidebar": {
+      "symbol": "sidebar.left"
+    },
+    "view_stream": {
+      "symbol": "rectangle.split.1x2",
+      "filled": "rectangle.split.1x2.fill",
+      "outlined": "rectangle.split.1x2"
+    },
+    "visibility": {
+      "symbol": "eye",
+      "filled": "eye.fill",
+      "outlined": "eye"
+    },
+    "visibility_off": {
+      "symbol": "eye.slash",
+      "filled": "eye.slash.fill",
+      "outlined": "eye.slash"
+    },
+    "voice_chat": {
+      "symbol": "waveform.and.mic"
+    },
+    "voicemail": {
+      "symbol": "recordingtape"
+    },
+    "volume_down": {
+      "symbol": "speaker.wave.1",
+      "filled": "speaker.wave.1.fill",
+      "outlined": "speaker.wave.1"
+    },
+    "volume_mute": {
+      "symbol": "speaker",
+      "filled": "speaker.fill",
+      "outlined": "speaker"
+    },
+    "volume_off": {
+      "symbol": "speaker.slash",
+      "filled": "speaker.slash.fill",
+      "outlined": "speaker.slash"
+    },
+    "volume_up": {
+      "symbol": "speaker.wave.3",
+      "filled": "speaker.wave.3.fill",
+      "outlined": "speaker.wave.3"
+    },
+    "vpn_key": {
+      "symbol": "key",
+      "filled": "key.fill",
+      "outlined": "key"
+    },
+    "vpn_key_off": {
+      "symbol": "key.slash",
+      "filled": "key.slash.fill",
+      "outlined": "key.slash"
+    },
+    "wallet": {
+      "symbol": "wallet.pass",
+      "filled": "wallet.pass.fill",
+      "outlined": "wallet.pass"
+    },
+    "warning": {
+      "symbol": "exclamationmark.triangle",
+      "filled": "exclamationmark.triangle.fill",
+      "outlined": "exclamationmark.triangle"
+    },
+    "warning_amber": {
+      "symbol": "exclamationmark.triangle",
+      "filled": "exclamationmark.triangle.fill",
+      "outlined": "exclamationmark.triangle"
+    },
+    "watch_later": {
+      "symbol": "clock",
+      "filled": "clock.fill",
+      "outlined": "clock"
+    },
+    "water": {
+      "symbol": "water.waves"
+    },
+    "water_drop": {
+      "symbol": "drop",
+      "filled": "drop.fill",
+      "outlined": "drop"
+    },
+    "waves": {
+      "symbol": "water.waves"
+    },
+    "waving_hand": {
+      "symbol": "hand.wave",
+      "filled": "hand.wave.fill",
+      "outlined": "hand.wave"
+    },
+    "wb_cloudy": {
+      "symbol": "cloud",
+      "filled": "cloud.fill",
+      "outlined": "cloud"
+    },
+    "wb_incandescent": {
+      "symbol": "lightbulb",
+      "filled": "lightbulb.fill",
+      "outlined": "lightbulb"
+    },
+    "wb_sunny": {
+      "symbol": "sun.max",
+      "filled": "sun.max.fill",
+      "outlined": "sun.max"
+    },
+    "wb_twilight": {
+      "symbol": "sun.horizon",
+      "filled": "sun.horizon.fill",
+      "outlined": "sun.horizon"
+    },
+    "weekend": {
+      "symbol": "sofa",
+      "filled": "sofa.fill",
+      "outlined": "sofa"
+    },
+    "west": {
+      "symbol": "arrow.left"
+    },
+    "whatshot": {
+      "symbol": "flame",
+      "filled": "flame.fill",
+      "outlined": "flame"
+    },
+    "wifi": {
+      "symbol": "wifi"
+    },
+    "wifi_off": {
+      "symbol": "wifi.slash"
+    },
+    "wifi_tethering": {
+      "symbol": "dot.radiowaves.left.and.right"
+    },
+    "window": {
+      "symbol": "window.vertical.closed"
+    },
+    "wine_bar": {
+      "symbol": "wineglass",
+      "filled": "wineglass.fill",
+      "outlined": "wineglass"
+    },
+    "work": {
+      "symbol": "briefcase",
+      "filled": "briefcase.fill",
+      "outlined": "briefcase"
+    },
+    "work_outline": {
+      "symbol": "briefcase",
+      "outlined": "briefcase"
+    },
+    "workspace_premium": {
+      "symbol": "rosette"
+    },
+    "wysiwyg": {
+      "symbol": "doc.richtext",
+      "filled": "doc.richtext.fill",
+      "outlined": "doc.richtext"
+    },
+    "zoom_in": {
+      "symbol": "plus.magnifyingglass"
+    },
+    "zoom_in_map": {
+      "symbol": "arrow.up.left.and.arrow.down.right"
+    },
+    "zoom_out": {
+      "symbol": "minus.magnifyingglass"
+    },
+    "zoom_out_map": {
+      "symbol": "arrow.down.right.and.arrow.up.left"
+    }
+  },
+  "unmapped": [
+    "account_tree",
+    "ad_units",
+    "adb",
+    "add_a_photo",
+    "add_alarm",
+    "add_alert",
+    "add_business",
+    "add_card",
+    "add_chart",
+    "add_home",
+    "add_home_work",
+    "add_location",
+    "add_location_alt",
+    "add_moderator",
+    "add_reaction",
+    "add_road",
+    "add_task",
+    "add_to_drive",
+    "add_to_home_screen",
+    "add_to_queue",
+    "addchart",
+    "adjust",
+    "admin_panel_settings",
+    "ads_click",
+    "agriculture",
+    "airline_seat_flat",
+    "airline_seat_flat_angled",
+    "airline_seat_individual_suite",
+    "airline_seat_legroom_extra",
+    "airline_seat_legroom_normal",
+    "airline_seat_legroom_reduced",
+    "airline_seat_recline_extra",
+    "airline_seat_recline_normal",
+    "airline_stops",
+    "airlines",
+    "airplane_ticket",
+    "airplanemode_inactive",
+    "alarm_add",
+    "alarm_off",
+    "alarm_on",
+    "all_out",
+    "amp_stories",
+    "anchor",
+    "android",
+    "animation",
+    "announcement",
+    "aod",
+    "api",
+    "app_blocking",
+    "app_registration",
+    "app_settings_alt",
+    "app_shortcut",
+    "apps_outage",
+    "architecture",
+    "area_chart",
+    "arrow_drop_down_circle",
+    "art_track",
+    "assignment_late",
+    "assignment_return",
+    "assignment_returned",
+    "assignment_turned_in",
+    "assist_walker",
+    "assistant",
+    "assistant_direction",
+    "assured_workload",
+    "atm",
+    "attach_email",
+    "attractions",
+    "attribution",
+    "audio_file",
+    "auto_awesome_motion",
+    "auto_delete",
+    "auto_fix_normal",
+    "auto_fix_off",
+    "auto_graph",
+    "auto_mode",
+    "autofps_select",
+    "baby_changing_station",
+    "back_hand",
+    "backup",
+    "backup_table",
+    "bakery_dining",
+    "balance",
+    "balcony",
+    "batch_prediction",
+    "battery_1_bar",
+    "battery_2_bar",
+    "battery_4_bar",
+    "battery_5_bar",
+    "battery_6_bar",
+    "battery_alert",
+    "battery_saver",
+    "battery_unknown",
+    "bedroom_baby",
+    "bedroom_child",
+    "bedroom_parent",
+    "bedtime_off",
+    "beenhere",
+    "bento",
+    "bike_scooter",
+    "biotech",
+    "blender",
+    "blind",
+    "bloodtype",
+    "bluetooth",
+    "bluetooth_audio",
+    "bluetooth_connected",
+    "bluetooth_disabled",
+    "bluetooth_drive",
+    "bluetooth_searching",
+    "blur_circular",
+    "blur_linear",
+    "blur_off",
+    "blur_on",
+    "book_online",
+    "bookmark_add",
+    "bookmark_added",
+    "bookmarks",
+    "border_bottom",
+    "border_color",
+    "border_horizontal",
+    "border_inner",
+    "border_left",
+    "border_right",
+    "border_style",
+    "border_top",
+    "border_vertical",
+    "boy",
+    "branding_watermark",
+    "breakfast_dining",
+    "brightness_2",
+    "brightness_4",
+    "brightness_6",
+    "brightness_auto",
+    "brightness_medium",
+    "broadcast_on_home",
+    "broadcast_on_personal",
+    "broken_image",
+    "browse_gallery",
+    "browser_updated",
+    "brunch_dining",
+    "bubble_chart",
+    "bug_report",
+    "build_circle",
+    "bungalow",
+    "bus_alert",
+    "cabin",
+    "calculate",
+    "calendar_view_month",
+    "calendar_view_week",
+    "call_missed",
+    "call_missed_outgoing",
+    "call_to_action",
+    "camera",
+    "camera_enhance",
+    "camera_front",
+    "camera_indoor",
+    "camera_outdoor",
+    "camera_rear",
+    "cancel_schedule_send",
+    "candlestick_chart",
+    "car_crash",
+    "car_rental",
+    "car_repair",
+    "carpenter",
+    "cases",
+    "cast",
+    "cast_connected",
+    "cast_for_education",
+    "castle",
+    "catching_pokemon",
+    "category",
+    "cell_wifi",
+    "center_focus_strong",
+    "center_focus_weak",
+    "chalet",
+    "charging_station",
+    "chat",
+    "checklist_rtl",
+    "checkroom",
+    "child_care",
+    "chrome_reader_mode",
+    "church",
+    "circle_notifications",
+    "cleaning_services",
+    "clear_all",
+    "closed_caption_disabled",
+    "closed_caption_off",
+    "cloud_done",
+    "cloud_download",
+    "cloud_off",
+    "cloud_queue",
+    "cloud_sync",
+    "cloud_upload",
+    "co_present",
+    "code_off",
+    "coffee_maker",
+    "collections_bookmark",
+    "comment_bank",
+    "comments_disabled",
+    "commit",
+    "commute",
+    "compare",
+    "compass_calibration",
+    "compress",
+    "connect_without_contact",
+    "connected_tv",
+    "connecting_airports",
+    "construction",
+    "contact_emergency",
+    "contact_mail",
+    "contact_phone",
+    "contactless",
+    "content_paste_go",
+    "content_paste_off",
+    "content_paste_search",
+    "control_camera",
+    "control_point_duplicate",
+    "cookie",
+    "cottage",
+    "countertops",
+    "credit_card_off",
+    "credit_score",
+    "crib",
+    "crisis_alert",
+    "crop_169",
+    "crop_32",
+    "crop_54",
+    "crop_75",
+    "crop_din",
+    "crop_landscape",
+    "crop_original",
+    "crop_portrait",
+    "crop_square",
+    "cruelty_free",
+    "css",
+    "currency_bitcoin",
+    "currency_exchange",
+    "dashboard_customize",
+    "data_array",
+    "data_exploration",
+    "data_saver_off",
+    "data_saver_on",
+    "data_thresholding",
+    "data_usage",
+    "dataset_linked",
+    "deblur",
+    "deck",
+    "delete_forever",
+    "delete_sweep",
+    "delivery_dining",
+    "density_large",
+    "density_medium",
+    "density_small",
+    "departure_board",
+    "deselect",
+    "desk",
+    "desktop_access_disabled",
+    "details",
+    "developer_board",
+    "developer_board_off",
+    "developer_mode",
+    "device_hub",
+    "device_unknown",
+    "devices",
+    "devices_fold",
+    "devices_other",
+    "dialer_sip",
+    "difference",
+    "directions_off",
+    "dirty_lens",
+    "disabled_visible",
+    "disc_full",
+    "display_settings",
+    "diversity_1",
+    "diversity_2",
+    "diversity_3",
+    "do_disturb_alt",
+    "do_disturb_off",
+    "do_not_disturb_off",
+    "do_not_disturb_on_total_silence",
+    "do_not_step",
+    "do_not_touch",
+    "dock",
+    "domain_add",
+    "domain_disabled",
+    "domain_verification",
+    "done_all",
+    "donut_large",
+    "donut_small",
+    "door_back",
+    "doorbell",
+    "download_done",
+    "drag_indicator",
+    "drive_file_move",
+    "drive_file_move_rtl",
+    "drive_folder_upload",
+    "dry",
+    "duo",
+    "dvr",
+    "dynamic_feed",
+    "dynamic_form",
+    "e_mobiledata",
+    "earbuds_battery",
+    "edgesensor_high",
+    "edgesensor_low",
+    "edit_attributes",
+    "edit_calendar",
+    "edit_location",
+    "edit_location_alt",
+    "edit_notifications",
+    "edit_road",
+    "egg",
+    "egg_alt",
+    "elderly",
+    "elderly_woman",
+    "electric_bike",
+    "electric_car",
+    "electric_meter",
+    "electric_moped",
+    "electric_rickshaw",
+    "elevator",
+    "emergency_recording",
+    "emergency_share",
+    "emoji_nature",
+    "emoji_symbols",
+    "energy_savings_leaf",
+    "engineering",
+    "enhanced_encryption",
+    "escalator",
+    "escalator_warning",
+    "event_note",
+    "event_repeat",
+    "explicit",
+    "explore",
+    "explore_off",
+    "exposure_neg_1",
+    "exposure_neg_2",
+    "exposure_plus_1",
+    "exposure_plus_2",
+    "exposure_zero",
+    "extension_off",
+    "face",
+    "face_2",
+    "face_3",
+    "face_4",
+    "face_5",
+    "face_6",
+    "face_retouching_natural",
+    "face_retouching_off",
+    "facebook",
+    "fact_check",
+    "factory",
+    "featured_video",
+    "female",
+    "fence",
+    "fiber_dvr",
+    "fiber_new",
+    "fiber_pin",
+    "fiber_smart_record",
+    "file_download_done",
+    "file_download_off",
+    "file_open",
+    "file_present",
+    "filter",
+    "filter_1",
+    "filter_2",
+    "filter_3",
+    "filter_4",
+    "filter_5",
+    "filter_6",
+    "filter_7",
+    "filter_8",
+    "filter_9",
+    "filter_9_plus",
+    "filter_alt_off",
+    "filter_b_and_w",
+    "filter_drama",
+    "filter_frames",
+    "filter_hdr",
+    "filter_list_off",
+    "filter_tilt_shift",
+    "filter_vintage",
+    "find_replace",
+    "fingerprint",
+    "fire_extinguisher",
+    "fire_hydrant_alt",
+    "fire_truck",
+    "fit_screen",
+    "fitbit",
+    "flaky",
+    "flare",
+    "flight_class",
+    "flip_to_back",
+    "flip_to_front",
+    "flood",
+    "flutter_dash",
+    "fmd_bad",
+    "folder_copy",
+    "folder_off",
+    "folder_open",
+    "folder_special",
+    "folder_zip",
+    "follow_the_signs",
+    "font_download",
+    "font_download_off",
+    "food_bank",
+    "forest",
+    "fork_left",
+    "fork_right",
+    "format_clear",
+    "format_color_fill",
+    "format_color_reset",
+    "format_color_text",
+    "format_line_spacing",
+    "format_list_numbered_rtl",
+    "format_overline",
+    "format_paint",
+    "format_shapes",
+    "format_textdirection_l_to_r",
+    "format_textdirection_r_to_l",
+    "fort",
+    "foundation",
+    "free_breakfast",
+    "free_cancellation",
+    "g_mobiledata",
+    "g_translate",
+    "gas_meter",
+    "gavel",
+    "generating_tokens",
+    "gesture",
+    "gif",
+    "gif_box",
+    "girl",
+    "gite",
+    "golf_course",
+    "gradient",
+    "grain",
+    "grass",
+    "grid_4x_4",
+    "grid_goldenratio",
+    "grid_off",
+    "group_add",
+    "group_remove",
+    "group_work",
+    "groups_2",
+    "groups_3",
+    "h_mobiledata",
+    "h_plus_mobiledata",
+    "hail",
+    "handshake",
+    "hd",
+    "hdr_auto",
+    "hdr_auto_select",
+    "hdr_enhanced_select",
+    "hdr_off",
+    "hdr_off_select",
+    "hdr_on",
+    "hdr_on_select",
+    "hdr_plus",
+    "hdr_strong",
+    "hdr_weak",
+    "headphones_battery",
+    "headset_mic",
+    "headset_off",
+    "hearing_disabled",
+    "heart_broken",
+    "heat_pump",
+    "hevc",
+    "hide_image",
+    "hide_source",
+    "high_quality",
+    "highlight_alt",
+    "history_edu",
+    "history_toggle_off",
+    "hive",
+    "hls",
+    "hls_off",
+    "holiday_village",
+    "home_max",
+    "home_mini",
+    "home_repair_service",
+    "home_work",
+    "horizontal_distribute",
+    "hot_tub",
+    "hotel_class",
+    "hourglass_bottom",
+    "hourglass_disabled",
+    "hourglass_empty",
+    "hourglass_full",
+    "hourglass_top",
+    "house_siding",
+    "houseboat",
+    "how_to_vote",
+    "html",
+    "http",
+    "hub",
+    "hvac",
+    "icecream",
+    "image_not_supported",
+    "image_search",
+    "imagesearch_roller",
+    "important_devices",
+    "incomplete_circle",
+    "insert_page_break",
+    "insights",
+    "install_desktop",
+    "install_mobile",
+    "integration_instructions",
+    "interests",
+    "interpreter_mode",
+    "inventory_2",
+    "invert_colors_off",
+    "iron",
+    "iso",
+    "javascript",
+    "join_full",
+    "join_inner",
+    "join_left",
+    "join_right",
+    "kayaking",
+    "kebab_dining",
+    "keyboard_double_arrow_down",
+    "keyboard_double_arrow_up",
+    "keyboard_tab",
+    "king_bed",
+    "kitesurfing",
+    "label_important",
+    "label_off",
+    "landslide",
+    "laptop_chromebook",
+    "laptop_windows",
+    "layers_clear",
+    "leaderboard",
+    "leak_add",
+    "leak_remove",
+    "leave_bags_at_home",
+    "legend_toggle",
+    "lens_blur",
+    "library_add_check",
+    "line_axis",
+    "line_style",
+    "line_weight",
+    "linear_scale",
+    "link_off",
+    "linked_camera",
+    "live_tv",
+    "local_car_wash",
+    "local_convenience_store",
+    "local_drink",
+    "local_florist",
+    "local_library",
+    "local_pharmacy",
+    "local_pizza",
+    "local_post_office",
+    "local_taxi",
+    "lock_clock",
+    "lock_person",
+    "lock_reset",
+    "logo_dev",
+    "looks",
+    "low_priority",
+    "loyalty",
+    "lte_mobiledata",
+    "lte_plus_mobiledata",
+    "lunch_dining",
+    "lyrics",
+    "macro_off",
+    "mail_lock",
+    "male",
+    "man_2",
+    "man_3",
+    "man_4",
+    "manage_accounts",
+    "manage_history",
+    "maps_home_work",
+    "maps_ugc",
+    "margin",
+    "mark_chat_read",
+    "mark_chat_unread",
+    "mark_email_read",
+    "mark_unread_chat_alt",
+    "markunread_mailbox",
+    "maximize",
+    "media_bluetooth_off",
+    "media_bluetooth_on",
+    "mediation",
+    "medical_information",
+    "menu_open",
+    "mic_external_off",
+    "mic_external_on",
+    "minimize",
+    "minor_crash",
+    "missed_video_call",
+    "mms",
+    "mobile_friendly",
+    "mobile_off",
+    "mobile_screen_share",
+    "mobiledata_off",
+    "mode",
+    "mode_fan_off",
+    "mode_of_travel",
+    "mode_standby",
+    "model_training",
+    "money_off",
+    "money_off_csred",
+    "monochrome_photos",
+    "mood_bad",
+    "moped",
+    "more",
+    "more_time",
+    "mosque",
+    "motion_photos_auto",
+    "motion_photos_off",
+    "motion_photos_on",
+    "motion_photos_pause",
+    "motion_photos_paused",
+    "motorcycle",
+    "move_down",
+    "move_up",
+    "movie",
+    "movie_creation",
+    "movie_filter",
+    "moving",
+    "mp",
+    "multiline_chart",
+    "multiple_stop",
+    "museum",
+    "music_off",
+    "music_video",
+    "nat",
+    "nature_people",
+    "nearby_error",
+    "nearby_off",
+    "nest_cam_wired_stand",
+    "network_check",
+    "network_locked",
+    "network_ping",
+    "network_wifi_1_bar",
+    "network_wifi_2_bar",
+    "network_wifi_3_bar",
+    "new_label",
+    "new_releases",
+    "next_week",
+    "nfc",
+    "night_shelter",
+    "nightlife",
+    "nights_stay",
+    "no_adult_content",
+    "no_backpack",
+    "no_cell",
+    "no_crash",
+    "no_drinks",
+    "no_food",
+    "no_luggage",
+    "no_meals",
+    "no_meeting_room",
+    "no_photography",
+    "no_sim",
+    "no_stroller",
+    "no_transfer",
+    "noise_aware",
+    "noise_control_off",
+    "nordic_walking",
+    "not_accessible",
+    "not_listed_location",
+    "not_started",
+    "note_alt",
+    "notification_add",
+    "notification_important",
+    "notifications_paused",
+    "offline_bolt",
+    "offline_pin",
+    "offline_share",
+    "oil_barrel",
+    "on_device_training",
+    "online_prediction",
+    "open_in_browser",
+    "open_in_new_off",
+    "other_houses",
+    "outdoor_grill",
+    "outlined_flag",
+    "output",
+    "padding",
+    "pages",
+    "panorama_photosphere",
+    "panorama_photosphere_select",
+    "panorama_vertical",
+    "panorama_vertical_select",
+    "panorama_wide_angle",
+    "panorama_wide_angle_select",
+    "paragliding",
+    "party_mode",
+    "password",
+    "pattern",
+    "pending_actions",
+    "perm_camera_mic",
+    "perm_contact_calendar",
+    "perm_data_setting",
+    "perm_device_information",
+    "perm_media",
+    "perm_scan_wifi",
+    "person_2",
+    "person_3",
+    "person_4",
+    "person_add_disabled",
+    "person_pin",
+    "person_pin_circle",
+    "person_search",
+    "personal_injury",
+    "pest_control_rodent",
+    "phishing",
+    "phone_android",
+    "phone_bluetooth_speaker",
+    "phone_callback",
+    "phone_disabled",
+    "phone_iphone",
+    "phone_locked",
+    "phone_missed",
+    "phone_paused",
+    "phonelink",
+    "phonelink_erase",
+    "phonelink_lock",
+    "phonelink_off",
+    "phonelink_ring",
+    "phonelink_setup",
+    "photo_camera_back",
+    "photo_camera_front",
+    "photo_filter",
+    "photo_size_select_actual",
+    "photo_size_select_large",
+    "photo_size_select_small",
+    "php",
+    "piano_off",
+    "picture_as_pdf",
+    "pin_drop",
+    "pin_end",
+    "pin_invoke",
+    "pinch",
+    "pivot_table_chart",
+    "pix",
+    "plagiarism",
+    "play_disabled",
+    "play_for_work",
+    "play_lesson",
+    "playlist_add_check_circle",
+    "playlist_add_circle",
+    "playlist_play",
+    "plus_one",
+    "podcasts",
+    "point_of_sale",
+    "policy",
+    "polyline",
+    "polymer",
+    "portable_wifi_off",
+    "power_input",
+    "power_off",
+    "precision_manufacturing",
+    "pregnant_woman",
+    "present_to_all",
+    "price_change",
+    "price_check",
+    "print_disabled",
+    "private_connectivity",
+    "production_quantity_limits",
+    "propane",
+    "propane_tank",
+    "psychology_alt",
+    "public_off",
+    "published_with_changes",
+    "punch_clock",
+    "query_stats",
+    "queue",
+    "queue_play_next",
+    "quickreply",
+    "quiz",
+    "r_mobiledata",
+    "radar",
+    "railway_alert",
+    "ramen_dining",
+    "ramp_left",
+    "ramp_right",
+    "raw_off",
+    "raw_on",
+    "real_estate_agent",
+    "receipt",
+    "receipt_long",
+    "recent_actors",
+    "recommend",
+    "record_voice_over",
+    "reduce_capacity",
+    "remember_me",
+    "remove_done",
+    "remove_from_queue",
+    "remove_moderator",
+    "remove_road",
+    "remove_shopping_cart",
+    "repartition",
+    "repeat_on",
+    "repeat_one_on",
+    "report_off",
+    "request_page",
+    "request_quote",
+    "reset_tv",
+    "restore_from_trash",
+    "restore_page",
+    "rice_bowl",
+    "rocket",
+    "rocket_launch",
+    "roofing",
+    "room_preferences",
+    "room_service",
+    "roundabout_left",
+    "roundabout_right",
+    "rounded_corner",
+    "rsvp",
+    "rtt",
+    "rule",
+    "rule_folder",
+    "running_with_errors",
+    "rv_hookup",
+    "safety_check",
+    "safety_divider",
+    "sanitizer",
+    "satellite",
+    "satellite_alt",
+    "save_as",
+    "saved_search",
+    "savings",
+    "scale",
+    "scanner",
+    "schedule_send",
+    "schema",
+    "score",
+    "scoreboard",
+    "screen_lock_landscape",
+    "screen_lock_portrait",
+    "screen_lock_rotation",
+    "screen_rotation",
+    "screen_rotation_alt",
+    "screen_share",
+    "screenshot",
+    "screenshot_monitor",
+    "scuba_diving",
+    "sd_card_alert",
+    "search_off",
+    "security_update",
+    "security_update_good",
+    "security_update_warning",
+    "segment",
+    "send_and_archive",
+    "send_time_extension",
+    "send_to_mobile",
+    "sensor_door",
+    "sensor_occupied",
+    "sensor_window",
+    "sensors_off",
+    "sentiment_dissatisfied",
+    "sentiment_neutral",
+    "sentiment_very_dissatisfied",
+    "sentiment_very_satisfied",
+    "set_meal",
+    "settings_accessibility",
+    "settings_applications",
+    "settings_backup_restore",
+    "settings_bluetooth",
+    "settings_brightness",
+    "settings_cell",
+    "settings_ethernet",
+    "settings_input_component",
+    "settings_input_composite",
+    "settings_input_hdmi",
+    "settings_input_svideo",
+    "settings_overscan",
+    "settings_phone",
+    "settings_power",
+    "settings_remote",
+    "settings_suggest",
+    "settings_system_daydream",
+    "settings_voice",
+    "severe_cold",
+    "shape_line",
+    "share_location",
+    "shield_moon",
+    "shop",
+    "shop_2",
+    "shop_two",
+    "shopping_cart_checkout",
+    "shuffle_on",
+    "shutter_speed",
+    "sick",
+    "sign_language",
+    "signal_cellular_0_bar",
+    "signal_cellular_alt_1_bar",
+    "signal_cellular_alt_2_bar",
+    "signal_cellular_connected_no_internet_0_bar",
+    "signal_cellular_connected_no_internet_4_bar",
+    "signal_cellular_no_sim",
+    "signal_cellular_nodata",
+    "signal_cellular_null",
+    "signal_cellular_off",
+    "signal_wifi_0_bar",
+    "signal_wifi_4_bar_lock",
+    "signal_wifi_statusbar_null",
+    "sim_card_alert",
+    "sim_card_download",
+    "single_bed",
+    "sip",
+    "skateboarding",
+    "sledding",
+    "smart_button",
+    "smart_screen",
+    "smart_toy",
+    "smoke_free",
+    "smoking_rooms",
+    "sms_failed",
+    "snippet_folder",
+    "snooze",
+    "snowmobile",
+    "snowshoeing",
+    "soap",
+    "social_distance",
+    "solar_power",
+    "sort_by_alpha",
+    "sos",
+    "soup_kitchen",
+    "source",
+    "spa",
+    "space_bar",
+    "space_dashboard",
+    "spatial_audio",
+    "spatial_audio_off",
+    "spatial_tracking",
+    "speaker",
+    "speaker_notes_off",
+    "speaker_phone",
+    "spoke",
+    "sports",
+    "sports_bar",
+    "sports_golf",
+    "sports_kabaddi",
+    "sports_mma",
+    "sports_motorsports",
+    "square_foot",
+    "ssid_chart",
+    "stacked_bar_chart",
+    "stacked_line_chart",
+    "stadium",
+    "star_border_purple_500",
+    "start",
+    "stay_current_landscape",
+    "stay_current_portrait",
+    "stay_primary_landscape",
+    "stay_primary_portrait",
+    "stop_screen_share",
+    "storage",
+    "streetview",
+    "style",
+    "subtitles_off",
+    "supervised_user_circle",
+    "supervisor_account",
+    "support_agent",
+    "surround_sound",
+    "swap_calls",
+    "swipe",
+    "swipe_down",
+    "swipe_down_alt",
+    "swipe_left",
+    "swipe_left_alt",
+    "swipe_right",
+    "swipe_right_alt",
+    "swipe_up",
+    "swipe_up_alt",
+    "swipe_vertical",
+    "switch_access_shortcut",
+    "switch_access_shortcut_add",
+    "switch_account",
+    "switch_left",
+    "switch_right",
+    "switch_video",
+    "synagogue",
+    "sync_disabled",
+    "sync_lock",
+    "system_security_update",
+    "system_security_update_good",
+    "system_security_update_warning",
+    "system_update",
+    "system_update_alt",
+    "tab",
+    "tab_unselected",
+    "table_bar",
+    "table_chart",
+    "table_rows",
+    "table_view",
+    "tablet",
+    "tablet_android",
+    "tablet_mac",
+    "takeout_dining",
+    "tap_and_play",
+    "tapas",
+    "task",
+    "taxi_alert",
+    "temple_buddhist",
+    "temple_hindu",
+    "text_rotate_up",
+    "text_rotate_vertical",
+    "text_rotation_angledown",
+    "text_rotation_angleup",
+    "text_rotation_down",
+    "text_rotation_none",
+    "texture",
+    "thermostat_auto",
+    "thumbs_up_down",
+    "timelapse",
+    "timer_10",
+    "timer_10_select",
+    "timer_3",
+    "timer_3_select",
+    "timer_off",
+    "tips_and_updates",
+    "tire_repair",
+    "toggle_off",
+    "toggle_on",
+    "token",
+    "toll",
+    "tonality",
+    "topic",
+    "tour",
+    "toys",
+    "track_changes",
+    "traffic",
+    "transcribe",
+    "transfer_within_a_station",
+    "transform",
+    "transgender",
+    "transit_enterexit",
+    "travel_explore",
+    "trending_down",
+    "trending_up",
+    "trip_origin",
+    "troubleshoot",
+    "try",
+    "tsunami",
+    "tty",
+    "tungsten",
+    "turn_sharp_left",
+    "turn_sharp_right",
+    "turn_slight_left",
+    "turn_slight_right",
+    "two_wheeler",
+    "type_specimen",
+    "unfold_less",
+    "unfold_less_double",
+    "unfold_more_double",
+    "unpublished",
+    "unsubscribe",
+    "upcoming",
+    "update_disabled",
+    "usb",
+    "usb_off",
+    "vape_free",
+    "vaping_rooms",
+    "vertical_distribute",
+    "vibration",
+    "video_call",
+    "video_camera_back",
+    "video_camera_front",
+    "video_file",
+    "video_label",
+    "video_library",
+    "video_settings",
+    "video_stable",
+    "videocam",
+    "videocam_off",
+    "videogame_asset_off",
+    "view_array",
+    "view_carousel",
+    "view_comfy",
+    "view_comfy_alt",
+    "view_compact",
+    "view_compact_alt",
+    "view_cozy",
+    "view_day",
+    "view_in_ar",
+    "view_kanban",
+    "view_module",
+    "view_quilt",
+    "view_timeline",
+    "view_week",
+    "vignette",
+    "villa",
+    "voice_over_off",
+    "volcano",
+    "volunteer_activism",
+    "vpn_lock",
+    "vrpano",
+    "wallpaper",
+    "warehouse",
+    "wash",
+    "watch",
+    "watch_off",
+    "water_damage",
+    "waterfall_chart",
+    "wb_auto",
+    "wb_iridescent",
+    "wb_shade",
+    "wc",
+    "web",
+    "web_asset",
+    "web_asset_off",
+    "web_stories",
+    "webhook",
+    "whatsapp",
+    "wheelchair_pickup",
+    "where_to_vote",
+    "widgets",
+    "width_full",
+    "width_normal",
+    "width_wide",
+    "wifi_1_bar",
+    "wifi_2_bar",
+    "wifi_calling",
+    "wifi_calling_3",
+    "wifi_channel",
+    "wifi_find",
+    "wifi_lock",
+    "wifi_password",
+    "wifi_protected_setup",
+    "wifi_tethering_error",
+    "wifi_tethering_error_rounded",
+    "wifi_tethering_off",
+    "wind_power",
+    "woman",
+    "woman_2",
+    "work_history",
+    "work_off",
+    "workspaces",
+    "wrap_text",
+    "wrong_location",
+    "yard",
+    "youtube_searched_for"
+  ]
+}

@@ -22,6 +22,7 @@ import {
   CTRL_PROXY_FORWARD_LEASE_SUBDIR,
   ctrlProxyForwardLeaseFileName,
 } from "../features/observe/android/CtrlProxyForwardLease";
+import type { ForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import {
   decodeForwardLeaseOwnerMetadata,
   encodeForwardLeaseOwnerMetadata,
@@ -35,6 +36,7 @@ import {
   DaemonDeviceLeaseOwnerProbe,
   DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS,
 } from "./deviceLeaseOwnerQuery";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 /**
  * Whether another live AutoMobile process drives a device this pool can see. Multi-device
@@ -165,7 +167,7 @@ function tcpServerScope(host: string, port: string): string {
  * Daemons sharing a server see the same devices, so they must share its claims (#10708).
  */
 export function adbServerScope(env: NodeJS.ProcessEnv = process.env): string {
-  const socket = env.ADB_SERVER_SOCKET?.trim();
+  const socket = readEnvRaw(AMBIENT_ENV.ADB_SERVER_SOCKET, env)?.trim();
   if (socket) {
     if (socket.startsWith("tcp:")) {
       const endpoint = socket.slice("tcp:".length);
@@ -177,8 +179,8 @@ export function adbServerScope(env: NodeJS.ProcessEnv = process.env): string {
     return `socket-${Buffer.from(socket).toString("base64url")}`;
   }
   return tcpServerScope(
-    env.ANDROID_ADB_SERVER_ADDRESS?.trim() || DEFAULT_ADB_SERVER_HOST,
-    env.ANDROID_ADB_SERVER_PORT?.trim() || DEFAULT_ADB_SERVER_PORT,
+    readEnvRaw(AMBIENT_ENV.ANDROID_ADB_SERVER_ADDRESS, env)?.trim() || DEFAULT_ADB_SERVER_HOST,
+    readEnvRaw(AMBIENT_ENV.ANDROID_ADB_SERVER_PORT, env)?.trim() || DEFAULT_ADB_SERVER_PORT,
   );
 }
 
@@ -355,25 +357,63 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       | string
       | undefined = getCtrlProxyForwardLeaseOwnerSocketPath,
     private readonly timer: Timer = defaultTimer,
+    private readonly forwardEvidence?: ForeignCtrlProxyForwardEvidence,
   ) {}
 
   async refresh(deviceIds: readonly string[]): Promise<void> {
     const entries = await Promise.all(
-      deviceIds.map(async (deviceId) => [deviceId, await this.readForeignOwner(deviceId)] as const),
+      deviceIds.map(
+        async (deviceId) => [deviceId, await this.readOwnerWithForwardEvidence(deviceId)] as const,
+      ),
     );
-    for (const [deviceId, pid] of entries) {
+    for (const [deviceId, { pid, forwardUnreadable }] of entries) {
       if (pid === undefined) {
         this.owners.delete(deviceId);
       } else {
         this.owners.set(deviceId, pid);
       }
       // Not free while a claim file exists that names nobody (a known live PID is better).
-      if (pid === undefined && this.hasUnreadableClaim(deviceId)) {
+      if (pid === undefined && (forwardUnreadable || this.hasUnreadableClaim(deviceId))) {
         this.unreadable.add(deviceId);
       } else {
         this.unreadable.delete(deviceId);
       }
     }
+  }
+
+  private async readOwnerWithForwardEvidence(
+    deviceId: string,
+  ): Promise<{ pid: number | undefined; forwardUnreadable: boolean }> {
+    const fileOwnerPid = await this.readForeignOwner(deviceId);
+    // A verified file owner decides this refresh; avoid a host forward probe when known (#12220).
+    if (fileOwnerPid !== undefined) {
+      return { pid: fileOwnerPid, forwardUnreadable: false };
+    }
+    return this.readForwardEvidence(deviceId);
+  }
+
+  private async readForwardEvidence(
+    deviceId: string,
+  ): Promise<{ pid: number | undefined; forwardUnreadable: boolean }> {
+    const forward = await this.forwardEvidence?.read(deviceId);
+    if (!forward || forward.kind === "none") {
+      return { pid: undefined, forwardUnreadable: false };
+    }
+    if (forward.ports.length === 0) {
+      if (forward.kind === "unknown") {
+        logger.warn(
+          `[DevicePool] Cannot inspect CtrlProxy forwards for ${deviceId}: ${forward.message}`,
+        );
+      }
+      return { pid: undefined, forwardUnreadable: false };
+    }
+    // A peer's live forwarding client cannot be made safe by relinquishing this daemon's
+    // separate idle lease. Keep the evidence until the next fresh read (#12220).
+    this.idleLeaseHolders.delete(deviceId);
+    if (forward.kind === "foreign") {
+      return { pid: forward.clientPids[0], forwardUnreadable: false };
+    }
+    return { pid: undefined, forwardUnreadable: true };
   }
 
   foreignClaimUnreadable(deviceId: string): boolean {

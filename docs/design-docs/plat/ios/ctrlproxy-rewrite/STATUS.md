@@ -62,7 +62,7 @@ regression when it is not.
 `Package.swift` (tools 6.3, platforms iOS 17 / macOS 15). As of Phase 7E the per-target-language-mode
 scheme is gone with the reference — `CtrlProxyRewrite` is the sole implementation:
 
-- `CtrlProxyRewrite` (`Sources/CtrlProxyRewrite/`) + `CtrlProxyTestSupport` + `CtrlProxyRewriteTests`
+- `CtrlProxyRewrite` (`Sources/CtrlProxy/`) + `CtrlProxyTestSupport` + `CtrlProxyRewriteTests`
   → all `.swiftLanguageMode(.v6)`. `CtrlProxyRewriteTests` is now a single-module suite (196 tests).
 - **Historical:** the reference `CtrlProxy` + `CtrlProxyTests` targets were pinned `.v5` as a
   behavioral oracle during the migration and were retired in Phase 7E (§5).
@@ -116,8 +116,7 @@ verified faithful across 6 facets), and `WebSocketServer` (queue-confined).
 `SdkStorageDiagnostic`) + `SdkHierarchyServerInfo` + the six DB response envelopes
 (`ExecuteSqlResponse`/`ListDatabasesResponse`/`StorageCapabilitiesResponse`/
 `ListTablesResponse`/`TableDataResponse`/`TableStructureResponse`), all `Codable & Sendable`;
-storage inspection (`StorageSuiteInfo`, `StorageEntry`, `StorageError`, `StorageInspecting`,
-`DefaultStorageInspecting` — stateless `Sendable`); `SdkHierarchyClient`/`SdkDatabaseClient`
+storage inspection (`StorageSuiteInfo`, `StorageEntry`, `StorageError`); `SdkHierarchyClient`/`SdkDatabaseClient`
 as async `Sendable` clients over an injected `HTTPRequesting` seam (+ `SdkHighlightOutcome`,
 `SdkDatabaseError`, `SdkHierarchyFetching`/`SdkDatabaseFetching`); `OSLogReader` +
 `OSLogReaderHolder` (queue-confined); `BundleId.normalized`; `SdkHierarchyCache`
@@ -473,7 +472,7 @@ Suggested order:
      `#filePath`-relative golden fixture file (the same load technique `WireSnapshotFixture` already
      uses — no SPM resource decl needed), or reduce to representative cases + invariants.
    - **Delete (behavioral/driver)**: CommandHandler, Connection, HierarchyDebouncer, PerfProvider,
-     VoiceOver, OSLog, FrameContext, SdkHierarchyExtractor, StorageInspecting, HierarchyMerge (the last
+     VoiceOver, OSLog, FrameContext, SdkHierarchyExtractor, HierarchyMerge (the last
      also conflicts with the planned Phase-8 merger behavior change). Delete their `Reference*` +
      `Rewrite*` helpers + fixtures/recorders too (the compiler flags orphans).
    - **Then remove the reference**: drop `Sources/CtrlProxy` + `Tests/CtrlProxyTests`; the SwiftPM

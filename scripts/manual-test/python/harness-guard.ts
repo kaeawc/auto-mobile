@@ -54,6 +54,7 @@ export async function runHarnessGuard(
       // Convert invalid input into the CLI's typed usage refusal.
       return { ok: false, message: `Invalid guard input: ${errorMessage(error)}` };
     }
+    // Share the launcher scrub list for broker/session config and legacy slot variables.
     const env = privateClientEnvironment(deps.env, {});
     if (command === "resolve") {
       // Inspect inherited overrides before the shared client sanitizer removes them.

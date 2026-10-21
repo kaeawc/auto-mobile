@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, expect, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
@@ -24,14 +25,12 @@ async function flush(): Promise<void> {
 function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
   const sockets: FakeWebSocket[] = [];
   const sent: string[][] = [];
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url) => {
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url) => {
       const socket = new FakeWebSocket(url, "none", 0, timer, "withhold");
       const messages: string[] = [];
       sent.push(messages);
@@ -40,7 +39,7 @@ function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
       };
       if (sockets.length < failures) {
         const emit = socket.emit.bind(socket);
-        socket.emit = (event, ...args) => {
+        socket.emit = (event: string | symbol, ...args: unknown[]) => {
           if (event === "open") {
             socket.readyState = WebSocketState.CLOSED;
             return emit("error", new Error("dial failure"));
@@ -59,17 +58,8 @@ function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
       return socket;
     },
     timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    () => manager,
-  );
+    serviceManagerFactory: () => manager,
+  });
   clients.push(client);
   return { client, timer, adb, sockets, sent };
 }

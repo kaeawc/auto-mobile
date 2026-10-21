@@ -4,14 +4,13 @@ import {
   DAEMON_LAUNCH_CWD_ENV,
 } from "../../../src/utils/workingDirectory";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { EventEmitter } from "node:events";
-import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { restoreIosSettings } from "../../../src/utils/ios-cmdline-tools/iosSettings";
 import { getAppDataContainerPath } from "../../../src/utils/ios-cmdline-tools/iosAppContainer";
 import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { createExecResult } from "../../../src/utils/execResult";
 
 const UDID = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
@@ -86,9 +85,9 @@ describe("simctl argv integrity (#4196)", () => {
   describe("restoreIosSettings issues an argv array, preserving every value", () => {
     for (const { label, value } of TRICKY_VALUES) {
       test(`defaults write survives ${label}`, async () => {
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
 
-        await restoreIosSettings(simctl as any, UDID, {
+        await restoreIosSettings(simctl, UDID, {
           values: { ".GlobalPreferences/AppleLocale": value },
         });
 
@@ -107,9 +106,9 @@ describe("simctl argv integrity (#4196)", () => {
     }
 
     test("an empty value keeps `write` as the verb and does not shift positions", async () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
 
-      await restoreIosSettings(simctl as any, UDID, {
+      await restoreIosSettings(simctl, UDID, {
         values: { ".GlobalPreferences/AppleLocale": "" },
       });
 
@@ -119,8 +118,8 @@ describe("simctl argv integrity (#4196)", () => {
     });
 
     test("no legacy string command path is used for defaults write", async () => {
-      const simctl = new FakeSimCtlClient();
-      await restoreIosSettings(simctl as any, UDID, {
+      const simctl = new FakeSimctl();
+      await restoreIosSettings(simctl, UDID, {
         values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
         ui: { appearance: "dark", contentSize: "large" },
       });
@@ -131,10 +130,10 @@ describe("simctl argv integrity (#4196)", () => {
   describe("getAppDataContainerPath issues an argv array", () => {
     for (const { label, value } of TRICKY_VALUES) {
       test(`bundle id survives ${label}`, async () => {
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
         simctl.setCommandArgsResult(["get_app_container", UDID, value, "data"], "/tmp/container\n");
 
-        const result = await getAppDataContainerPath(simctl as any, UDID, value);
+        const result = await getAppDataContainerPath(simctl, UDID, value);
 
         expect(result).toBe("/tmp/container");
         expect(simctl.getMethodCalls("executeCommandArgs")[0].args).toEqual([
@@ -271,18 +270,20 @@ describe("custom simctl device set (#6900)", () => {
         }
         process.env[DAEMON_LAUNCH_CWD_ENV] = "/launch";
         const calls: Array<{ file: string; args: string[] }> = [];
-        const child = new EventEmitter() as HostChildProcess;
+        const child = new FakeChildProcess(new FakeTimer());
         const client = new Simctl(
           null,
           async (file, args) => {
             calls.push({ file, args });
             return createExecResult("", "");
           },
-          new FakeTimer(),
-          "darwin",
-          (file, args) => {
-            calls.push({ file, args });
-            return child;
+          {
+            timer: new FakeTimer(),
+            platform: "darwin",
+            spawnProcess: (file, args) => {
+              calls.push({ file, args });
+              return child;
+            },
           },
         );
         await client.executeCommand("list devices --json");

@@ -8,25 +8,15 @@ interface EmulatorLossIncidentReader {
   list(limit?: number): Promise<EmulatorLossIncident[]>;
 }
 
-let reader: EmulatorLossIncidentReader | undefined;
-
-function getReader(): EmulatorLossIncidentReader {
-  return reader ?? new EmulatorLossIncidentRepository();
+export interface EmulatorLossIncidentResourceDependencies {
+  reader?: EmulatorLossIncidentReader;
 }
 
-export function setEmulatorLossIncidentReaderForTesting(
-  incidentReader: EmulatorLossIncidentReader,
-): void {
-  reader = incidentReader;
-}
-
-export function resetEmulatorLossIncidentReaderForTesting(): void {
-  reader = undefined;
-}
-
-async function getIncidentArchive(): Promise<ResourceContent> {
+async function getIncidentArchive(
+  deps: EmulatorLossIncidentResourceDependencies = {},
+): Promise<ResourceContent> {
   try {
-    const incidents = await getReader().list();
+    const incidents = await (deps.reader ?? new EmulatorLossIncidentRepository()).list();
     return {
       uri: EMULATOR_LOSS_INCIDENT_RESOURCE_URIS.ARCHIVE,
       mimeType: "application/json",
@@ -55,12 +45,14 @@ async function getIncidentArchive(): Promise<ResourceContent> {
   }
 }
 
-export function registerEmulatorLossIncidentResources(): void {
+export function registerEmulatorLossIncidentResources(
+  deps: EmulatorLossIncidentResourceDependencies = {},
+): void {
   ResourceRegistry.register(
     EMULATOR_LOSS_INCIDENT_RESOURCE_URIS.ARCHIVE,
     "Android Emulator Loss Incidents",
     "Bounded diagnostics and recovery outcomes for unexpectedly lost Android emulators.",
     "application/json",
-    getIncidentArchive,
+    () => getIncidentArchive(deps),
   );
 }

@@ -1,4 +1,5 @@
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
+import { toolJson } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerDownloadsFixtureTools } from "../../src/server/downloadsFixtureTools";
@@ -7,10 +8,15 @@ import type {
   DownloadsFixtureService,
   StageSessionDownloadsRequest,
 } from "../../src/server/downloadsFixtureService";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("stageSessionDownloads tool (#7007)", () => {
-  let originalTimer: unknown;
-  let originalToolCallRepository: unknown;
+  let originalTimer: ReturnType<typeof ToolRegistry.getCollaboratorsForTesting>["timer"];
+  let originalToolCallRepository: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["toolCallRepository"];
 
   beforeAll(() => {
     compileAjv2020({
@@ -19,20 +25,22 @@ describe("stageSessionDownloads tool (#7007)", () => {
     });
   });
   beforeEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
     // The tool is now device-aware, so its wrapped handler records a tool call
     // via the ToolRegistry's repository/timer. Stub both so the fast unit test
     // never resolves the real file-backed getDatabase() (issue #3067) and stays
     // deterministic.
-    originalTimer = (ToolRegistry as any).timer;
-    originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
-    (ToolRegistry as any).timer = new FakeTimer();
-    (ToolRegistry as any).toolCallRepository = { async recordToolCall(): Promise<void> {} };
+    originalTimer = ToolRegistry.getCollaboratorsForTesting().timer;
+    originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ timer: new FakeTimer() });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
   });
   afterEach(() => {
-    (ToolRegistry as any).timer = originalTimer;
-    (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.setCollaboratorsForTesting({ timer: originalTimer });
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
+    ToolRegistry.clearToolsForTesting();
   });
 
   test("registers a discoverable, opt-in, device-aware, strict schema", () => {
@@ -41,9 +49,9 @@ describe("stageSessionDownloads tool (#7007)", () => {
       (tool) => tool.name === "stageSessionDownloads",
     );
     expect(definition).toBeDefined();
-    expect(definition!.inputSchema.properties.sessionUuid).toBeDefined();
-    expect(definition!.inputSchema.properties.directory).toBeDefined();
-    expect(definition!.inputSchema.properties.files).toBeDefined();
+    expect(definition!.inputSchema.properties).toHaveProperty("sessionUuid");
+    expect(definition!.inputSchema.properties).toHaveProperty("directory");
+    expect(definition!.inputSchema.properties).toHaveProperty("files");
     expect(ToolRegistry.getTool("stageSessionDownloads")!.defaultEnabled).toBe(false);
     // Device-aware registration is what makes the MCP boundary's #6069
     // cross-session ownership guard run for this tool.
@@ -169,7 +177,7 @@ describe("stageSessionDownloads tool (#7007)", () => {
       reset: true,
       indexMedia: false,
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
     expect(payload).toMatchObject({
       success: true,
       sessionUuid: "session-1",

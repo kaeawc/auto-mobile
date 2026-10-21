@@ -9,10 +9,18 @@ import {
   TOOL_OUTPUT_RESOURCE_URI_TEMPLATE,
   buildToolOutputResourceUri,
   registerToolOutputResources,
-  resetToolOutputResourceDependencies,
-  setToolOutputResourceDependencies,
+  type ToolOutputResourceDependencies,
 } from "../../src/server/toolOutputResources";
 import { logger } from "../../src/utils/logger";
+
+let deps: ToolOutputResourceDependencies = {};
+function useToolOutputResourceDependencies(value: ToolOutputResourceDependencies): void {
+  deps = { ...deps, ...value };
+  registerToolOutputResources(deps);
+}
+function clearToolOutputResourceDependencies(): void {
+  deps = {};
+}
 
 const ARTIFACT_DIR = path.resolve("/tmp/auto-mobile-tool-outputs");
 
@@ -47,11 +55,11 @@ function installFake(fileSystem: FakeResourceFileSystem, issuedBasenames: string
   for (const name of issuedBasenames) {
     ledger.record(path.join(ARTIFACT_DIR, name));
   }
-  setToolOutputResourceDependencies({ fileSystem, ledger });
+  useToolOutputResourceDependencies({ fileSystem, ledger });
 }
 
 async function readArtifact(artifactId: string) {
-  registerToolOutputResources();
+  registerToolOutputResources(deps);
   const uri = buildToolOutputResourceUri(artifactId);
   const match = ResourceRegistry.matchTemplate(uri);
   expect(match).toBeDefined();
@@ -79,7 +87,7 @@ function expectGenericUnavailable(text: string, artifactId: string, leaked: stri
 
 describe("tool-output artifact resource (#5882)", () => {
   afterEach(() => {
-    resetToolOutputResourceDependencies();
+    clearToolOutputResourceDependencies();
     ResourceRegistry.clearResources();
   });
 
@@ -102,7 +110,7 @@ describe("tool-output artifact resource (#5882)", () => {
     const filename = "1-observe-id.json";
     expect(buildToolOutputResourceUri(filename)).toBe(`automobile:tool-output/${filename}`);
     const match =
-      (registerToolOutputResources(),
+      (registerToolOutputResources(deps),
       ResourceRegistry.matchTemplate(buildToolOutputResourceUri(filename)));
     expect(match?.params.artifactId).toBe(filename);
   });
@@ -218,7 +226,7 @@ describe("tool-output artifact resource (#5882)", () => {
         // symlink path — provenance alone must not defeat symlink refusal.
         const ledger = new ToolOutputArtifactLedger();
         ledger.record(linkPath);
-        setToolOutputResourceDependencies({ ledger });
+        useToolOutputResourceDependencies({ ledger });
 
         const content = await readArtifact(filename);
 
@@ -245,7 +253,7 @@ describe("tool-output artifact resource (#5882)", () => {
       // Correct hash → served.
       const ok = new ToolOutputArtifactLedger();
       ok.record(filePath, realHash);
-      setToolOutputResourceDependencies({ ledger: ok });
+      useToolOutputResourceDependencies({ ledger: ok });
       expect(JSON.parse((await readArtifact(filename)).text!)).toEqual({ real: true });
 
       // The file on disk now differs from the recorded hash (as if swapped after
@@ -253,7 +261,7 @@ describe("tool-output artifact resource (#5882)", () => {
       writeFileSync(filePath, JSON.stringify({ attacker: "owned" }));
       const swapped = new ToolOutputArtifactLedger();
       swapped.record(filePath, realHash);
-      setToolOutputResourceDependencies({ ledger: swapped });
+      useToolOutputResourceDependencies({ ledger: swapped });
       const content = await readArtifact(filename);
       expectGenericUnavailable(content.text!, filename, [filePath, "owned", "hash mismatch"]);
     } finally {

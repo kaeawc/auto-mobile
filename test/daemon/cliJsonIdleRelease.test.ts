@@ -1,9 +1,21 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { daemonResponseError } from "../../src/daemon/client";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+
+let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
+let errSpy: ReturnType<typeof spyOn<typeof console, "error">>;
+let exitSpy: ReturnType<typeof spyOn<typeof process, "exit">>;
+beforeEach(() => {
+  logSpy = spyOn(console, "log");
+  errSpy = spyOn(console, "error");
+  exitSpy = spyOn(process, "exit");
+});
+afterEach(() => {
+  mock.restore();
+});
 
 const unexpected = (): never => {
   throw new Error("Unexpected daemon operation");
@@ -35,13 +47,13 @@ async function runAgainst(error: Error, command: string, args: string[]) {
       return new Client();
     }
   }
-  const log = spyOn(console, "log").mockImplementation((text) => {
+  const log = logSpy.mockImplementation((text) => {
     stdout.push(String(text));
   });
-  const err = spyOn(console, "error").mockImplementation((text) => {
+  const err = errSpy.mockImplementation((text) => {
     stderr.push(String(text));
   });
-  const exit = spyOn(process, "exit").mockImplementation((code) => {
+  const exit = exitSpy.mockImplementation((code) => {
     exits.push(code);
     throw exited;
   });
@@ -68,7 +80,7 @@ describe("--json keeps the idle flag of an idle-window release", () => {
   } as never);
 
   test("the wire client error carries idle: true (premise)", () => {
-    expect((idleReleased as unknown as { idle?: boolean }).idle).toBe(true);
+    expect((idleReleased as { idle?: boolean }).idle).toBe(true);
   });
 
   test("session-info --json reports idle: true", async () => {

@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { EventEmitter } from "events";
 import {
   DeviceSessionManager,
-  DefaultDeviceClientProvider,
-} from "../../src/devices/DeviceSessionManager";
+  createDefaultDeviceClientProvider,
+} from "../../src/daemon/readiness/DeviceSessionManager";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreenCache } from "../fakes/FakeObserveScreenCache";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
@@ -28,10 +28,11 @@ import {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { IosCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { XCTestHierarchy } from "../../src/features/observe/ios/types";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
-import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import {
   resetDeviceCreationGate,
   setDeviceCreationGate,
@@ -67,24 +68,18 @@ function ipaBytes(): Buffer {
 }
 
 function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
-  // resetConnectionBudget() (issue #7538) and terminateStaleConnection()
-  // (issue #7554) are required DeviceService methods that most of these
-  // per-test overrides don't care about; default them to no-ops so a test
-  // exercising the enable/setup paths doesn't have to stub them just to
-  // avoid an unhandled-method crash.
-  return {
-    resetConnectionBudget: () => {},
-    terminateStaleConnection: () => {},
-    ...overrides,
-  } as unknown as AndroidCtrlProxy;
+  return Object.assign(new FakeCtrlProxy(), overrides);
 }
 
-function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
-  return {
-    resetConnectionBudget: () => {},
-    terminateStaleConnection: () => {},
-    ...overrides,
-  } as unknown as IOSCtrlProxy;
+type PushUpdateListener = (hierarchy: XCTestHierarchy) => void;
+const pushedHierarchy: XCTestHierarchy = {
+  updatedAt: 0,
+  packageName: "com.example.app",
+  hierarchy: {},
+};
+
+function stubIOSCtrlProxy(overrides: Partial<IosCtrlProxy>): IosCtrlProxy {
+  return Object.assign(new FakeIOSCtrlProxy(), overrides);
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -468,7 +463,7 @@ describe("DeviceSessionManager", () => {
       includes: (value: string) => dumpsysOutput.includes(value),
     } as ExecResult);
     fakeAdb.setDevices([resolvedA]);
-    const provider = new DefaultDeviceClientProvider(factory);
+    const provider = createDefaultDeviceClientProvider(factory);
     const manager = createTestSessionManager(provider);
 
     await manager.verifyAndroidDevice(resolvedA.deviceId, { readiness: "booted" });
@@ -708,14 +703,14 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
   });
 
   test("booted readiness does not initialize iOS CtrlProxy collaborators", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-booted-only", {
       udid: "ios-booted-only",
       name: "iPhone 15",
       state: "Booted",
       isAvailable: true,
     });
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any);
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl);
     const manager = createTestSessionManager(provider);
 
     await expect(
@@ -724,7 +719,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
   });
 
   test("push update fires clearForDevice on the injected ObserveScreenCache", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-push-1", {
       udid: "ios-push-1",
       name: "iPhone 15",
@@ -736,21 +731,21 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     iosManager.setRunning(true);
 
     // Capture the push-update callback so the test can fire it on demand.
-    let captured: (() => void) | null = null;
+    const captured: PushUpdateListener[] = [];
     const iosClient = stubIOSCtrlProxy({
       isConnected: () => true,
       verifyServiceReady: () => Promise.resolve(true),
-      onPushUpdate: (cb: () => void) => {
-        captured = cb;
+      onPushUpdate: (cb: PushUpdateListener) => {
+        captured.push(cb);
         return () => {
-          captured = null;
+          captured.length = 0;
         };
       },
     });
 
     const observeCache = new FakeObserveScreenCache();
 
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
       observeScreenCache: observeCache,
@@ -760,12 +755,10 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     await manager.verifyIosDevice("ios-push-1");
 
     // Listener registered; cache untouched until update fires.
-    if (!captured) {
-      throw new Error("onPushUpdate listener never registered");
-    }
+    expect(captured).toHaveLength(1);
     expect(observeCache.wasClearedFor("ios-push-1")).toBe(false);
 
-    captured();
+    captured[0](pushedHierarchy);
 
     expect(observeCache.wasClearedFor("ios-push-1")).toBe(true);
     expect(observeCache.getClearedDevices()).toEqual(["ios-push-1"]);
@@ -773,7 +766,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
 
   test("re-registers cache invalidation on a replacement iOS client only once", async () => {
     const deviceId = "ios-restarted-push";
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo(deviceId, {
       udid: deviceId,
       name: "iPhone 15",
@@ -782,13 +775,13 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     });
     const iosManager = new FakeIOSCtrlProxyManager();
     iosManager.setRunning(true);
-    const callbacksA: Array<() => void> = [];
-    const callbacksB: Array<() => void> = [];
-    const makeClient = (callbacks: Array<() => void>) =>
+    const callbacksA: PushUpdateListener[] = [];
+    const callbacksB: PushUpdateListener[] = [];
+    const makeClient = (callbacks: PushUpdateListener[]) =>
       stubIOSCtrlProxy({
         isConnected: () => true,
         verifyServiceReady: () => Promise.resolve(true),
-        onPushUpdate: (callback: () => void) => {
+        onPushUpdate: (callback: PushUpdateListener) => {
           callbacks.push(callback);
           return () => {};
         },
@@ -798,12 +791,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       iosCtrlProxyClient: makeClient(callbacksA),
       observeScreenCache: new FakeObserveScreenCache(),
     };
-    const provider = new FakeDeviceClientProvider(
-      fakeAdb,
-      fakeDeviceUtils,
-      fakeSimctl as any,
-      options,
-    );
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, options);
     const manager = createTestSessionManager(provider);
 
     await manager.verifyIosDevice(deviceId);
@@ -814,7 +802,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     await manager.verifyIosDevice(deviceId);
     await manager.verifyIosDevice(deviceId);
     expect(callbacksB).toHaveLength(1);
-    callbacksB[0]();
+    callbacksB[0](pushedHierarchy);
     expect(options.observeScreenCache.getClearedDevices()).toEqual([deviceId]);
   });
 
@@ -824,7 +812,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       IOSCtrlProxyManager,
       "reapOrphanedRunnerProcessesOnStartup",
     ).mockImplementation(() => reaping.promise);
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-push-1", {
       udid: "ios-push-1",
       name: "iPhone 15",
@@ -837,12 +825,12 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       new FakeIOSCtrlProxy(),
       "verifyServiceReady",
     ).mockResolvedValue(true);
-    const iosClient = {
+    const iosClient = stubIOSCtrlProxy({
       isConnected: () => true,
       verifyServiceReady,
       onPushUpdate: () => () => {},
-    } as unknown as IOSCtrlProxy;
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+    });
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
     });
@@ -880,7 +868,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const fakeAdb = new FakeAdbExecutor();
     const fakeDeviceUtils = new FakeDeviceUtils();
     const fakeSimctl = new FakeSimctl();
-    fakeSimctl.setAvailableSimulators([iosDevice]);
+    fakeSimctl.setAvailableSimulators([{ ...iosDevice, isRunning: false }]);
     fakeSimctl.setBootedSimulators([iosDevice]);
     fakeSimctl.setDeviceInfo(iosDevice.deviceId, {
       udid: iosDevice.deviceId,
@@ -891,7 +879,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const simctl = Object.assign(fakeSimctl, {
       openSimulatorApp: async () => true,
     });
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, simctl as never, {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, simctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
     });
@@ -998,7 +986,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const iosManager = new FakeIOSCtrlProxyManager();
     const iosClient = new FakeIOSCtrlProxy();
     iosClient.setConnected(true);
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as never, {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
     });
@@ -1012,7 +1000,9 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
       await bootStarted.promise;
       const createCall = fakeSimctl.getMethodCalls("createSimulator")[0];
       const createdName = createCall?.name;
-      expect(createdName).toBeString();
+      if (typeof createdName !== "string") {
+        throw new Error("createSimulator was not called with a simulator name");
+      }
       expect(lifecycleCoordinator.reservations[0]).toEqual({
         identity: { kind: "selector", platform: "ios", selector: createdName },
         operation: "start",
@@ -1139,13 +1129,13 @@ describe("DeviceSessionManager iOS presentation policy", () => {
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
-  function createIosManager(fakeSimctl: FakeSimCtlClient, timer = new FakeTimer()) {
+  function createIosManager(fakeSimctl: FakeSimctl, timer = new FakeTimer()) {
     const iosClient = new FakeIOSCtrlProxy();
     iosClient.setConnected(true);
     const provider = new FakeDeviceClientProvider(
       new FakeAdbExecutor(),
       new FakeDeviceUtils(),
-      fakeSimctl as never,
+      fakeSimctl,
       { iosCtrlProxyManager: new FakeIOSCtrlProxyManager(), iosCtrlProxyClient: iosClient },
     );
     return createTestSessionManager(provider, undefined, {
@@ -1154,7 +1144,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
   }
 
   test("repeated verification across multiple 30-second intervals never presents", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-sim-1", {
       udid: "ios-sim-1",
       name: "iPhone 15",
@@ -1175,7 +1165,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
   });
 
   test("verification of a shutdown device never presents", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-sim-1", {
       udid: "ios-sim-1",
       name: "iPhone 15",
@@ -1189,7 +1179,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
   test("session auto-start presents after its own boot; reconnect to the booted device does not", async () => {
     const fakeSimctl = new FakeSimctl();
     const device = { deviceId: "ios-sim-1", name: "iPhone 15", platform: "ios" as const };
-    fakeSimctl.setAvailableSimulators([{ ...device, isAvailable: true }]);
+    fakeSimctl.setAvailableSimulators([{ ...device, isRunning: false, isAvailable: true }]);
     fakeSimctl.setDeviceInfo(device.deviceId, {
       udid: device.deviceId,
       name: device.name,
@@ -1207,7 +1197,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
     const provider = new FakeDeviceClientProvider(
       new FakeAdbExecutor(),
       new FakeDeviceUtils(),
-      fakeSimctl as never,
+      fakeSimctl,
       { iosCtrlProxyManager: new FakeIOSCtrlProxyManager(), iosCtrlProxyClient: iosClient },
     );
     const manager = createTestSessionManager(provider);
@@ -1280,7 +1270,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const fakeIosClient = new FakeIOSCtrlProxy();
     fakeIosClient.setConnected(true);
 
-    return new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+    return new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       window: fakeWindow,
       ctrlProxyManager: fakeCtrlProxy,
       ctrlProxyClient: stubAndroidCtrlProxy({
@@ -1500,13 +1490,15 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("passes spawned Android emulator process into auto-start readiness wait", async () => {
-    const childProcess = new EventEmitter() as any;
+    const childProcess = new FakeChildProcess(new FakeTimer());
     const startedDevice: BootedDevice = {
       name: "mock-Pixel_9_Pro",
       deviceId: "mock-Pixel_9_Pro",
       platform: "android",
     };
-    fakeDeviceUtils.setDeviceImages("android", [{ name: "Pixel_9_Pro", platform: "android" }]);
+    fakeDeviceUtils.setDeviceImages("android", [
+      { name: "Pixel_9_Pro", platform: "android", isRunning: false },
+    ]);
     fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
     fakeAdb.setDevices([startedDevice]);
 
@@ -1539,7 +1531,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   test("holds the Android auto-start lease until a preempted emulator process exits", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
-    const childProcess = new EventEmitter() as any;
+    const childProcess = new FakeChildProcess(new FakeTimer());
     Object.assign(childProcess, {
       exitCode: null,
       signalCode: null,
@@ -1555,7 +1547,9 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       readinessStarted = resolve;
     });
     fakeAdb.setDevices([]);
-    fakeDeviceUtils.setDeviceImages("android", [{ name: "Pixel_9_Pro", platform: "android" }]);
+    fakeDeviceUtils.setDeviceImages("android", [
+      { name: "Pixel_9_Pro", platform: "android", isRunning: false },
+    ]);
     fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
     fakeDeviceUtils.waitForDeviceReady = async (_device, _timeoutMs, _childProcess, signal) => {
       readinessStarted();
@@ -1602,13 +1596,8 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   describe("cancelled Android auto-start launch", () => {
     const AVD = "Pixel_9_Pro";
 
-    type FakeEmulatorChild = HostChildProcess & {
-      exitCode: number | null;
-      signalCode: NodeJS.Signals | null;
-    };
-
     function fakeEmulatorChild(pid: number | undefined) {
-      const child = new EventEmitter() as FakeEmulatorChild;
+      const child = new FakeChildProcess(new FakeTimer());
       const signals: string[] = [];
       child.pid = pid;
       child.exitCode = null;
@@ -1634,7 +1623,9 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       const timer = new FakeTimer();
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
       fakeAdb.setDevices([]);
-      fakeDeviceUtils.setDeviceImages("android", [{ name: AVD, platform: "android" }]);
+      fakeDeviceUtils.setDeviceImages("android", [
+        { name: AVD, platform: "android", isRunning: false },
+      ]);
       fakeDeviceUtils.startDevice = async () => {
         const signal = getAbortSignal();
         await new Promise<void>((resolve) => {
@@ -1844,7 +1835,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       includes: (value: string) => dumpsysOutput.includes(value),
     } as ExecResult);
     const provider = buildProvider();
-    const windowProvider = new DefaultDeviceClientProvider(factory);
+    const windowProvider = createDefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
     const manager = createTestSessionManager(provider);
 
@@ -1894,7 +1885,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const raw = (device: BootedDevice): BootedDevice => ({ ...device, name: device.deviceId });
     const { createdFor, factory } = trackWindowFactories();
     const provider = buildProvider();
-    const windowProvider = new DefaultDeviceClientProvider(factory);
+    const windowProvider = createDefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
     const manager = createTestSessionManager(provider, fakeAdbFactory);
 
@@ -1920,7 +1911,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const raw = (device: BootedDevice): BootedDevice => ({ ...device, name: device.deviceId });
     const { createdFor, factory } = trackWindowFactories();
     const provider = buildProvider();
-    const windowProvider = new DefaultDeviceClientProvider(factory);
+    const windowProvider = createDefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
     const manager = createTestSessionManager(provider, fakeAdbFactory);
     manager.setCurrentDevice(raw(first), "android");
@@ -1950,7 +1941,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     };
     const older: BootedDevice = { ...newer, name: "Pixel_8_API_35", observedAt: 4 };
     const { createdFor, factory } = trackWindowFactories();
-    const provider = new DefaultDeviceClientProvider(factory);
+    const provider = createDefaultDeviceClientProvider(factory);
 
     const cached = provider.getWindow({ ...newer, observedAt: 2 });
     expect(provider.getWindow(newer)).toBe(cached);
@@ -1972,7 +1963,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const raw: BootedDevice = { ...newer, name: newer.deviceId };
     const { createdFor, factory } = trackWindowFactories();
     fakeAdb.setDevices([raw]);
-    const manager = createTestSessionManager(new DefaultDeviceClientProvider(factory));
+    const manager = createTestSessionManager(createDefaultDeviceClientProvider(factory));
 
     await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" }, newer);
     await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" }, older);

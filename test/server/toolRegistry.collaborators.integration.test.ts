@@ -15,7 +15,9 @@ import type {
 import type { BootedDevice } from "../../src/models";
 import type { SessionBindingReleaseHandler } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { createExecResult } from "../../src/utils/execResult";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
@@ -55,7 +57,6 @@ const iosDevice: BootedDevice = {
 };
 
 describe("DefaultAuditRunner", () => {
-  const originalCreate = defaultAdbClientFactory.create;
   let originalAuditEnabled: boolean;
 
   beforeEach(() => {
@@ -63,7 +64,6 @@ describe("DefaultAuditRunner", () => {
   });
 
   afterEach(() => {
-    (defaultAdbClientFactory as { create: typeof originalCreate }).create = originalCreate;
     serverConfig.setMemPerfAuditMode(originalAuditEnabled);
   });
 
@@ -80,13 +80,15 @@ describe("DefaultAuditRunner", () => {
   test("passes through to the handler when the mem-perf audit is disabled", async () => {
     serverConfig.setMemPerfAuditMode(false);
     let adbCreated = false;
-    (defaultAdbClientFactory as { create: typeof originalCreate }).create = () => {
-      adbCreated = true;
-      return {} as ReturnType<typeof originalCreate>;
+    const adbFactory: AdbClientFactory = {
+      create: () => {
+        adbCreated = true;
+        return new FakeAdbExecutor();
+      },
     };
 
     let handlerArgs: unknown;
-    const runner = new DefaultAuditRunner();
+    const runner = new DefaultAuditRunner(undefined, adbFactory);
     const result = await runner.run(
       makeInput(androidDevice, async (device, args) => {
         handlerArgs = { device, args };
@@ -103,12 +105,14 @@ describe("DefaultAuditRunner", () => {
   test("passes through to the handler for non-android devices even when audit is enabled", async () => {
     serverConfig.setMemPerfAuditMode(true);
     let adbCreated = false;
-    (defaultAdbClientFactory as { create: typeof originalCreate }).create = () => {
-      adbCreated = true;
-      return {} as ReturnType<typeof originalCreate>;
+    const adbFactory: AdbClientFactory = {
+      create: () => {
+        adbCreated = true;
+        return new FakeAdbExecutor();
+      },
     };
 
-    const runner = new DefaultAuditRunner();
+    const runner = new DefaultAuditRunner(undefined, adbFactory);
     const result = await runner.run(
       makeInput(iosDevice, async () => ({ success: true, sentinel: "ios" })),
     );
@@ -119,23 +123,19 @@ describe("DefaultAuditRunner", () => {
 
   test("looks up the foreground package via adb and skips the audit when none is focused", async () => {
     serverConfig.setMemPerfAuditMode(true);
-    let receivedCommand: string | undefined;
-    (defaultAdbClientFactory as { create: typeof originalCreate }).create = ((
-      device?: BootedDevice,
-    ) => {
-      expect(device).toBe(androidDevice);
-      return {
-        async executeCommand(command: string) {
-          receivedCommand = command;
-          // No mCurrentFocus line -> regex miss -> null package.
-          return { stdout: "no focus here", stderr: "", exitCode: 0 };
-        },
-      } as unknown as ReturnType<typeof originalCreate>;
-    }) as typeof originalCreate;
+    const adb = new FakeAdbExecutor();
+    // No mCurrentFocus line -> regex miss -> null package.
+    adb.setCommandResponse("dumpsys window", createExecResult("no focus here", ""));
+    const adbFactory: AdbClientFactory = {
+      create: (device) => {
+        expect(device).toBe(androidDevice);
+        return adb;
+      },
+    };
 
     const log = new FakeLogger();
     let handlerCalled = false;
-    const runner = new DefaultAuditRunner(log);
+    const runner = new DefaultAuditRunner(log, adbFactory);
     const result = await runner.run(
       makeInput(androidDevice, async () => {
         handlerCalled = true;
@@ -143,6 +143,7 @@ describe("DefaultAuditRunner", () => {
       }),
     );
 
+    const [receivedCommand] = adb.getExecutedCommands();
     expect(receivedCommand).toContain("dumpsys window");
     expect(receivedCommand).toContain("mCurrentFocus");
     expect(handlerCalled).toBe(true);
@@ -156,14 +157,12 @@ describe("DefaultAuditRunner", () => {
 
   test("swallows adb failures during foreground lookup and still runs the handler", async () => {
     serverConfig.setMemPerfAuditMode(true);
-    (defaultAdbClientFactory as { create: typeof originalCreate }).create = (() => ({
-      async executeCommand() {
-        throw new Error("adb offline");
-      },
-    })) as unknown as typeof originalCreate;
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("dumpsys window", new Error("adb offline"));
+    const adbFactory: AdbClientFactory = { create: () => adb };
 
     const log = new FakeLogger();
-    const runner = new DefaultAuditRunner(log);
+    const runner = new DefaultAuditRunner(log, adbFactory);
     const result = await runner.run(
       makeInput(androidDevice, async () => ({ success: true, sentinel: "adb-error" })),
     );

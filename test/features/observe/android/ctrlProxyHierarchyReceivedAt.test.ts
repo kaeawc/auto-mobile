@@ -12,7 +12,7 @@
  *   - a cache hit carries the cache entry's ORIGINAL host receipt time.
  */
 
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
   AccessibilityHierarchy,
@@ -23,6 +23,10 @@ import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyRe
 import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import {
+  executeCommandOptionsOf,
+  type ExecuteCommandArgs,
+} from "../../../fakes/executeCommandOptionsOf";
 
 interface Harness {
   hierarchy: CtrlProxyHierarchy;
@@ -33,9 +37,9 @@ interface Harness {
   setProcessNameSuffix: (suffix: string) => void;
   setProbeError: (error: Error | undefined) => void;
   getProbeCommand: () => string | undefined;
+  getProbeSignal: () => AbortSignal | undefined;
   setProbeGate: (gate: Promise<void>) => void;
   waitForProbeStart: () => Promise<void>;
-  restore: () => void;
 }
 
 function createHarness(): Harness {
@@ -46,6 +50,7 @@ function createHarness(): Harness {
   let processNameSuffix = "";
   let probeError: Error | undefined;
   let probeCommand: string | undefined;
+  let probeSignal: AbortSignal | undefined;
   let probeGate: Promise<void> = Promise.resolve();
   let resolveProbeStart!: () => void;
   const probeStarted = new Promise<void>((resolve) => {
@@ -60,14 +65,11 @@ function createHarness(): Harness {
     cancelScreenshotBackoff: () => {},
     device: { deviceId: "emulator-5554", platform: "android" } as never,
     adb: {
-      executeCommand: async (
-        command: string,
-        _timeoutMs?: number,
-        _options?: unknown,
-        _synchronous?: boolean,
-        signal?: AbortSignal,
-      ) => {
+      executeCommand: async (...args: ExecuteCommandArgs) => {
+        const command = args[0];
+        const { signal } = executeCommandOptionsOf(args);
         probeCommand = command;
+        probeSignal = signal;
         resolveProbeStart();
         await probeGate;
         if (signal?.aborted) {
@@ -94,21 +96,7 @@ function createHarness(): Harness {
     setLastWebSocketTimeout: () => {},
   };
 
-  const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-    isAvailable: async () => true,
-  } as never);
-
   const hierarchy = new CtrlProxyHierarchy(context);
-  // The tree content and its conversion are not under test — return a minimal
-  // converted result so we can assert only the receipt-time metadata on it.
-  const convertSpy = spyOn(hierarchy, "convertToViewHierarchyResult").mockImplementation(
-    (h: AccessibilityHierarchy) =>
-      ({
-        hierarchy: { node: { $: {} } },
-        packageName: h.packageName,
-        updatedAt: h.updatedAt,
-      }) as ViewHierarchyResult,
-  );
 
   return {
     hierarchy,
@@ -129,29 +117,45 @@ function createHarness(): Harness {
       probeError = error;
     },
     getProbeCommand: () => probeCommand,
+    getProbeSignal: () => probeSignal,
     setProbeGate: (gate) => {
       probeGate = gate;
     },
     waitForProbeStart: () => probeStarted,
-    restore: () => {
-      managerSpy.mockRestore();
-      convertSpy.mockRestore();
-    },
   };
 }
 
 const DEVICE_SKEW_MS = 25_000;
 
 describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
-  let h: Harness | null = null;
+  let h: Harness;
+  let managerSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyManager, "getInstance">>;
+  let convertSpy: ReturnType<typeof spyOn<CtrlProxyHierarchy, "convertToViewHierarchyResult">>;
 
+  beforeEach(() => {
+    h = createHarness();
+    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
+      isAvailable: async () => true,
+    } as never);
+
+    // The tree content and its conversion are not under test — return a minimal
+    // converted result so we can assert only the receipt-time metadata on it.
+    convertSpy = spyOn(h.hierarchy, "convertToViewHierarchyResult").mockImplementation(
+      (h: AccessibilityHierarchy) =>
+        ({
+          hierarchy: { node: { $: {} } },
+          packageName: h.packageName,
+          updatedAt: h.updatedAt,
+        }) as ViewHierarchyResult,
+    );
+  });
   afterEach(() => {
-    h?.restore();
-    h = null;
+    managerSpy.mockRestore();
+    convertSpy.mockRestore();
+    mock.restore();
   });
 
   test("a fresh sync stamps receivedAt to the current host clock, not the device timestamp", async () => {
-    h = createHarness();
     h.timer.advanceTime(100_000); // host clock now well past 0
 
     // No cache, so the delegate falls through to a synchronous fetch. The device
@@ -164,7 +168,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       } as AccessibilityHierarchy,
     });
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(result).not.toBeNull();
     expect(result!.updatedAt).toBe(deviceUpdatedAt); // device timestamp preserved
@@ -173,7 +180,6 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
   });
 
   test("a cache hit carries the cache entry's original host receipt time", async () => {
-    h = createHarness();
     h.timer.advanceTime(100_000);
 
     const receivedAt = h.timer.now() - 300; // host domain: cached 300ms ago
@@ -188,14 +194,16 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     });
 
     // Glance path (skipWaitForFresh) so the fresh cache entry is served directly.
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(result).not.toBeNull();
     expect(result!.receivedAt).toBe(receivedAt);
   });
 
   test("invalidates cached hierarchy when its package is no longer running", async () => {
-    h = createHarness();
     h.setCached({
       hierarchy: {
         updatedAt: h.timer.now(),
@@ -213,7 +221,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       } as AccessibilityHierarchy,
     });
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(syncSpy).toHaveBeenCalledTimes(1);
     expect(result).not.toBeNull();
@@ -222,7 +233,6 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
   });
 
   test("retains cached hierarchy when the liveness probe fails", async () => {
-    h = createHarness();
     h.setCached({
       hierarchy: {
         updatedAt: h.timer.now(),
@@ -233,14 +243,16 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     });
     h.setProbeError(new Error("dumpsys unavailable"));
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(result!.packageName).toBe("com.test.app");
     expect(h.getProbeCommand()).toBe("shell dumpsys activity processes");
   });
 
   test("invalidates a work-profile cache when the package runs only for another user", async () => {
-    h = createHarness();
     h.setCached({
       hierarchy: {
         updatedAt: h.timer.now(),
@@ -259,7 +271,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       } as AccessibilityHierarchy,
     });
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(syncSpy).toHaveBeenCalledTimes(1);
     expect(result!.packageName).toBe("com.current.app");
@@ -267,7 +282,6 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
   });
 
   test("retains a cache when its owning user's named process is running", async () => {
-    h = createHarness();
     h.setCached({
       hierarchy: {
         updatedAt: h.timer.now(),
@@ -286,12 +300,14 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
   });
 
   test("fresh is true only after a device hierarchy request", async () => {
-    h = createHarness();
-    const cachedTree: AccessibilityHierarchy = { updatedAt: 100, packageName: "" };
+    const cachedTree: AccessibilityHierarchy = { updatedAt: 100, packageName: "", hierarchy: {} };
     h.setCached({ hierarchy: cachedTree, receivedAt: 100, fresh: true });
 
     let deviceRequests = 0;
-    const cacheHit = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const cacheHit = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
     expect(cacheHit?.fresh).toBe(false);
     expect(deviceRequests).toBe(0);
 
@@ -305,13 +321,16 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     expect(timestampCacheHit.fresh).toBe(false);
     expect(deviceRequests).toBe(0);
 
-    const freshTree: AccessibilityHierarchy = { updatedAt: 200, packageName: "" };
+    const freshTree: AccessibilityHierarchy = { updatedAt: 200, packageName: "", hierarchy: {} };
     h.setCached(null);
     Reflect.set(h.hierarchy, "requestHierarchySync", async () => {
       deviceRequests += 1;
       return { hierarchy: freshTree };
     });
-    const syncSuccess = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const syncSuccess = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
     expect(syncSuccess?.fresh).toBe(true);
     expect(deviceRequests).toBeGreaterThan(0);
 
@@ -321,18 +340,15 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       deviceRequests += 1;
       return null;
     });
-    const cachedFallback = await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      true,
-      0,
-    );
+    const cachedFallback = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
     expect(cachedFallback?.fresh).toBe(false);
     expect(deviceRequests).toBe(2);
   });
 
   test("preserves a replacement cache entry received during the liveness probe", async () => {
-    h = createHarness();
     h.setCached({
       hierarchy: { packageName: "com.stale.app" } as AccessibilityHierarchy,
       receivedAt: h.timer.now(),
@@ -359,7 +375,6 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
   });
 
   test("uses the remaining request budget for the fresh hierarchy wait", async () => {
-    h = createHarness();
     h.timer.advanceTime(1000);
     h.setCached({
       hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
@@ -381,12 +396,11 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     releaseProbe();
 
     const result = await latestPromise;
-    expect(freshWaitTimeout).toBe(100);
+    expect<unknown>(freshWaitTimeout).toBe(100);
     expect(result.fresh).toBe(false);
   });
 
   test("re-evaluates cache freshness after the liveness probe", async () => {
-    h = createHarness();
     h.timer.advanceTime(1000);
     h.setCached({
       hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
@@ -407,7 +421,6 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
   });
 
   test("does not return cached data when the liveness probe is aborted", async () => {
-    h = createHarness();
     h.setCached({
       hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
       receivedAt: h.timer.now(),
@@ -426,6 +439,9 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       controller.signal,
     );
     await h.waitForProbeStart();
+    // adb itself must receive the caller's signal so it can stop the probe, not just the caller's
+    // post-probe check.
+    expect(h.getProbeSignal()).toBe(controller.signal);
 
     controller.abort();
     releaseProbe();

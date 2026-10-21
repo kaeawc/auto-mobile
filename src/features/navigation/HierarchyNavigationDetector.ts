@@ -1,7 +1,7 @@
 import { logger } from "../../utils/logger";
 import { TimingEntry } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { NavigationGraphManager } from "./NavigationGraphManager";
+import type { NavigationGraphService } from "./NavigationGraphManager";
 import { ScreenFingerprint, AccessibilityHierarchy, FingerprintResult } from "./ScreenFingerprint";
 
 /**
@@ -55,7 +55,7 @@ const DEFAULT_OPTIONS: Required<Omit<HierarchyNavigationDetectorOptions, "timer"
  * when it hasn't changed for the debounce period.
  */
 export class HierarchyNavigationDetector {
-  private navigationManager: NavigationGraphManager;
+  private navigationManager: Pick<NavigationGraphService, "recordHierarchyNavigation">;
   private debounceMs: number;
   private stabilityTimeoutMs: number;
   private timer: Timer;
@@ -78,7 +78,7 @@ export class HierarchyNavigationDetector {
   private navigationCallback: HierarchyNavigationCallback | null = null;
 
   constructor(
-    navigationManager: NavigationGraphManager,
+    navigationManager: Pick<NavigationGraphService, "recordHierarchyNavigation">,
     options?: HierarchyNavigationDetectorOptions,
   ) {
     this.navigationManager = navigationManager;

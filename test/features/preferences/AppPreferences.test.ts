@@ -5,7 +5,7 @@ import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/inter
 import { createExecResult } from "../../../src/utils/execResult";
 import { AppPreferences } from "../../../src/features/preferences/AppPreferences";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { readFileSync } from "node:fs";
 
@@ -517,7 +517,7 @@ describe("AppPreferences", () => {
   });
 
   test("writes iOS simulator UserDefaults through defaults daemon and verifies read-back", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app onboardingComplete",
       "1\n",
@@ -589,7 +589,7 @@ describe("AppPreferences", () => {
   });
 
   test("writes literal iOS simulator string values through argv-preserving defaults arguments", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app windowsPath",
       "C:\\tmp\n",
@@ -645,7 +645,7 @@ describe("AppPreferences", () => {
   });
 
   test("preserves whitespace in iOS simulator string defaults while removing the command newline", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app paddedString",
       "  padded value  \n",
@@ -673,7 +673,7 @@ describe("AppPreferences", () => {
   });
 
   test("rejects path-like iOS suite names before invoking simctl", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const preferences = new AppPreferences(iosSimulator, { simctl });
 
     for (const suite of [
@@ -698,7 +698,7 @@ describe("AppPreferences", () => {
   });
 
   test("reads iOS simulator UserDefaults through argv-preserving defaults arguments", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read group.com.example path\\key",
       "C:\\tmp\n",
@@ -743,7 +743,7 @@ describe("AppPreferences", () => {
   });
 
   test("uses an iOS suite as the defaults domain when provided", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read group.com.example defaultHost",
       "dev.example.com\n",
@@ -765,7 +765,7 @@ describe("AppPreferences", () => {
   });
 
   test("reads an explicit simulator-global defaults domain without appId", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app defaultHost",
       "dev.example.com\n",
@@ -788,7 +788,7 @@ describe("AppPreferences", () => {
   });
 
   test("rejects unsafe iOS integer writes instead of rounding", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const preferences = new AppPreferences(iosSimulator, { simctl });
 
     await expect(
@@ -805,7 +805,7 @@ describe("AppPreferences", () => {
   });
 
   test("infers typed iOS simulator UserDefaults values with defaults read-type", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app onboardingComplete",
       "1\n",
@@ -855,7 +855,7 @@ describe("AppPreferences", () => {
   });
 
   test("returns unsafe iOS integer defaults as strings instead of rounded numbers", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app unsafeInteger",
       "9007199254740993\n",
@@ -881,7 +881,7 @@ describe("AppPreferences", () => {
   });
 
   test("returns a not-found result for multiline defaults missing-key stderr", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandError(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app missingKey",
       new Error(
@@ -906,7 +906,7 @@ describe("AppPreferences", () => {
   });
 
   test("falls back to a string when multiline defaults read-type stderr reports a missing key", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app missingType",
       "fallback value\n",
@@ -1435,7 +1435,7 @@ describe("AppPreferences", () => {
     });
 
     test("rejects systemProperty scope on an iOS device without spawning defaults", async () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       const preferences = new AppPreferences(iosSimulator, { simctl });
 
       await expect(
@@ -1448,7 +1448,7 @@ describe("AppPreferences", () => {
     });
 
     test("rejects sharedPreferences scope on an iOS device without spawning defaults", async () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       const preferences = new AppPreferences(iosSimulator, { simctl });
 
       await expect(
@@ -1477,7 +1477,7 @@ describe("AppPreferences", () => {
     });
 
     test("rejects iOS userDefaults without an appId before spawning defaults", async () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       const preferences = new AppPreferences(iosSimulator, { simctl });
 
       await expect(

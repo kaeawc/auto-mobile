@@ -1,8 +1,10 @@
 import { logger } from "../../utils/logger";
-import type { IosVoiceOverDetector as IIosVoiceOverDetector } from "./interfaces/IosVoiceOverDetector";
+import type {
+  IosVoiceOverDetector as IIosVoiceOverDetector,
+  VoiceOverStateClient,
+} from "./interfaces/IosVoiceOverDetector";
 import { SystemTimer, type Timer } from "../../utils/SystemTimer";
-import type { IOSCtrlProxy } from "../observe/ios";
-import type { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { TTLCache } from "../../utils/cache/Cache";
 
 /**
@@ -44,8 +46,8 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    */
   async isVoiceOverEnabled(
     deviceId: string,
-    client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean> {
@@ -76,8 +78,8 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    */
   async isVoiceOverActiveOrUnknown(
     deviceId: string,
-    client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean> {
@@ -109,8 +111,8 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    */
   async resolveState(
     deviceId: string,
-    client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean | null> {
@@ -125,8 +127,8 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    */
   private async resolveVoiceOverState(
     deviceId: string,
-    client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean | null> {
@@ -205,7 +207,7 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    */
   private async detectVoiceOverState(
     deviceId: string,
-    client: IOSCtrlProxy,
+    client: VoiceOverStateClient,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean | null> {

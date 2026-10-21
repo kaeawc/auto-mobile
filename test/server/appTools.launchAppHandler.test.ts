@@ -1,16 +1,13 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  registerAppTools,
-  resetLaunchAppToolDependencies,
-  resetTerminateAppToolDependencies,
-  setLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
-} from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../src/models";
 import { ActionableError } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { iosMutationTokens } from "../../src/features/storage/IosMutationTokens";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 // #6868: exercise the REGISTERED launchApp handler (not just the response
 // builder) through an injected fake, so an already-foreground launch can never
@@ -44,22 +41,17 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     };
 
   const stubLaunch = (result: LaunchAppResult): void => {
-    setLaunchAppToolDependencies({
+    appTools.configure("launchApp", {
       createLaunchApp: () => ({ execute: async () => result }),
     });
   };
 
   beforeEach(() => {
-    ToolRegistry.clearTools();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
-    registerAppTools();
+    appTools.reset();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
+    appTools.clear();
   });
 
   test("an already-foreground app is a success with alreadyForeground, not an error", async () => {
@@ -100,9 +92,26 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     ).rejects.toThrow("App is not installed");
   });
 
+  test("launchApp preserves a transport refusal in a wrapped cause", async () => {
+    const typed = new AdbDeviceTransportUnavailableError(
+      device.deviceId,
+      new Error("device offline"),
+    );
+    appTools.configure("launchApp", {
+      createLaunchApp: () => ({
+        execute: async () => {
+          throw new ActionableError("launch failed", { cause: typed });
+        },
+      }),
+    });
+    await expect(
+      ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, { appId }),
+    ).rejects.toBe(typed);
+  });
+
   test("an existing actionable error is rethrown without another launch prefix", async () => {
     const original = new ActionableError("permission prompt could not be dismissed");
-    setLaunchAppToolDependencies({
+    appTools.configure("launchApp", {
       createLaunchApp: () => ({
         execute: async () => {
           throw original;
@@ -134,10 +143,10 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
 
   test("passes launch arguments to the launch action", async () => {
     let received: string[] | undefined;
-    setLaunchAppToolDependencies({
+    appTools.configure("launchApp", {
       createLaunchApp: () => ({
-        execute: async (_appId, _clear, _cold, _activity, _user, _stability, _signal, args) => {
-          received = args;
+        execute: async (_appId, launch) => {
+          received = launch.launchArguments;
           return { success: true, packageName: appId, observation: observationForApp(appId) };
         },
       }),
@@ -152,11 +161,11 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
   test("iOS launch token stays in memory and out of tool responses", async () => {
     const iosDevice = { ...device, deviceId: "ios-device", platform: "ios" as const };
     const launches: Array<string[] | undefined> = [];
-    setLaunchAppToolDependencies({
+    appTools.configure("launchApp", {
       idGenerator: new CountingIdGenerator("secret"),
       createLaunchApp: () => ({
-        execute: async (_appId, _clear, _cold, _activity, _user, _stability, _signal, args) => {
-          launches.push(args);
+        execute: async (_appId, launch) => {
+          launches.push(launch.launchArguments);
           return { success: true, packageName: appId };
         },
       }),
@@ -184,7 +193,7 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
 
   test("iOS launch errors redact and clear the token", async () => {
     const iosDevice = { ...device, deviceId: "ios-device", platform: "ios" as const };
-    setLaunchAppToolDependencies({
+    appTools.configure("launchApp", {
       idGenerator: new CountingIdGenerator("secret"),
       createLaunchApp: () => ({
         execute: async () => {
@@ -208,7 +217,7 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
   test("iOS termination clears the launch token", async () => {
     const iosDevice = { ...device, deviceId: "ios-device", platform: "ios" as const };
     iosMutationTokens.set(iosDevice.deviceId, appId, "secret");
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => ({
         execute: async () => ({ success: true, packageName: appId }),
       }),

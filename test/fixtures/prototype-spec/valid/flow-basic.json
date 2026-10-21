@@ -1,0 +1,25 @@
+{
+  "id": "flow-grid",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "flow",
+    "style": {
+      "spacing": 8,
+      "runSpacing": 12
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "Hello"
+      },
+      {
+        "type": "text",
+        "text": "World"
+      }
+    ]
+  }
+}

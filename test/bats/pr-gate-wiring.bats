@@ -73,6 +73,18 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.ios-xcode-build.result"* ]]
 }
 
+@test "iOS fixture changes trigger the Swift check" {
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-ios")
+    | (.with.filters | from_yaml | .ios[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\n''test/fixtures/ios-contract/**'$'\n'* ]]
+  [[ $'\n'"$output"$'\n' == *$'\n''test/fixtures/ios-ctrlproxy-request-snapshots.json'$'\n'* ]]
+}
+
 @test "ios-build-gate EXCLUDES the simulator-flaky job (keeps the required check deterministic)" {
   block="$(job_block ios-build-gate)"
   # Guard against a vacuous pass: a renamed gate id would make job_block return
@@ -226,9 +238,9 @@ wiring_requires_yq() {
   [ "$dependencies" = $'detect-changes\nfast-validation' ]
 }
 
-@test "merge TypeScript coverage has setup headroom beyond the 12 minute wall budget" {
+@test "merge TypeScript coverage has headroom for infra retry and timing rechecks" {
   wiring_requires_yq
-  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' .github/workflows/merge.yml
+  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" == 45' .github/workflows/merge.yml
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
@@ -261,8 +273,8 @@ wiring_requires_yq() {
   [ "$status" -eq 0 ]
   [[ "$output" == $'always()\tts-coverage-diagnostics\t'* ]]
   [[ "$output" == *"ci-logs/ts-coverage.log"* ]]
-  [[ "$output" == *"coverage/shards/*.ndjson"* ]]
-  [[ "$output" == *"coverage/shards/*.log"* ]]
+  [[ "$output" == *"coverage/shards/**"* ]]
+  [[ "$output" == *"scratch/bun-test-report.recheck.d/**"* ]]
   [[ "$output" == *$'\tignore\t7' ]]
 }
 
@@ -275,7 +287,10 @@ wiring_requires_yq() {
 
 @test "merge workflow preserves the same four lane boundaries" {
   local workflow=".github/workflows/merge.yml"
+  [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os | join(",")' "$workflow")" = windows-latest ]]
   [[ "$(job_block node-unit-tests "$workflow")" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$(job_block ts-code-coverage "$workflow")" == *"run-ts-coverage.sh"* ]]
+  [[ "$(job_block ts-code-coverage "$workflow")" == *"validate-bun-test-timings.sh"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$(job_block bats-tests "$workflow")" == *"scripts/ci/run-bats.sh unit"* ]]

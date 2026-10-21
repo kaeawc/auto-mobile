@@ -2,8 +2,11 @@ import { afterEach, expect, test } from "bun:test";
 import { registerHighlightTools } from "../../src/server/highlightTools";
 import { registerVideoRecordingTools } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
-afterEach(() => (ToolRegistry as any).tools.clear());
+isolateToolRegistry();
+
+afterEach(() => ToolRegistry.clearToolsForTesting());
 test("highlight and recording accept only unstyled circles", () => {
   registerHighlightTools();
   registerVideoRecordingTools();

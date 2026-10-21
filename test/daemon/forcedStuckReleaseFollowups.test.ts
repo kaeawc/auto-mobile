@@ -14,7 +14,6 @@ import {
   TerminalSessionError,
   type KeepScreenAwakeRestorer,
 } from "../../src/daemon/sessionManager";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import type { RotationRestoreState } from "../../src/features/action/Rotate";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -45,10 +44,6 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
   failReleases = 0;
   readonly releaseWrites: string[] = [];
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
-    await super.upsertActiveSession(record);
-  }
-
   override async markReleased(
     sessionUuid: string,
     status: DeviceSessionStatus,
@@ -70,10 +65,12 @@ class ParkedKeepAwake implements KeepScreenAwakeRestorer {
   readonly gate = Promise.withResolvers<void>();
   signal: AbortSignal | undefined;
   calls = 0;
-  async restore(): Promise<void> {
+  async restore(): Promise<{ status: "restored" }> {
     this.calls++;
     this.signal = getAbortSignal();
     await this.gate.promise;
+
+    return { status: "restored" as const };
   }
 }
 
@@ -93,13 +90,10 @@ async function harness() {
   const persistence = new ParkablePersistence();
   const keepAwake = new ParkedKeepAwake();
   const rotations: string[] = [];
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    () => keepAwake,
-    undefined,
-    {
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => keepAwake,
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: () => ({ restore: async () => {} }),
       rotation: (device) => ({
@@ -108,7 +102,7 @@ async function harness() {
         },
       }),
     },
-  );
+  });
   managers.push(manager);
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [first, second]);
@@ -127,7 +121,11 @@ async function harness() {
 const rotation: RotationRestoreState = { accelerometerRotation: 1, userRotation: 0 };
 
 async function bindShapedSession(h: Awaited<ReturnType<typeof harness>>, sessionId: string) {
-  await h.pool.bindOrReuseDeviceSession(sessionId, first.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId,
+    deviceId: first.deviceId,
+    platform: "android",
+  });
   h.manager.setKeepScreenAwake(sessionId, { applied: true, method: "settings" });
   h.manager.setRotation(h.manager.getSession(sessionId)!, rotation);
 }
@@ -194,7 +192,11 @@ describe("a forced stuck release stops touching the device (#11058 item 1)", () 
       await h.timer.advanceTimeAsync(SESSION_RELEASE_TEARDOWN_CAP_MS);
       await freeing;
       await flush();
-      await h.pool.bindOrReuseDeviceSession("b", first.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "b",
+        deviceId: first.deviceId,
+        platform: "android",
+      });
       expect(h.pool.getDevice(first.deviceId)?.sessionId).toBe("b");
 
       h.keepAwake.gate.resolve();
@@ -214,7 +216,11 @@ describe("a forced stuck release stops touching the device (#11058 item 1)", () 
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const h = await harness();
-      await h.pool.bindOrReuseDeviceSession("a", first.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "a",
+        deviceId: first.deviceId,
+        platform: "android",
+      });
       // Setup work that outlives the release's setup drain is handed back as pending cleanup.
       const setupGate = Promise.withResolvers<void>();
       void h.manager.trackSessionSetup(h.manager.getSession("a")!, () => setupGate.promise);
@@ -232,7 +238,11 @@ describe("a forced stuck release stops touching the device (#11058 item 1)", () 
       await freeing;
       await flush();
       h.persistence.parkRelease = undefined;
-      await h.pool.bindOrReuseDeviceSession("b", first.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "b",
+        deviceId: first.deviceId,
+        platform: "android",
+      });
       expect(h.manager.hasDeviceCleanupInProgress(first.deviceId)).toBe(false);
 
       // The stuck write lands after B owns the device: A's still-pending setup must not mark
@@ -305,7 +315,9 @@ describe("the force threshold and its fence (#11058 item 2)", () => {
 describe("a forced stuck release keeps the release's own reason (#11361 item 2)", () => {
   /** The daemon that starts after this one, reading the same rows. */
   function restartedDaemon(h: Awaited<ReturnType<typeof harness>>): SessionManager {
-    const next = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
+    const next = new SessionManager(h.timer, h.persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     managers.push(next);
     return next;
   }
@@ -427,7 +439,11 @@ describe("shutdown awaits a terminal write that fails during the drain (#11058 i
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const h = await harness();
-      await h.pool.bindOrReuseDeviceSession("a", first.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "a",
+        deviceId: first.deviceId,
+        platform: "android",
+      });
       const wedged = Promise.withResolvers<void>();
       h.persistence.parkRelease = wedged.promise;
       const release = h.manager.releaseSession("a", "heartbeat-timeout");

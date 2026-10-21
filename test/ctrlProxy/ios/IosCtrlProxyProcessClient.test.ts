@@ -6,6 +6,7 @@ import type {
 } from "../../../src/utils/HostCommandExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeLockOwnerGenerationProbe } from "../../fakes/FakeLockOwnerGenerationProbe";
 
 function result(stdout = "", stderr = "") {
   return {
@@ -17,14 +18,221 @@ function result(stdout = "", stderr = "") {
   };
 }
 
+class FakeExitingHostCommandExecutor extends FakeHostCommandExecutor {
+  readonly exitedPids = new Set<number>();
+
+  override async executeCommand(file: string, args: string[] = [], options?: HostCommandOptions) {
+    const response = await super.executeCommand(file, args, options);
+    if (file === "kill" && args[0] === "-0" && this.exitedPids.has(Number(args[1]))) {
+      throw new Error("No such process");
+    }
+    return response;
+  }
+}
+
 describe("IosCtrlProxyProcessClient", () => {
+  test("captures a runner's launch generation through the injected probe", () => {
+    const generation = new FakeLockOwnerGenerationProbe();
+    const client = new IosCtrlProxyProcessClient(new FakeHostCommandExecutor(), new FakeTimer(), {
+      processGeneration: generation,
+    });
+    expect(client.captureProcessGeneration(42)).toBe(generation.token);
+    expect(generation.currentCalls).toEqual([42]);
+  });
+
+  test.each(["different", "same", "unknown"] as const)(
+    "launch-token preflight respects %s before descendant discovery",
+    async (verdict) => {
+      const host = new FakeExitingHostCommandExecutor();
+      const generation = new FakeLockOwnerGenerationProbe();
+      generation.verdict = verdict;
+      host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n43 42\n"));
+      host.exitedPids.add(42);
+      host.exitedPids.add(43);
+      const client = new IosCtrlProxyProcessClient(host, new FakeTimer(), {
+        processGeneration: generation,
+      });
+
+      await client.terminateProcessTree(42, undefined, {
+        skipGraceful: true,
+        expectedGenerationToken: "launch-token",
+      });
+
+      expect(generation.compareCalls[0]).toEqual({ pid: 42, recorded: "launch-token" });
+      const commands = host.getExecutedCommands();
+      if (verdict === "different") {
+        expect(commands).toEqual([]);
+        expect(generation.currentCalls).toEqual([]);
+      } else {
+        expect(commands).toContain("ps -axo pid=,ppid=");
+        expect(commands.filter((command) => /^kill -(TERM|KILL)/.test(command))).toEqual([
+          "kill -KILL -- -42",
+          "kill -KILL 42",
+          "kill -KILL 43",
+        ]);
+      }
+    },
+  );
+
+  test.each([false, true])(
+    "uses the launch token when the root changes after preflight (skipGraceful=%s)",
+    async (skipGraceful) => {
+      const host = new FakeHostCommandExecutor();
+      const generation = new FakeLockOwnerGenerationProbe();
+      generation.token = "entry-token";
+      generation.onCompare = (_pid, recorded) =>
+        recorded === "launch-token" && host.getExecutedCommands().length > 0 ? "different" : "same";
+      host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n"));
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new IosCtrlProxyProcessClient(host, timer, {
+        processGeneration: generation,
+        releaseAttempts: 1,
+        releaseGraceMs: 1,
+      });
+
+      await client.terminateProcessTree(42, undefined, {
+        skipGraceful,
+        expectedGenerationToken: "launch-token",
+      });
+
+      expect(
+        host.getExecutedCommands().filter((command) => /^kill -(TERM|KILL)/.test(command)),
+      ).toEqual([]);
+      expect(generation.compareCalls).toEqual([
+        { pid: 42, recorded: "launch-token" },
+        { pid: 42, recorded: "launch-token" },
+      ]);
+    },
+  );
+
+  test.each(["different", "unknown", "unavailable"] as const)(
+    "forced process tree termination respects %s generation",
+    async (verdict) => {
+      const host = new FakeExitingHostCommandExecutor();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const generation = new FakeLockOwnerGenerationProbe();
+      if (verdict === "unavailable") {
+        generation.token = undefined;
+      } else {
+        generation.verdict = verdict;
+      }
+      host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n43 42\n"));
+      host.exitedPids.add(42);
+      host.exitedPids.add(43);
+      const client = new IosCtrlProxyProcessClient(host, timer, { processGeneration: generation });
+      await client.terminateProcessTree(42, undefined, { skipGraceful: true });
+      expect(generation.currentCalls).toEqual([42, 43]);
+      expect(
+        host.getExecutedCommands().filter((command) => /^kill -(TERM|KILL)/.test(command)),
+      ).toEqual(
+        verdict === "different" ? [] : ["kill -KILL -- -42", "kill -KILL 42", "kill -KILL 43"],
+      );
+    },
+  );
+  test.each(["root", "descendant", "after-term", "unknown"] as const)(
+    "process tree generation fence handles %s without device ownership",
+    async (scenario) => {
+      const host = new FakeExitingHostCommandExecutor();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const generation = new FakeLockOwnerGenerationProbe();
+      host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n43 42\n"));
+      if (scenario === "root") {
+        host.exitedPids.add(43);
+      }
+      host.setCommandResponse("kill -0", result());
+      generation.onCompare = (pid) => {
+        if (scenario === "root" && pid === 42) {
+          return "different";
+        }
+        if (scenario === "descendant" && pid === 43) {
+          return "different";
+        }
+        if (scenario === "after-term" && host.getExecutedCommands().includes("kill -TERM 42")) {
+          return "different";
+        }
+        return scenario === "unknown" ? "unknown" : "same";
+      };
+      const client = new IosCtrlProxyProcessClient(host, timer, {
+        processGeneration: generation,
+        releaseAttempts: 1,
+        releaseGraceMs: 1,
+      });
+      if (scenario === "root" || scenario === "after-term") {
+        await client.terminateProcessTree(42);
+      } else {
+        await expect(client.terminateProcessTree(42)).rejects.toThrow("remained alive");
+      }
+      const signals = host
+        .getExecutedCommands()
+        .filter((command) => /^kill -(TERM|KILL)/.test(command));
+      expect(generation.currentCalls).toEqual([42, 43]);
+      if (scenario === "root") {
+        expect(signals).toEqual(["kill -TERM 43"]);
+      }
+      if (scenario === "descendant") {
+        expect(signals).toEqual([
+          "kill -TERM -- -42",
+          "kill -TERM 42",
+          "kill -KILL -- -42",
+          "kill -KILL 42",
+        ]);
+      }
+      if (scenario === "after-term") {
+        expect(signals).toEqual(["kill -TERM -- -42", "kill -TERM 43", "kill -TERM 42"]);
+      }
+      if (scenario === "unknown") {
+        expect(signals).toEqual([
+          "kill -TERM -- -42",
+          "kill -TERM 43",
+          "kill -TERM 42",
+          "kill -KILL -- -42",
+          "kill -KILL 43",
+          "kill -KILL 42",
+        ]);
+      }
+    },
+  );
+
+  test("single PID reused immediately before KILL is left untouched", async () => {
+    const host = new FakeHostCommandExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const generation = new FakeLockOwnerGenerationProbe();
+    host.setCommandResponse("kill -0", result());
+    generation.onCompare = () => (generation.compareCalls.length >= 4 ? "different" : "same");
+    const client = new IosCtrlProxyProcessClient(host, timer, {
+      processGeneration: generation,
+      releaseAttempts: 1,
+      releaseGraceMs: 1,
+    });
+    await client.terminateProcess(42);
+    expect(generation.currentCalls).toEqual([42]);
+    expect(
+      host.getExecutedCommands().filter((command) => /^kill -(TERM|KILL)/.test(command)),
+    ).toEqual(["kill -TERM 42"]);
+  });
+  test("does not compare identity during exit wait after kill -0 reports exit", async () => {
+    const host = new FakeExitingHostCommandExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const generation = new FakeLockOwnerGenerationProbe();
+    host.exitedPids.add(42);
+    const client = new IosCtrlProxyProcessClient(host, timer, { processGeneration: generation });
+
+    await client.terminateProcess(42);
+
+    expect(generation.compareCalls.map(({ pid }) => pid)).toEqual([42]);
+  });
   test("force termination retains a separate-group child after the root exits", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     let rootAlive = true;
     let childAlive = true;
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         if (file === "ps") {
           return result(rootAlive ? "42 1\n43 42\n" : "43 1\n");
         }
@@ -58,7 +266,7 @@ describe("IosCtrlProxyProcessClient", () => {
     timer.enableAutoAdvance();
     const commands: string[] = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args, options) {
+      async executeCommand(file, args = [], options) {
         commands.push([file, ...args].join(" "));
         if (file === "ps") {
           await timer.sleep(options!.timeoutMs!);
@@ -86,7 +294,7 @@ describe("IosCtrlProxyProcessClient", () => {
     const commands: string[] = [];
     const timeouts: Array<number | undefined> = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args, options) {
+      async executeCommand(file, args = [], options) {
         commands.push([file, ...args].join(" "));
         timeouts.push(options?.timeoutMs);
         return result(file === "ps" ? "42 1\n43 42\n" : "");
@@ -188,7 +396,7 @@ describe("IosCtrlProxyProcessClient", () => {
     async (parentPid) => {
       const command = `${parentPid} xcodebuild test-without-building -xctestrun /tmp/${"long-path/".repeat(40)}CtrlProxy.xctestrun -destination id=DEVICE-1`;
       const host: HostCommandExecutor = {
-        async executeCommand(file, args) {
+        async executeCommand(file, args = []) {
           expect(file).toBe("ps");
           return result(args.includes("-ww") ? command : command.slice(0, 256));
         },
@@ -233,7 +441,7 @@ describe("IosCtrlProxyProcessClient", () => {
   test("force termination signals the tracked process group when its root is absent", async () => {
     const commands: string[] = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         commands.push(`${file} ${args.join(" ")}`);
         if (file === "ps") {
           return result();
@@ -257,7 +465,7 @@ describe("IosCtrlProxyProcessClient", () => {
   test("does not signal a PID recycled while descendants are enumerated", async () => {
     const commands: string[] = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         commands.push(`${file} ${args.join(" ")}`);
         if (args.includes("-axo")) {
           return result("42 100\n43 42");
@@ -274,7 +482,7 @@ describe("IosCtrlProxyProcessClient", () => {
     const timer = new FakeTimer();
     const commands: string[] = [];
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         commands.push(`${file} ${args.join(" ")}`);
         if (file === "kill" && args[0] === "-0") {
           throw new Error("No such process");
@@ -337,7 +545,7 @@ describe("IosCtrlProxyProcessClient", () => {
     timer.enableAutoAdvance();
     let killed = false;
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         if (file === "ps") {
           return result("42 1\n43 42\n");
         }
@@ -362,7 +570,7 @@ describe("IosCtrlProxyProcessClient", () => {
   test("propagates deadline expiry while waiting for a process tree to exit", async () => {
     const timer = new FakeTimer();
     const host: HostCommandExecutor = {
-      async executeCommand(file, args) {
+      async executeCommand(file, args = []) {
         if (file === "ps") {
           return result("42 1\n");
         }

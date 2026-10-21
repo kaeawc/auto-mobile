@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import {
@@ -9,6 +11,7 @@ import { terminateAppResultSchema } from "../../../src/server/toolOutputSchemas"
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   DefaultDeviceWindowCacheInvalidator,
@@ -18,7 +21,6 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeDeviceAppTerminator } from "../../fakes/FakeDeviceAppTerminator";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -29,7 +31,6 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import {
   getObserveCacheStore,
@@ -43,11 +44,13 @@ import { AdbClient as RealAdbClient } from "../../../src/utils/android-cmdline-t
 import { createExecResult } from "../../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { spyOnIosExistingInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("TerminateApp (Android install listing)", () => {
   const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
   let adb: FakeAdbClient;
   let app: TerminateApp;
+  let cacheInvalidator: FakeDeviceWindowCacheInvalidator;
   let ctrlProxySpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
 
   beforeEach(() => {
@@ -55,7 +58,8 @@ describe("TerminateApp (Android install listing)", () => {
     adb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    app = new TerminateApp(device, adb as unknown as AdbClient, { timer });
+    cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+    app = new TerminateApp(device, adb, { timer, cacheInvalidator });
     ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       throw new Error("CtrlProxy unavailable");
     });
@@ -119,9 +123,6 @@ describe("TerminateApp (Android install listing)", () => {
   });
 
   test("retires the app's process state after a force-stop and for an already-dead process", async () => {
-    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
-    const retiring = app as unknown as { cacheInvalidator: FakeDeviceWindowCacheInvalidator };
-    retiring.cacheInvalidator = cacheInvalidator;
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     await app.execute("com.example.app", { skipObservation: true });
@@ -200,7 +201,7 @@ describe("TerminateApp (Android install listing)", () => {
       throw new Error("CtrlProxy lookup interrupted");
     });
     await expect(
-      app.execute("com.example.app", { skipObservation: true }, controller.signal),
+      app.execute("com.example.app", { skipObservation: true, signal: controller.signal }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     expect(adb.wasCommandExecuted("shell pm list packages")).toBe(false);
     expect(adb.wasCommandExecuted("force-stop")).toBe(false);
@@ -212,7 +213,7 @@ describe("TerminateApp (Android install listing)", () => {
     const commandSpy = spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
       const result = await executeCommand(...args);
       if (args[0] === "shell pm list packages --user 0") {
-        expect(args[4]).toBe(controller.signal);
+        expect(executeCommandOptionsOf(args).signal).toBe(controller.signal);
         controller.abort();
         throw new Error("listing interrupted");
       }
@@ -220,7 +221,7 @@ describe("TerminateApp (Android install listing)", () => {
     });
     try {
       await expect(
-        app.execute("com.example.app", { skipObservation: true }, controller.signal),
+        app.execute("com.example.app", { skipObservation: true, signal: controller.signal }),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
       expect(adb.wasCommandExecuted("force-stop")).toBe(false);
     } finally {
@@ -259,7 +260,7 @@ describe("TerminateApp (iOS)", () => {
   });
 
   test("preserves default dependency implementations with omitted options", () => {
-    const app = new TerminateApp(iosDevice, new FakeAdbClient() as unknown as AdbClient);
+    const app = new TerminateApp(iosDevice, new FakeAdbClient());
     expect(app["cacheInvalidator"]).toBeInstanceOf(DefaultDeviceWindowCacheInvalidator);
     expect(app["deviceTerminator"]).toBeInstanceOf(DeviceAppManager);
     expect(app["simctl"]).toBeInstanceOf(SimCtlClient);
@@ -267,9 +268,9 @@ describe("TerminateApp (iOS)", () => {
 
   test("clears an existing iOS CtrlProxy hierarchy cache", () => {
     const clearCache = spyOn({ clearCache: () => {} }, "clearCache");
-    const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+    const existingClientSpy = spyOnIosExistingInstance({
       clearCache,
-    } as unknown as IOSCtrlProxyClient);
+    });
 
     try {
       new DefaultDeviceWindowCacheInvalidator().invalidate(iosDevice);
@@ -331,12 +332,10 @@ describe("TerminateApp (iOS)", () => {
       const cacheStore = new FakeObserveCacheStore(fakeTimer);
       const previousStore = getObserveCacheStore();
       setObserveCacheStore(cacheStore);
-      const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-        client as unknown as IOSCtrlProxyClient,
-      );
+      const existingClientSpy = spyOnIosExistingInstance(client);
 
       try {
-        const stale: ObserveResult = {
+        const stale: ObserveResult = buildObserveResult({
           display: { key: "primary", role: "inner", posture: "opened", generation: 0 },
           observationId: "pre-terminate",
           updatedAt: fakeTimer.now(),
@@ -347,7 +346,7 @@ describe("TerminateApp (iOS)", () => {
             updatedAt: fakeTimer.now(),
             hierarchy: { node: { text: "pre-terminate screen" } },
           },
-        };
+        });
         await cacheStore.put(iosDevice.deviceId, stale);
         await cacheStore.put("other-device", stale);
         expect((await client.getLatestHierarchy()).hierarchy?.packageName).toBe("com.example.app");
@@ -703,7 +702,7 @@ describe("TerminateApp (iOS wasForeground from the pre-terminate observation)", 
     updatedAt: fakeTimer.now(),
     screenSize: { width: 1170, height: 2532 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    activeWindow: { appId, activityName: "", type: "window" },
+    activeWindow: { appId, activityName: "", layoutSeqSum: 0, type: "window" },
     viewHierarchy: {
       packageName: appId,
       updatedAt: fakeTimer.now(),
@@ -757,7 +756,7 @@ describe("TerminateApp (iOS wasForeground from the pre-terminate observation)", 
     const result = await terminateObserved(
       simDevice,
       observationFor("com.example.app", {
-        freshness: { isFresh: false, requestedMinTimestamp: 0, actualTimestamp: 0 },
+        freshness: { isFresh: false, requestedAfter: 0, actualTimestamp: 0 },
       }),
     );
 
@@ -853,7 +852,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -869,7 +868,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     fakeAdb.setCommandResult("shell dumpsys activity processes", "no processes");
 
-    await new TerminateApp(androidDevice, fakeAdb as unknown as AdbClient, {
+    await new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
     }).execute("com.example.app", { skipObservation: true });
 
@@ -895,7 +894,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.android.settings'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     const result = await terminateApp.execute("com.android.settings", { skipObservation: true });
 
     expect(result.wasRunning).toBe(true);
@@ -923,7 +922,7 @@ describe("TerminateApp (Android)", () => {
       retireAppProcess: () => {},
     };
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: cacheInvalidator,
     });
@@ -955,7 +954,7 @@ describe("TerminateApp (Android)", () => {
       retireAppProcess: () => {},
     };
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: cacheInvalidator,
     });
@@ -980,7 +979,7 @@ describe("TerminateApp (Android)", () => {
       retireAppProcess: () => {},
     };
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: cacheInvalidator,
     });
@@ -995,7 +994,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app2");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -1021,7 +1020,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3271:com.example.other/u0a123");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result).toEqual({
@@ -1044,7 +1043,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandError("shell dumpsys activity processes", new Error("dumpsys unavailable"));
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
 
     await expect(
       terminateApp.execute("com.example.app", { skipObservation: true }),
@@ -1060,7 +1059,7 @@ describe("TerminateApp (Android)", () => {
       new Error("Command failed with exit code 1"),
     );
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     await expect(
       terminateApp.execute("com.example.app", { skipObservation: true }),
     ).rejects.toThrow("Command failed with exit code 1");
@@ -1101,16 +1100,17 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   // block was popped early and they reparented — the exact bug this fixes.
   const POST_BLOCK_ENTRY_NAMES = ["finalObserve", "uiStability"];
 
-  const createObserveResult = (): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1170, height: 2532 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: {
-      hierarchy: { node: [] },
-      packageName: "com.example.app",
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
       updatedAt: Date.now(),
-    },
-  });
+      screenSize: { width: 1170, height: 2532 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: createHierarchyForTest({
+        hierarchy: { node: [] },
+        packageName: "com.example.app",
+        updatedAt: Date.now(),
+      }),
+    });
 
   const topLevelNames = (timings: TimingData): string[] =>
     Array.isArray(timings) ? timings.map((e) => e.name) : Object.keys(timings);
@@ -1155,11 +1155,11 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   let fakeAwaitIdle: FakeAwaitIdle;
   let fakeWindow: FakeWindow;
 
-  const wireDeps = (terminateApp: TerminateApp): void => {
-    (terminateApp as any).observeScreen = fakeObserveScreen;
-    (terminateApp as any).awaitIdle = fakeAwaitIdle;
-    (terminateApp as any).window = fakeWindow;
-  };
+  const collaborators = () => ({
+    observeScreen: fakeObserveScreen,
+    awaitIdle: fakeAwaitIdle,
+    window: fakeWindow,
+  });
 
   beforeEach(() => {
     setDebugPerfEnabled(true); // exercise DefaultPerformanceTracker (NoOp hides the tree)
@@ -1184,8 +1184,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminateApp = new TerminateApp(iosSimDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1201,8 +1201,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminateApp = new TerminateApp(iosSimDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1221,8 +1221,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1243,8 +1243,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(false);
@@ -1266,13 +1266,13 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     ]);
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
         fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
       }),
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     // skipUiStability keeps the Android gfxinfo path out of the test; the perf
     // ownership under observedInteraction is what we are covering here.
     const result = await terminateApp.execute("com.example.app", { skipUiStability: true });
@@ -1293,11 +1293,11 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     ]);
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as unknown as AdbClient, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     try {
       const result = await terminateApp.execute("com.example.app", {
         userId: 0,
@@ -1361,7 +1361,7 @@ describe("TerminateApp (shared foreground dumpsys, #9758)", () => {
     timer.enableAutoAdvance();
     const adb = new RealAdbClient(
       device,
-      async (command) => {
+      async (command: string) => {
         commands.push(command);
         if (command.includes("dumpsys activity activities")) {
           return createExecResult(capture, "");
@@ -1374,9 +1374,7 @@ describe("TerminateApp (shared foreground dumpsys, #9758)", () => {
         }
         return createExecResult("", "");
       },
-      null,
-      undefined,
-      timer,
+      { timer },
     );
     const app = new TerminateApp(device, adb, { timer });
     return { app, commands };

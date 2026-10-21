@@ -97,11 +97,9 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   ): Promise<MemorySnapshot> {
     try {
       const { stdout } = await perf.track("adbMeminfo", () =>
-        this.adb.executeCommand(
-          `shell dumpsys meminfo ${shellQuote(packageName)}`,
-          undefined,
-          DUMPSYS_MAX_BUFFER,
-        ),
+        this.adb.executeCommand(`shell dumpsys meminfo ${shellQuote(packageName)}`, {
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+        }),
       );
 
       const metrics = this.parseMeminfo(stdout);
@@ -121,8 +119,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
 
   /**
    * Parse dumpsys meminfo output
+   *
+   * Public (not private) so unit tests call this pure parser directly instead of casting.
    */
-  private parseMeminfo(output: string): {
+  parseMeminfo(output: string): {
     javaHeapMb: number;
     nativeHeapMb: number;
     totalPssMb: number;
@@ -296,7 +296,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       const { stdout } = await perf.track("adbLogcatGC", () =>
         this.adb.executeCommand(
           `shell logcat -d -v epoch --pid=${shellQuote(resolvedPid)} | grep -iE "GC[_ ].*freed.*paused"`,
-          5000,
+          { timeoutMs: 5000 },
         ),
       );
 
@@ -323,8 +323,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    * process's GC to the audited one. `startTimestamp`/`endTimestamp` are applied the same way:
    * a line with a parseable epoch timestamp outside the window is dropped; a line with no
    * timestamp (e.g. a bare fixture without the logcat prefix) is kept for backward compatibility.
+   *
+   * Public (not private) so unit tests call this pure parser directly instead of casting.
    */
-  private parseGCEvents(
+  parseGCEvents(
     output: string,
     startTimestamp: number,
     endTimestamp: number,
@@ -488,11 +490,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   ): Promise<UnreachableObjectsInfo | null> {
     try {
       const { stdout } = await perf.track("adbMeminfoUnreachable", () =>
-        this.adb.executeCommand(
-          `shell dumpsys meminfo --unreachable ${shellQuote(packageName)}`,
-          10000,
-          DUMPSYS_MAX_BUFFER,
-        ),
+        this.adb.executeCommand(`shell dumpsys meminfo --unreachable ${shellQuote(packageName)}`, {
+          timeoutMs: 10000,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+        }),
       );
 
       return this.parseUnreachableObjects(stdout);
@@ -504,8 +505,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
 
   /**
    * Parse unreachable objects from dumpsys output
+   *
+   * Public (not private) so unit tests call this pure parser directly instead of casting.
    */
-  private parseUnreachableObjects(output: string): UnreachableObjectsInfo {
+  parseUnreachableObjects(output: string): UnreachableObjectsInfo {
     // Pattern: "Unreachable memory: 123 bytes in 45 unreachable objects"
     const unreachableMatch = output.match(
       /Unreachable memory:\s+(\d+)\s+bytes in\s+(\d+)\s+unreachable objects/i,

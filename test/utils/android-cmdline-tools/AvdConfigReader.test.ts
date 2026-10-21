@@ -1,10 +1,11 @@
 import { afterEach, describe, it, expect } from "bun:test";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   parseAvdConfig,
   apiLevelToVersion,
   versionToApiLevelRange,
   FileAvdConfigReader,
+  validateAvdMemory,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 describe("parseAvdConfig", () => {
@@ -15,6 +16,14 @@ describe("parseAvdConfig", () => {
     expect(config.screenWidth).toBe(1080);
     expect(config.screenHeight).toBe(2400);
     expect(config.screenDensity).toBe(420);
+  });
+
+  it("parses a dotted android-37.0 sysdir to API 37 / Android 17 (#12788)", () => {
+    const config = parseAvdConfig(
+      "image.sysdir.1=system-images/android-37.0/google_apis/arm64-v8a/",
+    );
+    expect(config.apiLevel).toBe(37);
+    expect(config.osVersion).toBe("17");
   });
 
   it("parses API level from image.sysdir.1", () => {
@@ -186,7 +195,7 @@ describe("parseAvdConfig", () => {
 
 describe("apiLevelToVersion", () => {
   // PARAM-10: pin the entire API-level -> version map, not a sample of five, so
-  // a drifted or removed entry is caught. The map runs contiguously 21..36.
+  // a drifted or removed entry is caught. The map runs contiguously 21..37.
   const mapRows: Array<[number, string]> = [
     [21, "5.0"],
     [22, "5.1"],
@@ -204,6 +213,7 @@ describe("apiLevelToVersion", () => {
     [34, "14"],
     [35, "15"],
     [36, "16"],
+    [37, "17"],
   ];
 
   for (const [apiLevel, version] of mapRows) {
@@ -213,7 +223,7 @@ describe("apiLevelToVersion", () => {
   }
 
   // Boundaries just outside the map, plus clearly-out-of-range values.
-  const unknownRows = [20, 37, 0, -1, 99];
+  const unknownRows = [20, 38, 0, -1, 99];
   for (const apiLevel of unknownRows) {
     it(`returns undefined for unmapped API ${apiLevel}`, () => {
       expect(apiLevelToVersion(apiLevel)).toBeUndefined();
@@ -224,7 +234,7 @@ describe("apiLevelToVersion", () => {
 describe("versionToApiLevelRange", () => {
   // Inverse of apiLevelToVersion for the release-version bounds startDevice
   // documents (#6132). Every table row must round-trip.
-  for (const apiLevel of Array.from({ length: 16 }, (_, index) => 21 + index)) {
+  for (const apiLevel of Array.from({ length: 17 }, (_, index) => 21 + index)) {
     it(`round-trips API ${apiLevel} through its release version`, () => {
       const version = apiLevelToVersion(apiLevel);
       expect(version).toBeDefined();
@@ -265,7 +275,7 @@ describe("versionToApiLevelRange", () => {
     expect(versionToApiLevelRange(" 14 ")).toEqual({ min: 34, max: 34 });
   });
 
-  for (const unknown of ["17", "4.4", "8.2", "", "abc", "14-QPR1"]) {
+  for (const unknown of ["18", "4.4", "8.2", "", "abc", "14-QPR1"]) {
     it(`returns undefined for unmapped release version '${unknown}'`, () => {
       expect(versionToApiLevelRange(unknown)).toBeUndefined();
     });
@@ -664,4 +674,56 @@ describe("FileAvdConfigReader constructor precedence", () => {
       }
     },
   );
+});
+
+describe("validateAvdMemory", () => {
+  it("rejects a modern AVD whose configured RAM is below the floor", () => {
+    expect(() =>
+      validateAvdMemory("Pixel_9_Pro", {
+        apiLevel: 36,
+        tag: "google_apis_playstore",
+        ramSizeMb: 1024,
+      }),
+    ).toThrow("hw.ramSize is 1024 MB, below the minimum 2048 MB");
+  });
+
+  it("rejects a modern AVD with an invalid RAM setting", () => {
+    expect(() =>
+      validateAvdMemory("Pixel_9_Pro", {
+        apiLevel: 36,
+        tag: "google_apis_playstore",
+        ramSizeInvalid: true,
+      }),
+    ).toThrow("hw.ramSize is invalid");
+  });
+
+  it("ignores a missing config", () => {
+    expect(() => validateAvdMemory("Pixel_9_Pro", null)).not.toThrow();
+  });
+
+  it("applies the RAM floor when the AVD config comes from an absolute registry path", async () => {
+    const avdHome = resolve("fake", "avd");
+    const relocatedAvdHome = resolve("custom", "avds");
+    const registryPath = join(avdHome, "Pixel_9_Pro.ini");
+    const configPath = join(relocatedAvdHome, "Pixel_9_Pro.avd", "config.ini");
+    const reader = new FileAvdConfigReader(
+      async (filePath) =>
+        filePath === registryPath
+          ? `path=${join(relocatedAvdHome, "Pixel_9_Pro.avd")}\n`
+          : "hw.ramSize=1024\nimage.sysdir.1=system-images/android-36/google_apis_playstore/arm64-v8a/\ntag.id=google_apis_playstore\n",
+      (filePath) => filePath === registryPath || filePath === configPath,
+      avdHome,
+    );
+    const config = await reader.readConfig("Pixel_9_Pro");
+    expect(() => validateAvdMemory("Pixel_9_Pro", config)).toThrow("hw.ramSize is 1024 MB");
+  });
+
+  it("does not apply the floor to older or non-Play images", () => {
+    expect(() =>
+      validateAvdMemory("Old", { apiLevel: 29, tag: "google_apis_playstore", ramSizeMb: 512 }),
+    ).not.toThrow();
+    expect(() =>
+      validateAvdMemory("Plain", { apiLevel: 36, tag: "google_apis", ramSizeMb: 512 }),
+    ).not.toThrow();
+  });
 });

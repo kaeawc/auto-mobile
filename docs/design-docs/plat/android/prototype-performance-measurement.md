@@ -111,22 +111,53 @@ Baseline: not yet recorded on a device
 
 ## Trace sections
 
-Specified, not yet in the renderer (#12128). The names are stable so Perfetto queries can be shared between
-measurements. All sections use the framework `android.os.Trace` (no new dependency); `Trace.isEnabled` and the
-async-section calls need API 29 and are skipped below it.
+All nine trace sections below are in the renderer (#12128).
+The names are stable so Perfetto queries can be shared between measurements. All sections use the
+framework `android.os.Trace` (no new dependency). All sections are emitted only while tracing
+is enabled via `Trace.isEnabled` (API 29+); below API 29 none is emitted and no `android.os.Trace`
+method is called. The async-section calls also need API 29.
 
-| Section name                   | Insertion point                                                                                                             | Kind                                                               |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `Prototype.interact`           | `PrototypeController.interact`, inside `mutex.withLock`, from after the stale-runtime check to the end                      | Async section (the body suspends and may resume on another thread) |
-| `Prototype.validateStateWrite` | `PrototypeRuntime.validated`, whole body                                                                                    | Synchronous                                                        |
-| `Prototype.prepareStateWrites` | `PrototypeRuntime.validated`, only the branch that calls `prepareStateWrites(from)` (first write, and after a host replace) | Synchronous, nested in `Prototype.validateStateWrite`              |
-| `Prototype.mapRenderTree`      | `PrototypeRenderMapper.map`, the miss path only (after the same-snapshot early return)                                      | Synchronous                                                        |
-| `Prototype.mapPrototypeSpec`   | `mapPrototypeSpec` in `PrototypeRenderModel.kt`, whole body (the uncached full mapping used outside a runtime)              | Synchronous                                                        |
-| `Prototype.syncAppearance`     | `PrototypeController.interact`, around `syncAppearance(runtime, model)` and `syncTextFieldFocus(model)`                     | Synchronous                                                        |
-| `Prototype.compose`            | `PrototypeRuntimeContent`, around the root `RenderPrototypeNode` call                                                       | Synchronous, begin/end without `try` (composable calls)            |
-| `Prototype.node`               | `RenderPrototypeNodeContent`, first and last statement of the body, only when `Trace.isEnabled()`                           | Synchronous, constant name; slices per frame = nodes recomposed    |
-| `Prototype.host.show`          | `PrototypeHost.showOnMain`, whole body                                                                                      | Synchronous                                                        |
+| Section name                   | Insertion point                                                                                                             | Kind                                                                         | Status      |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------- |
+| `Prototype.interact`           | `PrototypeController.interact`, inside `mutex.withLock`, from after the stale-runtime check to the end                      | Async section (the body suspends and may resume on another thread)           | in renderer |
+| `Prototype.validateStateWrite` | `PrototypeRuntime.validated`, whole body                                                                                    | Synchronous                                                                  | in renderer |
+| `Prototype.prepareStateWrites` | `PrototypeRuntime.validated`, only the branch that calls `prepareStateWrites(from)` (first write, and after a host replace) | Synchronous, nested in `Prototype.validateStateWrite`                        | in renderer |
+| `Prototype.mapRenderTree`      | `PrototypeRenderMapper.map`, the miss path only (after the same-snapshot early return)                                      | Synchronous                                                                  | in renderer |
+| `Prototype.mapPrototypeSpec`   | `mapPrototypeSpec` in `PrototypeRenderModel.kt`, whole body (the uncached full mapping used outside a runtime)              | Synchronous                                                                  | in renderer |
+| `Prototype.syncAppearance`     | `PrototypeController.interact`, around `syncAppearance(runtime, model)` and `syncTextFieldFocus(model)`                     | Async section (appearance event delivery and host focus updates can suspend) | in renderer |
+| `Prototype.compose`            | `PrototypeRuntimeContent`, around the `PrototypeSpecContent` call                                                           | Synchronous, begin/end without `try` (composable calls)                      | in renderer |
+| `Prototype.node`               | `RenderPrototypeNodeContent`, first and last statement of the body                                                          | Synchronous, constant name; slices per frame = nodes recomposed              | in renderer |
+| `Prototype.host.show`          | `PrototypeHost.showOnMain`, whole body                                                                                      | Synchronous                                                                  | in renderer |
 
-The slice count of `Prototype.node` inside one `Prototype.compose` is the number of nodes a state change
-recomposed, which is the epic's target metric; `Prototype.mapRenderTree` should appear at most once per
-`Prototype.interact`.
+Count `Prototype.node` slices per frame (per `Choreographer#doFrame`) to measure the number of nodes
+recomposed, which is the epic's target metric. Those inside `Prototype.compose` come from a new render
+model; node-local recompositions can run outside that slice. `Prototype.mapRenderTree` should appear
+at most once per `Prototype.interact`.
+
+## Vertical `scroll` first-show cost (#12139)
+
+`scroll` composes and measures every child up front (`Box(verticalScroll)`); the owner
+decision is to keep every row findable (no `LazyColumn`), so the question was whether that
+costs enough to justify deferring off-screen rows behind same-size placeholders. The gated
+`PrototypeScrollMeasurementTest` (`PROTOTYPE_SCROLL_MEASURE=1`, optional
+`PROTOTYPE_SCROLL_MEASURE_OUT=<file>`) disposes and recomposes a fullscreen scroll of 36 dp rows
+15 times after 5 warm-ups under Robolectric and times setContent through `waitForIdle`
+(first composition plus measure and layout; no draw). Two runs, medians:
+
+| Scenario                                     | Render nodes | Semantics nodes | Median ms | p90 ms    |
+| -------------------------------------------- | ------------ | --------------- | --------- | --------- |
+| trivial column (fixed overhead)              | 2            | 3               | 6.4-7.6   | 7.7-9.6   |
+| 87 rows (largest measured prototype)         | 176          | 90              | 4.1-4.9   | 4.4-8.0   |
+| benchmark list (`benchmark/prototype-frame`) | 335          | 183             | 7.7-7.9   | 12.5-17.4 |
+| 200 rows                                     | 402          | 203             | 4.5-5.0   | 5.7       |
+| 500 rows                                     | 1002         | 503             | 17.6-17.9 | 31.9-35.8 |
+
+Scenarios run in JUnit's method-name-hash order (trivial, 500, benchmark list, 87, 200), not
+the order above, so the first two carry more JIT/GC warm-up than the last two and the trivial
+case reads slower than 87 rows for that reason. The numbers exclude spec-to-render-model mapping
+(the runtime's cached render model is reused) and draw. Cost is not linear in rows: 87 to 200
+rows adds under 1 ms, 200 to 500 rows adds roughly 13 ms (about 42-45 us per row, inflated by the
+500-row case running early), and only 500 rows reaches a median of about 18 ms. Every row text is
+present in the semantics tree in every scenario (asserted). Robolectric numbers are not device frame times:
+the on-device figure for the benchmark list (`scripts/android/prototype-frame-benchmark.sh
+--scenario scroll`) is still owed before any deferral is built.

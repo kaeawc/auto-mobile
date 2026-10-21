@@ -52,3 +52,10 @@ instead of `result`.
 The resource reports the app's current state; it does not change any capability or
 policy. The capability states for storage features are a separate resource, see
 [Storage capabilities](storage-capabilities.md).
+
+Database reads through the Android SDK's `DatabaseInspectorProvider`
+(`automobile.database`) on a device held by another session require AutoMobile SDK
+**0.0.85 or newer** in the app. A non-owner read probes `getReadOnlyCapability` and
+proceeds only when the provider confirms `readOnlyEnforced: true`; otherwise it
+returns the non-retryable `sdk_too_old` refusal naming the minimum version. Upgrade
+the SDK in the app or ask the holder. The holder's own reads are unchanged.

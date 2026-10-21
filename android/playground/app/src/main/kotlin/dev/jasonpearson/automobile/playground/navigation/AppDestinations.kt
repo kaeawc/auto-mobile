@@ -52,4 +52,6 @@ data class HomeDestination(
 
 @Serializable data object DemoNetworkTestDestination : AppDestination
 
+@Serializable data object DemoPointerProbeDestination : AppDestination
+
 @Serializable data object DesignSystemDemoDestination : AppDestination

@@ -1,16 +1,22 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { dirname, join, resolve, sep } from "node:path";
 import * as appFiles from "../../src/server/appFileService";
+import {
+  IOS_FILES_FIXTURE_BUNDLE_ID,
+  IosSimulatorUserFilesProvider,
+} from "../../src/server/IosSimulatorUserFilesProvider";
+import { SimctlIosFilesFixtureContainer } from "../../src/server/SimctlIosFilesFixtureContainer";
 import type {
   AppFileFileSystem,
   AppFileStats,
   PutAppFileProviderRequest,
+} from "../../src/server/appFileService";
+import type {
   IosFilesFixtureContainer,
   DocumentPickerVisibilityVerifier,
-} from "../../src/server/appFileService";
+} from "../../src/server/IosSimulatorUserFilesProvider";
 import { ActionableError, type BootedDevice } from "../../src/models";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import { logger } from "../../src/utils/logger";
 
 const device: BootedDevice = {
@@ -147,13 +153,13 @@ function request(overrides: Partial<PutAppFileProviderRequest> = {}): PutAppFile
 }
 function harness() {
   const fs = new MemoryFileSystem();
-  const simctl = new FakeSimCtlClient();
-  const args = ["get_app_container", device.deviceId, appFiles.IOS_FILES_FIXTURE_BUNDLE_ID, "data"];
+  const simctl = new FakeSimctl();
+  const args = ["get_app_container", device.deviceId, IOS_FILES_FIXTURE_BUNDLE_ID, "data"];
   // Only single-path stdout is trimmed; there is no simctl-output parser fixture.
   simctl.setCommandArgsResult(args, ` ${root}\n`);
-  const factory = () => simctl as unknown as SimCtlClient;
-  const container = new appFiles.SimctlIosFilesFixtureContainer(factory, fs);
-  const provider = new appFiles.IosSimulatorUserFilesProvider(container);
+  const factory = () => simctl;
+  const container = new SimctlIosFilesFixtureContainer(factory, fs);
+  const provider = new IosSimulatorUserFilesProvider(container);
   return { fs, simctl, args, factory, container, provider };
 }
 const removed = (fs: MemoryFileSystem) =>
@@ -278,9 +284,7 @@ describe("iOS Simulator user_files", () => {
   test("empty batch performs no I/O or verification", async () => {
     const { container, fs, simctl } = harness();
     const verifier = new FakePickerVerifier();
-    expect(
-      await new appFiles.IosSimulatorUserFilesProvider(container, verifier).putFiles([]),
-    ).toEqual([]);
+    expect(await new IosSimulatorUserFilesProvider(container, verifier).putFiles([])).toEqual([]);
     expect(fs.calls).toEqual([]);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
     expect(verifier.requests).toEqual([]);
@@ -387,7 +391,7 @@ describe("iOS Simulator user_files", () => {
   test("failed namespace reset prevents copying and picker verification", async () => {
     const { container, fs } = harness();
     const verifier = new FakePickerVerifier();
-    const provider = new appFiles.IosSimulatorUserFilesProvider(container, verifier);
+    const provider = new IosSimulatorUserFilesProvider(container, verifier);
     fs.failure = "rm";
     await expect(
       provider.putFile(
@@ -426,7 +430,7 @@ describe("iOS Simulator user_files", () => {
       const container = new FakeFixtureContainer();
       const verifier = new FakePickerVerifier();
       verifier.status = status;
-      const provider = new appFiles.IosSimulatorUserFilesProvider(container, verifier);
+      const provider = new IosSimulatorUserFilesProvider(container, verifier);
       const signal = new AbortController().signal;
       const result = await provider.putFile(request({ signal }));
       expect(container.batches).toHaveLength(1);
@@ -444,12 +448,10 @@ describe("iOS Simulator user_files", () => {
     const verifier = new FakePickerVerifier();
     verifier.failure = new Error("picker disconnected");
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    const result = await new appFiles.IosSimulatorUserFilesProvider(container, verifier).putFile(
-      request(),
-    );
+    const result = await new IosSimulatorUserFilesProvider(container, verifier).putFile(request());
     expect(fs.files.get(join(namespaceRoot, "nested/input.txt"))?.toString()).toBe("fixture");
-    expect(result.effects[0]).toEqual({ type: "host_stage", status: "completed" });
-    expect(result.effects[1]).toEqual({
+    expect(result.effects?.[0]).toEqual({ type: "host_stage", status: "completed" });
+    expect(result.effects?.[1]).toEqual({
       type: "document_picker",
       status: "unavailable",
       reason: expect.stringContaining("picker disconnected"),
@@ -464,7 +466,7 @@ describe("iOS Simulator user_files", () => {
     container.failure = new ActionableError("container unavailable");
     const verifier = new FakePickerVerifier();
     await expect(
-      new appFiles.IosSimulatorUserFilesProvider(container, verifier).putFile(request()),
+      new IosSimulatorUserFilesProvider(container, verifier).putFile(request()),
     ).rejects.toThrow("container unavailable");
     expect(verifier.requests).toEqual([]);
   });

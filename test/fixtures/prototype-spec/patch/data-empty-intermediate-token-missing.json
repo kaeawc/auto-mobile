@@ -1,0 +1,84 @@
+{
+  "spec": {
+    "id": "patch-demo",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "count": 1,
+      "orders": [
+        {
+          "id": 1,
+          "title": "Tea"
+        },
+        {
+          "id": 2,
+          "title": "Coffee"
+        }
+      ],
+      "meta": {
+        "a": true,
+        "b": false
+      },
+      "a/b": {
+        "c~d": "old"
+      }
+    },
+    "state": {
+      "enabled": true,
+      "label": "Ready",
+      "total": 1
+    },
+    "root": {
+      "type": "column",
+      "id": "root",
+      "children": [
+        {
+          "type": "card",
+          "id": "card",
+          "children": [
+            {
+              "type": "text",
+              "id": "title",
+              "text": "Orders"
+            }
+          ]
+        },
+        {
+          "type": "column",
+          "id": "repeater",
+          "repeat": {
+            "items": {
+              "path": "/orders"
+            },
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "id": "row",
+              "text": "{item.title}"
+            }
+          ]
+        },
+        {
+          "type": "switch",
+          "id": "toggle",
+          "stateKey": "enabled"
+        }
+      ]
+    }
+  },
+  "ops": [
+    {
+      "op": "replace",
+      "path": "/data//count",
+      "value": 1
+    }
+  ],
+  "stage": "apply",
+  "expectedPath": "ops[0].path",
+  "expectedMessage": "Path does not exist"
+}

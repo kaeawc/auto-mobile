@@ -5,7 +5,7 @@ import type { Plan } from "../../src/models/Plan";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
@@ -33,8 +33,9 @@ describe("mixed-platform waitFor-timeout failure with a survivor parked at a bar
   let barrierCalls: string[];
   let seenPlatforms: Record<string, string | undefined>;
   let releaseTimeout: () => void;
-  let toolCallRepository: { toolCallRepository: unknown };
-  let originalToolCallRepository: unknown;
+  let originalToolCallRepository: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["toolCallRepository"];
 
   beforeAll(() => {
     if (!ToolRegistry.getToolForPlan("barrier")) {
@@ -92,9 +93,10 @@ describe("mixed-platform waitFor-timeout failure with a survivor parked at a bar
     }
 
     // Same no-op pipeline as planExecutorParticipantFailure.test.ts (no real DB, no device I/O).
-    toolCallRepository = ToolRegistry as unknown as { toolCallRepository: unknown };
-    originalToolCallRepository = toolCallRepository.toolCallRepository;
-    toolCallRepository.toolCallRepository = { recordToolCall: async () => {} };
+    originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         resolveExecutionTarget: async (input) => {
@@ -121,7 +123,7 @@ describe("mixed-platform waitFor-timeout failure with a survivor parked at a bar
 
   afterEach(() => {
     restorePipeline();
-    toolCallRepository.toolCallRepository = originalToolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     coordinator.reset();
     restoreCoordinator();
     ToolRegistry.unregister(prefixTool);
@@ -144,7 +146,7 @@ describe("mixed-platform waitFor-timeout failure with a survivor parked at a bar
 
   test("B fails promptly as a consequence; A's timeout keeps failedStep, observation and warnings", async () => {
     let settled = false;
-    const execution = new DefaultPlanExecutor(timer)
+    const execution = createDefaultPlanExecutor(timer)
       .executePlan(plan, 0, "android", "device-a", "base-uuid", undefined, "finish-current-step")
       .finally(() => {
         settled = true;

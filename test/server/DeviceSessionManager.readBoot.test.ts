@@ -5,7 +5,7 @@ import {
   DeviceSessionManager,
   type ConnectedPlatformScan,
   type DeviceReadyOptions,
-} from "../../src/devices/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceSessionManager";
 import {
   ActionableError,
   type BootedDevice,
@@ -19,9 +19,9 @@ import type {
   IosBootInstrumentation,
   IosBootRequest,
 } from "../../src/features/iosSimFleet/IosBootInstrumentation";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -110,12 +110,10 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
     applyOnConnect: false,
   }));
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(
-      adb,
-      devices,
-      simctlAvailable ? (simctl as unknown as SimCtlClient) : undefined,
-      { window },
-    ),
+    new FakeDeviceClientProvider(adb, devices, simctlAvailable ? simctl : undefined, {
+      window,
+      ctrlProxyManager: new FakeCtrlProxyManager(),
+    }),
     { create: () => adb },
     {
       runnerReadinessTimer: timer,

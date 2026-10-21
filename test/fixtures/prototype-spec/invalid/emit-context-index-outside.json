@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Emit",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "pick",
+          "context": {
+            "row": {
+              "index": true
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].context.row",
+  "expectedMessage": "Emit item/index binding outside a repeat template"
+}

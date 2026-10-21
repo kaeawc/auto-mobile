@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import {
+  DummyDriver,
+  Kysely,
+  SqliteAdapter,
+  SqliteIntrospector,
+  SqliteQueryCompiler,
+} from "kysely";
 import path from "path";
 import { tmpdir } from "node:os";
+import * as realDatabaseModule from "../../src/db/database";
+import type { Database } from "../../src/db/types";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
 import {
@@ -8,18 +17,33 @@ import {
   createFileBackedDbHarness,
   WINDOWS_FILE_DB_TEST_TIMEOUT_MS as HARNESS_TIMEOUT_REEXPORT,
 } from "./withFileBackedDb";
-import type { FreshDatabaseModule, LifecycleDatabaseModule } from "./withFileBackedDb";
+import type { FreshDatabaseModule } from "./withFileBackedDb";
+
+/** The narrow lifecycle slice of `database.ts` the harness actually drives. */
+type LifecycleFake = Pick<
+  FreshDatabaseModule,
+  "getDatabase" | "ensureMigrations" | "closeDatabase" | "getDatabasePath"
+>;
 
 /**
  * The harness's `importDatabaseModule` dep is typed as the full
- * {@link FreshDatabaseModule} (the only real module). The fakes here implement
- * just the narrow {@link LifecycleDatabaseModule} contract the harness actually
- * drives, so they cast at this ONE injection helper — the deliberate trade
- * (issue #3081, item 2) for dropping the `<M>` generic that previously threaded
- * through four interfaces.
+ * {@link FreshDatabaseModule}. The fakes here implement just the lifecycle slice,
+ * so they are laid over the real module's exports to form a complete module value.
  */
-const asFreshModule = (module: LifecycleDatabaseModule): FreshDatabaseModule =>
-  module as unknown as FreshDatabaseModule;
+const asFreshModule = (fake: LifecycleFake): FreshDatabaseModule => ({
+  ...realDatabaseModule,
+  ...fake,
+});
+
+/** A Kysely handle that never touches a database: the harness only passes it through. */
+const inertDatabase = new Kysely<Database>({
+  dialect: {
+    createAdapter: () => new SqliteAdapter(),
+    createDriver: () => new DummyDriver(),
+    createIntrospector: (db) => new SqliteIntrospector(db),
+    createQueryCompiler: () => new SqliteQueryCompiler(),
+  },
+});
 
 /**
  * Unit tests for the shared file-backed DB-lifecycle harness (issue #3046).
@@ -33,7 +57,7 @@ const asFreshModule = (module: LifecycleDatabaseModule): FreshDatabaseModule =>
  */
 describe("createFileBackedDbHarness (issue #3046)", () => {
   /** A fake `database.ts` module that records the order of lifecycle calls. */
-  function makeFakeModule(dbPath = "/fake/db/auto-mobile.db"): LifecycleDatabaseModule & {
+  function makeFakeModule(dbPath = "/fake/db/auto-mobile.db"): LifecycleFake & {
     calls: string[];
   } {
     const calls: string[] = [];
@@ -41,7 +65,7 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
       calls,
       getDatabase() {
         calls.push("getDatabase");
-        return {} as never;
+        return inertDatabase;
       },
       async ensureMigrations() {
         calls.push("ensureMigrations");
@@ -149,7 +173,7 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
     expect(env.AUTO_MOBILE_MIGRATIONS_DIR).toBeUndefined();
     expect(env[DAEMON_LAUNCH_CWD_ENV]).toBeUndefined();
 
-    expect(opened.module).toBe(fake);
+    expect(opened.module.getDatabase).toBe(fake.getDatabase);
     expect(opened.dbPath).toBe("/fake/db/auto-mobile.db");
   });
 
@@ -213,7 +237,7 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
 
     const mod = await harness.importFreshDatabaseModule();
 
-    expect(mod).toBe(fake);
+    expect(mod.getDatabase).toBe(fake.getDatabase);
     expect(importCount).toBe(1);
   });
 

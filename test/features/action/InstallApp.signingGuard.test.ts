@@ -67,7 +67,7 @@ describe("InstallApp signing guard", () => {
   test("replacing a copy signed by another key is refused before installing", async () => {
     const { install } = build([{ signerSha256: [SIGNER_B] }]);
     const error = await install
-      .execute(APK, 0, undefined, { expectedSigningSha256: [SIGNER_A] })
+      .execute(APK, { userId: 0, guard: { expectedSigningSha256: [SIGNER_A] } })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SigningGuardError);
     expect((error as SigningGuardError).reason).toBe("mismatch");
@@ -77,7 +77,7 @@ describe("InstallApp signing guard", () => {
   test("a multi-signer copy needs the complete expected set", async () => {
     const { install } = build([{ signerSha256: [SIGNER_A, SIGNER_B] }]);
     await expect(
-      install.execute(APK, 0, undefined, { expectedSigningSha256: [SIGNER_B] }),
+      install.execute(APK, { userId: 0, guard: { expectedSigningSha256: [SIGNER_B] } }),
     ).rejects.toMatchObject({ reason: "mismatch" });
     expect(installed()).toBe(false);
   });
@@ -85,7 +85,7 @@ describe("InstallApp signing guard", () => {
   test("unreadable signers refuse the replacement", async () => {
     const { install } = build([{ signing: { status: "unavailable", reason: "no signing block" } }]);
     await expect(
-      install.execute(APK, 0, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      install.execute(APK, { userId: 0, guard: { expectedSigningSha256: [SIGNER_A] } }),
     ).rejects.toMatchObject({ reason: "signing-unavailable" });
     expect(installed()).toBe(false);
   });
@@ -93,15 +93,18 @@ describe("InstallApp signing guard", () => {
   test("an unknown lookup refuses the replacement", async () => {
     const { install } = build([{ presence: "unknown", unknownReason: "timed out" }]);
     await expect(
-      install.execute(APK, 0, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      install.execute(APK, { userId: 0, guard: { expectedSigningSha256: [SIGNER_A] } }),
     ).rejects.toMatchObject({ reason: "presence-unknown" });
     expect(installed()).toBe(false);
   });
 
   test("a matching copy is replaced on the same explicit user", async () => {
     const { install, inspector } = build([{ signerSha256: [SIGNER_A] }]);
-    const result = await install.execute(APK, 0, undefined, {
-      expectedSigningSha256: [SIGNER_A],
+    const result = await install.execute(APK, {
+      userId: 0,
+      guard: {
+        expectedSigningSha256: [SIGNER_A],
+      },
     });
     expect(result).toMatchObject({
       success: true,
@@ -120,8 +123,11 @@ describe("InstallApp signing guard", () => {
       exec(`package:${APP}`),
     ]);
     const { install, inspector } = build([{ signerSha256: [SIGNER_B] }]);
-    const result = await install.execute(APK, 0, undefined, {
-      expectedSigningSha256: [SIGNER_A],
+    const result = await install.execute(APK, {
+      userId: 0,
+      guard: {
+        expectedSigningSha256: [SIGNER_A],
+      },
     });
     expect(result.signingGuard).toEqual({ status: "no-existing-package" });
     expect(inspector.calls).toEqual([]);
@@ -130,7 +136,7 @@ describe("InstallApp signing guard", () => {
 
   test("without guards no inspection happens and the result has no guard field", async () => {
     const { install, inspector } = build([{ signerSha256: [SIGNER_B] }]);
-    const result = await install.execute(APK, 0);
+    const result = await install.execute(APK, { userId: 0 });
     expect(result.success).toBe(true);
     expect(result).not.toHaveProperty("signingGuard");
     expect(inspector.calls).toEqual([]);
@@ -142,7 +148,10 @@ describe("InstallApp signing guard", () => {
       exec("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
     );
     const { install } = build([]);
-    const result = await install.execute(APK, 0, undefined, { allowDestructiveRecovery: false });
+    const result = await install.execute(APK, {
+      userId: 0,
+      guard: { allowDestructiveRecovery: false },
+    });
     expect(result.success).toBe(false);
     expect(result.warning).toContain("existing package was left installed");
     expect(adb.getExecutedCommands().some((command) => command.includes("uninstall"))).toBe(false);
@@ -154,7 +163,10 @@ describe("InstallApp signing guard", () => {
       exec("Success"),
     ]);
     const { install } = build([]);
-    const result = await install.execute(APK, 0, undefined, { allowDestructiveRecovery: true });
+    const result = await install.execute(APK, {
+      userId: 0,
+      guard: { allowDestructiveRecovery: true },
+    });
     expect(result.success).toBe(true);
     expect(adb.wasCommandExecuted("uninstall com.example.app")).toBe(true);
   });
@@ -164,7 +176,7 @@ describe("InstallApp signing guard", () => {
       installedAppsRepository: new FakeInstalledAppsRepository(),
     });
     await expect(
-      ios.execute("/tmp/App.app", undefined, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      ios.execute("/tmp/App.app", { guard: { expectedSigningSha256: [SIGNER_A] } }),
     ).rejects.toThrow("only supported for Android");
   });
 });

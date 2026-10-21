@@ -1,6 +1,6 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import { compactExclusiveSelectorProperties } from "../../src/server/toolSchemaHelpers";
+import { compactExclusiveSelectorProperties } from "../../src/utils/schemaHelpers";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;

@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -35,7 +36,7 @@ class InsertTextPlannerTest {
     }
   }
 
-  private fun placeSelection(
+  private suspend fun placeSelection(
     plan: InsertTextPlan,
     node: FakeNode,
     timer: FakeTimer,
@@ -49,8 +50,8 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `stale text converges before selection is attempted`() {
-    val plan = planInsertText("abc", false, 3, 3, "def")
+  fun `stale text converges before selection is attempted`() = runTest {
+    val plan = planInsertText(InsertTextSnapshot("abc", false, 3, 3), textToInsert = "def")
     val stale = InsertTextSnapshot("abc", false, 3, 3)
     val node = FakeNode(listOf(stale, stale, stale.copy(text = "abcdef")))
     val timer = FakeTimer()
@@ -64,8 +65,8 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `never converged text preserves warning and legacy failure within bound`() {
-    val plan = planInsertText("abc", false, 3, 3, "def")
+  fun `never converged text preserves warning and legacy failure within bound`() = runTest {
+    val plan = planInsertText(InsertTextSnapshot("abc", false, 3, 3), textToInsert = "def")
     for (acceptsCaretNotPlaced in listOf(false, true)) {
       val node = FakeNode(listOf(InsertTextSnapshot("abc", false, 3, 3)))
       val timer = FakeTimer()
@@ -80,8 +81,8 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `empty Compose field exposes selection action only after convergence`() {
-    val plan = planInsertText("", false, -1, -1, "abc")
+  fun `empty Compose field exposes selection action only after convergence`() = runTest {
+    val plan = planInsertText(InsertTextSnapshot("", false, -1, -1), textToInsert = "abc")
     val node =
       FakeNode(
         listOf(InsertTextSnapshot("", false, -1, -1), InsertTextSnapshot("abc", false, -1, -1)),
@@ -97,8 +98,8 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `empty node never converges and preserves unattempted selection warning`() {
-    val plan = planInsertText("", false, -1, -1, "abc")
+  fun `empty node never converges and preserves unattempted selection warning`() = runTest {
+    val plan = planInsertText(InsertTextSnapshot("", false, -1, -1), textToInsert = "abc")
     val node = FakeNode(listOf(InsertTextSnapshot("", false, -1, -1)))
     val timer = FakeTimer()
     assertEquals(
@@ -110,7 +111,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `immediately converged node does not pause or refresh again`() {
+  fun `immediately converged node does not pause or refresh again`() = runTest {
     val plan = InsertTextPlan("abc", 3, true)
     val node = FakeNode(listOf(InsertTextSnapshot("abc", false, 3, 3)))
     val timer = FakeTimer()
@@ -123,7 +124,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `converged already correct caret accepts rejected selection`() {
+  fun `converged already correct caret accepts rejected selection`() = runTest {
     val plan = InsertTextPlan("abcdef", 6, false)
     val timer = FakeTimer()
     var reads = 0
@@ -143,7 +144,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `node lost during mutation polling stops without moving selection`() {
+  fun `node lost during mutation polling stops without moving selection`() = runTest {
     val timer = FakeTimer()
     var reads = 0
     assertEquals(
@@ -176,7 +177,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `refresh time counts toward deadline and final pause is clamped`() {
+  fun `refresh time counts toward deadline and final pause is clamped`() = runTest {
     val plan = InsertTextPlan("abc", 3, true)
     val stale = InsertTextSnapshot("", false, -1, -1)
     val timer = FakeTimer()
@@ -199,7 +200,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `text converging on final deadline refresh is accepted`() {
+  fun `text converging on final deadline refresh is accepted`() = runTest {
     val plan = InsertTextPlan("abc", 3, true)
     val node =
       FakeNode(
@@ -290,7 +291,7 @@ class InsertTextPlannerTest {
   fun `unreported selection in empty field inserts at zero`() {
     assertEquals(
       InsertTextPlan("abc", 3, true),
-      planInsertText("", false, -1, -1, "abc"),
+      planInsertText(InsertTextSnapshot("", false, -1, -1), textToInsert = "abc"),
     )
   }
 
@@ -298,7 +299,7 @@ class InsertTextPlannerTest {
   fun `hint text is excluded with unreported selection`() {
     assertEquals(
       InsertTextPlan("abc", 3, true),
-      planInsertText("Email", true, -1, -1, "abc"),
+      planInsertText(InsertTextSnapshot("Email", true, -1, -1), textToInsert = "abc"),
     )
   }
 
@@ -306,7 +307,7 @@ class InsertTextPlannerTest {
   fun `unreported selection in nonempty field appends`() {
     assertEquals(
       InsertTextPlan("before!", 7, true),
-      planInsertText("before", false, -1, -1, "!"),
+      planInsertText(InsertTextSnapshot("before", false, -1, -1), textToInsert = "!"),
     )
   }
 
@@ -314,7 +315,7 @@ class InsertTextPlannerTest {
   fun `valid collapsed selection inserts in middle`() {
     assertEquals(
       InsertTextPlan("abXcd", 3, false),
-      planInsertText("abcd", false, 2, 2, "X"),
+      planInsertText(InsertTextSnapshot("abcd", false, 2, 2), textToInsert = "X"),
     )
   }
 
@@ -322,7 +323,7 @@ class InsertTextPlannerTest {
   fun `valid range replaces selected text`() {
     assertEquals(
       InsertTextPlan("aXd", 2, false),
-      planInsertText("abcd", false, 1, 3, "X"),
+      planInsertText(InsertTextSnapshot("abcd", false, 1, 3), textToInsert = "X"),
     )
   }
 
@@ -330,7 +331,7 @@ class InsertTextPlannerTest {
   fun `reversed selection replaces selected text`() {
     assertEquals(
       InsertTextPlan("hXo", 2, false),
-      planInsertText("hello", false, 4, 1, "X"),
+      planInsertText(InsertTextSnapshot("hello", false, 4, 1), textToInsert = "X"),
     )
   }
 
@@ -338,7 +339,7 @@ class InsertTextPlannerTest {
   fun `end beyond text length appends`() {
     assertEquals(
       InsertTextPlan("abcdX", 5, true),
-      planInsertText("abcd", false, 1, 5, "X"),
+      planInsertText(InsertTextSnapshot("abcd", false, 1, 5), textToInsert = "X"),
     )
   }
 
@@ -346,7 +347,7 @@ class InsertTextPlannerTest {
   fun `unreported start with valid end appends`() {
     assertEquals(
       InsertTextPlan("abcdX", 5, true),
-      planInsertText("abcd", false, -1, 2, "X"),
+      planInsertText(InsertTextSnapshot("abcd", false, -1, 2), textToInsert = "X"),
     )
   }
 
@@ -354,7 +355,7 @@ class InsertTextPlannerTest {
   fun `valid start with unreported end appends`() {
     assertEquals(
       InsertTextPlan("abcdX", 5, true),
-      planInsertText("abcd", false, 2, -1, "X"),
+      planInsertText(InsertTextSnapshot("abcd", false, 2, -1), textToInsert = "X"),
     )
   }
 
@@ -362,7 +363,7 @@ class InsertTextPlannerTest {
   fun `valid selection in hint field uses empty text`() {
     assertEquals(
       InsertTextPlan("X", 1, false),
-      planInsertText("Email", true, 0, 0, "X"),
+      planInsertText(InsertTextSnapshot("Email", true, 0, 0), textToInsert = "X"),
     )
   }
 
@@ -380,11 +381,11 @@ class InsertTextPlannerTest {
     for (insertion in insertions) {
       assertEquals(
         InsertTextPlan("a${insertion}b", 1 + insertion.length, false),
-        planInsertText("ab", false, 1, 1, insertion),
+        planInsertText(InsertTextSnapshot("ab", false, 1, 1), textToInsert = insertion),
       )
       assertEquals(
         InsertTextPlan("ab$insertion", 2 + insertion.length, true),
-        planInsertText("ab", false, -1, -1, insertion),
+        planInsertText(InsertTextSnapshot("ab", false, -1, -1), textToInsert = insertion),
       )
     }
   }
@@ -393,12 +394,20 @@ class InsertTextPlannerTest {
   fun `remembered caret is used when text matches and selection is unreported`() {
     assertEquals(
       InsertTextPlan("hel🇯🇵Xlo", 8, false, true),
-      planInsertText("hel🇯🇵lo", false, -1, -1, "X", RememberedCaret("hel🇯🇵lo", 7, -1, -1)),
+      planInsertText(
+        InsertTextSnapshot("hel🇯🇵lo", false, -1, -1),
+        textToInsert = "X",
+        remembered = RememberedCaret("hel🇯🇵lo", 7, -1, -1),
+      ),
     )
     // UTF-16 offset 5 is between the flag's two regional indicators, not after the flag.
     assertEquals(
       InsertTextPlan("hel🇯X🇵lo", 6, false, true),
-      planInsertText("hel🇯🇵lo", false, -1, -1, "X", RememberedCaret("hel🇯🇵lo", 5, -1, -1)),
+      planInsertText(
+        InsertTextSnapshot("hel🇯🇵lo", false, -1, -1),
+        textToInsert = "X",
+        remembered = RememberedCaret("hel🇯🇵lo", 5, -1, -1),
+      ),
     )
   }
 
@@ -406,7 +415,11 @@ class InsertTextPlannerTest {
   fun `remembered caret wins over a valid reported selection when text matches`() {
     assertEquals(
       InsertTextPlan("abXcd", 3, false, true),
-      planInsertText("abcd", false, 4, 4, "X", RememberedCaret("abcd", 2, 4, 4)),
+      planInsertText(
+        InsertTextSnapshot("abcd", false, 4, 4),
+        textToInsert = "X",
+        remembered = RememberedCaret("abcd", 2, 4, 4),
+      ),
     )
   }
 
@@ -415,11 +428,19 @@ class InsertTextPlannerTest {
     val remembered = RememberedCaret("abcd", 2, 4, 4)
     assertEquals(
       InsertTextPlan("abcdeX", 6, true),
-      planInsertText("abcde", false, -1, -1, "X", remembered),
+      planInsertText(
+        InsertTextSnapshot("abcde", false, -1, -1),
+        textToInsert = "X",
+        remembered = remembered,
+      ),
     )
     assertEquals(
       InsertTextPlan("aXbcde", 2, false),
-      planInsertText("abcde", false, 1, 1, "X", remembered),
+      planInsertText(
+        InsertTextSnapshot("abcde", false, 1, 1),
+        textToInsert = "X",
+        remembered = remembered,
+      ),
     )
   }
 
@@ -427,7 +448,11 @@ class InsertTextPlannerTest {
   fun `remembered caret out of range is ignored`() {
     assertEquals(
       InsertTextPlan("abX", 3, true),
-      planInsertText("ab", false, -1, -1, "X", RememberedCaret("ab", 9, -1, -1)),
+      planInsertText(
+        InsertTextSnapshot("ab", false, -1, -1),
+        textToInsert = "X",
+        remembered = RememberedCaret("ab", 9, -1, -1),
+      ),
     )
   }
 
@@ -435,7 +460,11 @@ class InsertTextPlannerTest {
   fun `caret moved to end uses reported selection instead of remembered offset seven`() {
     assertEquals(
       InsertTextPlan("hel🇯🇵loé", 10, false),
-      planInsertText("hel🇯🇵lo", false, 9, 9, "é", RememberedCaret("hel🇯🇵lo", 7, -1, -1)),
+      planInsertText(
+        InsertTextSnapshot("hel🇯🇵lo", false, 9, 9),
+        textToInsert = "é",
+        remembered = RememberedCaret("hel🇯🇵lo", 7, -1, -1),
+      ),
     )
   }
 
@@ -444,17 +473,39 @@ class InsertTextPlannerTest {
     val remembered = RememberedCaret("abcd", 2, 4, 4)
     assertEquals(
       InsertTextPlan("aXd", 2, false),
-      planInsertText("abcd", false, 1, 3, "X", remembered),
+      planInsertText(
+        InsertTextSnapshot("abcd", false, 1, 3),
+        textToInsert = "X",
+        remembered = remembered,
+      ),
     )
     assertEquals(
       InsertTextPlan("abcX", 4, false),
-      planInsertText("abcd", false, 4, 3, "X", remembered),
+      planInsertText(
+        InsertTextSnapshot("abcd", false, 4, 3),
+        textToInsert = "X",
+        remembered = remembered,
+      ),
     )
   }
 
   @Test
   fun `null remembered keeps today's behaviour`() {
-    assertEquals(InsertTextPlan("abXcd", 3, false), planInsertText("abcd", false, 2, 2, "X", null))
-    assertEquals(InsertTextPlan("abc", 3, true), planInsertText("Email", true, -1, -1, "abc", null))
+    assertEquals(
+      InsertTextPlan("abXcd", 3, false),
+      planInsertText(
+        InsertTextSnapshot("abcd", false, 2, 2),
+        textToInsert = "X",
+        remembered = null,
+      ),
+    )
+    assertEquals(
+      InsertTextPlan("abc", 3, true),
+      planInsertText(
+        InsertTextSnapshot("Email", true, -1, -1),
+        textToInsert = "abc",
+        remembered = null,
+      ),
+    )
   }
 }

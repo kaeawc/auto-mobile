@@ -2,4 +2,5 @@ tool-definitions.json
 # Imported as JSON at build time and inlined into dist/src/index.js; nothing reads them from disk.
 # Only test-plan.schema.json is read at runtime (PlanSchemaValidator).
 prototype-spec-contract.json
+prototype-ios-icon-symbols.json
 prototype-asset-contract.json

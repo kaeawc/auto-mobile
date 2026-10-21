@@ -7,23 +7,13 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import dev.jasonpearson.automobile.desktop.core.MONOTONIC_NOW_MS
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
-import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
-import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import dev.jasonpearson.automobile.desktop.core.rememberControlFreshnessTick
-import dev.jasonpearson.automobile.desktop.domain.ConnectionStatus
-import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("WorkspaceDeviceControl")
 
@@ -88,209 +78,85 @@ class WorkspaceDeviceControlState(
  */
 @Composable
 fun rememberWorkspaceDeviceControl(
-  column: DeviceColumn,
-  clientProvider: () -> AutoMobileClient?,
-  enabled: Boolean,
-  // An omitted provider retains legacy behavior; a supplied provider gates registration/release.
-  sessionUuidProvider: (() -> String?)? = null,
-  streamFactory: () -> ObservationStream = {
-    createWorkspaceControlObservationClient(sessionUuidProvider = sessionUuidProvider)
-  },
-  /** The daemon refused this pane's input because another session holds the device (#10743). */
-  onDeviceHeldElsewhere: (deviceId: String) -> Unit = {},
+  options: WorkspaceDeviceControlOptions,
 ): WorkspaceDeviceControlState {
-  val scope = rememberCoroutineScope()
-  val layoutState = remember(column.deviceId) { LayoutInspectorState() }
-  var tapError by remember(column.deviceId) { mutableStateOf<String?>(null) }
-  val tracer = remember(column.deviceId) { InteractionLatencyTracer() }
+  return with(options) {
+    val scope = rememberCoroutineScope()
+    val layoutState = remember(column.deviceId) { LayoutInspectorState() }
+    var tapError by remember(column.deviceId) { mutableStateOf<String?>(null) }
+    val tracer = remember(column.deviceId) { InteractionLatencyTracer() }
 
-  // The provider swaps behind the long-lived holder (a daemon reconnect must not strand a queued
-  // input on a superseded client); it is read at dispatch time so the newest client is always used.
-  val controlClientProvider by rememberUpdatedState(clientProvider)
-  val heldElsewhereSink by rememberUpdatedState(onDeviceHeldElsewhere)
+    // The provider swaps behind the long-lived holder (a daemon reconnect must not strand a queued
+    // input on a superseded client); it is read at dispatch time so the newest client is always
+    // used.
 
-  // The decoupled input path: a click on the video pane maps through the retained geometry snapshot
-  // and dispatches straight here, frame-identity-free (see [VideoInputDispatcher]). This is what
-  // makes input immune to the observation stream's dedup/staleness — the wedge the session caused.
-  val dispatcher =
-    remember(scope, column.deviceId) {
-      VideoInputDispatcher(
-        scope = scope,
-        clientProvider = { controlClientProvider.invoke() },
-        platform = { column.platform.wireName() },
-        deviceId = column.deviceId,
-        tracer = tracer,
-        streamingEnabled = GestureStreamingConfig.enabled,
-        onDeviceHeldElsewhere = { heldElsewhereSink(column.deviceId) },
+    // The decoupled input path: a click on the video pane maps through the retained geometry
+    // snapshot
+    // and dispatches straight here, frame-identity-free (see [VideoInputDispatcher]). This is what
+    // makes input immune to the observation stream's dedup/staleness — the wedge the session
+    // caused.
+    val dispatcher = rememberWorkspaceInput(options, scope, tracer)
+
+    // When the pane deactivates (loses focus, or the daemon can't serve input), retire the
+    // dispatcher:
+    // drop any queued/buffered input so it can't later fire at the no-longer-focused device, and
+    // free
+    // its warm dispatch thread instead of holding one per farm pane. Re-enabling re-activates it on
+    // the next input. `enabled` false on first composition is a no-op (nothing queued, no thread
+    // yet).
+    LaunchedEffect(dispatcher, enabled) { if (!enabled) dispatcher.reset() }
+
+    // The session is kept ONLY to turn the observation stream into a geometry snapshot
+    // ([session.renderSnapshot]); it never dispatches from the video pane, so its client/error
+    // hooks
+    // are inert. reset() on a provider swap keeps its snapshot state coherent across reconnects.
+    val session = rememberWorkspaceGeometrySession(options, scope) { tapError = it }
+    LaunchedEffect(clientProvider) { session.reset() }
+
+    val sessionUuid = sessionUuidProvider?.invoke()
+    val stream =
+      key(sessionUuidProvider, sessionUuid) {
+        if (enabled && (sessionUuidProvider == null || sessionUuid != null))
+          rememberReconnectingObservationStream(
+            dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+              deviceId = column.deviceId,
+              streamFactory = streamFactory,
+            ),
+          )
+        else null
+      }
+
+    // Request a fast paired capture cadence while control is armed. The daemon's default is too
+    // slow
+    // (~3s screenshots), so after a tap the retained snapshot ages out before a superseding pair
+    // arrives and control disarms — "one click works, then nothing". Mirrors the Live Layout
+    // cadence;
+    // setCadence is re-applied across reconnects by the client, and is a no-op when unchanged.
+    LaunchedEffect(stream, enabled) {
+      stream?.setCadence(
+        screenshotIntervalMs = if (enabled) CONTROL_SCREENSHOT_INTERVAL_MS else null,
+        hierarchyIntervalMs = if (enabled) CONTROL_HIERARCHY_INTERVAL_MS else null,
       )
     }
 
-  // When the pane deactivates (loses focus, or the daemon can't serve input), retire the
-  // dispatcher:
-  // drop any queued/buffered input so it can't later fire at the no-longer-focused device, and free
-  // its warm dispatch thread instead of holding one per farm pane. Re-enabling re-activates it on
-  // the next input. `enabled` false on first composition is a no-op (nothing queued, no thread
-  // yet).
-  LaunchedEffect(dispatcher, enabled) { if (!enabled) dispatcher.reset() }
+    WorkspaceHierarchyCollector(options, stream, layoutState, session)
 
-  // The session is kept ONLY to turn the observation stream into a geometry snapshot
-  // ([session.renderSnapshot]); it never dispatches from the video pane, so its client/error hooks
-  // are inert. reset() on a provider swap keeps its snapshot state coherent across reconnects.
-  val session =
-    remember(scope, column.deviceId) {
-      DeviceControlSession(
-        scope = scope,
-        clientProvider = { controlClientProvider.invoke() },
-        platform = { column.platform.wireName() },
-        nowMs = MONOTONIC_NOW_MS,
-        publishError = { message -> tapError = message },
-      )
-    }
-  LaunchedEffect(clientProvider) { session.reset() }
+    WorkspaceScreenshotCollector(options, stream, layoutState, session)
 
-  val sessionUuid = sessionUuidProvider?.invoke()
-  val stream =
-    key(sessionUuidProvider, sessionUuid) {
-      if (enabled && (sessionUuidProvider == null || sessionUuid != null))
-        rememberReconnectingObservationStream(
-          deviceId = column.deviceId,
-          streamFactory = streamFactory,
-        )
-      else null
+    val geometry = rememberWorkspaceGeometry(options, layoutState, session)
+
+    // Diagnostic: log arm/disarm transitions so a wedge is visible in the daemon-run log.
+    val armed = geometry != null
+    LaunchedEffect(column.deviceId, armed) {
+      LOG.info("device control ${if (armed) "ARMED" else "disarmed"} for ${column.deviceId}")
     }
 
-  // Request a fast paired capture cadence while control is armed. The daemon's default is too slow
-  // (~3s screenshots), so after a tap the retained snapshot ages out before a superseding pair
-  // arrives and control disarms — "one click works, then nothing". Mirrors the Live Layout cadence;
-  // setCadence is re-applied across reconnects by the client, and is a no-op when unchanged.
-  LaunchedEffect(stream, enabled) {
-    stream?.setCadence(
-      screenshotIntervalMs = if (enabled) CONTROL_SCREENSHOT_INTERVAL_MS else null,
-      hierarchyIntervalMs = if (enabled) CONTROL_HIERARCHY_INTERVAL_MS else null,
+    WorkspaceDeviceControlState(
+      dispatcher = dispatcher,
+      interactionSnapshot = geometry,
+      renderSnapshot = geometry,
+      tapError = tapError,
+      tracer = tracer,
     )
   }
-
-  // Hierarchy collector — mirrors AutoMobileContent's Live Layout collector. The receipt-time hooks
-  // fire BEFORE the async parse so a scale/context flip invalidates control immediately; the frame
-  // generation is captured before the parse so a frame decoded across an invalidation is dropped.
-  LaunchedEffect(stream, column.deviceId) {
-    val active = stream ?: return@LaunchedEffect
-    active.resetLayoutReplayCache()
-    active.hierarchyUpdates.collect { update ->
-      if (update.deviceId != column.deviceId) return@collect
-      session.onObservationFrameContextDeclared(update.frameContext, update.captureSequence)
-      session.onObservationSpaceDeclared(
-        update.coordinateSpace,
-        update.captureSequence,
-        update.nativeScale,
-      )
-      val generation = layoutState.frameGeneration
-      update.data?.let { hierarchyJson ->
-        val result =
-          withContext(Dispatchers.Default) {
-            val parsed = parseHierarchyFromJson(hierarchyJson) ?: return@withContext null
-            val changed =
-              layoutState.computeChangedElements(layoutState.currentElementMap, parsed.elementMap)
-            parsed to changed
-          }
-        result?.let {
-          layoutState.updateConnectionStatus(ConnectionStatus.Connected)
-          layoutState.applyHierarchyUpdate(
-            it.first,
-            it.second,
-            deviceId = update.deviceId,
-            generation = generation,
-            captureSequence = update.captureSequence,
-            frameContext = update.frameContext,
-            coordinateSpace = update.coordinateSpace,
-            nativeScale = update.nativeScale,
-            captureRotation = update.rotation,
-          )
-        }
-      }
-    }
-  }
-
-  // Screenshot collector — same receipt-time gate + generation guard; decodes the base64 frame the
-  // control surface renders and maps clicks against.
-  LaunchedEffect(stream, column.deviceId) {
-    val active = stream ?: return@LaunchedEffect
-    active.resetLayoutReplayCache()
-    active.screenshotUpdates.collect { update ->
-      if (update.deviceId != column.deviceId) return@collect
-      session.onObservationFrameContextDeclared(update.frameContext, update.captureSequence)
-      session.onObservationSpaceDeclared(
-        update.coordinateSpace,
-        update.captureSequence,
-        update.nativeScale,
-      )
-      val generation = layoutState.frameGeneration
-      update.screenshotBase64?.let { base64 ->
-        val data = withContext(Dispatchers.Default) { java.util.Base64.getDecoder().decode(base64) }
-        layoutState.updateConnectionStatus(ConnectionStatus.Connected)
-        layoutState.updateScreenshot(
-          data = data,
-          width = update.screenWidth,
-          height = update.screenHeight,
-          timestamp = update.timestamp,
-          fallback = update.screenshotFallback ?: false,
-          fallbackReason = update.screenshotFallbackReason,
-          format = update.screenshotFormat,
-          captureSource = update.screenshotCaptureSource,
-          deviceId = update.deviceId,
-          generation = generation,
-          captureSequence = update.captureSequence,
-          frameContext = update.frameContext,
-          coordinateSpace = update.coordinateSpace,
-          nativeScale = update.nativeScale,
-          rotation = update.rotation,
-        )
-      }
-    }
-  }
-
-  // Re-evaluate on a slow ticker as well as on source updates: a stalled observation stream
-  // produces
-  // no updates, so its staleness is only visible as time passing.
-  rememberControlFreshnessTick(enabled)
-  session.evaluate(
-    DeviceControlInputs(
-      enabled = enabled,
-      realDeviceMode = true,
-      selectedDeviceId = column.deviceId,
-      transportSupportsInput = true,
-      observationStreamConnected = layoutState.connectionStatus == ConnectionStatus.Connected,
-      screenshot = layoutState.screenshotFacts,
-      hierarchy = layoutState.hierarchyFacts,
-      // WebRTC/video has no capture identity; control maps and renders the paired screenshot.
-      liveFrame = null,
-    ),
-  )
-
-  // Geometry retention — the crux of the decoupling. Keep the last snapshot INDEFINITELY: device
-  // width/height/rotation is a stable property, not a per-frame capture identity, so a click can
-  // always be mapped through the most recent one and there is no freshness window to age out and
-  // disarm the pane. The daemon dedupes hierarchy_updates, so on a static screen no new pair
-  // arrives — under the old freshness gate the pane disarmed a few seconds after each tap ("one
-  // click works, then it freezes"). A real rotation DOES produce a fresh snapshot that overwrites
-  // this one, so the geometry self-heals; only the brief transient during a rotate is momentarily
-  // stale, which is vastly preferable to a hard input freeze.
-  val liveRender = session.renderSnapshot
-  val sticky = remember(column.deviceId) { mutableStateOf<DeviceFrameSnapshot?>(null) }
-  LaunchedEffect(liveRender) { if (liveRender != null) sticky.value = liveRender }
-  val geometry = liveRender ?: sticky.value
-
-  // Diagnostic: log arm/disarm transitions so a wedge is visible in the daemon-run log.
-  val armed = geometry != null
-  LaunchedEffect(column.deviceId, armed) {
-    LOG.info("device control ${if (armed) "ARMED" else "disarmed"} for ${column.deviceId}")
-  }
-
-  return WorkspaceDeviceControlState(
-    dispatcher = dispatcher,
-    interactionSnapshot = geometry,
-    renderSnapshot = geometry,
-    tapError = tapError,
-    tracer = tracer,
-  )
 }

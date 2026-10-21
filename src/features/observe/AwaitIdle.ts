@@ -12,7 +12,13 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import type { AwaitIdle as AwaitIdleInterface, UiStabilityState } from "./interfaces/AwaitIdle";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { shellQuote } from "../../utils/shellQuote";
+
+/** Consecutive missing-frame polls allowed before ending the stability wait. */
+export const NO_FRAME_STATS_GRACE_POLLS = 10;
+/** Minimum duration of a consecutive missing-frame streak before ending the wait. */
+export const NO_FRAME_STATS_GRACE_MS = 1000;
 
 export class AwaitIdle implements AwaitIdleInterface {
   private adb: AdbExecutor;
@@ -32,10 +38,11 @@ export class AwaitIdle implements AwaitIdleInterface {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    hierarchyReader?: ViewHierarchyRequestReader,
   ) {
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
-    this.idle = new Idle(device, this.adbFactory, timer);
+    this.idle = new Idle(device, this.adbFactory, timer, hierarchyReader);
     this.timer = timer;
   }
 
@@ -100,13 +107,11 @@ export class AwaitIdle implements AwaitIdleInterface {
 
     try {
       await withRemainingBudget(deadlineMs, this.timer, signal, (activeSignal, remainingMs) =>
-        this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
-          remainingMs,
-          DUMPSYS_MAX_BUFFER,
-          undefined,
-          activeSignal,
-        ),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`, {
+          timeoutMs: remainingMs,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          signal: activeSignal,
+        }),
       );
     } catch (error) {
       signal?.throwIfAborted();
@@ -168,14 +173,18 @@ export class AwaitIdle implements AwaitIdleInterface {
     signal?: AbortSignal,
   ): Promise<{
     updatedState: typeof state;
+    noFrameData?: boolean;
+    frameStatsUnavailable?: boolean;
     shouldUpdateLastNonIdleTime: boolean;
   }> {
     const stabilityResult = await this.idle.getUiStability(
       packageName,
-      state.prevMissedVsync,
-      state.prevSlowUiThread,
-      state.prevFrameDeadlineMissed,
-      state.prevTotalFrames,
+      {
+        missedVsync: state.prevMissedVsync,
+        slowUiThread: state.prevSlowUiThread,
+        frameDeadlineMissed: state.prevFrameDeadlineMissed,
+        totalFrames: state.prevTotalFrames,
+      },
       state.firstGfxInfoLog,
       new NoOpPerformanceTracker(),
       { timeoutMs, signal },
@@ -194,7 +203,36 @@ export class AwaitIdle implements AwaitIdleInterface {
 
     return {
       updatedState,
+      ...(stabilityResult.noFrameData ? { noFrameData: true } : {}),
+      ...(stabilityResult.frameStatsUnavailable ? { frameStatsUnavailable: true } : {}),
       shouldUpdateLastNonIdleTime: stabilityResult.shouldUpdateLastNonIdleTime,
+    };
+  }
+
+  private createNoFrameGraceCheck(deadlineMs: number) {
+    let consecutiveNoFrameData = 0;
+    let noFrameDataStreakStart: number | null = null;
+    return (
+      noFrameData: boolean | undefined,
+      frameStatsUnavailable: boolean | undefined,
+    ): boolean => {
+      if (frameStatsUnavailable || this.timer.now() >= deadlineMs) {
+        return false;
+      }
+      if (!noFrameData) {
+        consecutiveNoFrameData = 0;
+        noFrameDataStreakStart = null;
+        return false;
+      }
+      if (consecutiveNoFrameData === 0) {
+        noFrameDataStreakStart = this.timer.now();
+      }
+      consecutiveNoFrameData++;
+      return (
+        consecutiveNoFrameData >= NO_FRAME_STATS_GRACE_POLLS &&
+        noFrameDataStreakStart !== null &&
+        this.timer.now() - noFrameDataStreakStart >= NO_FRAME_STATS_GRACE_MS
+      );
     };
   }
 
@@ -207,6 +245,23 @@ export class AwaitIdle implements AwaitIdleInterface {
    * @returns Promise that resolves with GfxMetrics when UI is stable
    */
   async waitForUiStabilityWithState(
+    packageName: string,
+    timeoutMs: number,
+    initState: UiStabilityState,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<GfxMetrics | null> {
+    return (
+      (await this.idle.waitForQuietTreeStability(
+        packageName,
+        initState.startTime,
+        timeoutMs,
+        signal,
+      )) ?? this.waitForFrameStabilityWithState(packageName, timeoutMs, initState, perf, signal)
+    );
+  }
+
+  private async waitForFrameStabilityWithState(
     packageName: string,
     timeoutMs: number,
     initState: {
@@ -230,7 +285,9 @@ export class AwaitIdle implements AwaitIdleInterface {
     let pollCount = 0;
     let isStable = false;
     const deadlineMs = initState.startTime + timeoutMs;
+    const hasExhaustedNoFrameGrace = this.createNoFrameGraceCheck(deadlineMs);
     const finalMetrics: {
+      idleEndReason?: GfxMetrics["idleEndReason"];
       percentile50thMs: number | null;
       percentile90thMs: number | null;
       percentile95thMs: number | null;
@@ -272,6 +329,14 @@ export class AwaitIdle implements AwaitIdleInterface {
         finalMetrics.slowUiThreadCount = state.prevSlowUiThread;
         finalMetrics.frameDeadlineMissedCount = state.prevFrameDeadlineMissed;
 
+        if (hasExhaustedNoFrameGrace(checkResult.noFrameData, checkResult.frameStatsUnavailable)) {
+          logger.info(
+            `[AwaitIdle] Ending UI stability wait after the grace period without valid frame stats for ${packageName}`,
+          );
+          finalMetrics.idleEndReason = "noFrameStats";
+          break;
+        }
+
         // Now check if we've been stable (criteria passing) for required duration
         const timeoutCheck = this.checkUiStabilityTimeout(
           state.lastNonIdleTime,
@@ -306,18 +371,24 @@ export class AwaitIdle implements AwaitIdleInterface {
     // Get final gfxinfo to capture percentiles
     if (deadlineMs > this.timer.now()) {
       try {
-        const finalGfxInfo = await perf.track("finalGfxinfo", async () => {
-          return withRemainingBudget(deadlineMs, this.timer, signal, (activeSignal, remainingMs) =>
-            this.adb.executeCommand(
-              `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-              remainingMs,
-              DUMPSYS_MAX_BUFFER,
-              undefined,
-              activeSignal,
-            ),
+        const metrics = await perf.track("finalGfxinfo", async () => {
+          const finalGfxInfo = await withRemainingBudget(
+            deadlineMs,
+            this.timer,
+            signal,
+            (activeSignal, remainingMs) =>
+              this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
+                timeoutMs: remainingMs,
+                maxBuffer: DUMPSYS_MAX_BUFFER,
+                signal: activeSignal,
+              }),
           );
+          const metrics = this.idle.parseMetrics(finalGfxInfo.stdout);
+          if (this.idle.validateFrameData(metrics)) {
+            delete finalMetrics.idleEndReason;
+          }
+          return metrics;
         });
-        const metrics = this.idle.parseMetrics(finalGfxInfo.stdout);
         finalMetrics.percentile50thMs = metrics.percentile50th;
         finalMetrics.percentile90thMs = metrics.percentile90th;
         finalMetrics.percentile95thMs = metrics.percentile95th;
@@ -327,7 +398,7 @@ export class AwaitIdle implements AwaitIdleInterface {
         finalMetrics.frameDeadlineMissedCount = metrics.frameDeadlineMissed;
       } catch (err) {
         signal?.throwIfAborted();
-        logger.info(`[AwaitIdle] Failed to get final gfxinfo: ${err}`);
+        logger.warn(`[AwaitIdle] Failed to get final gfxinfo: ${err}`);
       }
     }
 
@@ -335,13 +406,7 @@ export class AwaitIdle implements AwaitIdleInterface {
 
     return {
       packageName,
-      percentile50thMs: finalMetrics.percentile50thMs,
-      percentile90thMs: finalMetrics.percentile90thMs,
-      percentile95thMs: finalMetrics.percentile95thMs,
-      percentile99thMs: finalMetrics.percentile99thMs,
-      missedVsyncCount: finalMetrics.missedVsyncCount,
-      slowUiThreadCount: finalMetrics.slowUiThreadCount,
-      frameDeadlineMissedCount: finalMetrics.frameDeadlineMissedCount,
+      ...finalMetrics,
       pollCount,
       stabilityWaitMs,
       isStable,

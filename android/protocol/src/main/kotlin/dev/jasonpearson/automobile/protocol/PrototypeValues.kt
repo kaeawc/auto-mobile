@@ -20,6 +20,14 @@ sealed class PrototypeDimension {
   data class Dp(val dp: Double) : PrototypeDimension()
 }
 
+/** A pager fills its viewport or uses a fixed main-axis extent. */
+@Serializable(with = PrototypePagerPageSizeSerializer::class)
+sealed class PrototypePagerPageSize {
+  data object Fill : PrototypePagerPageSize()
+
+  data class Dp(val dp: Double) : PrototypePagerPageSize()
+}
+
 /**
  * `style.fontFamily`: a built-in family name, or a font asset the host uploaded (#10443). The asset
  * form carries only the opaque id; font bytes travel through `put_prototype_asset`.
@@ -151,6 +159,26 @@ object PrototypeDimensionSerializer :
     }
 }
 
+object PrototypePagerPageSizeSerializer :
+  PrototypeJsonValueSerializer<PrototypePagerPageSize>("PrototypePagerPageSize") {
+  override fun fromJson(value: JsonElement): PrototypePagerPageSize =
+    when (value) {
+      JsonPrimitive("fill") -> PrototypePagerPageSize.Fill
+      else -> {
+        val dp = dpValue(value, 0.000001)
+        if (dp > PrototypeSpecValidator.MAX_PROTOTYPE_PAGER_DP)
+          throw SerializationException("Invalid dp value")
+        PrototypePagerPageSize.Dp(dp)
+      }
+    }
+
+  override fun toJson(value: PrototypePagerPageSize): JsonElement =
+    when (value) {
+      PrototypePagerPageSize.Fill -> JsonPrimitive("fill")
+      is PrototypePagerPageSize.Dp -> dpJson(value.dp)
+    }
+}
+
 object PrototypeModeValueSerializer :
   PrototypeJsonValueSerializer<PrototypeModeValue>("PrototypeModeValue") {
   override fun fromJson(value: JsonElement): PrototypeModeValue {
@@ -273,20 +301,17 @@ object PrototypeDetentSerializer :
 
 object PrototypePageTargetSerializer :
   PrototypeJsonValueSerializer<PrototypePageTarget>("PrototypePageTarget") {
+  private fun isPageIndex(number: Double): Boolean =
+    number.isFinite() && number in 0.0..Int.MAX_VALUE.toDouble() && number % 1.0 == 0.0
+
   override fun fromJson(value: JsonElement): PrototypePageTarget {
     if (value == JsonPrimitive("next")) return PrototypePageTarget.Next
     if (value == JsonPrimitive("prev")) return PrototypePageTarget.Prev
     val primitive = value as? JsonPrimitive ?: throw SerializationException("Expected page index")
-    val number = primitive.takeIf { !it.isString }?.doubleOrNull
-    if (
-      number == null ||
-        !number.isFinite() ||
-        number < 0 ||
-        number > Int.MAX_VALUE ||
-        number % 1.0 != 0.0
-    ) {
-      throw SerializationException("Invalid page index")
-    }
+    val number =
+      primitive.takeIf { !it.isString }?.doubleOrNull
+        ?: throw SerializationException("Invalid page index")
+    if (!isPageIndex(number)) throw SerializationException("Invalid page index")
     return PrototypePageTarget.Index(number.toInt())
   }
 

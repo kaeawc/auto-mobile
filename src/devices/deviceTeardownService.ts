@@ -6,14 +6,10 @@ import type {
   VirtualDeviceLifecycleCoordinator,
   VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
+import { DeviceTeardownDeadlineError } from "./DeviceTeardownDeadlineError";
+export { DeviceTeardownDeadlineError } from "./DeviceTeardownDeadlineError";
 
 export type DeviceTeardownPhase = "precondition" | "stop" | "destroy" | "verification";
-
-export class DeviceTeardownDeadlineError extends ActionableError {
-  constructor() {
-    super("Device teardown deadline exceeded");
-  }
-}
 
 export type DeviceTeardownResolution<TTarget, TResponse> =
   | { target: TTarget }

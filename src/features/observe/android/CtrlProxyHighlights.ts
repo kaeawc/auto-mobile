@@ -5,13 +5,12 @@
  */
 
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
-import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { HighlightOperationResult, HighlightShape } from "../../../models";
 import type { DelegateContext, NormalizedHighlightBounds } from "./types";
-import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
+import { sendCommand } from "../DeviceServiceUtils";
 
 /**
  * Delegate class for handling visual highlight overlay operations.
@@ -47,49 +46,38 @@ export class CtrlProxyHighlights {
     const startTime = this.context.timer.now();
 
     try {
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn(
-          "[CTRL_PROXY] Failed to establish WebSocket connection for highlight operation",
-        );
-        return {
-          success: false,
-          error: "Failed to connect to accessibility service",
-        };
+      // Omit falsy id/shape from the wire rather than serializing null, as the builder does.
+      const params: Record<string, unknown> = {};
+      if (payload.id) {
+        params.id = payload.id;
       }
-
-      const requestId = this.context.requestManager.generateId("highlight");
-
-      // Register request with automatic timeout handling
-      const highlightPromise = this.context.requestManager.register<HighlightOperationResult>(
-        requestId,
-        "highlight",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          error: `Highlight request timeout after ${timeout}ms`,
-        }),
+      if (payload.shape) {
+        params.shape = this.normalizeHighlightShape(payload.shape);
+      }
+      const result = await sendCommand<HighlightOperationResult>(
+        // Highlights never went through the generic command gate or wire deadlines.
+        { ...this.context, isCommandSupported: undefined, wireDeadlineParams: undefined },
+        {
+          idPrefix: "highlight",
+          responseType: "highlight",
+          messageType: type,
+          params,
+          timeoutMs,
+          perf,
+          cancelScreenshotBackoff: false,
+          notConnectedError: () => {
+            logger.warn(
+              "[CTRL_PROXY] Failed to establish WebSocket connection for highlight operation",
+            );
+            return { success: false, error: "Failed to connect to accessibility service" };
+          },
+          timeoutError: (timeout) => ({
+            success: false,
+            error: `Highlight request timeout after ${timeout}ms`,
+          }),
+          unsupportedCommandError: (_messageType, error) => ({ success: false, error }),
+        },
       );
-
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-
-        const request = ctrlProxyRequests.addHighlight({
-          requestId,
-          id: payload.id,
-          shape: payload.shape ? this.normalizeHighlightShape(payload.shape) : undefined,
-        });
-
-        ws.send(serializeCtrlProxyRequest(request));
-        logger.debug(`[CTRL_PROXY] Sent highlight request (${type}, requestId: ${requestId})`);
-      });
-
-      const result = await perf.track("waitForHighlight", () => highlightPromise);
       const duration = this.context.timer.now() - startTime;
 
       if (result.success) {

@@ -1,3 +1,6 @@
+import { CtrlProxySdkCapabilities } from "../../../../src/features/observe/ios/CtrlProxySdkCapabilities";
+import { CtrlProxyNetworkSync } from "../../../../src/features/observe/ios/CtrlProxyNetworkSync";
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 /**
  * Field-name wire-parity backstop for the iOS control-proxy TS client ↔ Swift runner
  * (issue #2954, checklist item 3 of #2857).
@@ -6,7 +9,7 @@
  * `type` discriminator but NOT a renamed field *inside* a command payload: renaming
  * `disableAllFiltering` on the TS side compiles cleanly and only fails at runtime
  * on-device, when the typed Swift payload struct (under
- * `ios/control-proxy/Sources/CtrlProxyRewrite/Models/`) decodes the wrong field.
+ * `ios/control-proxy/Sources/CtrlProxy/Models/`) decodes the wrong field.
  *
  * This suite is one half of a two-sided guard around a shared JSON snapshot fixture,
  * `test/fixtures/ios-ctrlproxy-request-snapshots.json`:
@@ -38,6 +41,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { requestSdkTrigger } from "../../../../src/features/observe/ios/CtrlProxySdkTrigger";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
@@ -52,8 +57,8 @@ import { CtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyTex
 import { CtrlProxyVoiceOver } from "../../../../src/features/observe/ios/CtrlProxyVoiceOver";
 import { IOS_KNOWN_REQUEST_TYPE_SET } from "../../../../src/features/observe/ios/ctrlProxyRequestTypes";
 import type { HierarchyDelegateContext } from "../../../../src/features/observe/ios/types";
-import { buildNetworkMockRules } from "../../../../src/server/networkMockRules";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { buildNetworkMockRules } from "../../../../src/utils/networkMockRules";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { serializeIosRequest } from "../../../../src/features/observe/ios/serializeIosRequest";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -90,12 +95,9 @@ function createHarness(): Harness {
   const context: HierarchyDelegateContext = {
     serializeRequest: serializeIosRequest,
     getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+      new FakeOpenSocket((data) => {
+        sent.push(data);
+      }),
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -119,6 +121,7 @@ interface SnapshotSpec {
    * throw unless the response reports success, so those specs provide a matching shape.
    */
   resolveWith?: unknown;
+  fireAndForget?: boolean;
 }
 
 /**
@@ -127,7 +130,120 @@ interface SnapshotSpec {
  * (fractional coordinates prove the iOS no-rounding path; no two coordinate
  * fields share a value, so a swapped field is caught by value, not just name).
  */
+// These runner commands are declared by the host but have no production TS builder.
+// Remove an entry when its builder lands: the disjointness test prevents stale exemptions.
+const HOST_NEVER_SENDS = new Set([
+  "get_current_focus",
+  "get_traversal_order",
+  "request_two_finger_swipe",
+  "set_network_fault_rules",
+]);
+
+function snapshotSdkCapabilities(h: Harness): CtrlProxySdkCapabilities {
+  return new CtrlProxySdkCapabilities({
+    timer: h.context.timer,
+    getSupportedCommands: () => null,
+    isCommandSupported: () => true,
+    createDelegateContext: () => h.context,
+    syncNetworkMockRulesToDevice: () => {},
+    syncNetworkErrorSimulationToDevice: () => {},
+  });
+}
+
+async function withClient(
+  h: Harness,
+  invoke: (client: IOSCtrlProxyClient) => unknown,
+): Promise<unknown> {
+  const client = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "snapshot-device", platform: "ios", name: "fixture" },
+    8765,
+    () => {
+      throw new Error("snapshot must never open a socket");
+    },
+    h.context.timer,
+  );
+  client.getSdkCapabilityTestHooks().sdkCapabilityGate = async () => null;
+  client.sendMessage = (data) => {
+    h.sent.push(data);
+    return true;
+  };
+  return await invoke(client);
+}
+
 const SNAPSHOT_SPECS: SnapshotSpec[] = [
+  {
+    name: "get_sdk_capabilities",
+    builder: "CtrlProxySdkCapabilities.requestSdkCapabilities",
+    invoke: (h) => snapshotSdkCapabilities(h).requestSdkCapabilities(-1),
+  },
+  {
+    name: "request_activate_accessibility_link",
+    builder: "CtrlProxyVoiceOver.requestActivateAccessibilityLink",
+    invoke: (h) =>
+      new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink({
+        text: "Details",
+        occurrence: 2,
+        ownerResourceId: "owner-42",
+      }),
+  },
+  {
+    name: "request_magic_tap",
+    builder: "CtrlProxyVoiceOver.requestMagicTap",
+    invoke: (h) => new CtrlProxyVoiceOver(h.context).requestMagicTap(),
+  },
+  {
+    name: "request_sdk_trigger",
+    builder: "requestSdkTrigger",
+    invoke: (h) =>
+      requestSdkTrigger(h.context, {
+        module: "callkit",
+        trigger: "incoming",
+        payload: { caller: "fixture" },
+      }),
+  },
+  {
+    name: "set_hierarchy_poll_interval",
+    builder: "IOSCtrlProxyClient.refreshObservationStreamHierarchyCadence",
+    invoke: (h) => withClient(h, (client) => client.refreshObservationStreamHierarchyCadence(275)),
+    fireAndForget: true,
+  },
+  {
+    name: "set_network_error_simulation",
+    builder: "CtrlProxyNetworkSync.setNetworkErrorSimulation",
+    invoke: (h) =>
+      new CtrlProxyNetworkSync({
+        getDevice: () => ({ deviceId: "snapshot-device", platform: "ios", name: "fixture" }),
+        requestManager: h.requestManager,
+        sdkCapability: {
+          hasSdkCapability: () => true,
+          isLegacySdkCommandSupported: () => true,
+          ensureSdkCapability: async () => true,
+          sdkCapabilityGate: async () => null,
+        },
+        sendMessage: (data) => {
+          h.sent.push(data);
+          return true;
+        },
+        isCommandSupported: () => true,
+        createDelegateContext: () => h.context,
+      }).setNetworkErrorSimulation({
+        enabled: true,
+        errorType: "timeout",
+        limit: 3,
+        expiresAtEpochMs: 1700000000000,
+        remainingMs: 2500,
+      }),
+  },
+  {
+    name: "set_voiceover_state",
+    builder: "CtrlProxyVoiceOver.requestSetVoiceOverEnabled",
+    invoke: (h) => new CtrlProxyVoiceOver(h.context).requestSetVoiceOverEnabled(true),
+  },
+  {
+    name: "storage_capabilities",
+    builder: "CtrlProxyDatabase.storageCapabilities",
+    invoke: (h) => new CtrlProxyDatabase(h.context).storageCapabilities("com.example.app"),
+  },
   {
     name: "request_hierarchy",
     builder: "CtrlProxyHierarchy.requestHierarchySync (disableAllFiltering=true)",
@@ -149,40 +265,85 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_tap_coordinates",
     builder:
       "SharedGestureDelegate.requestTapCoordinates (via CtrlProxyGestures, roundCoordinates=false)",
-    invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(120.5, 240.25, 35),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestTapCoordinates({ x: 120.5, y: 240.25, duration: 35 }),
+  },
+  {
+    name: "request_tap_coordinates_double_tap",
+    builder: "CtrlProxyGestures.requestDoubleTapCoordinates",
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestDoubleTapCoordinates(120.5, 240.25, 5000),
   },
   {
     name: "request_swipe",
     builder: "SharedGestureDelegate.requestSwipe (via CtrlProxyGestures)",
-    invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(10.5, 20.25, 300.75, 401.5, 275),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestSwipe({
+        x1: 10.5,
+        y1: 20.25,
+        x2: 300.75,
+        y2: 401.5,
+        duration: 275,
+      }),
   },
   {
     name: "request_drag",
     builder: "SharedGestureDelegate.requestDrag (via CtrlProxyGestures)",
     invoke: (h) =>
-      new CtrlProxyGestures(h.context).requestDrag(11.5, 22.25, 33.75, 44.5, 350, 900, 150, 5000),
+      new CtrlProxyGestures(h.context).requestDrag({
+        x1: 11.5,
+        y1: 22.25,
+        x2: 33.75,
+        y2: 44.5,
+        pressDurationMs: 350,
+        dragDurationMs: 900,
+        holdDurationMs: 150,
+        timeoutMs: 5000,
+      }),
   },
   {
     name: "request_pinch",
     builder: "SharedGestureDelegate.requestPinch (via CtrlProxyGestures)",
     invoke: (h) =>
-      new CtrlProxyGestures(h.context).requestPinch(160.5, 320.25, 80.5, 200.75, 45.5, 275),
+      new CtrlProxyGestures(h.context).requestPinch({
+        centerX: 160.5,
+        centerY: 320.25,
+        distanceStart: 80.5,
+        distanceEnd: 200.75,
+        rotationDegrees: 45.5,
+        duration: 275,
+      }),
+  },
+  {
+    name: "request_path_gesture",
+    builder: "CtrlProxyGestures.requestPathGesture",
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context, undefined, async () => [
+        "path_gesture_v1",
+      ]).requestPathGesture(
+        [
+          { x: 12.5, y: 24.25, offsetMs: 0 },
+          { x: 12.5, y: 24.25, offsetMs: 300 },
+          { x: 40.75, y: 80.5, offsetMs: 700 },
+        ],
+        5000,
+        "frame-42",
+      ),
   },
   {
     name: "request_multi_finger_swipe",
     builder: "CtrlProxyGestures.requestMultiFingerSwipe",
     invoke: (h) =>
-      new CtrlProxyGestures(h.context).requestMultiFingerSwipe(
-        15.5,
-        25.25,
-        35.75,
-        46.5,
-        3,
-        450,
-        5000,
-        undefined,
-        24.5,
-      ),
+      new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+        x1: 15.5,
+        y1: 25.25,
+        x2: 35.75,
+        y2: 46.5,
+        fingerCount: 3,
+        duration: 450,
+        timeoutMs: 5000,
+        fingerSpacing: 24.5,
+      }),
   },
   {
     name: "request_set_text",
@@ -485,10 +646,12 @@ async function captureWire(spec: SnapshotSpec): Promise<Record<string, unknown>>
   }
   expect(h.sent.length).toBe(1);
   const wire = JSON.parse(h.sent[0]) as Record<string, unknown>;
-  h.requestManager.resolve(
-    wire.requestId as string,
-    spec.resolveWith ?? { success: true, totalTimeMs: 1 },
-  );
+  if (!spec.fireAndForget) {
+    h.requestManager.resolve(
+      wire.requestId as string,
+      spec.resolveWith ?? { success: true, totalTimeMs: 1 },
+    );
+  }
   await promise;
   return wire;
 }
@@ -503,7 +666,8 @@ function normalizeRequestId(wire: Record<string, unknown>): Record<string, unkno
 async function captureAllSnapshots(): Promise<Map<string, Record<string, unknown>>> {
   const captured = new Map<string, Record<string, unknown>>();
   for (const spec of SNAPSHOT_SPECS) {
-    captured.set(spec.name, normalizeRequestId(await captureWire(spec)));
+    const wire = await captureWire(spec);
+    captured.set(spec.name, spec.fireAndForget ? wire : normalizeRequestId(wire));
   }
   // Sent without a requestId (fire-and-forget sync on reconnect) — not normalized.
   captured.set("set_network_mock_rules", buildNetworkMockRulesSnapshot());
@@ -517,8 +681,9 @@ function builderDoc(name: string): string {
   );
 }
 
+let committedFixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as FixtureFile;
 function loadFixture(): FixtureFile {
-  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as FixtureFile;
+  return committedFixture;
 }
 
 describe("iOS control-proxy — request snapshot fixture matches live TS builders", () => {
@@ -536,6 +701,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
         })),
       };
       writeFileSync(FIXTURE_PATH, `${JSON.stringify(updated, null, 2)}\n`);
+      committedFixture = updated;
     }
 
     const fixture = loadFixture();
@@ -558,6 +724,21 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
   test("every fixture wire type is a known RequestType rawValue", () => {
     for (const snapshot of loadFixture().snapshots) {
       expect(IOS_KNOWN_REQUEST_TYPE_SET.has(snapshot.wire.type as string)).toBe(true);
+    }
+  });
+
+  test("fixture covers every host-sent RequestType", () => {
+    const covered = new Set(loadFixture().snapshots.map((s) => s.wire.type));
+    expect([...covered].sort()).toEqual(
+      [...IOS_KNOWN_REQUEST_TYPE_SET].filter((type) => !HOST_NEVER_SENDS.has(type)).sort(),
+    );
+  });
+
+  test("host-never-sends exemptions are known and absent from the fixture", () => {
+    const covered = new Set(loadFixture().snapshots.map((s) => s.wire.type));
+    for (const type of HOST_NEVER_SENDS) {
+      expect(IOS_KNOWN_REQUEST_TYPE_SET.has(type)).toBe(true);
+      expect(covered.has(type)).toBe(false);
     }
   });
 
@@ -626,7 +807,12 @@ describe("iOS integer millisecond request boundary", () => {
       {
         name: "tap",
         builder: "tap",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(1.5, 2.5, 250.5),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestTapCoordinates({
+            x: 1.5,
+            y: 2.5,
+            duration: 250.5,
+          }),
       },
       {
         name: "action",
@@ -634,7 +820,7 @@ describe("iOS integer millisecond request boundary", () => {
         invoke: (h) =>
           new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
             "Row",
-            "longPress",
+            "long_press",
             5000,
             undefined,
             { duration: 250.5 },
@@ -644,23 +830,55 @@ describe("iOS integer millisecond request boundary", () => {
         name: "drag",
         builder: "drag",
         invoke: (h) =>
-          new CtrlProxyGestures(h.context).requestDrag(1, 2, 3, 4, 600.5, 1500.4, 0.4, 5000),
+          new CtrlProxyGestures(h.context).requestDrag({
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 4,
+            pressDurationMs: 600.5,
+            dragDurationMs: 1500.4,
+            holdDurationMs: 0.4,
+            timeoutMs: 5000,
+          }),
       },
       {
         name: "swipe",
         builder: "swipe",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(1, 2, 3, 4, 250.5, 1500.4),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestSwipe({
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 4,
+            duration: 250.5,
+            timeoutMs: 1500.4,
+          }),
       },
       {
         name: "pinch",
         builder: "pinch",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestPinch(1, 2, 3, 4, 0.5, 250.5),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestPinch({
+            centerX: 1,
+            centerY: 2,
+            distanceStart: 3,
+            distanceEnd: 4,
+            rotationDegrees: 0.5,
+            duration: 250.5,
+          }),
       },
       {
         name: "multi",
         builder: "multi",
         invoke: (h) =>
-          new CtrlProxyGestures(h.context).requestMultiFingerSwipe(1, 2, 3, 4, 3, 250.5),
+          new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 4,
+            fingerCount: 3,
+            duration: 250.5,
+          }),
       },
     ];
     for (const spec of specs) {

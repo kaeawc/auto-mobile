@@ -1,4 +1,5 @@
-import { DaemonState } from "../daemon/daemonState";
+import { holderOf } from "../daemon/deviceBinding";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { isSessionReleasing } from "../daemon/sessionReleaseState";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 
@@ -20,15 +21,15 @@ export interface PlanDeviceOwnership {
  */
 export const daemonPlanDeviceOwnership: PlanDeviceOwnership = {
   ownsDevice(sessionUuid: string, deviceId: string): boolean {
-    const state = DaemonState.getInstance();
-    if (!state.isInitialized()) {
+    const manager = defaultDaemonContext.sessionManager();
+    const pool = defaultDaemonContext.devicePool();
+    if (!manager || !pool) {
       return true;
     }
-    const manager = state.getSessionManager();
     const baseOf = (id: string): string | undefined =>
       resolveToolSelectionBaseSessionUuid(id, manager);
     const owner = manager.getSessionForDevice(deviceId);
-    const poolOwner = state.getDevicePool().getDevice(deviceId)?.sessionId ?? null;
+    const poolOwner = holderOf(pool.getDevice(deviceId)) ?? null;
     if (!owner || !poolOwner) {
       return false;
     }

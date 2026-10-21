@@ -1,0 +1,11 @@
+docs/using/environment-variables.md
+src/db/keyedJsonConfigRepository.ts
+src/db/migrationDependencyIntegrity.ts
+src/features/observe/AwaitIdle.ts
+src/features/observe/Idle.ts
+src/models/UiStabilityResult.ts
+src/server/deviceTools.ts
+test/db/keyedJsonConfigRepository.legacyRows.test.ts
+test/features/observe/AwaitIdle.test.ts
+test/features/observe/Idle.test.ts
+test/server/deviceTools.appResourceDependencies.test.ts

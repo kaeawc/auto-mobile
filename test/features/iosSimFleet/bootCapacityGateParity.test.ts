@@ -19,7 +19,7 @@ import { logger } from "../../../src/utils/logger";
 import { FakeAndroidCapacitySource } from "../../fakes/FakeAndroidCapacitySource";
 import { FakeFleetHostSource } from "../../fakes/FakeFleetHostSource";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const GIB = 1024 ** 3;
@@ -41,7 +41,7 @@ describe("boot capacity gate parity", () => {
   // os totals too, `report.host` is undefined and the gate falls back to a limit of 1.
   test("a failed ps snapshot does not collapse the iOS derived limit to 1 on a big host", async () => {
     const psFailsExecutor = new FakeHostCommandExecutor(); // empty ps output => unparseable
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(["list", "devices", "--json"], SIMCTL);
     const commandSource = new CommandFleetHostSource(
       psFailsExecutor,

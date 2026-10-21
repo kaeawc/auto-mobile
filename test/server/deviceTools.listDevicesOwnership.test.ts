@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { listDevicePayloads } from "../../src/server/deviceTools";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
@@ -47,19 +47,19 @@ describe("listDevices reports ownership allocation enforces", () => {
     return pool;
   };
 
-  test("a managed-slot device is assigned/held, a free device stays idle", async () => {
-    const registry = new FakeSlotRegistry(timer);
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+  test("a binding device is assigned/held, a free device stays idle", async () => {
+    const registry = new FakeBindingRegistry(timer);
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
     const devices = [ios("SIM-SLOT"), ios("SIM-FREE")];
     const pool = await makePool(devices, {
-      managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
     });
-    await pool.managedSlotStableIds("ios");
+    await pool.bindingStableIds("ios");
 
-    const [slot, free] = listDevicePayloads(devices, pool, new Map());
-    expect(slot.runtime.poolStatus).toBe("assigned");
-    expect(slot.runtime.heldBy).toBe("managed_slot");
-    expect(slot.runtime.session).toBeNull();
+    const [binding, free] = listDevicePayloads(devices, pool, new Map());
+    expect(binding.runtime.poolStatus).toBe("assigned");
+    expect(binding.runtime.heldBy).toBe("session_broker");
+    expect(binding.runtime.session).toBeNull();
     expect(free.runtime.poolStatus).toBe("idle");
     expect(free.runtime.heldBy).toBeUndefined();
   });

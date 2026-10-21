@@ -1,80 +1,141 @@
-import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { Server } from "@modelcontextprotocol/server";
+import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
+import * as prototypeSuspended from "../../src/features/prototype/prototypeSuspended";
+import { isTypedToolRefusal } from "../../src/daemon/shapeToolCallError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { parseSync, Visitor, type ClassDeclaration, type ClassExpression } from "oxc-parser";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { parseSync, Visitor, type Class } from "oxc-parser";
+import type { ServerContext } from "@modelcontextprotocol/server";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import {
-  handleDaemonRequest,
-  type DaemonStateAccess,
-} from "../../src/daemon/daemonRequestHandlers";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import * as hostBootRegistry from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
+import * as downloadsStageRefusal from "../../src/server/StageSessionDownloadsRefusal";
 import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import * as deviceLost from "../../src/models/DeviceLostError";
-import * as managedSlotConfig from "../../src/models/managedSlotConfig";
-import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError";
+import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import * as bindingRefusals from "../../src/daemon/sessionBroker/provisioning/refusal";
+import * as bindingDiscoveryIncompleteErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import * as bindingRegistrySchemaUnsupportedErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
+import * as bindingOwnershipLostErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
+import * as bindingOwnershipUnconfirmedErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
+import * as sessionConfig from "../../src/devices/sessionConfig";
+import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError.base";
+import * as androidDiscoveryRefusals from "../../src/models/AndroidBootedDeviceDiscoveryIncompleteError";
+import * as androidAvdIdentityConflict from "../../src/devices/AndroidAvdIdentityConflictError";
+import * as androidIdentityUnresolved from "../../src/devices/AndroidIdentityUnresolvedError";
+import * as androidDeviceIdentityUnresolved from "../../src/devices/AndroidDeviceIdentityUnresolvedError";
+import * as androidAvdIdentityUnresolved from "../../src/devices/AndroidAvdIdentityUnresolvedError";
 import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
 import * as iosHomeLaunchTimeout from "../../src/models/IosHomeLaunchTimeoutError";
+import * as sdkCapabilityQuery from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentError";
 import * as streamPolicy from "../../src/daemon/streamSubscriptionPolicy";
 import * as namespaceGuard from "../../src/daemon/sharedNamespaceGuard";
 import * as restartAdmission from "../../src/daemon/daemonRestartAdmission";
+import * as restartPending from "../../src/daemon/daemonRestartPending";
 import * as deviceSessionResolver from "../../src/daemon/deviceSessionResolver";
+import * as orphanRecorderRefusal from "../../src/daemon/orphanRecorderRefusal";
 import * as recordingAdmission from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption";
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
+import * as nsDaemonAmbiguousSessionSelectorError from "../../src/daemon/proxy/DaemonAmbiguousSessionSelectorError";
+import * as nsDaemonAssetVersionMismatchError from "../../src/daemon/proxy/DaemonAssetVersionMismatchError";
+import * as nsDaemonBoundSessionExpiredError from "../../src/daemon/proxy/DaemonBoundSessionExpiredError";
+import * as nsDaemonBuildMismatchError from "../../src/daemon/proxy/DaemonBuildMismatchError";
+import * as nsDaemonConnectionSessionReleasedError from "../../src/daemon/proxy/DaemonConnectionSessionReleasedError";
+import * as nsDaemonSessionStalledError from "../../src/daemon/proxy/DaemonSessionStalledError";
+import * as nsDaemonToolOutcomeUnknownError from "../../src/daemon/proxy/DaemonToolOutcomeUnknownError";
+import * as nsDaemonToolUnavailableError from "../../src/daemon/proxy/DaemonToolUnavailableError";
+import * as nsDaemonVersionMismatchError from "../../src/daemon/proxy/DaemonVersionMismatchError";
+import * as nsLifecycleConnectionInFlightError from "../../src/daemon/proxy/LifecycleConnectionInFlightError";
 import * as sessionManager from "../../src/daemon/sessionManager";
-import * as sessionOwnership from "../../src/daemon/sessionNoLongerOwnsDevice";
+import * as nsSessionRecoveryIdentityLossError from "../../src/daemon/sessionManager/SessionRecoveryIdentityLossError";
+import * as sessionErrors from "../../src/daemon/sessionErrors";
+import * as sessionOwnership from "../../src/models/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
 import * as provisioning from "../../src/devices/exactDeviceProvisioning";
+import * as provisionDeviceError from "../../src/devices/ProvisionDeviceError";
+import * as provisionDeviceCreateRejected from "../../src/devices/ProvisionDeviceCreateRejectedError";
+import * as deviceBootTimeout from "../../src/devices/DeviceBootTimeoutError";
 import * as deviceBoot from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
+import * as sessionReleasedDuringCreation from "../../src/models/SessionReleasedDuringCreationError";
+import * as deviceShuttingDown from "../../src/models/DeviceShuttingDownError";
+import * as sessionCreationTimeout from "../../src/models/SessionCreationTimeoutError";
+import * as retryableDeviceAcquisition from "../../src/models/RetryableDeviceAcquisitionError";
+import * as deviceOwnedByOtherDaemon from "../../src/models/DeviceOwnedByOtherDaemonError";
+import * as deviceCleanupInProgress from "../../src/models/DeviceCleanupInProgressError";
+import * as deviceUnhealthy from "../../src/models/DeviceUnhealthyError";
+import * as deviceTransportOffline from "../../src/models/DeviceTransportOfflineError";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
-import * as managedSlotRefusals from "../../src/daemon/managedSlots/managedSlotRefusal";
+import * as inputOwnedError from "../../src/models/InputDeviceOwnedError";
+import * as deviceAssignedToBinding from "../../src/models/DeviceAssignedToBindingError";
+import * as brokerConnectionRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
-import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
-import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
-import * as ambiguousTargetRefusal from "../../src/server/ambiguousDeviceTargetRefusal";
+import * as boundSessionRefusal from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import * as deviceOutsideBoundSession from "../../src/daemon/DeviceOutsideBoundSessionError";
+import * as sessionOutsideBoundSession from "../../src/daemon/SessionOutsideBoundSessionError";
+import * as planLockRefusal from "../../src/daemon/planExecutionInProgressRefusal";
+import * as adbTransportUnavailable from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import * as ambiguousTargetRefusal from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import * as daemonTypes from "../../src/daemon/types";
 import * as daemonConstants from "../../src/daemon/constants";
 import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
 import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
+import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
-import * as daemonClient from "../../src/daemon/client";
+import * as nsDaemonRequestNotDeliveredError from "../../src/daemon/DaemonRequestNotDeliveredError";
+import * as nsDaemonUnavailableError from "../../src/daemon/DaemonUnavailableError";
+import * as nsUnknownToolError from "../../src/daemon/UnknownToolError";
+import * as nsReleaseErrors from "../../src/daemon/releaseErrors";
+import * as nsDaemonSessionCreationRejectedError from "../../src/daemon/sessionErrors/DaemonSessionCreationRejectedError";
+import * as nsPooledAvdIdentityError from "../../src/features/deviceLifecycle/PooledAvdIdentityError";
+import * as daemonHandshakeMismatch from "../../src/daemon/DaemonHandshakeMismatchError";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
-import * as toolUnavailable from "../../src/server/toolUnavailableError";
-import * as deviceTools from "../../src/server/deviceTools";
+import * as toolUnavailable from "../../src/daemon/toolUnavailableError";
+import * as deviceLifecycleCore from "../../src/features/deviceLifecycle/deviceLifecycleCore";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
-import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
+import {
+  bindingsFailure,
+  optionalRecord,
+  readExpectations,
+  readSurfaceExpectations,
+  readSurfaceFixture,
+  readTypedFields,
+  readWirePayload,
+  requireRecord,
+  resultJson,
+  wirePayloadOf,
+  type RefusalFields,
+  type SurfaceFields,
+  type TypedFields,
+  type WirePayload,
+} from "./helpers/refusalWireReaders";
 import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  DaemonRestartDeferredError,
-  DaemonRestartPendingError,
-} from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartPendingError } from "../../src/daemon/daemonRestartPending";
 import {
   EXTERNALLY_CAPTURED_SURFACE_FIXTURES,
   EXEMPT_REFUSAL_ERROR_CLASSES,
   fixtureDrivenErrorClasses,
-  MANAGED_SLOT_FIXTURE_PREFIX,
   recoveryPendingError,
   shapedRefusalResult,
   PROVISION_DEVICE_FIXTURE_PREFIX,
   buildRefusalSurfaceFixtures,
   type RefusalSurfaceFixture,
-  type RefusalWireResult,
   expectedWireCodes,
-  managedSlotNestedCodes,
   REFUSAL_FIXTURES_DIR,
   REFUSAL_SURFACES_DIR,
   serializeRefusalSurfaceFixture,
@@ -94,43 +155,134 @@ import {
 const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
   "server/downloadsFixtureService": downloadsRefusals,
+  "server/StageSessionDownloadsRefusal": downloadsStageRefusal,
   "utils/android-cmdline-tools/AdbDeviceHealth": adbHealth,
   "models/DeviceLostError": deviceLost,
-  "models/managedSlotConfig": managedSlotConfig,
-  "models/BootedDeviceDiscoveryIncompleteError": discoveryRefusals,
+  "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,
+  "daemon/sessionBroker/provisioning/refusal": bindingRefusals,
+  "daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError":
+    bindingDiscoveryIncompleteErrorModule,
+  "daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError":
+    bindingRegistrySchemaUnsupportedErrorModule,
+  "daemon/sessionBroker/provisioning/BindingOwnershipLostError": bindingOwnershipLostErrorModule,
+  "daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError":
+    bindingOwnershipUnconfirmedErrorModule,
+  "devices/sessionConfig": sessionConfig,
+  "models/BootedDeviceDiscoveryIncompleteError.base": discoveryRefusals,
+  "models/AndroidBootedDeviceDiscoveryIncompleteError": androidDiscoveryRefusals,
+  "devices/AndroidAvdIdentityConflictError": androidAvdIdentityConflict,
+  "devices/AndroidIdentityUnresolvedError": androidIdentityUnresolved,
+  "devices/AndroidDeviceIdentityUnresolvedError": androidDeviceIdentityUnresolved,
+  "devices/AndroidAvdIdentityUnresolvedError": androidAvdIdentityUnresolved,
   "models/DeviceShutdownTimeoutError": shutdownTimeout,
   "models/IosHomeLaunchTimeoutError": iosHomeLaunchTimeout,
+  "features/observe/ios/SdkCapabilityQueryError": sdkCapabilityQuery,
   "models/SessionRecoveryAssignmentError": recoveryAssignment,
   "daemon/streamSubscriptionPolicy": streamPolicy,
   "daemon/sharedNamespaceGuard": namespaceGuard,
   "daemon/daemonRestartAdmission": restartAdmission,
+  "daemon/daemonRestartPending": restartPending,
   "daemon/deviceSessionResolver": deviceSessionResolver,
   "daemon/deviceGestureRecordingStartAdmission": recordingAdmission,
+  "daemon/orphanRecorderRefusal": orphanRecorderRefusal,
   "daemon/daemonHandoffInterruption": handoffInterruption,
   "daemon/daemonMcpProxy": daemonProxy,
+  "daemon/proxy/DaemonAmbiguousSessionSelectorError": nsDaemonAmbiguousSessionSelectorError,
+  "daemon/proxy/DaemonAssetVersionMismatchError": nsDaemonAssetVersionMismatchError,
+  "daemon/proxy/DaemonBoundSessionExpiredError": nsDaemonBoundSessionExpiredError,
+  "daemon/proxy/DaemonBuildMismatchError": nsDaemonBuildMismatchError,
+  "daemon/proxy/DaemonConnectionSessionReleasedError": nsDaemonConnectionSessionReleasedError,
+  "daemon/proxy/DaemonSessionStalledError": nsDaemonSessionStalledError,
+  "daemon/proxy/DaemonToolOutcomeUnknownError": nsDaemonToolOutcomeUnknownError,
+  "daemon/proxy/DaemonToolUnavailableError": nsDaemonToolUnavailableError,
+  "daemon/proxy/DaemonVersionMismatchError": nsDaemonVersionMismatchError,
+  "daemon/proxy/LifecycleConnectionInFlightError": nsLifecycleConnectionInFlightError,
   "daemon/sessionManager": sessionManager,
-  "daemon/sessionNoLongerOwnsDevice": sessionOwnership,
+  "daemon/sessionManager/SessionRecoveryIdentityLossError": nsSessionRecoveryIdentityLossError,
+  "daemon/sessionErrors/SessionHeldByRecoveryError": sessionErrors,
+  "daemon/sessionErrors/SessionRebindingError": sessionErrors,
+  "daemon/sessionErrors/SessionSuspectError": sessionErrors,
+  "daemon/sessionErrors/SessionTerminalReleaseInProgressError": sessionErrors,
+  "models/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,
   "devices/exactDeviceProvisioning": provisioning,
+  "devices/ProvisionDeviceError": provisionDeviceError,
+  "devices/ProvisionDeviceCreateRejectedError": provisionDeviceCreateRejected,
   "devices/deviceBootService": deviceBoot,
-  "daemon/deviceAcquisitionRefusals": acquisitionRefusals,
+  "devices/DeviceBootTimeoutError": deviceBootTimeout,
+  "models/SessionReleasedDuringCreationError": sessionReleasedDuringCreation,
+  "models/DeviceShuttingDownError": deviceShuttingDown,
+  "models/SessionCreationTimeoutError": sessionCreationTimeout,
+  "models/RetryableDeviceAcquisitionError": retryableDeviceAcquisition,
+  "models/DeviceOwnedByOtherDaemonError": deviceOwnedByOtherDaemon,
+  "models/DeviceCleanupInProgressError": deviceCleanupInProgress,
+  "models/DeviceUnhealthyError": deviceUnhealthy,
+  "models/DeviceTransportOfflineError": deviceTransportOffline,
+  "models/InputDeviceOwnedError": inputOwnedError,
+  "models/DeviceAssignedToBindingError": deviceAssignedToBinding,
   "daemon/inputDeviceOwnership": inputOwnership,
-  "daemon/managedSlots/managedSlotRefusal": managedSlotRefusals,
+  "daemon/sessionBroker/connectionRefusal": brokerConnectionRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,
-  "server/deviceOutsideBoundSessionRefusal": boundSessionRefusal,
-  "server/planExecutionInProgressRefusal": planLockRefusal,
-  "server/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
+  "daemon/DeviceOutsideBoundSessionError": deviceOutsideBoundSession,
+  "daemon/SessionOutsideBoundSessionError": sessionOutsideBoundSession,
+  "daemon/planExecutionInProgressRefusal": planLockRefusal,
+  "daemon/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
+  "utils/android-cmdline-tools/AdbDeviceTransportUnavailableError": adbTransportUnavailable,
   "daemon/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
-  "daemon/client": daemonClient,
+  "models/SdkTooOldError": sdkTooOld,
+  "features/prototype/prototypeHidden": prototypeHidden,
+  "features/prototype/prototypeSuspended": prototypeSuspended,
+  "daemon/DaemonHandshakeMismatchError": daemonHandshakeMismatch,
+  "daemon/DaemonRequestNotDeliveredError": nsDaemonRequestNotDeliveredError,
+  "daemon/DaemonUnavailableError": nsDaemonUnavailableError,
+  "daemon/UnknownToolError": nsUnknownToolError,
+  "daemon/releaseErrors": nsReleaseErrors,
+  "daemon/sessionErrors/DaemonSessionCreationRejectedError": nsDaemonSessionCreationRejectedError,
+  "features/deviceLifecycle/PooledAvdIdentityError": nsPooledAvdIdentityError,
   "daemon/deviceControlTransportFailure": controlTransport,
-  "server/toolUnavailableError": toolUnavailable,
-  "server/deviceTools": deviceTools,
+  "daemon/toolUnavailableError": toolUnavailable,
+  "features/deviceLifecycle/core/provisioning": deviceLifecycleCore,
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */
-const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {};
+const INSTALLER_ERROR_EXEMPTION =
+  "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.";
+
+const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
+    INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/TemplateResolveError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/TemplateCopyError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PlistRewriteError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/IconRenderError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/SimctlInstallError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeListError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeUninstallError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/DataContainerError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/DataWriteError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/NotPrototypeBundleError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/CodesignError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerChecksumMismatchError":
+    INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerDownloadError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerUnsupportedVersionError":
+    INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerDownloadDisabledError":
+    INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerOverrideError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerExtractError": INSTALLER_ERROR_EXEMPTION,
+  "daemon/sessionBroker/store":
+    "Export identity mismatch is mapped to a {success:false, code} daemon reply by the export handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+  "daemon/sessionBroker/SessionRequestOwnerMismatchError":
+    "Request owner mismatch is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply (retryAfterMs only when retryable) by the release/abandon handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+  "daemon/sessionBroker/SessionBrokerInvariantError":
+    "Store precondition failure raised inside the broker; it is classified as a permanent clean-release failure by cleanReleaseFailure.ts and never serialized as a coded tool or daemon refusal (session_broker_invariant_failed appears nowhere on the wire). It reaches daemon RPCs only as an untyped rethrow (brokerRejection rethrows unknown errors; store requireValue/ownedResource can throw it out of releaseOnce).",
+  "daemon/sessionBroker/SessionBrokerStoppingError":
+    "Shutdown refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+};
 
 interface CodedErrorModule {
   module: string;
@@ -145,7 +297,7 @@ interface ScannedClass {
   exported: boolean;
 }
 
-type ScannedClassNode = ClassDeclaration | ClassExpression;
+type ScannedClassNode = Class;
 
 function declaresCode(node: ScannedClassNode): boolean {
   return node.body.body.some((member) => {
@@ -196,7 +348,9 @@ function scanClasses(module: string, source: string): ScannedClass[] {
       }
       if (!node.source && node.exportKind !== "type") {
         for (const specifier of node.specifiers) {
-          exportedNames.add(specifier.local.name);
+          exportedNames.add(
+            specifier.local.type === "Literal" ? specifier.local.value : specifier.local.name,
+          );
         }
       }
     },
@@ -300,7 +454,7 @@ beforeAll(() => {
   const root = join(import.meta.dir, "..", "..", "src");
   codedErrorInventory = Object.freeze(
     codedErrorModules(
-      readdirSync(root, { recursive: true })
+      readdirSync(root, { recursive: true, encoding: "utf8" })
         .filter((file) => file.endsWith(".ts"))
         .map((file) => ({
           module: file.split(sep).join("/").slice(0, -3),
@@ -336,50 +490,14 @@ function missingErrorClasses(
  * same fixtures and classify them per expectations.json. This suite keeps the TypeScript side of
  * that contract honest.
  */
-interface Expectations {
-  codes: Record<
-    string,
-    {
-      expected: RefusalDisposition;
-      knownGaps?: Record<string, RefusalDisposition>;
-      fields: RefusalFields;
-    }
-  >;
-}
-
-interface RefusalFields {
-  code?: string;
-  retryable: boolean;
-  acquireNewSession: boolean;
-  retryAfterMs?: number;
-  recovering?: boolean;
-  externalDevices?: string[];
-}
-
-interface WirePayload {
-  details?: { recovering?: boolean };
-  retryAfterMs?: number;
-  recovering?: boolean;
-  externalDevices?: string[];
-  code?: string;
-  retryable?: boolean;
-  nextAction?: string;
-  error?: {
-    retryAfterMs?: number;
-    recovering?: boolean;
-    code?: string;
-    retryable?: boolean;
-    nextAction?: string;
-    acquisitionFailure?: { code?: string } | null;
-  };
-}
-
 /** The codes a payload names on the wire, outermost first. */
 function wireCodes(payload: WirePayload): string[] {
-  const codes = [typeof payload.error === "object" ? payload.error.code : payload.code];
+  const codes = [typeof payload.error === "object" ? payload.error.code : payload.code].filter(
+    (code): code is string => code !== undefined,
+  );
   const nested =
     typeof payload.error === "object" ? payload.error.acquisitionFailure?.code : undefined;
-  return nested ? [...codes, nested] : codes.filter((code): code is string => code !== undefined);
+  return nested ? [...codes, nested] : codes;
 }
 
 const WAIT_CODES: ReadonlySet<string> = new Set([
@@ -406,6 +524,7 @@ function readFields(payload: WirePayload): RefusalFields {
     ...(typeof retryAfterMs === "number" && retryAfterMs > 0 ? { retryAfterMs } : {}),
     ...(typeof recovering === "boolean" ? { recovering } : {}),
     ...(payload.externalDevices ? { externalDevices: payload.externalDevices } : {}),
+    ...(payload.heldDevices ? { heldDevices: payload.heldDevices } : {}),
   };
 }
 
@@ -438,9 +557,9 @@ function dispositionOf(
   return retryable ? "retry" : "fail";
 }
 
-const expectations = JSON.parse(
+const expectations = readExpectations(
   readFileSync(join(REFUSAL_FIXTURES_DIR, "expectations.json"), "utf8"),
-) as Expectations;
+);
 const fixtures = buildRefusalWireFixtures();
 const fixtureCodes = fixtures.map((fixture) => fixture.code);
 
@@ -455,7 +574,8 @@ function exportedCodeConstants(): Map<string, string> {
     acquisitionRefusals,
     inputOwnership,
     bootCapacity,
-    managedSlotRefusals,
+    brokerConnectionRefusals,
+    bindingRefusals,
     boundSessionRefusal,
     daemonTypes,
     daemonConstants,
@@ -473,26 +593,6 @@ function exportedCodeConstants(): Map<string, string> {
   return found;
 }
 
-interface SurfaceFields extends Omit<RefusalFields, "retryable"> {
-  retryable?: boolean;
-  /** The evidence the refusal carries beside its typed fields. */
-  details?: Record<string, unknown>;
-  /** A managed slot failure's boot-capacity object. */
-  capacity?: Record<string, unknown>;
-  budget?: Record<string, unknown>;
-}
-
-interface SurfaceExpectations {
-  fixtures: Record<string, { expected: RefusalDisposition; fields: SurfaceFields }>;
-}
-
-interface TypedFields {
-  code?: string;
-  retryable?: boolean;
-  retryAfterMs?: number;
-  nextAction?: string;
-}
-
 /** The typed fields a surface fixture's payload carries, and where they sit on that surface. */
 function surfaceTyped(fixture: RefusalSurfaceFixture): {
   typed: TypedFields;
@@ -500,48 +600,48 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
   capacity?: Record<string, unknown>;
   budget?: Record<string, unknown>;
 } {
-  const payload = fixture.payload as Record<string, unknown>;
+  const payload = requireRecord(fixture.payload, `${fixture.name} payload`);
   if (
     [
       "device-loss-outcome",
       "device-session-error-fields",
       "request-failure-fields",
-      "managed-slots-response",
+      "press-button-result",
     ].includes(fixture.surface)
   ) {
-    return { typed: payload as TypedFields };
+    return { typed: readTypedFields(payload) };
   }
   if (fixture.surface === "recording-start-result") {
-    const result = fixture.payload as RefusalWireResult;
-    return { typed: JSON.parse(result.content[0].text) as TypedFields };
+    return { typed: readTypedFields(resultJson(payload)) };
   }
   if (fixture.surface === "proxy-tool-result") {
-    const result = fixture.payload as RefusalWireResult;
-    const body = JSON.parse(result.content[0].text) as { error: TypedFields };
-    return { typed: body.error };
+    return { typed: readTypedFields(requireRecord(resultJson(payload), "body").error) };
   }
-  if (fixture.surface === "provision-envelope") {
-    return { typed: payload.error as TypedFields };
-  }
-  if (fixture.surface === "liveness-handover") {
-    return { typed: payload.error as TypedFields };
+  if (fixture.surface === "provision-envelope" || fixture.surface === "liveness-handover") {
+    return { typed: readTypedFields(payload.error) };
   }
   if (fixture.surface === "aux-socket-response") {
-    return { typed: payload as TypedFields, details: { deviceId: payload.deviceId } };
+    return { typed: readTypedFields(payload), details: { deviceId: payload.deviceId } };
   }
   if (fixture.surface === "socket-frame") {
-    return { typed: payload as TypedFields, details: payload.details as Record<string, unknown> };
+    return {
+      typed: readTypedFields(payload),
+      details: optionalRecord(payload, "details", "socket frame"),
+    };
   }
   if (fixture.surface === "overload-frame") {
-    const { code, retryable, retryAfterMs, reason, queueWaitMs, remainingTimeoutMs } =
-      payload.overloadFailure as TypedFields & {
-        reason: string;
-        queueWaitMs: number;
-        remainingTimeoutMs: number;
-      };
+    const failure = requireRecord(payload.overloadFailure, "overloadFailure");
     return {
-      typed: { code, retryable, retryAfterMs },
-      details: { queueWaitMs, remainingTimeoutMs, reason },
+      typed: readTypedFields({
+        code: failure.code,
+        retryable: failure.retryable,
+        retryAfterMs: failure.retryAfterMs,
+      }),
+      details: {
+        queueWaitMs: failure.queueWaitMs,
+        remainingTimeoutMs: failure.remainingTimeoutMs,
+        reason: failure.reason,
+      },
     };
   }
   if (fixture.surface === "webrtc-stream-response") {
@@ -550,18 +650,20 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
     return { typed: { code: String(payload.errorCode) } };
   }
   if (fixture.surface === "delete-device") {
-    const text = (payload as unknown as RefusalWireResult).content[0].text;
-    const failure = (JSON.parse(text) as { failure: Record<string, unknown> }).failure;
+    const failure = requireRecord(requireRecord(resultJson(payload), "body").failure, "failure");
     const { code, phase, message, retryable, retryAfterMs, nextAction, ...evidence } = failure;
     expect([phase, typeof message], fixture.name).toEqual(["precondition", "string"]);
     return {
-      typed: { code, retryable, retryAfterMs, nextAction } as TypedFields,
+      typed: readTypedFields({ code, retryable, retryAfterMs, nextAction }),
       details: Object.keys(evidence).length > 0 ? evidence : undefined,
     };
   }
-  const result = payload as unknown as ManagedSlotsResult;
-  const failure = result.slots.find((slot) => slot.failure)?.failure ?? result.failure;
-  return { typed: failure as TypedFields, capacity: failure?.capacity, budget: failure?.budget };
+  const failure = bindingsFailure(payload);
+  return {
+    typed: readTypedFields(failure),
+    capacity: optionalRecord(failure, "capacity", "failure"),
+    budget: optionalRecord(failure, "budget", "failure"),
+  };
 }
 
 function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
@@ -582,11 +684,10 @@ function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
 const surfaceFixtures = buildRefusalSurfaceFixtures();
 const capturedSurfaceFixtures = EXTERNALLY_CAPTURED_SURFACE_FIXTURES.filter(
   (fixture) => fixture.testFile !== "test/daemon/refusalWireContract.test.ts",
-).map(
-  (fixture) =>
-    JSON.parse(
-      readFileSync(join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`), "utf8"),
-    ) as RefusalSurfaceFixture,
+).map((fixture) =>
+  readSurfaceFixture(
+    readFileSync(join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`), "utf8"),
+  ),
 );
 const allSurfaceFixtures = [...surfaceFixtures, ...capturedSurfaceFixtures];
 const coveredWireCodes = new Set([
@@ -595,16 +696,22 @@ const coveredWireCodes = new Set([
   ...EXTERNALLY_CAPTURED_SURFACE_FIXTURES.flatMap((fixture) => expectedWireCodes(fixture.name)),
 ]);
 const drivenErrorClasses = fixtureDrivenErrorClasses();
-const surfaceExpectations = JSON.parse(
+const surfaceExpectations = readSurfaceExpectations(
   readFileSync(join(REFUSAL_SURFACES_DIR, "expectations.json"), "utf8"),
-) as SurfaceExpectations;
+);
+
+type ToolsCallHandler = (request: unknown, ctx: ServerContext) => Promise<unknown>;
+
+function isToolsCallHandler(value: unknown): value is ToolsCallHandler {
+  return typeof value === "function";
+}
 
 // Capture private production builders through their registered public handlers, using only fakes.
 const ownedSurfaceFixtures: RefusalSurfaceFixture[] = [];
 beforeAll(async () => {
   const registration = spyOn(Server.prototype, "setRequestHandler");
   let harness: ReturnType<typeof createProxyMcpServer>;
-  let registrations: typeof registration.mock.calls;
+  let registrations: ReadonlyArray<readonly unknown[]>;
   try {
     harness = createProxyMcpServer({
       proxyConfig: {
@@ -619,10 +726,10 @@ beforeAll(async () => {
   } finally {
     registration.mockRestore();
   }
-  const handler = registrations.find(([schema]) => schema === CallToolRequestSchema)?.[1];
+  const handler = registrations.findLast(([method]) => method === "tools/call")?.[1];
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    if (!handler) {
+    if (!isToolsCallHandler(handler)) {
       throw new Error("Missing tools/call handler");
     }
     const cases = [
@@ -633,7 +740,7 @@ beforeAll(async () => {
           "explicit-release",
         ),
       ],
-      ["daemon_shutting_down", new daemonClient.DaemonShuttingDownError()],
+      ["daemon_shutting_down", new DaemonShuttingDownError()],
     ] as const;
     for (const [name, error] of cases) {
       const call = spyOn(harness.proxy, "callTool").mockRejectedValue(error);
@@ -644,14 +751,7 @@ beforeAll(async () => {
           builder: "createProxyMcpServer tools/call via resolveCallToolErrorResult",
           payload: await handler(
             { method: "tools/call", params: { name: "tapOn" } },
-            {
-              signal: new AbortController().signal,
-              requestId: 1,
-              sendNotification: async () => {},
-              sendRequest: async () => {
-                throw new Error("Unexpected request");
-              },
-            },
+            fakeServerContext({ signal: new AbortController().signal, id: 1 }),
           ),
         });
       } finally {
@@ -659,7 +759,7 @@ beforeAll(async () => {
       }
     }
     const sessionUuid = "11111111-2222-4333-8444-555555555555";
-    const loss = new daemonClient.DaemonBoundSessionLostError({
+    const loss = new DaemonBoundSessionLostError({
       code: "bound_session_lost",
       sessionUuid,
       reason: "daemon-shutdown",
@@ -692,14 +792,7 @@ beforeAll(async () => {
           method: "tools/call",
           params: { name: "observe", arguments: { deviceId: "emulator-5554" } },
         },
-        {
-          signal: new AbortController().signal,
-          requestId: 1,
-          sendNotification: async () => {},
-          sendRequest: async () => {
-            throw new Error("Unexpected request");
-          },
-        },
+        fakeServerContext({ signal: new AbortController().signal, id: 1 }),
       );
       expect(lossClient.callToolCalls).toHaveLength(1);
       ownedSurfaceFixtures.push({
@@ -713,37 +806,6 @@ beforeAll(async () => {
       await lossHarness.server.close();
       await lossHarness.proxy.close();
     }
-    const state: DaemonStateAccess = {
-      isInitialized: () => true,
-      getSessionManager: () => {
-        throw new Error("Invalid config must not access sessions");
-      },
-      getDevicePool: () => {
-        throw new Error("Invalid config must not access devices");
-      },
-      getDeviceSessionRegistry: () => {
-        throw new Error("Invalid config must not access registry");
-      },
-      getManagedSlotAcquisition: () => ({
-        acquire: async () => {
-          throw new Error("Invalid config must not acquire");
-        },
-      }),
-    };
-    ownedSurfaceFixtures.push({
-      surface: "managed-slots-response",
-      name: "managed_slot_config_invalid",
-      builder: "handleDaemonRequest via handleAcquireManagedSlots",
-      payload: await handleDaemonRequest(
-        {
-          id: "invalid-config",
-          type: "mcp_request",
-          method: "daemon/acquireManagedSlots",
-          params: { config: { contractVersion: 1 }, livenessOwnerToken: "fixture-owner" },
-        },
-        state,
-      ),
-    });
   } finally {
     warn.mockRestore();
     await harness.server.close();
@@ -769,7 +831,7 @@ describe("refusal wire contract", () => {
       "device_unhealthy.all_candidates",
     ]) {
       const fixture = fixtures.find((fixture) => fixture.code === stem)!;
-      const payload = JSON.parse(fixture.result.content[0].text);
+      const payload = requireRecord(resultJson(fixture.result), "payload");
       expect(payload).toMatchObject({
         success: false,
         error: expect.any(String),
@@ -779,7 +841,10 @@ describe("refusal wire contract", () => {
       });
       expect(Array.isArray(payload.devices)).toBe(true);
       expect(payload).not.toHaveProperty("nextAction");
-      expect(acquisitionRefusals.RETRYABLE_DEVICE_ACQUISITION_CODES.has(payload.code)).toBe(false);
+      expect(
+        typeof payload.code === "string" &&
+          acquisitionRefusals.RETRYABLE_DEVICE_ACQUISITION_CODES.has(payload.code),
+      ).toBe(false);
       if (stem.endsWith("all_candidates")) {
         expect(payload).not.toHaveProperty("deviceId");
         expect(payload).not.toHaveProperty("reason");
@@ -818,7 +883,7 @@ describe("refusal wire contract", () => {
     const fixture = fixtures.find((fixture) => fixture.code === "ambiguous_session_selector")!;
     expect(fixture.result.isError).toBe(true);
     expect(fixture.result.content).toHaveLength(1);
-    const payload = JSON.parse(fixture.result.content[0].text);
+    const payload = requireRecord(resultJson(fixture.result), "payload");
     expect(payload.error).toEqual({
       code: "ambiguous_session_selector",
       message: expect.stringContaining("Name one with sessionUuid or deviceId."),
@@ -829,41 +894,7 @@ describe("refusal wire contract", () => {
       ],
       retryable: false,
     });
-    expect(deriveDisposition(payload)).toBe("fail");
-  });
-
-  test("total-resource refusal is retryable without a retry delay on every budget surface", () => {
-    for (const fixture of fixtures.filter((entry) =>
-      entry.code.includes("managed_slot_budget_exhausted"),
-    )) {
-      const payload = JSON.parse(fixture.result.content[0].text) as {
-        error: { acquisitionFailure: ManagedSlotsResult["failure"] };
-      };
-      const failure = payload.error.acquisitionFailure;
-      expect(failure).toMatchObject({ code: "managed_slot_budget_exhausted", retryable: true });
-      expect(failure).not.toHaveProperty("retryAfterMs");
-    }
-    const surface = surfaceFixtures.find(
-      (entry) => entry.name === "managed_slot_budget_exhausted.budget",
-    )!;
-    expect(surfaceFields(surface)).toMatchObject({
-      code: "managed_slot_budget_exhausted",
-      retryable: true,
-      budget: {
-        limit: 2,
-        usage: { orphaned: 0 },
-        retained: [
-          { reason: "deletion_pending", attempts: 2, failedDeletes: 1, lastError: "delete failed" },
-          {
-            reason: "deletion_stuck",
-            attempts: 5,
-            failedDeletes: 3,
-            lastError: "native delete keeps failing",
-          },
-        ],
-      },
-    });
-    expect(surfaceFields(surface)).not.toHaveProperty("retryAfterMs");
+    expect(deriveDisposition(readWirePayload(payload))).toBe("fail");
   });
 
   test("committed fixtures equal what the real TypeScript builders emit", () => {
@@ -882,7 +913,7 @@ describe("refusal wire contract", () => {
 
   test("every fixture carries the code it is named for on the wire", () => {
     for (const fixture of fixtures) {
-      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const payload = wirePayloadOf(fixture.result);
       expect(wireCodes(payload), fixture.code).toEqual(expectedWireCodes(fixture.code));
     }
   });
@@ -896,16 +927,10 @@ describe("refusal wire contract", () => {
     }
   });
 
-  test("every managed slot acquisition failure code has a fixture", () => {
-    for (const code of managedSlotNestedCodes()) {
-      expect(fixtureCodes, code).toContain(`${MANAGED_SLOT_FIXTURE_PREFIX}${code}`);
-    }
-  });
-
   test("unhealthy corpus waits exactly while recovering and retryable", () => {
     const outcomes = new Set<string>();
     for (const fixture of fixtures) {
-      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const payload = wirePayloadOf(fixture.result);
       const fields = readFields(payload);
       if (fields.code !== "device_unhealthy") {
         continue;
@@ -919,7 +944,7 @@ describe("refusal wire contract", () => {
 
   test("the expectations agree with the disposition the wire fields imply", () => {
     for (const fixture of fixtures) {
-      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const payload = wirePayloadOf(fixture.result);
       expect(expectations.codes[fixture.code].expected, fixture.code).toBe(
         deriveDisposition(payload),
       );
@@ -928,12 +953,18 @@ describe("refusal wire contract", () => {
 
   test("the expectations pin the fields each fixture carries on the wire", () => {
     for (const fixture of fixtures) {
-      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const payload = wirePayloadOf(fixture.result);
       expect(expectations.codes[fixture.code].fields, fixture.code).toEqual(readFields(payload));
     }
     const rows = Object.values(expectations.codes).map((row) => row.fields);
     expect(rows.some((fields) => fields.retryAfterMs !== undefined)).toBe(true);
     expect(rows.some((fields) => fields.externalDevices !== undefined)).toBe(true);
+    expect(rows.some((fields) => fields.heldDevices !== undefined)).toBe(true);
+    expect(
+      rows.some(
+        (fields) => fields.heldDevices?.length === 2 && fields.externalDevices === undefined,
+      ),
+    ).toBe(true);
     expect(rows.some((fields) => fields.acquireNewSession)).toBe(true);
   });
 
@@ -1129,6 +1160,13 @@ describe("refusal wire contract", () => {
       string | undefined,
     ])[] = [
       [
+        "SDK capability query timeout",
+        () => new sdkCapabilityQuery.SdkCapabilityQueryError("timeout", "SDK probe timed out"),
+        "timeout",
+        true,
+        undefined,
+      ],
+      [
         "plan lock",
         () => new planLockRefusal.PlanExecutionInProgressError("session"),
         "plan_execution_in_progress",
@@ -1191,7 +1229,7 @@ describe("refusal wire contract", () => {
 
     test.each(classes)("%s", (_name, build, code, retryable, nextAction) => {
       const error = build();
-      const mcp = readFields(JSON.parse(shapedRefusalResult(error).content[0].text) as WirePayload);
+      const mcp = readFields(wirePayloadOf(shapedRefusalResult(error)));
       const frame = mcpRequestFailureDetails(error, undefined);
       const plan = planRefusalFields(error);
       expect([mcp.code, mcp.retryable]).toEqual([code, retryable]);
@@ -1243,7 +1281,7 @@ describe("refusal wire contract", () => {
         candidates: [{ deviceId: "ios-a", platform: "ios" }],
       };
       expect(error.toPayload()).toEqual(payload);
-      expect(JSON.parse(shapedRefusalResult(error).content[0].text)).toMatchObject(payload);
+      expect(resultJson(shapedRefusalResult(error))).toMatchObject(payload);
       expect(mcpRequestFailureDetails(error, undefined).details).toEqual({
         candidates: payload.candidates,
       });
@@ -1261,6 +1299,24 @@ describe("refusal wire contract", () => {
       expect(planRefusalFields(error).details).toMatchObject({ code: "session_recovery_pending" });
     });
   });
+
+  test.each(["cancelled", "timeout", "not_connected", "sdk_capability_query_failed"] as const)(
+    "SDK capability query %s carries code and retryable on every wire",
+    (code) => {
+      const error = new sdkCapabilityQuery.SdkCapabilityQueryError(code, "SDK probe failed");
+      const mcp = shapedRefusalResult(error);
+      expect(mcp.isError).toBe(true);
+      expect(JSON.parse(mcp.content[0].text)).toEqual({
+        success: false,
+        error: "SDK probe failed",
+        code,
+        retryable: true,
+      });
+      expect(isTypedToolRefusal(error)).toBe(true);
+      expect(mcpRequestFailureDetails(error, undefined)).toEqual({ code, retryable: true });
+      expect(planRefusalFields(error)).toEqual({ code, retryable: true });
+    },
+  );
 
   describe("surfaces that carry a refusal but are not a tool result", () => {
     test("committed surface fixtures equal what the real serializers emit", () => {
@@ -1288,7 +1344,6 @@ describe("refusal wire contract", () => {
         "proxy-tool-result",
         "request-failure-fields",
         "liveness-handover",
-        "managed-slots-response",
         "provision-envelope",
       ]);
       for (const fixture of allSurfaceFixtures.filter((fixture) =>
@@ -1334,7 +1389,7 @@ describe("refusal wire contract", () => {
 
     test("every socket frame carries the code it is named for and its retry intent", () => {
       for (const fixture of surfaceFixtures.filter((f) => f.surface === "socket-frame")) {
-        const frame = fixture.payload as { success: boolean; code?: string; retryable?: boolean };
+        const frame = requireRecord(fixture.payload, fixture.name);
         expect(frame.success, fixture.name).toBe(false);
         expect([frame.code], fixture.name).toEqual(expectedWireCodes(fixture.name));
         expect(typeof frame.retryable, fixture.name).toBe("boolean");
@@ -1348,14 +1403,13 @@ describe("refusal wire contract", () => {
         expect.arrayContaining([
           "device_owned_by_other_session",
           "device_outside_bound_session",
-          "device_outside_managed_slots",
-          "device_assigned_to_managed_slot",
+          "device_outside_broker_grant",
+          "device_assigned_to_binding",
         ]),
       );
       expect(names("delete-device")).toEqual(
         expect.arrayContaining(["device_owned_by_other_daemon", "discovery_incomplete"]),
       );
-      expect(names("managed-slots-result")).toContain("capacity_exhausted.capacity_external");
     });
   });
 });

@@ -74,26 +74,10 @@ const nodeToolOutputResourceFileSystem: ToolOutputResourceFileSystem = {
   },
 };
 
-let toolOutputResourceFileSystem: ToolOutputResourceFileSystem = nodeToolOutputResourceFileSystem;
-let issuedArtifactLedger: Pick<ToolOutputArtifactLedger, "resolve"> = toolOutputArtifactLedger;
-
-export function setToolOutputResourceDependencies(deps: {
+export interface ToolOutputResourceDependencies {
   fileSystem?: ToolOutputResourceFileSystem;
   ledger?: Pick<ToolOutputArtifactLedger, "resolve">;
-}): void {
-  if (deps.fileSystem) {
-    toolOutputResourceFileSystem = deps.fileSystem;
-  }
-  if (deps.ledger) {
-    issuedArtifactLedger = deps.ledger;
-  }
 }
-
-export function resetToolOutputResourceDependencies(): void {
-  toolOutputResourceFileSystem = nodeToolOutputResourceFileSystem;
-  issuedArtifactLedger = toolOutputArtifactLedger;
-}
-
 /** Build the companion resource URI for an artifact file basename. */
 export function buildToolOutputResourceUri(filename: string): string {
   return `${TOOL_OUTPUT_RESOURCE_URI_PREFIX}${filename}`;
@@ -116,7 +100,10 @@ function notAvailable(uri: string, artifactId: string): ResourceContent {
   );
 }
 
-async function getToolOutputArtifact(params: Record<string, string>): Promise<ResourceContent> {
+async function getToolOutputArtifact(
+  params: Record<string, string>,
+  deps: ToolOutputResourceDependencies = {},
+): Promise<ResourceContent> {
   const artifactId = params.artifactId ?? "";
   const uri = buildToolOutputResourceUri(artifactId);
 
@@ -131,13 +118,16 @@ async function getToolOutputArtifact(params: Record<string, string>): Promise<Re
   // path the writer recorded rather than one re-derived from the client id. A
   // shape-valid sibling planted in a shared `--tool-outputs-dir` has no ledger
   // entry, so it is refused before any filesystem access (issue #5917).
-  const issued = issuedArtifactLedger.resolve(artifactId);
+  const issued = (deps.ledger ?? toolOutputArtifactLedger).resolve(artifactId);
   if (issued === undefined) {
     return notAvailable(uri, artifactId);
   }
 
   try {
-    const text = await toolOutputResourceFileSystem.readFile(issued.path, issued.sha256);
+    const text = await (deps.fileSystem ?? nodeToolOutputResourceFileSystem).readFile(
+      issued.path,
+      issued.sha256,
+    );
     return { uri, mimeType: "application/json", text };
   } catch (error) {
     const reason = errorMessage(error);
@@ -146,7 +136,7 @@ async function getToolOutputArtifact(params: Record<string, string>): Promise<Re
   }
 }
 
-export function registerToolOutputResources(): void {
+export function registerToolOutputResources(deps: ToolOutputResourceDependencies = {}): void {
   ResourceRegistry.registerTemplate(
     TOOL_OUTPUT_RESOURCE_URI_TEMPLATE,
     "Tool Output Artifact",
@@ -154,7 +144,7 @@ export function registerToolOutputResources(): void {
       "`resourceUri` in an artifact's metadata points here so a client can read the " +
       'full raw JSON (e.g. an `observe {"raw": true}` hierarchy) over the protocol.',
     "application/json",
-    getToolOutputArtifact,
+    (params: Record<string, string>) => getToolOutputArtifact(params, deps),
   );
 
   logger.info("[ToolOutputResources] Registered tool-output artifact resource");

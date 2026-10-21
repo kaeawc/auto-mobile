@@ -1,0 +1,135 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
+import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
+import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
+import {
+  openSqliteBindingRegistry,
+  type SqliteBindingRegistry,
+} from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { SessionConfig } from "../../../src/devices/sessionConfig";
+import { SESSION_REQUEST_ABANDONED_CODE } from "../../../src/daemon/sessionBroker/requestIdentity";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
+import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+
+afterEach(() => {
+  mock.restore();
+});
+
+function config(requestId: string): SessionConfig {
+  return {
+    contractVersion: 1,
+    requestId,
+    device: {
+      schemaVersion: 1,
+      platform: "ios",
+      hardware: { kind: "omitted" },
+      os: { kind: "omitted" },
+    },
+  };
+}
+
+// Receipt-shaping races found in review after the broker landed (#12762, #12766).
+describe("broker result receipts", () => {
+  let registry: SqliteBindingRegistry;
+  let devices: FakeNativePort;
+  let options: SessionBrokerOptions;
+  let broker: SessionBroker;
+
+  beforeAll(async () => {
+    const warm = await openSqliteBindingRegistry({ dbPath: ":memory:" });
+    await warm.close();
+  });
+
+  beforeEach(async () => {
+    registry = await openSqliteBindingRegistry({ dbPath: ":memory:", isExecOwnerLive: () => true });
+    const scope = await registry.ensureScope({
+      managedHostScope: "private-host",
+      runnerNamespace: "private-broker",
+      runnerIncarnation: "persistent",
+    });
+    if (scope.kind !== "ready") {
+      throw new Error("Missing scope");
+    }
+    devices = new FakeNativePort(registry);
+    options = {
+      store: registry.sessionBrokerStore(scope.scope.scopeKey, new CountingIdGenerator("resource")),
+      devices,
+      owner: FAKE_BROKER_OWNER,
+      limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 0 },
+      catalog: async () => iosCatalog(),
+      defaults: () => iosDefaults(),
+      sessionDisposition: () => "live",
+    };
+    broker = new SessionBroker(options);
+  });
+
+  afterEach(async () => {
+    await broker.close();
+    await registry.close();
+  });
+
+  test("a retryable post-admission capacity failure carries the retry hint on the first reply", async () => {
+    devices.prepareError = new SessionBrokerFailureError({
+      code: "capacity_exhausted",
+      message: "No device capacity",
+      retryable: true,
+    });
+    const first = await broker.prepare(config("late-capacity"), "owner-token");
+    expect(first).toMatchObject({
+      outcome: "failed",
+      failure: { code: "capacity_exhausted", retryable: true, retryRequires: "new_request_id" },
+    });
+    expect(await broker.prepare(config("late-capacity"), "owner-token")).toEqual(first);
+  });
+
+  test.each([true, false])(
+    "managed cleanup_pending replays without an eviction delay with confirmed cleanup=%s",
+    async (cleanupConfirmed) => {
+      devices.prepareError = new SessionBrokerFailureError({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: true,
+      });
+      devices.canDestroy = cleanupConfirmed;
+      const request = config("managed-cleanup");
+      const first = await broker.prepare(request, "owner-token");
+      expect(first).toMatchObject({ outcome: "failed", cleanupPending: !cleanupConfirmed });
+      expect(first.failure).toEqual({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: cleanupConfirmed,
+      });
+      const scopeKey = (await options.store.listResources())[0].scopeKey;
+      const reopened = new SessionBroker({
+        ...options,
+        store: registry.sessionBrokerStore(scopeKey),
+      });
+      expect(await reopened.ownedStatus(request.requestId, "owner-token")).toEqual(first);
+      expect(await reopened.prepare(request, "owner-token")).toEqual(first);
+      devices.canDestroy = true;
+      await reopened.recover();
+      expect((await reopened.status(request.requestId))?.failure).toEqual({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: true,
+      });
+    },
+  );
+
+  test("an abandonment committed while the ready receipt is assembled is not reported ready", async () => {
+    const activate = options.store.activate.bind(options.store);
+    const listResources = options.store.listResources.bind(options.store);
+    const listResourcesSpy = spyOn(options.store, "listResources");
+    spyOn(options.store, "activate").mockImplementationOnce(async (...args) => {
+      const request = await activate(...args);
+      listResourcesSpy.mockImplementationOnce(async () => {
+        await options.store.abandon("raced", options.owner, "owner-token");
+        return listResources();
+      });
+      return request;
+    });
+    const result = await broker.prepare(config("raced"), "owner-token");
+    expect(result.outcome).toBe("failed");
+    expect(result.failure?.code).toBe(SESSION_REQUEST_ABANDONED_CODE);
+  });
+});

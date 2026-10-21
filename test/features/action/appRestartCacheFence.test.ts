@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ClearAppData } from "../../../src/features/action/ClearAppData";
 import { InstallApp } from "../../../src/features/action/InstallApp";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -15,7 +15,7 @@ import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCa
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const android: BootedDevice = { name: "android", platform: "android", deviceId: "test-android" };
@@ -38,10 +38,12 @@ const execResult = (stdout: string): ExecResult => ({
   includes: (value) => stdout.includes(value),
 });
 const staleResult = (timer: FakeTimer): ObserveResult => ({
+  observationId: "restart-cache",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: timer.now(),
   screenSize: { width: 100, height: 100 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-  viewHierarchy: { node: {} },
+  viewHierarchy: { hierarchy: {} },
 });
 
 class OrderedAdb extends FakeAdbExecutor {
@@ -121,11 +123,14 @@ function iosInstallHarness(device = simulator, downgrade = false) {
       events.push(args[1]);
       return execResult("");
     },
-    timer,
+    { timer },
   );
   const plist = {
     extractString: async () => appId,
     readXmlBytes: async () => "",
+    readJsonFile: async () => ({}),
+    readJsonBytes: async () => ({}),
+    readXmlFile: async () => "",
     extractRawFile: async () => appId,
   };
   const makeAction = (invalidator: FakeDeviceWindowCacheInvalidator) =>
@@ -149,12 +154,15 @@ function iosInstallHarness(device = simulator, downgrade = false) {
 
 describe("app restart cache generation", () => {
   // The installed-app query falls back to the fake ADB; never connect to a device.
-  let proxySpy: ReturnType<typeof spyOn> | undefined;
+  let proxySpy: ReturnType<typeof spyOn>;
   afterEach(() => {
-    proxySpy?.mockRestore();
+    proxySpy.mockRestore();
+  });
+  beforeEach(() => {
+    proxySpy = spyOn(AndroidCtrlProxyClient, "getInstance");
   });
   function fakeAndroidProxy() {
-    proxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+    proxySpy.mockImplementation(() => {
       throw new Error("fake proxy unavailable");
     });
   }
@@ -191,7 +199,7 @@ describe("app restart cache generation", () => {
     async (device) => {
       for (const fails of [false, true]) {
         const events: string[] = [];
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
         simctl.setContainerPath(appId, "/fake/container");
         const { invalidator, store } = clearInvalidationHarness(events);
         const action = new ClearAppData(device, undefined, {
@@ -253,7 +261,9 @@ describe("app restart cache generation", () => {
     fakeAndroidProxy();
     const h = androidInstallHarness();
     const invalidator = new FakeDeviceWindowCacheInvalidator(() => h.events.push("invalidate"));
-    expect((await h.makeAction(invalidator).execute("/fake/app.apk", 0)).success).toBe(true);
+    expect((await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 })).success).toBe(
+      true,
+    );
     expect(invalidator.calls).toEqual([android]);
     const index = h.events.indexOf("invalidate");
     expect(h.events[index - 1]).toBe('settled:install --user 0 -r "/fake/app.apk"');
@@ -270,7 +280,9 @@ describe("app restart cache generation", () => {
       ]);
       h.adb.setCommandResponse("uninstall ", execResult("Success"));
       const invalidator = new FakeDeviceWindowCacheInvalidator(() => h.events.push("invalidate"));
-      expect((await h.makeAction(invalidator).execute("/fake/app.apk", 0)).success).toBe(succeeds);
+      expect(
+        (await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 })).success,
+      ).toBe(succeeds);
       expect(invalidator.calls).toEqual(succeeds ? [android, android] : [android]);
       const preceding = h.events.flatMap((event, i) =>
         event === "invalidate" ? [h.events[i - 1]] : [],
@@ -291,11 +303,13 @@ describe("app restart cache generation", () => {
       const invalidator = new FakeDeviceWindowCacheInvalidator();
       if (output === "throw") {
         h.adb.setCommandError("install --user", new Error("install failed"));
-        await expect(h.makeAction(invalidator).execute("/fake/app.apk", 0)).rejects.toThrow(
-          "install failed",
-        );
+        await expect(
+          h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 }),
+        ).rejects.toThrow("install failed");
       } else {
-        expect((await h.makeAction(invalidator).execute("/fake/app.apk", 0)).success).toBe(false);
+        expect(
+          (await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 })).success,
+        ).toBe(false);
       }
       expect(invalidator.calls).toEqual([]);
     },
@@ -357,7 +371,7 @@ describe("app restart cache generation", () => {
                 { create: () => h.adb },
                 { cacheInvalidator: invalidator },
               ).execute(appId, 0)
-            : await h.makeAction(invalidator).execute("/fake/app.apk", 0);
+            : await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 });
         expect(result.success).toBe(true);
         await store.put(android.deviceId, stale, generation);
         expect(store.getRecentInMemoryForDevice(android.deviceId)).toEqual(

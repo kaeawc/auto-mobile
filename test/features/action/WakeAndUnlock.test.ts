@@ -1,3 +1,4 @@
+import type { ActionCall } from "../../../src/features/action/ActionCall";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -209,6 +210,9 @@ describe("WakeAndUnlock", () => {
         expect(result).toMatchObject({ success: true, unlocked: true, wasLocked: true });
         expect(result).toHaveProperty("warning");
         const warning = result.warning;
+        if (warning === undefined) {
+          throw new Error("Expected recovery warning");
+        }
         expect(warning).toContain(`runner recovery ${outcome}`);
         expect(warning).toContain("next observe");
         expect(warn).toHaveBeenCalledWith(expect.stringContaining(warning));
@@ -258,7 +262,7 @@ describe("WakeAndUnlock", () => {
       lock.states = [LOCKED_SWIPE, UNLOCKED];
       recovery.recoveryDelayMs = 21_000;
       recovery.timer = timer;
-      const result = await action.execute(undefined, 14_000);
+      const result = await action.execute(undefined, { deadlineMs: 14_000 });
       expect(result).toMatchObject({ success: true, unlocked: true, wasLocked: true });
       expect(lock.reads).toBe(2);
       expect(recovery.budgets[0]).toBeLessThanOrEqual(1_000);
@@ -277,7 +281,7 @@ describe("WakeAndUnlock", () => {
       try {
         // Sample the clock as the action rejects: auto-advance then keeps firing the
         // abandoned 21 s recovery sleep.
-        const failure = await action.execute(undefined, 14_000).then(
+        const failure = await action.execute(undefined, { deadlineMs: 14_000 }).then(
           () => ({ error: undefined as unknown, at: timer.now() }),
           (error: unknown) => ({ error, at: timer.now() }),
         );
@@ -323,7 +327,7 @@ describe("WakeAndUnlock", () => {
         return "timed_out";
       });
       try {
-        await expect(action.execute(undefined, undefined, controller.signal)).rejects.toThrow(
+        await expect(action.execute(undefined, { signal: controller.signal })).rejects.toThrow(
           "cancelled",
         );
         expect(lock.reads).toBe(1);
@@ -345,7 +349,7 @@ describe("WakeAndUnlock", () => {
         return UNLOCKED;
       });
       try {
-        await expect(action.execute(undefined, undefined, controller.signal)).rejects.toThrow(
+        await expect(action.execute(undefined, { signal: controller.signal })).rejects.toThrow(
           "cancelled",
         );
         expect(reads).toBe(2);
@@ -1156,7 +1160,7 @@ describe("WakeAndUnlock", () => {
       iosRunnerRecovery: recovery,
       iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
       iosLockStateProbe: new FakeIosLockProbe(),
-    }).execute(undefined, transportDeadline);
+    }).execute(undefined, { deadlineMs: transportDeadline });
     await expect(failure).rejects.toThrow(/still locked.*swipe failed/);
     expect(budgets).toEqual([2_000, 2_500, 2_500]);
     expect(timer.now()).toBe(9_000);
@@ -1500,8 +1504,16 @@ const executeForOutputSchema = WakeAndUnlock.prototype.execute;
 let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
 beforeOutputSchema(() => {
   executeOutputSchemaSpy = spyOnOutputSchema(WakeAndUnlock.prototype, "execute").mockImplementation(
-    async function (this: WakeAndUnlock, ...args: Parameters<WakeAndUnlock["execute"]>) {
-      const result = await executeForOutputSchema.apply(this, args);
+    async function (
+      this: WakeAndUnlock,
+      pin?: string,
+      callOrDeadline?: ActionCall | number,
+      signal?: AbortSignal,
+    ) {
+      const result =
+        typeof callOrDeadline === "object"
+          ? await executeForOutputSchema.bind(this)(pin, callOrDeadline)
+          : await executeForOutputSchema.call(this, pin, callOrDeadline, signal);
       const payload = { message: "Result", ...result };
       expect(wakeAndUnlockResultSchema.parse(payload)).toBeDefined();
       const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {

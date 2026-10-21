@@ -15,7 +15,12 @@ set -euo pipefail
 
 sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-${ANDROID_SDK_HOME:-}}}"
 if [[ -z "${sdk_root}" ]]; then
-  for candidate in "/usr/local/lib/android/sdk" "${HOME:-}/Library/Android/sdk" "${HOME:-}/Android/Sdk"; do
+  # ENSURE_EMULATOR_SDK_FALLBACK_ROOTS (colon-separated, may be empty) overrides
+  # the default well-known roots so tests can prove the "no SDK" diagnostic
+  # without touching (and sdkmanager-installing into) the runner's real SDK.
+  default_roots="/usr/local/lib/android/sdk:${HOME:-}/Library/Android/sdk:${HOME:-}/Android/Sdk"
+  IFS=: read -r -a fallback_roots <<<"${ENSURE_EMULATOR_SDK_FALLBACK_ROOTS-${default_roots}}"
+  for candidate in ${fallback_roots[@]+"${fallback_roots[@]}"}; do
     if [[ -n "${candidate}" && -d "${candidate}" ]]; then
       sdk_root="${candidate}"
       break
@@ -54,7 +59,23 @@ if [[ ! -x "${emulator_bin}" ]]; then
   fi
 
   echo "Android emulator package missing at ${emulator_bin}; installing via ${sdkmanager}"
-  yes 2>/dev/null | "${sdkmanager}" --install "emulator" >/dev/null || true
+  # sdkmanager occasionally downloads a corrupt archive ("Error on ZipFile unknown
+  # archive") and exits without installing anything; the next attempt usually
+  # succeeds. Retry a bounded number of times and clear any partial install
+  # first, so a half-extracted emulator/ directory cannot satisfy the check below.
+  install_attempts="${ENSURE_EMULATOR_SDK_INSTALL_ATTEMPTS:-3}"
+  retry_delay_seconds="${ENSURE_EMULATOR_SDK_RETRY_DELAY_SECONDS:-10}"
+  for ((attempt = 1; attempt <= install_attempts; attempt++)); do
+    yes 2>/dev/null | "${sdkmanager}" --install "emulator" >/dev/null || true
+    if [[ -x "${emulator_bin}" ]]; then
+      break
+    fi
+    if ((attempt < install_attempts)); then
+      echo "warning: emulator package install attempt ${attempt}/${install_attempts} did not produce ${emulator_bin}; retrying in ${retry_delay_seconds}s" >&2
+      rm -rf "${sdk_root}/emulator"
+      sleep "${retry_delay_seconds}"
+    fi
+  done
 fi
 
 if [[ ! -x "${emulator_bin}" ]]; then

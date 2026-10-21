@@ -1,5 +1,10 @@
 # CtrlProxy Swift-6 rewrite — planning notes
 
+> **Historical.** These notes record the Swift-6 migration. The "Rewrite" name has since been
+> retired: the SPM product and target `CtrlProxyRewrite` are now `CtrlProxy`
+> (`ios/control-proxy/Sources/CtrlProxy`), and `CtrlProxyRewriteTests` is now `CtrlProxyTests`.
+> Identifiers below keep their original names for history.
+
 Working notes for the `ios/control-proxy` Swift-6 concurrency rewrite
 (`CtrlProxyRewrite` target). These are **temporary planning docs**: they capture
 design decisions and deferred improvements uncovered while porting, and should be

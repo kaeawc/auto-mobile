@@ -1,13 +1,11 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { isRecoverableDaemonReleaseReason } from "../../src/db/deviceSessionRepository";
-import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo, SomePlatform } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const IOS_SIMULATOR: BootedDevice = {
@@ -46,18 +44,6 @@ class DiscoveryCountingDeviceManager extends FakeDeviceManager {
   }
 }
 
-interface DevicePoolRecoveryInternals {
-  evictMissingPooledDevice(
-    device: PooledDevice,
-    reason: string,
-    options?: { attemptDeviceLossRecovery?: boolean },
-  ): Promise<void>;
-  getSessionPreservingRecoveryTarget(
-    deviceId: string,
-    expectedDevice: PooledDevice | undefined,
-  ): { device: PooledDevice; session: Session } | undefined;
-}
-
 function createPool(
   sessions: SessionManager,
   timer: FakeTimer,
@@ -65,16 +51,12 @@ function createPool(
   continuityEnabled = true,
   onLoss = false,
 ): DevicePool {
-  return new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss, maxAttempts: 1 },
-      deviceSessionContinuityEnabled: continuityEnabled,
-    }),
-  );
+  return makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss, maxAttempts: 1 },
+    deviceSessionContinuityEnabled: continuityEnabled,
+  });
 }
 
 async function setupOwnedIOS(
@@ -87,14 +69,12 @@ async function setupOwnedIOS(
   const pool = createPool(sessions, timer, manager, true, onLoss);
   manager.bootedDevices = [IOS_SIMULATOR];
   await pool.initializeWithDevices([IOS_SIMULATOR]);
-  await pool.bindOrReuseDeviceSession(
-    "ios-session",
-    IOS_SIMULATOR.deviceId,
-    "ios",
-    undefined,
-    undefined,
-    IOS_SIMULATOR,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "ios-session",
+    deviceId: IOS_SIMULATOR.deviceId,
+    platform: "ios",
+    expectedIdentity: IOS_SIMULATOR,
+  });
   const captured = pool.getDevice(IOS_SIMULATOR.deviceId);
   if (!captured) {
     throw new Error("expected the simulator to be pooled");
@@ -103,7 +83,7 @@ async function setupOwnedIOS(
 }
 
 async function evictAsMissing(pool: DevicePool, device: PooledDevice): Promise<void> {
-  await (pool as unknown as DevicePoolRecoveryInternals).evictMissingPooledDevice(
+  await pool.testHooks.evictMissingPooledDevice.call(
     device,
     "not present in iOS simulator discovery",
     { attemptDeviceLossRecovery: true },
@@ -138,7 +118,7 @@ test("owned iOS simulator loss and same-UDID return preserve the session with a 
     await evictAsMissing(pool, captured);
 
     expect(sessions.getSession("ios-session")).toBeNull();
-    expect(await persistence.getSession?.("ios-session")).toMatchObject({
+    expect(await persistence.getSession("ios-session")).toMatchObject({
       status: "released",
       release_reason: `device-restart:${IOS_SIMULATOR.deviceId}`,
     });
@@ -193,7 +173,7 @@ test("awaiting-owner iOS simulator loss is admitted and rehydrates onto the same
 
     manager.bootedDevices = [];
     await evictAsMissing(pool, captured);
-    expect(await persistence.getSession?.("ios-session")).toMatchObject({
+    expect(await persistence.getSession("ios-session")).toMatchObject({
       release_reason: `device-restart:${IOS_SIMULATOR.deviceId}`,
     });
 
@@ -280,14 +260,12 @@ test("physical iOS device loss remains terminal", async () => {
   const manager = new FakeDeviceManager([], [IOS_PHYSICAL_DEVICE]);
   const pool = createPool(sessions, timer, manager);
   await pool.initializeWithDevices([IOS_PHYSICAL_DEVICE]);
-  await pool.bindOrReuseDeviceSession(
-    "physical-session",
-    IOS_PHYSICAL_DEVICE.deviceId,
-    "ios",
-    undefined,
-    undefined,
-    IOS_PHYSICAL_DEVICE,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "physical-session",
+    deviceId: IOS_PHYSICAL_DEVICE.deviceId,
+    platform: "ios",
+    expectedIdentity: IOS_PHYSICAL_DEVICE,
+  });
   const captured = pool.getDevice(IOS_PHYSICAL_DEVICE.deviceId);
   if (!captured) {
     throw new Error("expected the physical iOS device to be pooled");
@@ -296,7 +274,7 @@ test("physical iOS device loss remains terminal", async () => {
 
   try {
     await evictAsMissing(pool, captured);
-    const persisted = await persistence.getSession?.("physical-session");
+    const persisted = await persistence.getSession("physical-session");
 
     expect(sessions.getSession("physical-session")).toBeNull();
     expect(persisted?.release_reason).toBeDefined();
@@ -315,28 +293,25 @@ test("Android emulators and iOS simulators resolve through the shared continuity
   const pool = createPool(sessions, timer, manager);
   await pool.addDevice(ANDROID_EMULATOR, ANDROID_IMAGE);
   await pool.addDevice(IOS_SIMULATOR);
-  await pool.bindOrReuseDeviceSession(
-    "android-session",
-    ANDROID_EMULATOR.deviceId,
-    "android",
-    ANDROID_IMAGE,
-    undefined,
-    ANDROID_EMULATOR,
-  );
-  await pool.bindOrReuseDeviceSession(
-    "ios-session",
-    IOS_SIMULATOR.deviceId,
-    "ios",
-    undefined,
-    undefined,
-    IOS_SIMULATOR,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "android-session",
+    deviceId: ANDROID_EMULATOR.deviceId,
+    platform: "android",
+    sourceImage: ANDROID_IMAGE,
+    expectedIdentity: ANDROID_EMULATOR,
+  });
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "ios-session",
+    deviceId: IOS_SIMULATOR.deviceId,
+    platform: "ios",
+    expectedIdentity: IOS_SIMULATOR,
+  });
   const android = pool.getDevice(ANDROID_EMULATOR.deviceId);
   const ios = pool.getDevice(IOS_SIMULATOR.deviceId);
   if (!android || !ios) {
     throw new Error("expected both virtual devices to be pooled");
   }
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool.testHooks;
 
   try {
     expect(

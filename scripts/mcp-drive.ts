@@ -10,7 +10,7 @@
  * stderr pipe keeps the parent alive forever; a non-unref'd timer adds a tail;
  * truncated output; no build-mismatch handling). This script keeps a single MCP
  * session open for the whole plan and reuses the official
- * `@modelcontextprotocol/sdk` transport, exactly as `scripts/live-device-acceptance.ts`
+ * `@modelcontextprotocol/client` transport, exactly as `scripts/live-device-acceptance.ts`
  * does, so the framing/stderr/timeout details are handled by the SDK rather than
  * by hand.
  *
@@ -39,13 +39,14 @@
  */
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../src/utils/deviceTimeouts";
 import { isCliToolFailure } from "../src/cli/index";
 import { coerceCliValue, getDeclaredParamTypes } from "../src/cli/cliValueCoercion";
-import { getDeviceSessionIdFromResult } from "../src/server/deviceSessionResult";
-import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
+import { getDeviceSessionIdFromResult } from "../src/daemon/deviceSessionResult";
+import { readToolEnvelopePayload } from "../src/daemon/toolEnvelopePayload";
+import { withV1ClientErrors } from "../src/daemon/mcpError";
 
 export interface DriveStep {
   tool: string;
@@ -395,15 +396,25 @@ async function createSdkClient(serverPath: string, timeoutMs: number): Promise<D
     command: process.execPath,
     args: [serverPath],
     stderr: "inherit",
-    env: { ...process.env },
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    ),
   });
   await client.connect(transport);
   return {
+    // The v1 error shape keeps a timeout reported as "MCP error -32001: Request timed out".
     callTool: (name, args) =>
-      client.callTool({ name, arguments: args }, undefined, {
-        timeout: timeoutMs,
-        resetTimeoutOnProgress: true,
-      }),
+      withV1ClientErrors(
+        client.callTool(
+          { name, arguments: args },
+          {
+            timeout: timeoutMs,
+            resetTimeoutOnProgress: true,
+          },
+        ),
+      ),
     close: () => client.close(),
   };
 }

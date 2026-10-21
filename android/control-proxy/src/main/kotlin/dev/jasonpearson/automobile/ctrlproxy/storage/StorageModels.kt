@@ -71,7 +71,7 @@ data class PreferenceChangeEvent(
   /**
    * Type name of [previousValue], which may differ from [type] on a remove or type-changing write.
    * The wire encoder quotes [previousValue] by THIS type so it stays valid JSON even when [type] is
-   * UNKNOWN (#3000). Null for older SDKs / no prior value.
+   * UNKNOWN (#3000). UNKNOWN for no prior value; null only for older SDKs.
    */
   val previousValueType: String? = null,
 )

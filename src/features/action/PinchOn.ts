@@ -5,7 +5,7 @@ import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import type { DisplayFence, DisplayFenceDependencies } from "./BaseVisualChange";
-import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
+import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
@@ -23,7 +23,7 @@ import {
   PinchOnOptions,
   PinchOnResult,
 } from "../../models";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ElementResolver } from "../utility/ElementResolver";
 import { isUsableScreenSize, screenSizeForOffscreenCheck } from "../utility/ElementGeometry";
 import {
@@ -35,7 +35,7 @@ import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { getProjectedHierarchyScreenSize } from "../observe/HierarchyNormalization";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -58,9 +58,18 @@ import {
   TakeScreenshotCapturer,
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 export const PINCH_DURATION_MIN_MS = 1;
 export const PINCH_DURATION_MAX_MS = 10000;
+
+/**
+ * Largest |rotationDegrees| a pinch accepts (#13059). The runners follow the rotation arc in
+ * 10-degree segments capped at 36, so one full turn is the most the arc approximation can honor.
+ */
+export const PINCH_ROTATION_MAX_DEGREES = 360;
+export const PINCH_ROTATION_MIN_DEGREES = -PINCH_ROTATION_MAX_DEGREES;
 
 export const PINCH_DISTANCE_EXCLUSIVE_MIN = 0;
 export const PINCH_SCALE_EXCLUSIVE_MIN = 0;
@@ -105,7 +114,7 @@ type PinchExecutionContext = {
   displayTarget?: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
 };
 
-type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestPinch"]>> & {
+type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxy["requestPinch"]>> & {
   observation?: ObserveResult;
   staleDisplay?: PinchOnResult["staleDisplay"];
   pinchPath?: string;
@@ -169,7 +178,11 @@ export class PinchOn extends BaseVisualChange {
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
 
-  constructor(device: BootedDevice, adb: AdbClient | null = null, deps: PinchOnDependencies = {}) {
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    deps: PinchOnDependencies = {},
+  ) {
     super(device, adb, deps.timer, deps.renderedDisplayRevision, deps);
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.resolver = deps.resolver ?? new ElementResolver();
@@ -198,13 +211,22 @@ export class PinchOn extends BaseVisualChange {
     };
   }
 
+  async execute(options: PinchOnOptions, call?: ActionCall): Promise<PinchOnResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     options: PinchOnOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<PinchOnResult>;
+  async execute(
+    options: PinchOnOptions,
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<PinchOnResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
     this.validateDuration(options.duration);
+    this.validateRotation(options.rotationDegrees);
     let displayTarget: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
     if (options.display !== undefined) {
       try {
@@ -226,7 +248,9 @@ export class PinchOn extends BaseVisualChange {
 
     if (this.device.platform === "android") {
       throwIfAborted(signal);
-      const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, this.adb);
+      const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, {
+        create: () => this.adb,
+      });
       const available = await perf.track("a11yAvailable", () => a11yManager.isAvailable());
       throwIfAborted(signal);
       if (!available) {
@@ -280,8 +304,7 @@ export class PinchOn extends BaseVisualChange {
         searchCriteria,
         this.visionConfig,
         finalErrorMessage,
-        undefined,
-        this.visionAnalyzer,
+        { visionAnalyzer: this.visionAnalyzer },
       );
     }
 
@@ -297,6 +320,19 @@ export class PinchOn extends BaseVisualChange {
     ) {
       throw new ActionableError(
         `pinchOn duration must be an integer from ${PINCH_DURATION_MIN_MS} to ${PINCH_DURATION_MAX_MS} ms`,
+      );
+    }
+  }
+
+  private validateRotation(rotationDegrees: PinchOnOptions["rotationDegrees"]): void {
+    if (
+      rotationDegrees !== undefined &&
+      (!Number.isFinite(rotationDegrees) ||
+        rotationDegrees < PINCH_ROTATION_MIN_DEGREES ||
+        rotationDegrees > PINCH_ROTATION_MAX_DEGREES)
+    ) {
+      throw new ActionableError(
+        `pinchOn rotationDegrees must be a finite number from ${PINCH_ROTATION_MIN_DEGREES} to ${PINCH_ROTATION_MAX_DEGREES}`,
       );
     }
   }
@@ -391,19 +427,19 @@ export class PinchOn extends BaseVisualChange {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
       const result = await awaitWhileRequestIsLive(
-        AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory).requestPinch(
+        AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory).requestPinch({
           centerX,
           centerY,
           distanceStart,
           distanceEnd,
           rotationDegrees,
           duration,
-          resolveGestureCtrlProxyTimeoutMs(duration),
+          timeoutMs: resolveGestureCtrlProxyTimeoutMs(duration),
           perf,
           signal,
-          displayTarget?.displayId === 0 ? undefined : displayTarget?.displayId,
-          displayTarget?.assertCurrent,
-        ),
+          displayId: displayTarget?.displayId === 0 ? undefined : displayTarget?.displayId,
+          beforeSend: displayTarget?.assertCurrent,
+        }),
         signal,
       );
       throwIfAborted(signal);
@@ -421,17 +457,17 @@ export class PinchOn extends BaseVisualChange {
           // Once beforeSend lands, also pass this as the dispatch's beforeSend.
           fence?.assertCurrent();
           const result = await awaitWhileRequestIsLive(
-            IOSCtrlProxyClient.getInstance(this.device).requestPinch(
-              centerX,
-              centerY,
-              distanceStart,
-              distanceEnd,
-              rotationDegrees,
-              duration,
-              resolveGestureCtrlProxyTimeoutMs(duration),
-              perf,
-              signal,
-            ),
+            IOSCtrlProxyClient.getInstance(this.device).requestPinch({
+              centerX: centerX,
+              centerY: centerY,
+              distanceStart: distanceStart,
+              distanceEnd: distanceEnd,
+              rotationDegrees: rotationDegrees,
+              duration: duration,
+              timeoutMs: resolveGestureCtrlProxyTimeoutMs(duration),
+              perf: perf,
+              signal: signal,
+            }),
             signal,
           );
           throwIfAborted(signal);
@@ -448,7 +484,7 @@ export class PinchOn extends BaseVisualChange {
         usesObservationForResolution: Boolean(options.container || options.autoTarget),
         changeExpected: false,
         display: options.display,
-        timeoutMs: 8000,
+        timeoutMs: SETTLE_BUDGET_MS.longGesture,
         progress,
         perf,
         signal,
@@ -541,9 +577,11 @@ export class PinchOn extends BaseVisualChange {
       options.display!,
       this.observeScreen,
       this.adb,
-      this.lastRenderedObservation,
-      signal,
-      this.displayTransitionReader,
+      {
+        lastRenderedObservation: this.lastRenderedObservation,
+        signal,
+        transitions: this.displayTransitionReader,
+      },
     );
 
     throwIfAborted(signal);
@@ -911,13 +949,18 @@ export class PinchOn extends BaseVisualChange {
     const minDistance = Math.max(PINCH_MIN_DISTANCE_PX, minDimension * 0.1);
 
     let { distanceStart, distanceEnd } = this.inferDistances(options, minDimension);
+    const isPureRotation = distanceStart === distanceEnd;
 
-    if (options.direction === "out" && distanceEnd <= distanceStart) {
-      distanceEnd = Math.min(maxDistance, distanceStart * 1.5);
-    }
+    // A pure rotation (equal finger distances) must stay equal: the direction nudges below would
+    // otherwise turn it into a 1.5x zoom (#12536).
+    if (!isPureRotation) {
+      if (options.direction === "out" && distanceEnd <= distanceStart) {
+        distanceEnd = Math.min(maxDistance, distanceStart * 1.5);
+      }
 
-    if (options.direction === "in" && distanceStart <= distanceEnd) {
-      distanceStart = Math.min(maxDistance, distanceEnd * 1.5);
+      if (options.direction === "in" && distanceStart <= distanceEnd) {
+        distanceStart = Math.min(maxDistance, distanceEnd * 1.5);
+      }
     }
 
     distanceStart = clamp(distanceStart, minDistance, maxDistance);

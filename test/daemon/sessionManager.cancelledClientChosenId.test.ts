@@ -4,7 +4,9 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeTimer } from "../fakes/FakeTimer";
+import { installSessionManagerCleanup, makeSessionManager } from "../helpers/sessionManagerSuite";
+
+installSessionManagerCleanup();
 
 // #11593: a request cancelled while the session it names is being minted must leave the id its
 // client chose free to be created again. A daemon-minted id is still retired for good: nobody
@@ -25,14 +27,9 @@ class SteppedPersistence extends FakeDeviceSessionPersistence {
   private parked: { step: PersistStep; reached: () => void; finish: Promise<void> } | undefined;
   private finishParked: (() => void) | undefined;
 
-  constructor() {
-    super();
-    // The lookup exists from the start, so the terminal-row read is an await of its own. The
-    // first upsert swaps in the repository's real lookup.
-    this.getSession = async () => {
-      await this.pass("terminal-row read");
-      return undefined;
-    };
+  override async getSession(sessionUuid: string) {
+    await this.pass("terminal-row read");
+    return await super.getSession(sessionUuid);
   }
 
   /** Park the next `step`; resolves once the mint is waiting on it. */
@@ -79,7 +76,7 @@ class SteppedPersistence extends FakeDeviceSessionPersistence {
   }
 
   async row(sessionUuid: string) {
-    return await this.getSession!(sessionUuid);
+    return await this.getSession(sessionUuid);
   }
 }
 
@@ -89,12 +86,12 @@ async function mintCancelledDuring(
   clientChosen: boolean,
 ): Promise<{ manager: SessionManager; persistence: SteppedPersistence; failure: unknown }> {
   const persistence = new SteppedPersistence();
-  const manager = new SessionManager(new FakeTimer(), persistence);
+  const manager = makeSessionManager({ persistence });
   const controller = new AbortController();
   const reached = persistence.park(step);
   const minting = runWithAbortSignal(controller.signal, () =>
     runWithAcquisitionReceipt(clientChosen ? { clientChosenSessionId: SESSION_ID } : {}, () =>
-      manager.createSession(SESSION_ID, DEVICE_ID, "android"),
+      manager.createSession(SESSION_ID, DEVICE_ID, "android", { signal: controller.signal }),
     ),
   ).then(
     () => undefined,
@@ -153,13 +150,13 @@ describe("a mint cancelled while its session is persisted", () => {
 
   test("a receipt that names another id does not spare this one", async () => {
     const persistence = new SteppedPersistence();
-    const manager = new SessionManager(new FakeTimer(), persistence);
+    const manager = makeSessionManager({ persistence });
     const controller = new AbortController();
     try {
       const reached = persistence.park("active-row upsert");
       const minting = runWithAbortSignal(controller.signal, () =>
         runWithAcquisitionReceipt({ clientChosenSessionId: "some-other-session" }, () =>
-          manager.createSession(SESSION_ID, DEVICE_ID, "android"),
+          manager.createSession(SESSION_ID, DEVICE_ID, "android", { signal: controller.signal }),
         ),
       ).catch((error: unknown) => error);
       await reached;
@@ -175,7 +172,7 @@ describe("a mint cancelled while its session is persisted", () => {
 
   test("daemon shutdown still retires a client-chosen id caught mid-mint", async () => {
     const persistence = new SteppedPersistence();
-    const manager = new SessionManager(new FakeTimer(), persistence);
+    const manager = makeSessionManager({ persistence });
     try {
       const reached = persistence.park("active-row upsert");
       const minting = runWithAcquisitionReceipt({ clientChosenSessionId: SESSION_ID }, () =>

@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  type InteractionToolDependencies,
   formatSwipeOnMessage,
-  resetSwipeOnFactory,
-  setSwipeOnFactory,
   swipeOnSchema,
   swipeOnHandler,
 } from "../../src/server/interactionTools";
@@ -10,7 +9,9 @@ import type { SwipeOnArgs } from "../../src/server/interactionToolTypes";
 import type { BootedDevice, SwipeOnOptions, SwipeOnToolPayload } from "../../src/models";
 import { resolveSwipeDirection } from "../../src/features/action/swipeon/swipeOnUtils";
 import { getStructuredField } from "../../src/utils/toolUtils";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 
+const interactionDeps: InteractionToolDependencies = {};
 test("swipeOn schema advertises the runtime default gesture type", () => {
   const implicitDirection = resolveSwipeDirection({ direction: "down" }).direction;
   const defaultGestureType = (
@@ -78,11 +79,11 @@ describe("formatSwipeOnMessage", () => {
 // already outcome-gated but the envelope never set `isError`, so a conforming
 // client still saw an ordinary result on a failed swipe.
 describe("swipeOnHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
   const args: SwipeOnArgs = { direction: "up", platform: "android" };
 
   afterEach(() => {
-    resetSwipeOnFactory();
+    delete interactionDeps.swipeOnFactory;
   });
 
   const fakeResult = (overrides: Partial<SwipeOnToolPayload>): SwipeOnToolPayload =>
@@ -92,22 +93,22 @@ describe("swipeOnHandler (registered handler wiring)", () => {
     }) as SwipeOnToolPayload;
 
   test("a failed swipe sets isError and reports the failure, not a completed swipe", async () => {
-    setSwipeOnFactory(() => ({
+    interactionDeps.swipeOnFactory = () => ({
       execute: async () => fakeResult({ error: "VoiceOver scrolling is not supported" }),
-    }));
+    });
 
-    const response = await swipeOnHandler(fakeDevice, args);
+    const response = await swipeOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "message")).toBe("VoiceOver scrolling is not supported");
     expect(getStructuredField(response, "success")).toBe(false);
   });
 
   test("a successful swipe has no isError and an unchanged message", async () => {
-    setSwipeOnFactory(() => ({
+    interactionDeps.swipeOnFactory = () => ({
       execute: async () => fakeResult({ success: true, found: false }),
-    }));
+    });
 
-    const response = await swipeOnHandler(fakeDevice, args);
+    const response = await swipeOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(response.isError).toBeUndefined();
     expect(getStructuredField(response, "message")).toBe("Swiped up");
   });
@@ -116,14 +117,14 @@ describe("swipeOnHandler (registered handler wiring)", () => {
     const signal = new AbortController().signal;
     let options: SwipeOnOptions | undefined;
     let forwardedSignal: AbortSignal | undefined;
-    setSwipeOnFactory(() => ({
-      execute: async (args, _progress, actionSignal) => {
+    interactionDeps.swipeOnFactory = () => ({
+      execute: async (args, call) => {
         options = args;
-        forwardedSignal = actionSignal;
+        forwardedSignal = (call as ActionCall | undefined)?.signal;
         return fakeResult({ success: true });
       },
-    }));
-    await swipeOnHandler(fakeDevice, args, undefined, signal);
+    });
+    await swipeOnHandler(fakeDevice, args, undefined, signal, interactionDeps);
     expect(options?.display).toBeUndefined();
     expect(options?.autoTarget).toBe(true);
     expect(options?.includeSystemInsets).toBe(false);

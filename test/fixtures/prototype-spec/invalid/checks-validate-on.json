@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": ""
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "value",
+      "validateOn": "tap"
+    }
+  },
+  "expectedPath": "root.validateOn"
+}

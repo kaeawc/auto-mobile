@@ -1,0 +1,48 @@
+{
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/rows"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Emit",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "pick",
+              "context": {
+                "id": {
+                  "item": "object"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "rows": [
+        {
+          "id": 1,
+          "object": {
+            "x": 1
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].context.id",
+  "expectedMessage": "Unknown repeat field \"object\""
+}

@@ -1,3 +1,4 @@
+import type { WindowIdentityFreshnessResolver } from "./WindowIdentityFreshness";
 import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import type { SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
 import type { HierarchyCapture } from "./HierarchyCapture";
@@ -9,8 +10,7 @@ import type { PredictiveUIState } from "./interfaces/PredictiveUIState";
 import type { ObserveResultCacheStore } from "./cache/ObserveResultCacheStore";
 import type { ScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
 import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRecorder";
-import type { HierarchyCollector } from "./collectors/HierarchyCollector";
-import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import type { DeviceStateCollectorPort, HierarchyCollectorPort } from "./collectors/collectorPorts";
 import type { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
@@ -18,6 +18,7 @@ import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
 import type { DaemonStateLike } from "../../daemon/daemonState";
 import type { IosLockStateProbe } from "./ios/IosLockStateProbe";
 import type { ScreenshotEvidenceFiles } from "./screenshot/observationScreenshotEvidence";
+import type { ActiveWindowAttributionReconciler } from "./ActiveWindowAttribution";
 
 /**
  * Dependencies for ObserveScreen that can be injected for testing.
@@ -47,14 +48,16 @@ export interface ObserveScreenDependencies {
 
   // Composed services. If omitted, defaults are built from the data sources above.
   screenshotRecorder?: ObserveScreenshotRecorder;
-  hierarchyCollector?: HierarchyCollector;
+  hierarchyCollector?: HierarchyCollectorPort;
   onAvailabilityLost?: (reason: string) => void;
   daemonState?: Pick<DaemonStateLike, "isInitialized" | "getSessionManager">;
-  deviceStateCollector?: DeviceStateCollector;
+  deviceStateCollector?: DeviceStateCollectorPort;
+  activeWindowAttributionReconciler?: ActiveWindowAttributionReconciler;
+  windowIdentityFreshnessResolver?: WindowIdentityFreshnessResolver;
   iosLockStateProbe?: IosLockStateProbe;
-  performanceAuditor?: PerformanceAuditor;
-  accessibilityAuditor?: AccessibilityAuditor;
-  accessibilityStateDetector?: AccessibilityStateDetector;
+  performanceAuditor?: Pick<PerformanceAuditor, "run">;
+  accessibilityAuditor?: Pick<AccessibilityAuditor, "run">;
+  accessibilityStateDetector?: Pick<AccessibilityStateDetector, "run">;
 
   // Rejects cross-platform (stale) hierarchies. Defaults to RealHierarchyPlatformValidator.
   platformValidator?: HierarchyPlatformValidator;

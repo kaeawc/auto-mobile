@@ -5,7 +5,7 @@ import { BootedDevice } from "../../src/models";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { z } from "zod/v4";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -28,7 +28,9 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
   };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
+  let originalDeviceSessionManager: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["deviceSessionManager"];
   let restorePipelineOverrides: (() => void) | undefined;
 
   beforeEach(() => {
@@ -37,8 +39,8 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -47,7 +49,7 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
   });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { toolIsError, toolStructured } from "../helpers/toolResponse";
 import { registerPrototypeTools, prototypeOutputSchema } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
@@ -62,9 +63,9 @@ describe("prototype tool on an iOS simulator", () => {
     restore();
   });
 
-  async function call(input: unknown, target = simulator) {
+  async function call(input: Record<string, unknown>, target = simulator) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(target, input);
-    return { response, payload: prototypeOutputSchema.parse(response.structuredContent) };
+    return { response, payload: prototypeOutputSchema.parse(toolStructured(response)) };
   }
   const types = () => agent.requests.map((request) => request.type);
 
@@ -122,12 +123,39 @@ describe("prototype tool on an iOS simulator", () => {
 
   test("agent prototype_event pushes reach awaitEvent through the shared coordinator", async () => {
     await call({ action: "show", spec });
-    agent.emit({ ...event(1, "panel", "emit", "save") });
+    const pushed = {
+      ...event(1, "panel", "emit", "save"),
+      context: { id: 3, nested: [true, null] },
+      contextTruncated: true as const,
+    };
+    agent.emit(pushed);
     const { payload } = await call({ action: "awaitEvent", id: "panel" });
-    expect({ type: "prototype_event", ...payload.event }).toEqual(
-      event(1, "panel", "emit", "save"),
-    );
+    // The agent push type admits the "unknown" kind the output schema normalizes away.
+    expect<unknown>({ type: "prototype_event", ...payload.event }).toEqual(pushed);
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("emit context requires the iOS agent capability before uploading assets", async () => {
+    const withContext = {
+      ...spec,
+      root: { ...spec.root, onTap: [{ type: "emit", name: "pick", context: {} }] },
+    };
+    const { payload } = await call({
+      action: "show",
+      spec: withContext,
+      assets: [{ id: "logo", path: "/img/logo.png" }],
+    });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("prototype_emit_context_v1");
+    expect(payload.error).toContain("root.onTap[0].context");
+    expect(payload.error).toContain("Relaunch");
+    expect(agent.requests).toEqual([]);
+    const capable = new FakePrototypeAgentClient({
+      ...agent.handshake,
+      capabilities: [...agent.handshake.capabilities, "prototype_emit_context_v1"],
+    });
+    connections.agents.set(simulator.deviceId, capable);
+    expect((await call({ action: "show", spec: withContext })).payload.success).toBe(true);
   });
 
   test("an agent request failure is a prototype failure, not a thrown error", async () => {
@@ -135,7 +163,7 @@ describe("prototype tool on an iOS simulator", () => {
       new Error("Prototype agent closed the connection; the app may have exited."),
     );
     const { response, payload } = await call({ action: "show", spec });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain("app may have exited");
   });
 
@@ -154,7 +182,7 @@ describe("prototype tool on an iOS simulator", () => {
     "%o is refused before any agent request",
     async (input, message) => {
       const { response, payload } = await call(input);
-      expect(response.isError).toBe(true);
+      expect(toolIsError(response)).toBe(true);
       expect(payload.error).toContain(message);
       expect(agent.requests).toEqual([]);
     },
@@ -174,10 +202,16 @@ describe("prototype tool on an iOS simulator", () => {
       },
     });
 
+    test("inspect and status preserve iOS stack paths", async () => {
+      const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
+      agent.queueReplies(agentStatus({ stacks }));
+      expect((await call({ action: "inspect" })).payload.prototypes).toMatchObject([{ stacks }]);
+      expect((await call({ action: "status" })).payload.prototypes).toMatchObject([{ stacks }]);
+    });
     test("maps the agent's status to the Android inspect shape without suspended or dropped events", async () => {
       agent.queueReplies(agentStatus());
       const { response, payload } = await call({ action: "inspect" });
-      expect(response.isError).toBeFalsy();
+      expect(toolIsError(response)).toBe(false);
       expect(agent.requests.map((request) => request.type)).toEqual(["get_prototype_status"]);
       expect(payload.success).toBe(true);
       expect(payload.prototypes).toMatchObject([
@@ -221,7 +255,7 @@ describe("prototype tool on an iOS simulator", () => {
         }),
       );
       const { response, payload } = await call({ action: "inspect" });
-      expect(response.isError).toBe(true);
+      expect(toolIsError(response)).toBe(true);
       expect(payload.error).toContain("prototype_inspect_v1");
       expect(payload.error).toContain("launchApp prototype: true");
       expect(connections.agents.get(simulator.deviceId)).toBeDefined();
@@ -248,7 +282,7 @@ describe("prototype tool on an iOS simulator", () => {
       spec: layered,
       assets: [{ id: "logo", path: "/img/logo.png" }],
     });
-    expect(response.isError).toBeFalsy();
+    expect(toolIsError(response)).toBe(false);
     expect(payload.success).toBe(true);
     expect(payload.warning).toBeUndefined();
     expect(types()).toEqual(["put_prototype_asset", "show_prototype"]);
@@ -257,7 +291,7 @@ describe("prototype tool on an iOS simulator", () => {
   test('window.persistence "device" is still refused on iOS before any agent request', async () => {
     const persistent = { ...spec, window: { ...spec.window, persistence: "device" as const } };
     const { response, payload } = await call({ action: "show", spec: persistent });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain('window.persistence "device" is Android only');
     expect(agent.requests).toEqual([]);
   });
@@ -276,7 +310,7 @@ describe("prototype tool on an iOS simulator", () => {
   test("a simulator with no agent connection gets launchApp prototype guidance", async () => {
     connections.agents.clear();
     const { response, payload } = await call({ action: "show", spec });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain("launchApp with prototype: true");
     expect(payload.error).toContain(simulator.deviceId);
   });

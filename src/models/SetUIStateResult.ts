@@ -1,5 +1,5 @@
 import { BaseActionResult } from "./BaseActionResult";
-import { ElementSelector } from "./SetUIStateOptions";
+import { SetUIStateElementSelector } from "./SetUIStateOptions";
 
 /**
  * Detected field type for a UI element
@@ -11,7 +11,7 @@ export type FieldType = "text" | "checkbox" | "toggle" | "dropdown" | "unknown";
  */
 export interface FieldResult {
   /** Selector used to find the field */
-  selector: ElementSelector;
+  selector: SetUIStateElementSelector;
   /** Whether the field was set successfully */
   success: boolean;
   /** Number of attempts made */

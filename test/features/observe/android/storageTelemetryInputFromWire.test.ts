@@ -24,6 +24,9 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
       },
       1234,
     );
+    if (!input) {
+      throw new Error("Expected accepted storage telemetry");
+    }
     expect(input).toEqual({
       timestamp: 1234,
       applicationId: "com.example",
@@ -33,6 +36,14 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
       valueType: "STRING",
       changeType: "modify",
     });
+  });
+
+  test.each(["add", "remove"])("passes through changeType %s", (changeType) => {
+    expect(storageTelemetryInputFromWire({ ...base, changeType }, 42)?.changeType).toBe(changeType);
+  });
+
+  test("defaults missing changeType to modify", () => {
+    expect(storageTelemetryInputFromWire({ ...base }, 42)?.changeType).toBe("modify");
   });
 
   test("threads a runner-supplied previousValue through", () => {
@@ -46,6 +57,9 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
       },
       1000,
     );
+    if (!input) {
+      throw new Error("Expected accepted storage telemetry");
+    }
     expect(input.previousValue).toBe("light");
   });
 
@@ -60,6 +74,9 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
       },
       1000,
     );
+    if (!input) {
+      throw new Error("Expected accepted storage telemetry");
+    }
     expect(input).toHaveProperty("previousValue", null);
   });
 
@@ -73,6 +90,9 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
       },
       1000,
     );
+    if (!input) {
+      throw new Error("Expected accepted storage telemetry");
+    }
     // Field must be absent so the repository's `!== undefined` guard triggers the
     // auto-lookup for legacy runners.
     expect("previousValue" in input).toBe(false);
@@ -81,6 +101,9 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
 
   test("defaults packageName/fileName/valueType/changeType/key/value for sparse messages", () => {
     const input = storageTelemetryInputFromWire({ ...base }, 42);
+    if (!input) {
+      throw new Error("Expected accepted storage telemetry");
+    }
     expect(input).toEqual({
       timestamp: 42,
       applicationId: null,

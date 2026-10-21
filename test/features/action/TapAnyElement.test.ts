@@ -1,12 +1,15 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { describe, expect, test, spyOn, mock } from "bun:test";
+import { describe, expect, test, spyOn, mock, afterEach } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
-import {
-  AdbClient,
-  AdbCommandTimeoutError,
-} from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
+import { containerSelectorError } from "../../../src/features/action/tapSharedHelpers";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -32,14 +35,16 @@ import type {
   AccessibilityNodeSelector,
 } from "../../../src/features/observe/android/types";
 
+afterEach(() => mock.restore());
+
 const createTapAnyElement = (selector: FakeElementSelector) => {
   return new TapAnyElement(
     {
       name: "test-device",
       platform: "android",
       deviceId: "emulator-5554",
-    } as any,
-    new FakeAdbClient() as any,
+    },
+    new FakeAdbClient(),
     {
       timer: new FakeTimer(),
       elementSelector: selector,
@@ -52,7 +57,7 @@ const makeElement = () =>
     bounds: { left: 10, top: 20, right: 110, bottom: 70 },
     text: "ListItem",
     clickable: "true",
-  }) as any;
+  }) satisfies Element;
 
 describe("TapAnyElement", () => {
   test("budgets the maximum Android long press beyond the default ADB timeout", async () => {
@@ -61,17 +66,20 @@ describe("TapAnyElement", () => {
     timer.enableAutoAdvance();
     const tapAny = new TapAnyElement(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
-      adb as any,
+      adb,
       { timer, elementSelector: new FakeElementSelector(makeElement()) },
     );
-    tapAny.setRefreshViewHierarchyForTesting(async () => null);
-    tapAny.observedInteraction = (action) =>
-      action(
-        recordObservationRead({
+    tapAny.testHooks.setRefreshViewHierarchy(async () => null);
+    tapAny.observedInteraction = runBlockWith(() =>
+      recordObservationRead(
+        buildObserveResult({
           viewHierarchy: { hierarchy: { node: {} } },
           screenSize: { width: 500, height: 500 },
+          updatedAt: 0,
+          systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
         }),
-      );
+      ),
+    );
 
     await tapAny.execute({ action: "longPress", duration: LONG_PRESS_HARD_MAX_MS });
     const swipe = adb
@@ -80,7 +88,7 @@ describe("TapAnyElement", () => {
     expect(swipe?.timeoutMs).toBe(LONG_PRESS_HARD_MAX_MS + 2000);
   });
 
-  describe("validateOptions", () => {
+  describe("container validation", () => {
     const EXACTLY_ONE = "container must specify exactly one";
 
     // A container must resolve to exactly one truthy selector. Zero truthy
@@ -97,13 +105,22 @@ describe("TapAnyElement", () => {
       ["empty container object", {}, EXACTLY_ONE],
       ["both selectors empty strings", { elementId: "", text: "" }, EXACTLY_ONE],
     ])("%s", (_name, container, expected) => {
-      const tapAny = createTapAnyElement(new FakeElementSelector(makeElement()));
-      const error = (tapAny as any).validateOptions({ action: "tap", container });
+      const error = containerSelectorError(container, "tapAny");
       if (expected === null) {
         expect(error).toBeNull();
       } else {
         expect(error).toContain(expected);
       }
+    });
+
+    test("execute rejects an ambiguous container before touching the device", async () => {
+      const tapAny = createTapAnyElement(new FakeElementSelector(makeElement()));
+      const result = await tapAny.execute({
+        action: "tap",
+        container: { elementId: "com.app:id/list", text: "List" },
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(EXACTLY_ONE);
     });
   });
 
@@ -112,7 +129,7 @@ describe("TapAnyElement", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
-      const result = (tapAny as any).findClickableElement(
+      const result = tapAny.testHooks.findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -125,7 +142,7 @@ describe("TapAnyElement", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
-      (tapAny as any).findClickableElement(
+      tapAny.testHooks.findClickableElement(
         { action: "tap", selectionStrategy: "random" },
         { hierarchy: { node: {} } },
       );
@@ -137,7 +154,7 @@ describe("TapAnyElement", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
-      (tapAny as any).findClickableElement(
+      tapAny.testHooks.findClickableElement(
         { action: "tap", scrollableContainer: true },
         { hierarchy: { node: {} } },
       );
@@ -149,7 +166,7 @@ describe("TapAnyElement", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
-      (tapAny as any).findClickableElement({ action: "tap" }, { hierarchy: { node: {} } });
+      tapAny.testHooks.findClickableElement({ action: "tap" }, { hierarchy: { node: {} } });
 
       expect(selector.lastScrollableContainer).toBeUndefined();
     });
@@ -158,7 +175,7 @@ describe("TapAnyElement", () => {
       const selector = new FakeElementSelector(null);
       const tapAny = createTapAnyElement(selector);
 
-      const result = (tapAny as any).findClickableElement(
+      const result = tapAny.testHooks.findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -171,11 +188,11 @@ describe("TapAnyElement", () => {
         bounds: { left: -200, top: -200, right: -100, bottom: -100 },
         text: "Hidden",
         clickable: "true",
-      } as any;
+      } satisfies Element;
       const selector = new FakeElementSelector(offScreenElement);
       const tapAny = createTapAnyElement(selector);
 
-      const result = (tapAny as any).findClickableElement(
+      const result = tapAny.testHooks.findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
         { observationScreenSize: { width: 1080, height: 1920 } },
@@ -188,7 +205,7 @@ describe("TapAnyElement", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
-      const result = (tapAny as any).findClickableElement(
+      const result = tapAny.testHooks.findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
         { observationScreenSize: { width: 1080, height: 1920 } },
@@ -202,7 +219,7 @@ describe("TapAnyElement", () => {
         bounds: { left: 20, top: 20, right: 40, bottom: 40 },
         text: "Visible",
         clickable: "true",
-      } as any;
+      } satisfies Element;
       const adb = new FakeAdbClient();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -228,9 +245,17 @@ describe("TapAnyElement", () => {
         },
       );
       const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
-      tapAny.observedInteraction = (action) =>
-        action(recordObservationRead({ viewHierarchy, screenSize: { width: 10, height: 10 } }));
-      tapAny.setRefreshViewHierarchyForTesting(async () => null);
+      tapAny.observedInteraction = runBlockWith(() =>
+        recordObservationRead(
+          buildObserveResult({
+            viewHierarchy,
+            screenSize: { width: 10, height: 10 },
+            updatedAt: 0,
+            systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
+          }),
+        ),
+      );
+      tapAny.testHooks.setRefreshViewHierarchy(async () => null);
 
       const result = await tapAny.execute({ action: "tap" });
 
@@ -244,7 +269,7 @@ describe("TapAnyElement", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
-      const result = (tapAny as any).findClickableElement(
+      const result = tapAny.testHooks.findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -255,14 +280,14 @@ describe("TapAnyElement", () => {
 });
 
 describe("TapAnyElement Android gesture dispatch", () => {
-  const hierarchy = { hierarchy: { node: { marker: "before" } } };
+  const hierarchy = { hierarchy: { node: { text: "before" } } };
 
   function setup(
     result: A11yTapCoordinatesResult = { success: true, totalTimeMs: 1 },
     talkBackEnabled = false,
-    element = makeElement(),
+    element: Element = makeElement(),
   ) {
-    const observedHierarchy = { hierarchy: { node: { marker: "before" } } };
+    const observedHierarchy: ViewHierarchyResult = { hierarchy: { node: { text: "before" } } };
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -273,7 +298,9 @@ describe("TapAnyElement Android gesture dispatch", () => {
     const adbTapCountAtRequest: number[] = [];
     const semanticCalls: string[] = [];
     const service = {
-      requestTapCoordinates: async (x: number, y: number, duration?: number) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y, duration } = request;
+
         adbTapCountAtRequest.push(
           adb.getCommandCalls().filter((call) => call.command.includes("input touchscreen tap"))
             .length,
@@ -304,16 +331,19 @@ describe("TapAnyElement Android gesture dispatch", () => {
         talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
       },
     );
-    tapAny.observedInteraction = (action) =>
-      action(
-        recordObservationRead({
+    tapAny.observedInteraction = runBlockWith(() =>
+      recordObservationRead(
+        buildObserveResult({
+          updatedAt: 0,
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
           viewHierarchy: observedHierarchy,
           screenSize: { width: 500, height: 500 },
         }),
-      );
+      ),
+    );
     let refreshCount = 0;
-    tapAny.setRefreshViewHierarchyForTesting(async () => ({
-      hierarchy: { node: { marker: `after-${++refreshCount}` } },
+    tapAny.testHooks.setRefreshViewHierarchy(async () => ({
+      hierarchy: { node: { text: `after-${++refreshCount}` } },
     }));
     return {
       tapAny,
@@ -340,7 +370,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   });
 
   test("unconfirmed enabled TalkBack attaches a warning while fresh evidence does not", async () => {
-    const { tapAny, detector } = setup({ success: true }, true);
+    const { tapAny, detector } = setup({ success: true, totalTimeMs: 1 }, true);
     let unconfirmed = true;
     Object.assign(detector, {
       resolveTalkBackStateWithConfirmation: async () => ({ talkBack: true, unconfirmed }),
@@ -382,7 +412,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   });
 
   test("TalkBack activates the native element through accessibility action", async () => {
-    const { tapAny, adb, strategy, calls } = setup({ success: true }, true);
+    const { tapAny, adb, strategy, calls } = setup({ success: true, totalTimeMs: 1 }, true);
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
     expect(strategy.directActivationCalls).toHaveLength(1);
@@ -394,7 +424,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   });
 
   test("failed TalkBack activation uses a precise coordinate tap before ADB", async () => {
-    const { tapAny, adb, strategy } = setup({ success: true }, true);
+    const { tapAny, adb, strategy } = setup({ success: true, totalTimeMs: 1 }, true);
     strategy.setDirectActivationResult({
       success: false,
       method: "accessibility-action",
@@ -418,7 +448,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   });
 
   test("TalkBack double tap preserves coordinate fallback warnings", async () => {
-    const { tapAny, strategy } = setup({ success: true }, true);
+    const { tapAny, strategy } = setup({ success: true, totalTimeMs: 1 }, true);
     const warning = "TalkBack activation is unconfirmed: double-tap gesture acknowledged";
     strategy.setFallbackResult({
       success: true,
@@ -431,7 +461,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   });
 
   test("TalkBack retry preserves warnings without duplicates", async () => {
-    const { tapAny, strategy } = setup({ success: true }, true);
+    const { tapAny, strategy } = setup({ success: true, totalTimeMs: 1 }, true);
     strategy.setDirectActivationResult({ success: false, method: "accessibility-action" });
     const warning = "TalkBack activation is unconfirmed: coordinate gesture acknowledged";
     strategy.setPreciseTapResult({
@@ -439,7 +469,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
       method: "coordinate-fallback",
       warnings: [warning],
     });
-    tapAny.setRefreshViewHierarchyForTesting(async () => hierarchy);
+    tapAny.testHooks.setRefreshViewHierarchy(async () => hierarchy);
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
     expect(strategy.preciseTapCalls).toHaveLength(2);
@@ -448,7 +478,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
 
   test("unchanged hierarchy retries exactly once", async () => {
     const { tapAny, calls } = setup();
-    tapAny.setRefreshViewHierarchyForTesting(async () => hierarchy);
+    tapAny.testHooks.setRefreshViewHierarchy(async () => hierarchy);
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
     expect(calls).toHaveLength(2);
@@ -459,12 +489,16 @@ describe("TapAnyElement Android gesture dispatch", () => {
     async (displayId) => {
       const element: Element = {
         bounds: { left: 499, right: 509, top: 20, bottom: 40 },
-        clickable: true,
+        clickable: "true",
         text: "Edge target",
       };
-      const { tapAny, calls, observedHierarchy } = setup({ success: true }, false, element);
-      Object.assign(observedHierarchy, { displayId });
-      tapAny.setRefreshViewHierarchyForTesting(async () => observedHierarchy);
+      const { tapAny, calls, observedHierarchy } = setup(
+        { success: true, totalTimeMs: 1 },
+        false,
+        element,
+      );
+      observedHierarchy.displayId = displayId;
+      tapAny.testHooks.setRefreshViewHierarchy(async () => observedHierarchy);
       const result = await tapAny.execute({ action: "tap" });
       expect(result.success).toBe(true);
       expect(calls).toHaveLength(2);
@@ -478,7 +512,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   test("unchanged hierarchy never retries a double tap or probes for a change", async () => {
     const { tapAny, calls } = setup();
     let probes = 0;
-    tapAny.setRefreshViewHierarchyForTesting(async () => {
+    tapAny.testHooks.setRefreshViewHierarchy(async () => {
       probes++;
       return hierarchy;
     });
@@ -491,7 +525,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   test("unchanged hierarchy never retries a long press or probes for a change", async () => {
     const { tapAny, adb } = setup();
     let probes = 0;
-    tapAny.setRefreshViewHierarchyForTesting(async () => {
+    tapAny.testHooks.setRefreshViewHierarchy(async () => {
       probes++;
       return hierarchy;
     });
@@ -505,12 +539,12 @@ describe("TapAnyElement Android gesture dispatch", () => {
 
   test("rejects a changed capture before dispatching the selected target", async () => {
     const { tapAny, adb, calls, timer, observedHierarchy } = setup();
-    tapAny.setBeforeAndroidTapForTesting(() => {
+    tapAny.testHooks.setBeforeAndroidTap(() => {
       const selected = getHierarchySnapshot(observedHierarchy);
       expect(selected).toBeDefined();
       const replacement = identifyObservedHierarchy(
         "android",
-        { hierarchy: { node: { marker: "replacement" } } },
+        { hierarchy: { node: createFlatNodeForTest({ text: "replacement" }) } },
         "fresh",
         timer,
         undefined,
@@ -542,7 +576,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
 
   test("long press tries the native accessibility action before ADB", async () => {
     const element = { ...makeElement(), "resource-id": "app:id/target" };
-    const { tapAny, adb, semanticCalls } = setup({ success: true }, false, element);
+    const { tapAny, adb, semanticCalls } = setup({ success: true, totalTimeMs: 1 }, false, element);
     const result = await tapAny.execute({ action: "longPress", duration: 1200 });
     expect(result.success).toBe(true);
     expect(semanticCalls).toEqual(["long_click"]);
@@ -570,12 +604,14 @@ test.each([false, true])(
       hierarchy: {
         node: {
           bounds: { left: 0, top: 0, right: 500, bottom: 500 },
-          node: {
-            text: "Continue",
-            clickable: true,
-            "resource-id": "app:id/continue",
-            bounds: { left: 200, top: 100, right: 300, bottom: 160 },
-          },
+          node: [
+            {
+              text: "Continue",
+              clickable: "true",
+              "resource-id": "app:id/continue",
+              bounds: { left: 200, top: 100, right: 300, bottom: 160 },
+            },
+          ],
         },
       },
     };
@@ -601,7 +637,7 @@ test.each([false, true])(
     );
     const tapAny = new TapAnyElement(
       { deviceId: "capture-tapany", name: "Test", platform: "android" },
-      adb as any,
+      adb,
       {
         timer,
         hierarchyCapture: capture,
@@ -614,17 +650,23 @@ test.each([false, true])(
       },
     );
     let searchFinished = false;
-    tapAny.setRefreshViewHierarchyForTesting(async (refresh, ...args) =>
-      searchFinished ? { hierarchy: { node: { marker: "after" } } } : refresh(...args),
+    tapAny.testHooks.setRefreshViewHierarchy(async (refresh, ...args) =>
+      searchFinished ? { hierarchy: { node: { text: "after" } } } : refresh(...args),
     );
     const cached = {
       observationId: "old-capture",
       screenSize: { width: 100, height: 100 },
       viewHierarchy: { displayId: 0, hierarchy: { node: {} } },
     };
-    tapAny.observedInteraction = (action) => action(cached);
+    tapAny.observedInteraction = runBlockWith(
+      buildObserveResult({
+        ...cached,
+        updatedAt: 0,
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      }),
+    );
     // The search capture completes before the gesture; only the post-tap probe changes.
-    tapAny.setBeforeAndroidTapForTesting(() => {
+    tapAny.testHooks.setBeforeAndroidTap(() => {
       searchFinished = true;
     });
     const result = await tapAny.execute({ action: "tap", searchUntil: { duration: 500 } });
@@ -666,14 +708,17 @@ describe("TapAnyElement node long press fallbacks", () => {
         accessibilityDetector: new FakeAccessibilityDetector(),
       },
     );
-    tapAny.observedInteraction = (action) =>
-      action(
-        recordObservationRead({
+    tapAny.observedInteraction = runBlockWith(() =>
+      recordObservationRead(
+        buildObserveResult({
           viewHierarchy: { hierarchy: { node: {} } },
           screenSize: { width: 500, height: 500 },
+          updatedAt: 0,
+          systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
         }),
-      );
-    tapAny.setRefreshViewHierarchyForTesting(async () => target?.fresh ?? null);
+      ),
+    );
+    tapAny.testHooks.setRefreshViewHierarchy(async () => target?.fresh ?? null);
     return { proxy, adb, tapAny };
   }
 
@@ -819,14 +864,14 @@ describe("tapAny long press safety", () => {
     timer.enableAutoAdvance();
     const element: Element = {
       text: "ListItem",
-      clickable: true,
+      clickable: "true",
       "hierarchy-source": "uiautomator",
       bounds: { left: 10, top: 20, right: 110, bottom: 70 },
     };
     const displayLookup = mock(() => undefined);
     const action = new TapAnyElement(
       { name: "test-device", platform: "android", deviceId: "tap-any-long-press-bound" },
-      adb as unknown as AdbClient,
+      adb,
       {
         timer,
         elementSelector: new FakeElementSelector(element),
@@ -834,14 +879,17 @@ describe("tapAny long press safety", () => {
         lastRenderedObservation: displayLookup,
       },
     );
-    action.observedInteraction = (callback) =>
-      callback(
-        recordObservationRead({
-          viewHierarchy: { hierarchy: { node: element } },
+    action.observedInteraction = runBlockWith(() =>
+      recordObservationRead(
+        buildObserveResult({
+          updatedAt: 0,
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          viewHierarchy: { hierarchy: { node: { $: element } } },
           screenSize: { width: 500, height: 500 },
         }),
-      );
-    action.setRefreshViewHierarchyForTesting(async () => null);
+      ),
+    );
+    action.testHooks.setRefreshViewHierarchy(async () => null);
     return { adb, timer, action, displayLookup };
   }
 
@@ -871,9 +919,10 @@ describe("tapAny long press safety", () => {
     [60000, 120000],
   ])("budget admission accepts duration %s with remaining %s", async (duration, remaining) => {
     const h = setup();
-    const result = await h.action.execute({ action: "longPress", duration }, undefined, undefined, {
-      requestDeadlineMs: remaining === undefined ? undefined : h.timer.now() + remaining,
-    });
+    const result = await h.action.execute(
+      { action: "longPress", duration },
+      { deadlineMs: remaining === undefined ? undefined : h.timer.now() + remaining },
+    );
     expect(result.success).toBe(true);
     expect(h.adb.getCommandCalls()).toEqual([
       expect.objectContaining({
@@ -890,9 +939,7 @@ describe("tapAny long press safety", () => {
       const observe = spyOn(h.action, "observedInteraction");
       const result = await h.action.execute(
         { action: "longPress", duration: 20000, display: "1" },
-        undefined,
-        undefined,
-        { requestDeadlineMs: h.timer.now() + remaining },
+        { deadlineMs: h.timer.now() + remaining },
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain(
@@ -918,15 +965,14 @@ describe("tapAny long press safety", () => {
         if (path === "timeout") {
           throw new AdbCommandTimeoutError("Command timed out");
         }
-        expect(args[4]).toBe(controller.signal);
+        expect(executeCommandOptionsOf(args).signal).toBe(controller.signal);
         controller.abort();
         throw new DOMException("Operation aborted", "AbortError");
       });
       try {
         const result = await h.action.execute(
           { action: "longPress", duration: 1500 },
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         );
         expect(result.success).toBe(false);
         expect(result.error).toContain("press may still be held on the device for up to 1500 ms");

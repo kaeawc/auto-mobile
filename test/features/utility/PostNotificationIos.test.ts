@@ -2,7 +2,7 @@ import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { BootedDevice } from "../../../src/models";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 
 import { logger } from "../../../src/utils/logger";
 
@@ -10,21 +10,20 @@ const SIM_UDID = "11111111-2222-3333-4444-555555555555";
 const PHYSICAL_UDID = "00008030001A2B3C4D5E6F7089ABCDEF01234567";
 
 describe("PostNotification - iOS Simulator", () => {
-  let simctl: FakeSimCtlClient;
+  let simctl: FakeSimctl;
   let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
   afterEach(() => warn.mockRestore());
 
   const makeDevice = (deviceId: string): BootedDevice =>
     ({ deviceId, platform: "ios" }) as BootedDevice;
 
-  const make = (deviceId: string) =>
-    new PostNotification(makeDevice(deviceId), null, null, simctl as any);
+  const make = (deviceId: string) => new PostNotification(makeDevice(deviceId), null, null, simctl);
 
   const pushCalls = () => simctl.getMethodCalls("pushNotification");
 
   beforeEach(() => {
     warn = spyOn(logger, "warn").mockImplementation(() => {});
-    simctl = new FakeSimCtlClient();
+    simctl = new FakeSimctl();
   });
 
   test("logs unexpected push rejections and preserves the top-level failure", async () => {

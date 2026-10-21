@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "rich",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "spans": [
+        {
+          "text": ""
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.spans[0].text",
+  "expectedMessage": "Invalid string value"
+}

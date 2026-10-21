@@ -44,7 +44,7 @@ describe("cli-idle session across a daemon stall (#10835)", () => {
       },
       timer,
     );
-    await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     expect(sessionManager.adoptCliLivenessPolicy(SESSION, CLI_IDLE_MS)).toBe(true);
     monitor.start();
     // Idle, with every scan on time.

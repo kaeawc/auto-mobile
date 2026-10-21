@@ -5,6 +5,9 @@
  * refused to the CLI. Drives the real {@link UnixSocketServer}, real {@link DevicePool} and the
  * registered `getAndroid` handler; only the loopback MCP hop is replaced by a direct dispatch.
  */
+import type { CallToolResult } from "@modelcontextprotocol/client";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
@@ -18,6 +21,7 @@ import { up as addStableDeviceIdentityWriterFence } from "../../src/db/migration
 import { up as addLivenessOwner } from "../../src/db/migrations/2026_09_16_000_device_session_liveness_owner";
 import { up as addLivenessContract } from "../../src/db/migrations/2026_09_16_001_device_session_liveness_contract";
 import { up as addLivenessWriterFence } from "../../src/db/migrations/2026_09_17_000_device_session_liveness_writer_fence";
+import { up as addActivitySequence } from "../../src/db/migrations/2026_10_15_000_device_session_activity_seq";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { DAEMON_ONE_SHOT_CLI_PARAM } from "../../src/daemon/constants";
@@ -32,17 +36,17 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const DEVICE_ID = "emulator-5554";
 const AVD_NAME = "Agent_AVD";
@@ -67,29 +71,26 @@ async function createHarness(): Promise<Harness> {
     addLivenessOwner,
     addLivenessContract,
     addLivenessWriterFence,
+    addActivitySequence,
   ]) {
     await migrate(db as Kysely<unknown>);
   }
   const repository = new DeviceSessionRepository(db);
   const timer = new FakeTimer();
   const barrier = new FakeDbWriteBarrier();
-  const manager = new SessionManager(timer, repository, () => barrier);
+  const manager = new SessionManager(timer, repository, { barrier: () => barrier });
   const devices = new FakeDeviceManager(
     [],
     [{ deviceId: DEVICE_ID, name: AVD_NAME, platform: "android" }],
   );
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "one-shot-cli-daemon", {
-      timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: devices,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      deviceSessionRepository: repository,
-      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
-      idGenerator: new FakeIdGenerator(),
-      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
-    }),
-  );
+  const pool = makePool(manager, "one-shot-cli-daemon", {
+    timer,
+    deviceManager: devices,
+    deviceSessionRepository: repository,
+    recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+    idGenerator: new FakeIdGenerator(),
+    lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+  });
   await pool.initializeWithDevices(devices.bootedDevices);
 
   const matcher = new FakeDeviceMatcher();
@@ -121,25 +122,30 @@ async function createHarness(): Promise<Harness> {
   registerDeviceTools();
 
   const socketPath = join(tmpdir(), `one-shot-cli-${randomUUID()}.sock`);
-  const server = new UnixSocketServer(
-    socketPath,
-    "http://localhost:0/mcp",
-    DaemonState.getInstance(),
-    new FakeTimer(),
-  );
+  const server = new UnixSocketServer(socketPath, DaemonState.getInstance(), new FakeTimer());
   // The loopback MCP hop dispatches straight to the registered handler with the arguments the
   // socket server forwards, internal markers included.
-  server.mcpClientFactory = async () => ({
-    callTool: async ({ name, arguments: args }: { name: string; arguments?: unknown }) =>
-      await ToolRegistry.getTool(name)!.handler(args as Record<string, unknown>),
-    listTools: async () => ({ tools: [] }),
-    listResources: async () => ({ resources: [] }),
-    readResource: async () => ({ contents: [] }),
-    listResourceTemplates: async () => ({ resourceTemplates: [] }),
-    close: async () => {},
-  });
+  server.mcpClientFactory = async () =>
+    new StubMcpClient({
+      callTool: async ({ name, arguments: args }) => {
+        const result = await ToolRegistry.getTool(name)!.handler(args as Record<string, unknown>);
+        if (!isCallToolResult(result)) {
+          throw new Error(`Tool ${name} returned a non-MCP result`);
+        }
+        return result;
+      },
+    });
   await server.start();
   return { db, manager, pool, server, socketPath, clients: [] };
+}
+
+function isCallToolResult(value: unknown): value is CallToolResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "content" in value &&
+    Array.isArray(value.content)
+  );
 }
 
 function connect(h: Harness): DaemonClient {

@@ -8,8 +8,15 @@ REPO="kaeawc/auto-mobile"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIGNATURES="$SCRIPT_DIR/known-flakes.txt"
 RETRY_MARKER='Starting emulator retry attempt 2.'
-# shellcheck disable=SC2016 # The jq program intentionally contains jq variables.
-FAILURE_CONCLUSIONS_JQ_DEF='def is_failed_conclusion: ((. // "") | ascii_downcase) as $conclusion | ($conclusion == "failure" or $conclusion == "cancelled" or $conclusion == "timed_out" or $conclusion == "startup_failure");'
+FAILURE_CONCLUSIONS_JQ_DEF="def is_failed_conclusion: ((. // \"\") | ascii_downcase) as \$conclusion | (\$conclusion == \"failure\" or \$conclusion == \"cancelled\" or \$conclusion == \"timed_out\" or \$conclusion == \"startup_failure\");"
+
+# Preserve conditional-call semantics while exposing the status as data.
+RUN_STATUS=0
+run_capture_status() {
+  local run_rc=0
+  "$@" || run_rc=$?
+  RUN_STATUS="$run_rc"
+}
 
 usage() {
   echo "Usage: scripts/ci/classify-failure.sh <run-id> [--attempt N]" >&2
@@ -54,7 +61,7 @@ match_signature() {
     [[ "$job_pattern" == \#* ]] && continue
     job_pattern="$(lowercase "$job_pattern")"
     message_pattern="$(lowercase "$message_pattern")"
-    # shellcheck disable=SC2053 # Signature fields deliberately use shell globs.
+    # shellcheck disable=SC2053 # Signature fields are glob patterns; quoting would change classifier matches.
     if [[ "$job_lc" == $job_pattern && "$annotation_lc" == $message_pattern ]]; then
       printf '%s — %s' "$verdict" "$note"
       return 0
@@ -90,8 +97,8 @@ terminal_attempt_evidence() {
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
   local line normalized in_group=0 after_marker=0 terminal=''
 
-  # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
-  if executed_retry_marker_present "$evidence"; then
+  run_capture_status executed_retry_marker_present "$evidence"
+  if (( RUN_STATUS == 0 )); then
     while IFS= read -r line || [[ -n "$line" ]]; do
       if [[ "$line" == *'##[group]Run'* ]]; then
         in_group=1
@@ -123,9 +130,8 @@ ambiguous_terminal_attempt() {
   local evidence="$1"
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
 
-  # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
-  [[ "$evidence" == *"$diagnostics_marker"* ]] \
-    && ! executed_retry_marker_present "$evidence"
+  run_capture_status executed_retry_marker_present "$evidence"
+  [[ "$evidence" == *"$diagnostics_marker"* && "$RUN_STATUS" != 0 ]]
 }
 
 # Gate outcomes are emitted only when every failed upstream job in this run is
@@ -155,7 +161,7 @@ advisory_only_gate() {
     'Node Tests')
       [[ -n "$failures" ]] \
         && grep -Eq '^Node Unit Timing Budget$' <<< "$failures" \
-        && ! grep -Eq '^(Node Unit Tests|Node Host Integration Tests)' <<< "$failures"
+        && ! grep -Eq '^(Node Unit Tests|Node Host Integration Tests|TypeScript Code Coverage)' <<< "$failures"
       ;;
     WebRTC)
       [[ -n "$failures" ]] \
@@ -219,6 +225,90 @@ fetch_job_log() {
   printf '%s' "$log_text"
 }
 
+diagnose_log_failure() {
+  awk '
+    function clean(s,    esc) {
+      sub(/^\xef\xbb\xbf/, "", s); sub(/\r$/, "", s)
+      sub(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[^ ]+Z[ ]*/, "", s)
+      esc=sprintf("%c", 27); gsub(esc "\\[[0-9;]*m", "", s)
+      return s
+    }
+    function pathnorm(p) {
+      gsub(/\\/, "/", p)
+      sub(/^\/home\/runner\/work\/[^\/]+\/[^\/]+\//, "", p)
+      sub(/^[A-Za-z]:\/a\/[^\/]+\/[^\/]+\//, "", p)
+      return p
+    }
+    function addpart(s) { if (s != "") parts[++np]=s }
+    function flush_unhandled(    desc, i, shown) {
+      if (!uh) return
+      uhcount++
+      if (uhpath != "") { uhpath=pathnorm(uhpath); if (!(uhpath in paths)) { paths[uhpath]=1; pathlist[++npath]=uhpath } }
+      if (uhfile != "" && !(uhfile in importers)) { importers[uhfile]=1; files[++nfiles]=uhfile }
+      if (uherr != "" && firstUnhandledError == "") firstUnhandledError=uherr
+      uh=0; uhpath=""; uhfile=""; uherr=""
+    }
+    function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+    {
+      line=clean($0)
+      if (line ~ /^##\[group\].*:[[:space:]]*$/) { group=line; sub(/^##\[group\]/,"",group); sub(/:[[:space:]]*$/, "", group) }
+      if (line ~ /^# Unhandled error between tests/) { flush_unhandled(); uh=1; uhfile=group; next }
+      if (uh) {
+        if (line ~ /^error: ENOENT reading "/) { uhpath=line; sub(/^error: ENOENT reading "/,"",uhpath); sub(/".*$/,"",uhpath) }
+        else if (line ~ /^error:/ && uherr == "") uherr=line
+        if (line ~ /^[-]+$/ && (uhpath != "" || uherr != "")) flush_unhandled()
+      }
+      if (line ~ /^error:/) { assertion=line; sub(/^error:[[:space:]]*/,"",assertion) }
+      if (line ~ /^\(pass\)/ || line ~ /^\(fail\)/) {
+        if (line ~ /^\(fail\)/) {
+          name=line; sub(/^\(fail\)[[:space:]]*/,"",name); sub(/[[:space:]]+\[[^]]*\][[:space:]]*$/, "", name)
+          if (!(name in failseen)) { failseen[name]=1; failures[++nf]=name; ffile[name]=frame; fassert[name]=assertion }
+          else if (ffile[name] == "" && frame != "") ffile[name]=frame
+          frame=""; assertion=""
+        } else { frame=""; assertion="" }
+      }
+      if (line ~ /^[[:space:]]*at / && line ~ /:[0-9]+:[0-9]+\)?$/) {
+        fr=line; sub(/^[[:space:]]*at /,"",fr)
+        if (fr ~ /\([^()]*:[0-9]+:[0-9]+\)$/) { sub(/^.*\(/,"",fr); sub(/\)$/,"",fr) }
+        sub(/:[0-9]+$/, "", fr)
+        if (index(fr,".test.")) frame=pathnorm(fr)
+        else if (frame == "") frame=pathnorm(fr)
+      }
+      if (line ~ /^FAIL: .* shard [0-9]+ exited with status [0-9]+/) { exitline=line }
+      if (line == "Segmentation fault" || line == "Killed" || line ~ /terminated by signal/) sigline=line
+    }
+    END {
+      flush_unhandled()
+      if (uhcount) {
+        desc="bun \"Unhandled error between tests\" x" uhcount ": "
+        if (npath) {
+          desc=desc "ENOENT reading " pathlist[1]
+          for (i=2;i<=npath;i++) desc=desc ", " pathlist[i]
+          desc=desc " (missing import target; check filename case on case-sensitive Linux)"
+        } else desc=desc (firstUnhandledError != "" ? firstUnhandledError : "error unavailable")
+        if (nfiles) { desc=desc " imported by "; shown=nfiles<3?nfiles:3; for(i=1;i<=shown;i++) desc=desc (i==1?"":", ") files[i]; if(nfiles>3) desc=desc " (+" nfiles-3 " more)" }
+        addpart(desc)
+      }
+      if (nf) {
+        desc="test failure: "; shown=nf<5?nf:5
+        for(i=1;i<=shown;i++) { name=failures[i]; desc=desc (i==1?"":"; ") name; if(ffile[name]!="") { desc=desc " at " ffile[name]; sub(/:[0-9]+:[0-9]+$/, "", desc) } if(fassert[name]!="") desc=desc " (" fassert[name] ")" }
+        if(nf>5) desc=desc " (+" nf-5 " more)"; addpart(desc)
+      }
+      if (exitline != "") {
+        match(exitline,/shard [0-9]+/); shard=substr(exitline,RSTART+6,RLENGTH-6); match(exitline,/status [0-9]+/); status=substr(exitline,RSTART+7,RLENGTH-7)+0
+        if(status>128 && status!=124) { n=status-128; sig="SIG" n; if(n==1)sig="SIGHUP"; else if(n==2)sig="SIGINT"; else if(n==6)sig="SIGABRT"; else if(n==9)sig="SIGKILL"; else if(n==11)sig="SIGSEGV"; else if(n==15)sig="SIGTERM"; addpart("shard " shard " killed by signal " sig " (status " status ")") }
+        else if(status>=1 && status<=127 && np>0) addpart("shard " shard " exited with status " status " (not a signal kill)")
+      }
+      if(sigline!="" && (exitline == "" || status>128 || status==124 || status==0 || status>127)) addpart("signal evidence in log: " sigline)
+      for(i=1;i<=np;i++) printf "%s%s", (i==1?"":"; "), parts[i]
+    }
+  ' <<< "$1"
+}
+
+display_annotation() {
+  awk 'BEGIN { ORS="" } { if (NR>1) s=s " "; s=s $0 } END { gsub(/[[:space:]]+/, " ", s); sub(/^ /,"",s); sub(/ $/,"",s); if (length(s)>200) s=substr(s,1,197) "..."; print s }' <<< "$1"
+}
+
 fetch_artifact_logs() {
   local job_name="$1"
   local matrix_suffix artifact_name artifacts artifact_id artifact_file artifact_text=''
@@ -259,25 +349,35 @@ while IFS=$'\t' read -r job_id job_name steps; do
   if [[ -z "$annotation_text" ]]; then
     annotation_text='none'
   fi
+  display_annotation_text="$(display_annotation "$annotation_text")"
   log_text="$(fetch_job_log "$job_id")"
   if [[ -z "$log_text" ]]; then
     log_text="$(fetch_artifact_logs "$job_name")"
   fi
 
-  # shellcheck disable=SC2310 # A non-match is expected classifier control flow.
-  if advisory_only_gate "$job_name"; then
+  run_capture_status advisory_only_gate "$job_name"
+  advisory_status=$RUN_STATUS
+  run_capture_status executed_retry_marker_present "${head_branch} ${annotation_text} ${log_text}"
+  retry_marker_status=$RUN_STATUS
+  run_capture_status ambiguous_terminal_attempt "${head_branch} ${annotation_text} ${log_text}"
+  ambiguous_status=$RUN_STATUS
+  if (( advisory_status == 0 )); then
     verdict='CHECK-UPSTREAM-FIRST — aggregator is red because of an advisory (non-required) lane; inspect the upstream rows above before rerunning or filing an issue'
   elif [[ "${head_branch} ${annotation_text} ${log_text}" == *"$RETRY_MARKER"* ]] \
-    && ! executed_retry_marker_present "${head_branch} ${annotation_text} ${log_text}"; then
+    && (( retry_marker_status != 0 )); then
     verdict='UNKNOWN — retry attempt never executed; echoed retry marker is not terminal-attempt evidence'
-  elif ambiguous_terminal_attempt "${head_branch} ${annotation_text} ${log_text}"; then
+  elif (( ambiguous_status == 0 )); then
     verdict='UNKNOWN — log predates the retry marker; attempt-one diagnostics are not authoritative for the terminal attempt'
   else
     evidence="$(terminal_attempt_evidence "${head_branch} ${annotation_text} ${log_text}")"
     verdict="$(match_signature "$job_name" "$evidence")"
+    if [[ "$verdict" == 'UNKNOWN — no signature match, investigate' ]]; then
+      diagnosis="$(diagnose_log_failure "$log_text")"
+      if [[ -n "$diagnosis" ]]; then verdict="INVESTIGATE — $diagnosis"; fi
+    fi
   fi
 
-  printf '%s → %s → %s → %s\n' "$job_name" "${steps:-none}" "$annotation_text" "$verdict"
+  printf '%s → %s → %s → %s\n' "$job_name" "${steps:-none}" "$display_annotation_text" "$verdict"
 done < <(
   jq -r "${FAILURE_CONCLUSIONS_JQ_DEF}"$'
     .jobs[]

@@ -1,3 +1,4 @@
+import { statusOf } from "../../src/daemon/deviceBinding";
 import { describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -39,7 +40,11 @@ describe("DevicePool state-change listener", () => {
     });
     holder.pool = pool;
     try {
-      const sessionId = await pool.bindOrReuseDeviceSession("s1", handset.deviceId, "android");
+      const sessionId = await pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: handset.deviceId,
+        platform: "android",
+      });
       expect(seen).toEqual([["android", sessionId, "busy"]]);
 
       await pool.releaseDevice(handset.deviceId, sessionId);
@@ -57,7 +62,7 @@ describe("DevicePool state-change listener", () => {
       for (let i = 0; i < 10 && seen.length === 0; i++) {
         pool.recordDeviceError(handset.deviceId);
       }
-      expect(pool.getDevice(handset.deviceId)?.status).toBe("error");
+      expect(statusOf(pool.getDevice(handset.deviceId)!)).toBe("error");
       expect(seen).toEqual([handset.deviceId]);
     } finally {
       sessions.stopCleanupTimer();
@@ -69,7 +74,11 @@ describe("DevicePool state-change listener", () => {
       throw new Error("observer boom");
     });
     try {
-      const sessionId = await pool.bindOrReuseDeviceSession("s1", handset.deviceId, "android");
+      const sessionId = await pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: handset.deviceId,
+        platform: "android",
+      });
       expect(pool.getDevice(handset.deviceId)?.sessionId).toBe(sessionId);
     } finally {
       sessions.stopCleanupTimer();

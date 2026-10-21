@@ -96,3 +96,14 @@ describe("FakeCtrlProxy node actions", () => {
     expect(await fake.supportsNodeActionSelectors()).toBe(true);
   });
 });
+
+test("saved pin fake supports configured failure and interface calls", async () => {
+  const fake = new FakeCtrlProxy();
+  const proxy: AndroidCtrlProxy = fake;
+  const result = { success: false, errorCode: "pin_failed" as const, error: "launcher refused" };
+  fake.setPinResult(result);
+  expect(
+    await proxy.requestPinSavedPrototype("panel", "hero", 123, new NoOpPerformanceTracker()),
+  ).toEqual(result);
+  expect(fake.pinRequests).toEqual([{ id: "panel", icon: "hero" }]);
+});

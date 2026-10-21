@@ -1,0 +1,205 @@
+{
+  "spec": {
+    "id": "resolve",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "name": "{data:/s}"
+          }
+        ],
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+          "contentDescription": "{data:/s}"
+        },
+        {
+          "type": "button",
+          "label": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "{data:/s}",
+              "payload": {
+                "text": "{data:/s}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "fab",
+          "icon": "add",
+          "label": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+        },
+        {
+          "type": "segmentedButton",
+          "stateKey": "choice",
+          "options": [
+            {
+              "value": "a",
+              "label": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+            },
+            {
+              "value": "b",
+              "label": "literal"
+            }
+          ]
+        },
+        {
+          "type": "topAppBar",
+          "title": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+          "navigationIcon": {
+            "icon": "menu",
+            "label": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+          },
+          "actions": [
+            {
+              "icon": "add",
+              "label": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+            }
+          ]
+        },
+        {
+          "type": "dialog",
+          "title": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+          "text": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "confirm": {
+            "label": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+          },
+          "dismiss": {
+            "label": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+          }
+        },
+        {
+          "type": "snackbar",
+          "text": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "action": {
+            "label": "{data:/s}|{data:/n}|{data:/f}|{data:/b}|{data:/missing}|{data:/object}|{data:/array}|{data:/a~1b~0c}|{data:/raw}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+          }
+        }
+      ]
+    },
+    "data": {
+      "s": "hello",
+      "n": 7,
+      "f": 4.5,
+      "b": true,
+      "object": {},
+      "array": [],
+      "a/b~c": "escaped",
+      "raw": "{data:/missing}"
+    },
+    "state": {
+      "state_key": "state",
+      "choice": "a",
+      "open": false
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "name": "{data:/s}"
+        }
+      ],
+      "as": "item"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+        "contentDescription": "{data:/s}"
+      },
+      {
+        "type": "button",
+        "label": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "{data:/s}",
+            "payload": {
+              "text": "{data:/s}"
+            }
+          }
+        ]
+      },
+      {
+        "type": "fab",
+        "icon": "add",
+        "label": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+      },
+      {
+        "type": "segmentedButton",
+        "stateKey": "choice",
+        "options": [
+          {
+            "value": "a",
+            "label": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+          },
+          {
+            "value": "b",
+            "label": "literal"
+          }
+        ]
+      },
+      {
+        "type": "topAppBar",
+        "title": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+        "navigationIcon": {
+          "icon": "menu",
+          "label": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+        },
+        "actions": [
+          {
+            "icon": "add",
+            "label": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+          }
+        ]
+      },
+      {
+        "type": "dialog",
+        "title": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+        "text": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "confirm": {
+          "label": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+        },
+        "dismiss": {
+          "label": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+        }
+      },
+      {
+        "type": "snackbar",
+        "text": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "action": {
+          "label": "hello|7|4.5|true||||escaped|{data:/missing}|{data:bad}|{data:/bad~2}|{state_key}|{item.name}"
+        }
+      }
+    ]
+  }
+}

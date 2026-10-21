@@ -1,4 +1,4 @@
-import type { Mutex } from "async-mutex";
+import { unbindDevice, holderOf, isBusy } from "./deviceBinding";
 import { ActionableError, type DeviceInfo } from "../models";
 import type { Session, SessionManager } from "./sessionManager";
 import type { DeviceRecoveryCoordinator } from "./deviceRecoveryCoordinator";
@@ -18,17 +18,17 @@ import type {
 export interface AdbServerResetQuarantinePoolPort {
   /** Tell resource subscribers a status or holder write committed (#11413). */
   noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
-  getAssignmentMutex(): Mutex;
-  getDevices(): Map<string, PooledDevice>;
+  withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   getSessionManager(): SessionManager;
-  getStartedDeviceProcesses(): Map<string, DeviceAutolockChildProcess>;
+  getStartedDeviceProcesses(): ReadonlyMap<string, DeviceAutolockChildProcess>;
   getAdbServerResetTrackedProcesses(): WeakMap<PooledDevice, DeviceAutolockChildProcess>;
   getAdbServerResetRecoveryReservations(): Map<string, AdbServerResetRecoveryReservation>;
   getAndroidStartupLeases(): Map<symbol, AndroidStartupLeaseRequest>;
-  getRecoveringAndroidImages(): Map<string, DeviceInfo>;
-  getRecoveringAndroidDeviceIds(): Set<string>;
-  getRecoveringSessionLosses(): Map<string, AndroidRecoveryRecord>;
-  getFailedTerminalRecoveryReleases(): Set<string>;
+  getRecoveringAndroidImages(): ReadonlyMap<string, DeviceInfo>;
+  getRecoveringAndroidDeviceIds(): ReadonlySet<string>;
+  getRecoveringSessionLosses(): ReadonlyMap<string, AndroidRecoveryRecord>;
+  getFailedTerminalRecoveryReleases(): ReadonlySet<string>;
   getRecoveryCoordinator(): DeviceRecoveryCoordinator;
   getAfterAndroidStartupRecoverySnapshot(): (() => void) | undefined;
   getDevice(id: string): PooledDevice | null;
@@ -98,7 +98,7 @@ export class AdbServerResetQuarantine {
     }
     const sessionId =
       device.adbServerResetSessionId ??
-      device.sessionId ??
+      holderOf(device) ??
       this.pool.getSessionManager().getSessionForDevice(device.id);
     const session = sessionId ? this.pool.getSessionManager().getSession(sessionId) : null;
     if (!session || session.assignedDevice !== device.id || session.platform !== "android") {
@@ -110,7 +110,7 @@ export class AdbServerResetQuarantine {
   async detachAdbServerResetCohort(
     cohort: readonly PooledDevice[],
   ): Promise<AdbServerResetCohortDetachment> {
-    return await this.pool.getAssignmentMutex().runExclusive(async () => {
+    return await this.pool.withAssignmentLock(async () => {
       if (
         cohort.some(
           (device) =>
@@ -132,14 +132,14 @@ export class AdbServerResetQuarantine {
         ) {
           continue;
         }
-        const sessionId = device.sessionId;
-        if (device.sessionId) {
-          const session = this.pool.getSessionManager().getSession(device.sessionId);
+        const sessionId = holderOf(device);
+        if (holderOf(device)) {
+          const session = this.pool.getSessionManager().getSession(holderOf(device)!);
           if (!session || session.assignedDevice !== device.id || session.platform !== "android") {
-            this.pool.getRecoveryCoordinator().finalizeRecoveryRecord(device.sessionId);
+            this.pool.getRecoveryCoordinator().finalizeRecoveryRecord(holderOf(device)!);
             continue;
           }
-          device.adbServerResetSessionId = device.sessionId;
+          device.adbServerResetSessionId = holderOf(device)!;
         }
         device.adbServerResetAutolockSessionId = device.autolockSessionId;
         const trackedProcess = this.pool.getStartedDeviceProcesses().get(device.id);
@@ -147,8 +147,7 @@ export class AdbServerResetQuarantine {
           this.pool.getAdbServerResetTrackedProcesses().set(device, trackedProcess);
         }
         this.reserveAdbServerResetRecovery(device);
-        device.sessionId = null;
-        device.status = "idle";
+        unbindDevice(device);
         this.pool.noteDeviceStateChanged?.(device);
         await this.pool.removeDevice(device.id, false, device);
         detached.push(device);
@@ -174,7 +173,7 @@ export class AdbServerResetQuarantine {
     }
     try {
       for (const device of cohort) {
-        if (capturedTargets.some(({ sessionId }) => sessionId === device.sessionId)) {
+        if (capturedTargets.some(({ sessionId }) => sessionId === holderOf(device))) {
           device.adbServerResetIncidentId = await this.pool.recordEmulatorLossIncident(
             device.id,
             "adb-server-reset",
@@ -239,7 +238,7 @@ export class AdbServerResetQuarantine {
       if (device.adbServerResetIncidentId) {
         await this.pool.completeEmulatorLossRecovery(
           device.adbServerResetIncidentId,
-          device.sessionId && activeSessionIds.has(device.sessionId)
+          holderOf(device) && activeSessionIds.has(holderOf(device)!)
             ? "exhausted"
             : "not-attempted",
         );
@@ -279,13 +278,13 @@ export class AdbServerResetQuarantine {
       if (
         this.pool.getDevices().get(device.id) !== device ||
         !this.pool.isAndroidEmulatorActiveRelaunchEligible(device) ||
-        !device.sessionId
+        !holderOf(device)
       ) {
         continue;
       }
-      const session = this.pool.getSessionManager().getSession(device.sessionId);
+      const session = this.pool.getSessionManager().getSession(holderOf(device)!);
       if (session?.assignedDevice === device.id && session.platform === "android") {
-        sessionTargets.set(device.sessionId, {
+        sessionTargets.set(holderOf(device)!, {
           deviceId: device.id,
           session,
           pooledDevice: device,
@@ -307,7 +306,7 @@ export class AdbServerResetQuarantine {
       if (
         this.pool.getDevices().get(device.id) !== device ||
         !this.pool.isAndroidEmulatorActiveRelaunchEligible(device) ||
-        device.sessionId !== null ||
+        holderOf(device) !== null ||
         !this.pool.getStartedDeviceProcesses().has(device.id)
       ) {
         continue;
@@ -366,7 +365,7 @@ export class AdbServerResetQuarantine {
     for (;;) {
       let matchingReservations: AdbServerResetRecoveryReservation[] = [];
       let matchingRecoveryAvdNames: string[] = [];
-      await this.pool.getAssignmentMutex().runExclusive(() => {
+      await this.pool.withAssignmentLock(() => {
         ({ matchingReservations, matchingRecoveryAvdNames } =
           this.getAndroidStartupRecoveryMatches(request));
         if (matchingReservations.length === 0 && matchingRecoveryAvdNames.length === 0) {
@@ -393,7 +392,7 @@ export class AdbServerResetQuarantine {
         return;
       }
       released = true;
-      await this.pool.getAssignmentMutex().runExclusive(() => {
+      await this.pool.withAssignmentLock(() => {
         this.pool.getAndroidStartupLeases().delete(owner);
       });
     };
@@ -436,7 +435,7 @@ export class AdbServerResetQuarantine {
   }
 
   async releaseAdbServerResetCohortReservations(cohort: readonly PooledDevice[]): Promise<void> {
-    await this.pool.getAssignmentMutex().runExclusive(() => {
+    await this.pool.withAssignmentLock(() => {
       for (const device of cohort) {
         if (device.adbServerResetSessionId) {
           const sessionId = device.adbServerResetSessionId;
@@ -480,10 +479,10 @@ export class AdbServerResetQuarantine {
       ? this.pool.getDevices().get(assignedDeviceId)
       : undefined;
     return (
-      restoredDevice?.sessionId === sessionId &&
-      restoredDevice.status === "busy" &&
-      restoredDevice.platform === "android" &&
-      restoredDevice.avdName === device.avdName
+      holderOf(restoredDevice) === sessionId &&
+      isBusy(restoredDevice) &&
+      restoredDevice!.platform === "android" &&
+      restoredDevice!.avdName === device.avdName
     );
   }
 

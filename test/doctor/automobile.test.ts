@@ -30,6 +30,7 @@ import { logger } from "../../src/utils/logger";
 import { DoctorDeadlineError } from "../../src/doctor/deadline";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ActionableError } from "../../src/models/ActionableError";
+import { createExecResult } from "../../src/utils/execResult";
 
 describe("checkDaemonVersion", () => {
   test("returns pass status", () => {
@@ -82,7 +83,7 @@ describe("checkImageBackend", () => {
   test("reports active sharp backend and load status on macOS and Linux", async () => {
     const result = await checkImageBackend({
       platform: "linux",
-      sharpLoader: async () => ({}) as never,
+      sharpLoader: async () => ({}),
     });
 
     expect(result).toEqual({
@@ -335,7 +336,7 @@ describe("AutoMobile doctor cancellation", () => {
       observedSignal = probe?.signal;
       observedTimeoutMs = probe?.timeoutMs;
       await new Promise<void>((resolve) => {
-        probe?.signal?.addEventListener("abort", resolve, { once: true });
+        probe?.signal?.addEventListener("abort", () => resolve(), { once: true });
       });
       try {
         probe?.signal?.throwIfAborted();
@@ -567,7 +568,6 @@ describe("checkCtrlProxy", () => {
         {
           deviceId: "emulator-5554",
           platform: "android",
-          isEmulator: true,
           name: "Pixel",
         },
       ]);
@@ -596,22 +596,24 @@ describe("checkCtrlProxy", () => {
         {
           deviceId: "emulator-5554",
           platform: "android",
-          isEmulator: true,
           name: "Pixel",
         },
       ]);
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      fakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
 
       const result = await checkCtrlProxy(fakeFactory);
 
@@ -630,16 +632,16 @@ describe("checkCtrlProxy", () => {
   });
 
   function configureInstalled(adb: FakeAdbExecutor, sha = "different-sha", enabled = true) {
-    adb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-      stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-      stderr: "",
-    });
-    adb.setCommandResponse("shell pm path", { stdout: "package:/data/app/base.apk", stderr: "" });
-    adb.setCommandResponse("shell sha256sum", { stdout: `${sha} /data/app/base.apk`, stderr: "" });
-    adb.setCommandResponse("settings get secure", {
-      stdout: enabled ? AndroidCtrlProxyManager.PACKAGE : "",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+      createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+    );
+    adb.setCommandResponse("shell pm path", createExecResult("package:/data/app/base.apk", ""));
+    adb.setCommandResponse("shell sha256sum", createExecResult(`${sha} /data/app/base.apk`, ""));
+    adb.setCommandResponse(
+      "settings get secure",
+      createExecResult(enabled ? AndroidCtrlProxyManager.PACKAGE : "", ""),
+    );
   }
 
   const device = (deviceId: string) => ({
@@ -714,8 +716,7 @@ describe("checkCtrlProxy", () => {
     fakeAdb.setDevices([device("one")]);
     configureInstalled(fakeAdb);
     await checkCtrlProxy(fakeFactory);
-    expect(AndroidCtrlProxyManager.getExistingInstance("one")).toBe(live);
-    expect(Reflect.get(AndroidCtrlProxyManager, "adbFactory")).toBe(liveFactory);
+    expect(live === AndroidCtrlProxyManager.getExistingInstance("one")).toBe(true);
     expect(await live.isInstalled()).toBe(true);
     expect(await live.isEnabled()).toBe(true);
     expect(liveAdb.getExecutedCommands()).toHaveLength(commands);
@@ -753,7 +754,7 @@ describe("checkCtrlProxy", () => {
     expect(disabled.status).toBe("warn");
     expect(disabled.recommendation).toContain("Enable CtrlProxy in device settings");
     configureInstalled(fakeAdb);
-    fakeAdb.setCommandResponse("shell pm path", { stdout: "", stderr: "" });
+    fakeAdb.setCommandResponse("shell pm path", createExecResult("", ""));
     const unknown = await checkCtrlProxy(fakeFactory);
     expect(unknown.status).toBe("warn");
     expect(unknown.message).toContain("versionStatus=unverifiable");
@@ -767,7 +768,7 @@ describe("checkCtrlProxy", () => {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
     fakeAdb.setDevices([device("one")]);
     configureInstalled(fakeAdb);
-    fakeAdb.setCommandResponse("shell pm path", { stdout: "", stderr: "" });
+    fakeAdb.setCommandResponse("shell pm path", createExecResult("", ""));
     try {
       const result = await checkCtrlProxy(fakeFactory);
       expect(result.status).toBe("fail");
@@ -796,7 +797,7 @@ describe("checkCtrlProxy", () => {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
     fakeAdb.setDevices([device("one")]);
     configureInstalled(fakeAdb);
-    fakeAdb.setCommandResponse("shell pm path", { stdout: "", stderr: "" });
+    fakeAdb.setCommandResponse("shell pm path", createExecResult("", ""));
     try {
       const result = await checkCtrlProxy(fakeFactory);
       expect(result.status).not.toBe("fail");
@@ -970,10 +971,10 @@ describe("checkCtrlProxy", () => {
       "device=one; No work profiles detected",
     );
     fakeAdb.setUsers([{ userId: 10, name: "Work", flags: 0x20, running: true }]);
-    fakeAdb.setCommandResponse("shell settings --user 10", {
-      stdout: AndroidCtrlProxyManager.PACKAGE,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "shell settings --user 10",
+      createExecResult(AndroidCtrlProxyManager.PACKAGE, ""),
+    );
     expect((await checkWorkProfileAccessibility(fakeFactory)).message).toBe(
       "device=one; Accessibility service enabled for 1 work profile(s)",
     );
@@ -1065,18 +1066,20 @@ describe("checkCtrlProxy", () => {
         {
           deviceId: "emulator-5554",
           platform: "android",
-          isEmulator: true,
           name: "Pixel",
         },
       ]);
-      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      fakeAdb.setCommandResponse(
+        "settings get secure",
+        createExecResult(
+          `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
+          "",
+        ),
+      );
 
       const result = await checkCtrlProxy(fakeFactory);
 
@@ -1200,6 +1203,11 @@ describe("runAutoMobileChecks", () => {
       name: "CtrlProxy Forwarding Leases",
       status: "pass" as const,
       message: "No CtrlProxy forwarding leases held by other processes",
+    }),
+    checkDeviceOwnership: async () => ({
+      name: "Device Ownership Agreement",
+      status: "pass" as const,
+      message: "Device ownership stores agree",
     }),
   };
 

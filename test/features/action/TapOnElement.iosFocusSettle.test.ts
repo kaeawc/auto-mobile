@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { beforeAll, describe, expect, test } from "bun:test";
 import cartAItem44Focused from "../../fixtures/ios/nested-selection/cart-a-item-44-quantity-focused.json";
 import cartBItem41Focused from "../../fixtures/ios/nested-selection/cart-b-item-41-quantity-focused.json";
@@ -10,6 +11,7 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import type { TapStrategy } from "../../../src/utils/interfaces/TapStrategy";
+import { IosTapStrategy } from "../../../src/features/action/strategies/IosTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 /**
@@ -62,11 +64,21 @@ async function focusOnIos(
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
+  const iosClip = new IosTapStrategy({ name: "iPhone", platform: "ios", deviceId: "sim" });
   const tapStrategy: TapStrategy = {
     prepareViewHierarchyForResponse: () => null,
     isAccessibilityServiceEnabled: async () => false,
+    clipNavigationTapBounds: (...args) => iosClip.clipNavigationTapBounds(...args),
     shouldRunPreTapStability: () => false,
     retryTapIfNoChange: false,
+    warnsOnDisabledElement: false,
+    settlesPostTapChange: false,
+    verifiesRefreshedDisplay: false,
+    promotesClickableAncestor: false,
+    settlesFocusChangeAfterTap: true,
+    rethrowsKeyboardOcclusion: false,
+    applyRefreshedObservationRotation: (...args) =>
+      iosClip.applyRefreshedObservationRotation(...args),
     longPressDurationMs: 1000,
   };
   const device: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "sim" };
@@ -95,9 +107,21 @@ async function focusOnIos(
     // The first post-tap read still shows the screen before the field took focus.
     observedInteraction: async (action: (observation: ObserveResult) => Promise<object>) => ({
       ...(await action(
-        recordObservationRead({ viewHierarchy: preTap, screenSize: capture.screenSize }),
+        recordObservationRead(
+          buildObserveResult({
+            viewHierarchy: preTap,
+            screenSize: capture.screenSize,
+            updatedAt: 0,
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          }),
+        ),
       )),
-      observation: { viewHierarchy: beforeFocus(capture), screenSize: capture.screenSize },
+      observation: buildObserveResult({
+        viewHierarchy: beforeFocus(capture),
+        screenSize: capture.screenSize,
+        updatedAt: 0,
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      }),
     }),
     prepareSelectionCapture: async () => null,
     deriveTapEffectAfterPostTapObservation: async (_previous: unknown, current: ObserveResult) => ({

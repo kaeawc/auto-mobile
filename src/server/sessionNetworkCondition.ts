@@ -1,5 +1,5 @@
 import type { SessionManager } from "../daemon/sessionManager";
-import type { IosAppNetworkRuleCommandContext } from "../features/network-filter/IosAppNetworkRuleClient";
+import type { IosAppNetworkRuleCommandContext } from "../features/networkFilter/IosAppNetworkRuleClient";
 import {
   iosAppNetworkRuleOutcome,
   type NetworkConditionState,

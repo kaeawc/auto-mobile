@@ -1,28 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  installAppSchema,
-  registerAppTools,
-  resetInstallAppToolDependencies,
-  resetUninstallAppToolDependencies,
-  setInstallAppToolDependencies,
-  setUninstallAppToolDependencies,
-  uninstallAppSchema,
-} from "../../src/server/appTools";
+import { installAppSchema, uninstallAppSchema } from "../../src/server/appTools";
+import type { InstallAppCall } from "../../src/features/action/InstallApp";
+import type { UninstallAppCall } from "../../src/features/action/UninstallApp";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SigningGuardError } from "../../src/models/SigningGuardError";
 import { SIGNER_A } from "../helpers/signedApkFixtures";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 const device = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
 
 describe("install/uninstall signing guard arguments", () => {
   beforeEach(() => {
-    ToolRegistry.clearTools();
-    registerAppTools();
+    appTools.reset();
   });
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetInstallAppToolDependencies();
-    resetUninstallAppToolDependencies();
+    appTools.clear();
   });
 
   test("schemas accept well-formed digests and reject malformed or empty lists", () => {
@@ -45,11 +39,11 @@ describe("install/uninstall signing guard arguments", () => {
   });
 
   test("uninstallApp forwards the guard; without one the call shape is unchanged", async () => {
-    const calls: unknown[][] = [];
-    setUninstallAppToolDependencies({
+    const calls: Array<UninstallAppCall | undefined> = [];
+    appTools.configure("uninstallApp", {
       createUninstallApp: () => ({
-        execute: async (...args) => {
-          calls.push(args.slice(0, 5));
+        execute: async (_appId, call) => {
+          calls.push(call);
           return { success: true, packageName: "a.b", keepData: false, wasInstalled: true };
         },
       }),
@@ -57,16 +51,18 @@ describe("install/uninstall signing guard arguments", () => {
     const handler = ToolRegistry.getTool("uninstallApp")?.deviceAwareHandler;
     await handler?.(device, { appId: "a.b", expectedSigningSha256: [SIGNER_A] });
     await handler?.(device, { appId: "a.b" });
-    expect(calls[0]?.[4]).toEqual({ expectedSigningSha256: [SIGNER_A] });
-    expect(calls[1]).toHaveLength(4);
+    expect(calls[0]?.guard).toEqual({
+      expectedSigningSha256: [SIGNER_A],
+    });
+    expect(calls[1]?.guard).toBeUndefined();
   });
 
   test("installApp forwards guards and surfaces a typed refusal", async () => {
-    const calls: unknown[][] = [];
-    setInstallAppToolDependencies({
+    const calls: Array<InstallAppCall | undefined> = [];
+    appTools.configure("installApp", {
       createInstallApp: () => ({
-        execute: async (...args) => {
-          calls.push(args);
+        execute: async (_artifactPath, call) => {
+          calls.push(call);
           throw new SigningGuardError("mismatch", "signed by a different key", {
             appId: "a.b",
             userId: 0,
@@ -83,7 +79,7 @@ describe("install/uninstall signing guard arguments", () => {
         allowDestructiveRecovery: false,
       }),
     ).rejects.toBeInstanceOf(SigningGuardError);
-    expect(calls[0]?.[3]).toEqual({
+    expect(calls[0]?.guard).toEqual({
       expectedSigningSha256: [SIGNER_A],
       allowDestructiveRecovery: false,
     });

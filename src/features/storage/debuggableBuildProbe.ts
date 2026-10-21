@@ -24,11 +24,10 @@ export async function probeDebuggableBuild(
   appId: string,
 ): Promise<boolean | undefined> {
   try {
-    const result = await adb.executeCommand(
-      `shell dumpsys package ${shellQuote(appId)}`,
-      5000,
-      DUMPSYS_MAX_BUFFER,
-    );
+    const result = await adb.executeCommand(`shell dumpsys package ${shellQuote(appId)}`, {
+      timeoutMs: 5000,
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+    });
     return parseDebuggableBuild(result.stdout);
   } catch (error) {
     logger.warn("[DebuggableBuildProbe] Android package probe failed", error);

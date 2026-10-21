@@ -1,4 +1,3 @@
-import type { Kysely } from "kysely";
 import { DAEMON_DEVICE_LEASE_STATUS_METHOD } from "../../src/daemon/constants";
 import {
   handleDaemonRequest,
@@ -24,7 +23,8 @@ import {
   terminalReleaseJournalPath,
   type TerminalReleaseJournalDirectory,
 } from "../../src/daemon/terminalReleaseJournal";
-import type { Database } from "../../src/db/types";
+import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import type { DeviceSession } from "../../src/db/types";
 import {
   DeviceSessionRepository,
   isRecoverableDaemonReleaseReason,
@@ -252,10 +252,10 @@ interface DaemonProcess {
  * The session manager's in-progress recoveries/assignments (session id -> promise), read without
  * side effects. Private state, read only by the stranded-claim invariant.
  */
-function pendingSessionAssignments(manager: SessionManager): ReadonlyMap<string, unknown> {
-  const raw: unknown = Reflect.get(manager, "pendingSessionAssignments");
+function sessionAssignments(manager: SessionManager): ReadonlyMap<string, unknown> {
+  const raw: unknown = Reflect.get(Reflect.get(manager, "sessionSlots"), "assignments");
   if (!(raw instanceof Map)) {
-    throw new Error("SessionManager no longer keeps pendingSessionAssignments; update the harness");
+    throw new Error("SessionSlots no longer exposes assignments; update the harness");
   }
   return raw;
 }
@@ -323,22 +323,20 @@ class SharedClaimFiles {
   }
 }
 
-class TwoDaemonWorld {
+export class TwoDaemonWorld {
   constructor(
-    private readonly db: Kysely<Database>,
+    private readonly repository: DeviceSessionRepository,
+    private readonly loadNonActiveRows: () => Promise<DeviceSession[]>,
     private readonly tolerate: ReadonlySet<TwoDaemonViolationKind>,
-  ) {
-    this.repository = new DeviceSessionRepository(db, this.timer);
-  }
+    readonly timer = new FakeTimer(),
+  ) {}
 
-  readonly timer = new FakeTimer();
   readonly discovery = new FakeDeviceUtils();
   readonly journalFiles = new FakeTerminalReleaseJournalFileSystem();
   /** Session id -> the dead daemon whose journal held its terminal release when it died. */
   private readonly deadTerminalReleases = new Map<string, string>();
   readonly claims = new SharedClaimFiles((pid) => this.isPidRunning(pid));
   readonly trace: string[] = [];
-  private readonly repository: DeviceSessionRepository;
   readonly online: boolean[] = DEVICES.map(() => true);
   readonly clients: ClientState[] = Array.from({ length: TWO_DAEMON_CLIENT_COUNT }, (_, index) => ({
     index,
@@ -740,6 +738,7 @@ class TwoDaemonWorld {
   }
 
   async start(): Promise<void> {
+    resetDbWriteBarrier();
     this.discovery.setBootedDevices("android", this.onlineDevices());
     this.startProcess(0);
     this.startProcess(1);
@@ -756,6 +755,8 @@ class TwoDaemonWorld {
     }
     this.timer.resolveAll();
     await drainMicrotasks(SETTLE_TURNS);
+    // A dead process deliberately leaves writes pending forever; no world owns the singleton.
+    resetDbWriteBarrier();
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -827,12 +828,7 @@ class TwoDaemonWorld {
    * the peer and that daemon's own startup refuse the row until the daemon exits.
    */
   private async checkNoStrandedClaims(): Promise<void> {
-    const rows = await this.db
-      .selectFrom("device_sessions")
-      .selectAll()
-      .where("status", "!=", "active")
-      .where("expires_at_ms", ">", this.timer.now())
-      .execute();
+    const rows = await this.loadNonActiveRows();
     for (const row of rows) {
       if (!row.release_reason || !isRecoverableDaemonReleaseReason(row.release_reason)) {
         continue;
@@ -845,7 +841,7 @@ class TwoDaemonWorld {
         !owner.manager.hasSession(row.session_uuid) &&
         // A recovery still in progress (past the startup deadline, waiting out a restart grace)
         // holds its claim legitimately; only a claim no recovery holds is stranded.
-        !pendingSessionAssignments(owner.manager).has(row.session_uuid)
+        !sessionAssignments(owner.manager).has(row.session_uuid)
       ) {
         this.fail(
           "stranded-claim",
@@ -947,20 +943,14 @@ class TwoDaemonWorld {
     this.launch(
       `c${client.index} acquire ${device.deviceId} via ${process.name}`,
       async () => {
-        const bound = await process.pool.bindOrReuseDeviceSession(
+        const bound = await process.pool.bindOrReuseDeviceSession({
           sessionId,
-          device.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          connection,
-          false,
-        );
+          deviceId: device.deviceId,
+          platform: "android",
+          allowSessionRebind: false,
+          mcpSessionId: connection,
+          oneShotCli: false,
+        });
         this.log(`  c${client.index} bound ${device.deviceId} -> ${bound} on ${process.name}`);
         if (process.dead) {
           return;
@@ -1509,7 +1499,19 @@ export async function runTwoDaemonSteps(
   options: TwoDaemonRunOptions = {},
 ): Promise<TwoDaemonRunResult> {
   const db = await createTestDatabase();
-  const world = new TwoDaemonWorld(db, options.tolerate ?? new Set());
+  const timer = new FakeTimer();
+  const world = new TwoDaemonWorld(
+    new DeviceSessionRepository(db, timer),
+    () =>
+      db
+        .selectFrom("device_sessions")
+        .selectAll()
+        .where("status", "!=", "active")
+        .where("expires_at_ms", ">", timer.now())
+        .execute(),
+    options.tolerate ?? new Set(),
+    timer,
+  );
   try {
     await world.start();
     for (const [index, step] of steps.entries()) {

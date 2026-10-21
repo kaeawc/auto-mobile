@@ -6,7 +6,7 @@ import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import type { VisionFallbackConfig } from "../../../src/vision/VisionTypes";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { ObserveResult, TapOnElementOptions } from "../../../src/models";
+import type { BootedDevice, ObserveResult, TapOnElementOptions } from "../../../src/models";
 import { SelectionStateTracker } from "../../../src/features/navigation/SelectionStateTracker";
 import { ActionableError } from "../../../src/models";
 
@@ -19,28 +19,32 @@ const enabledVisionConfig: VisionFallbackConfig = {
   cacheTtlMinutes: 60,
 };
 
-const device = { name: "test-device", platform: "android", id: "emulator-5554" } as any;
+const device: BootedDevice = {
+  name: "test-device",
+  platform: "android",
+  deviceId: "emulator-5554",
+};
 
 const createObserveResult = (): ObserveResult => ({
-  timestamp: Date.now(),
+  updatedAt: Date.now(),
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy: { hierarchy: { node: [] } } as any,
+  viewHierarchy: { hierarchy: {} },
 });
 
 describe("TapOnElement vision fallback (handleElementNotFound)", () => {
-  let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+  let getInstanceSpy: ReturnType<typeof spyOn>;
   let fakeCtrlProxy: FakeCtrlProxy;
 
   beforeEach(() => {
     fakeCtrlProxy = new FakeCtrlProxy();
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as any,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy);
   });
 
   afterEach(() => {
-    getInstanceSpy?.mockRestore();
+    getInstanceSpy.mockRestore();
   });
 
   const createTapOnElement = (
@@ -119,7 +123,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
 
     let thrown: Error | null = null;
     try {
-      await (tapOn as any).handleElementNotFound(options, observeResult, true, undefined);
+      await tapOn.testHooks.handleElementNotFound(options, observeResult, true, undefined);
     } catch (e) {
       thrown = e as Error;
     }
@@ -157,7 +161,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
 
     let thrown: Error | null = null;
     try {
-      await (tapOn as any).handleElementNotFound(options, observeResult, true, undefined);
+      await tapOn.testHooks.handleElementNotFound(options, observeResult, true, undefined);
     } catch (e) {
       thrown = e as Error;
     }
@@ -181,7 +185,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
 
     let thrown: Error | null = null;
     try {
-      await (tapOn as any).handleElementNotFound(options, observeResult, true, undefined);
+      await tapOn.testHooks.handleElementNotFound(options, observeResult, true, undefined);
     } catch (e) {
       thrown = e as Error;
     }
@@ -202,7 +206,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
 
     let thrown: Error | null = null;
     try {
-      await (tapOn as any).handleElementNotFound(options, observeResult, true, undefined);
+      await tapOn.testHooks.handleElementNotFound(options, observeResult, true, undefined);
     } catch (e) {
       thrown = e as Error;
     }
@@ -227,7 +231,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
 
     let thrown: Error | null = null;
     try {
-      await (tapOn as any).handleElementNotFound(options, observeResult, false, undefined);
+      await tapOn.testHooks.handleElementNotFound(options, observeResult, false, undefined);
     } catch (e) {
       thrown = e as Error;
     }
@@ -248,7 +252,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
     const observeResult = createObserveResult();
 
     try {
-      await (tapOn as any).handleElementNotFound(options, observeResult, true, undefined);
+      await tapOn.testHooks.handleElementNotFound(options, observeResult, true, undefined);
     } catch {
       /* expected */
     }

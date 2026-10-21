@@ -1,4 +1,5 @@
 import { expect, describe, test, beforeAll, beforeEach, afterEach } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
@@ -25,6 +26,7 @@ const GREEN_PNG = Buffer.from(
 
 describe("ScreenshotCache", function () {
   let tempDir: string;
+  const scratch = useScratchRoot("screenshot-cache-");
   let fakeTimer: FakeTimer;
 
   // The first read pays one-time filesystem and module cost; pay it outside the timed tests.
@@ -41,14 +43,13 @@ describe("ScreenshotCache", function () {
   });
 
   beforeEach(async function () {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "screenshot-cache-"));
+    tempDir = scratch.next();
     fakeTimer = new FakeTimer();
     ScreenshotCache.clearCache();
   });
 
   afterEach(async function () {
     ScreenshotCache.clearCache();
-    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   test("returns cached buffer within TTL", async function () {
@@ -87,14 +88,11 @@ describe("ScreenshotCache", function () {
 });
 
 describe("ScreenshotCache.getScreenshotFiles", function () {
+  const scratch = useScratchRoot("screenshot-files-");
   let tempDir: string;
 
-  beforeEach(async function () {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "screenshot-files-"));
-  });
-
-  afterEach(async function () {
-    await fs.rm(tempDir, { recursive: true, force: true });
+  beforeEach(() => {
+    tempDir = scratch.next();
   });
 
   test("includes .jpg captures written by the Android CtrlProxy path", async function () {

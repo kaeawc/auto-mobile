@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "flow-grid",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "flow",
+      "maxLines": 0,
+      "children": []
+    }
+  },
+  "expectedPath": "root.maxLines"
+}

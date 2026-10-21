@@ -1,3 +1,7 @@
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
+import { createExecResult } from "../../../src/utils/execResult";
+import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
+import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DisplayTransitionTracker,
@@ -16,14 +20,13 @@ import {
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
+
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { setObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { readFileSync } from "node:fs";
@@ -37,6 +40,7 @@ import {
   type ObservationFrameInvalidator,
 } from "../../../src/features/observe/ObservationFrameInvalidator";
 import { logger } from "../../../src/utils/logger";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 class FakeObservationFrameInvalidator implements ObservationFrameInvalidator {
   readonly deviceIds: string[] = [];
@@ -250,9 +254,9 @@ describe("display transitions", () => {
           updatedAt: 2,
         },
       ]);
-      const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      const client = spyOnIosClientInstance({
         getLatestHierarchy: async () => ({ hierarchy: null }),
-      } as unknown as IOSCtrlProxyClient);
+      });
       try {
         const screen = new RealObserveScreen(
           rotatingDevice,
@@ -293,9 +297,9 @@ describe("display transitions", () => {
     hierarchy.configureHierarchy(captured);
     const cacheStore = new FakeObserveCacheStore(timer);
     setObserveCacheStore(cacheStore);
-    const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const client = spyOnIosClientInstance({
       getLatestHierarchy: async () => ({ hierarchy: null }),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const screen = new RealObserveScreen(
       duo,
       adbFactory,
@@ -318,14 +322,21 @@ describe("display transitions", () => {
     const executeSpy = spyOn(screen, "execute").mockImplementation((request) =>
       execute({ ...options, ...request }),
     );
-    const cachedSpy = spyOn(screen, "getMostRecentCachedObserveResult").mockResolvedValue(null);
+    const cachedSpy = spyOn(screen, "getMostRecentCachedObserveResult").mockResolvedValue({
+      observationId: "cache-miss",
+      updatedAt: 0,
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      screenSize: { width: 0, height: 0 },
+      systemInsets: { top: 0, left: 0, right: 0, bottom: 0 },
+      freshness: { isFresh: false, warning: "test cache miss" },
+    });
     try {
       const before = displayTransitions.identityRevision(duo.deviceId);
       const observed = await screen.execute(options);
       const afterObserve = displayTransitions.identityRevision(duo.deviceId);
       const prepared = await screen.execute({ ...options, freshness: "cached-ok" });
       // values reported in issue #8379's 2026-10-01 device verification
-      const expectedSize = { width: 951, height: 669, units: "points" };
+      const expectedSize = { width: 951, height: 669, units: "points" as const };
       expect(observed.screenSize).toEqual(expectedSize);
       expect(prepared.screenSize).toEqual(expectedSize);
       for (const result of [observed, prepared]) {
@@ -646,10 +657,13 @@ describe("display transitions", () => {
   test("rotation does not wipe observe cache or repeat the lock sample", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 100}',
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 100}',
+        "",
+      ),
+    );
     const lockRead = spyOn(adb, "getDeviceLock");
     const cache = new FakeObserveCacheStore(timer);
     const hierarchy = new FakeViewHierarchy();
@@ -719,14 +733,14 @@ describe("display transitions", () => {
     const hierarchy = new FakeViewHierarchy();
     const cache = new FakeObserveCacheStore(timer);
     adb.setCommandResponseSequence("cmd display get-displays", [
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-        stderr: "",
-      },
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-        stderr: "",
-      },
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
     ]);
     adb.setDeviceLockSequence([
       { locked: false, keyguardShowing: false },
@@ -770,15 +784,18 @@ describe("display transitions", () => {
 
   test("tapOn rejects a fresh hierarchy captured on a different sized panel", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-      stderr: "",
-    });
-    const capture = {
-      capture: async () => ({
-        hierarchy: { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 },
-      }),
-    } as HierarchyCapture;
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
+    );
+    const capture = new FakeHierarchyCapture(() => ({
+      hierarchy: { node: {} },
+      screenWidth: 100,
+      screenHeight: 100,
+    }));
     const tap = new TapOnElement(device, adb, {
       timer: new FakeTimer(),
       hierarchyCapture: capture,
@@ -807,19 +824,21 @@ describe("display transitions", () => {
     };
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state state", {
-      stdout: deviceStateFixture("foldpf-5-after-reset-state.txt"),
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout: deviceStateFixture("foldpf-print-states.txt"),
-      stderr: "",
-    });
+        "",
+      ),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(deviceStateFixture("foldpf-5-after-reset-state.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(deviceStateFixture("foldpf-print-states.txt"), ""),
+    );
     const hierarchy = new FakeViewHierarchy();
     hierarchy.configureHierarchy({
       hierarchy: { node: {} },
@@ -841,16 +860,12 @@ describe("display transitions", () => {
       expect(observed.display).toMatchObject({ key: "external", posture: "closed" });
       const tap = new TapOnElement(focusedDevice, adb, {
         timer,
-        hierarchyCapture: {
-          capture: async () => ({
-            hierarchy: {
-              hierarchy: { node: {} },
-              displayId: 2,
-              screenWidth: 200,
-              screenHeight: 200,
-            },
-          }),
-        } as HierarchyCapture,
+        hierarchyCapture: new FakeHierarchyCapture(() => ({
+          hierarchy: { node: {} },
+          displayId: 2,
+          screenWidth: 200,
+          screenHeight: 200,
+        })),
       });
       await expect(tap.refreshViewHierarchy(10, observed.screenSize)).resolves.toBeDefined();
       expect(displayTransitions.revision(focusedDevice.deviceId)).toBe(0);
@@ -873,15 +888,18 @@ describe("display transitions", () => {
       },
     };
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
-    const capture = {
-      capture: async () => ({
-        hierarchy: { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
-      }),
-    } as HierarchyCapture;
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+    );
+    const capture = new FakeHierarchyCapture(() => ({
+      hierarchy: { node: {} },
+      screenWidth: 200,
+      screenHeight: 200,
+    }));
     const tap = new TapOnElement(sameSized, adb, {
       timer: new FakeTimer(),
       hierarchyCapture: capture,
@@ -899,4 +917,199 @@ describe("display transitions", () => {
       displayTransitions.reset(sameSized.deviceId);
     }
   });
+});
+
+const fingerprintInventory = parseAndroidDeviceDisplays(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-open-surfaceflinger.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-open-displays.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-print-states.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+)!;
+
+describe("fingerprint pushed panel identity", () => {
+  test("state-first fold ignores the old fingerprint until the complementary display push", () => {
+    for (const oldFingerprint of [undefined, { width: 2076, height: 2152 }]) {
+      const resolved: Array<{ width: number; height: number }> = [];
+      const tracker = new DisplayTransitionTracker(
+        () => {},
+        () => {},
+        (_id, size) => {
+          resolved.push(size);
+          return panelKeyForFingerprint(fingerprintInventory.panels, size);
+        },
+      );
+      tracker.record("state-first", {
+        display: { key: "4619827259835644672", role: "inner", posture: "opened", generation: 0 },
+        screenSize: { width: 2076, height: 2152 },
+      });
+      const emitted: Array<string | undefined> = [];
+      tracker.subscribe("state-first", (panel) => emitted.push(panel?.key));
+      tracker.notifyAndroidTransition("state-first", {
+        change: "device_state",
+        displayId: 0,
+        deviceState: 1,
+        width: 2076,
+        height: 2152,
+        panelFingerprint: oldFingerprint,
+      });
+      expect(emitted).toEqual([undefined]);
+      expect(resolved).toEqual([]);
+      expect(tracker["pendingPushes"].get("state-first")?.panel).toBeUndefined();
+      const newFingerprint = { width: 1080, height: 2364 };
+      tracker.notifyAndroidTransition("state-first", {
+        change: "changed",
+        displayId: 0,
+        ...newFingerprint,
+        panelFingerprint: newFingerprint,
+      });
+      expect(resolved).toEqual([newFingerprint]);
+      expect(tracker["pendingPushes"].get("state-first")?.panel).toEqual({
+        key: "4619827551948147201",
+        ...newFingerprint,
+      });
+      expect(emitted).toEqual([undefined]);
+      expect(tracker.revision("state-first")).toBe(1);
+      expect(
+        tracker.record("state-first", {
+          display: { key: "4619827551948147201", role: "cover", posture: "closed", generation: 1 },
+          screenSize: newFingerprint,
+        }),
+      ).toBe(false);
+      expect(tracker.revision("state-first")).toBe(1);
+    }
+  });
+
+  test("rotation with a resolved panel is swallowed for a placeholder or the same identified panel", () => {
+    for (const key of ["0", "4619827259835644672"]) {
+      let calls = 0;
+      const tracker = new DisplayTransitionTracker(
+        () => {},
+        () => {},
+        () => {
+          calls++;
+          return "4619827259835644672";
+        },
+      );
+      tracker.record("fingerprint", {
+        display: { key, role: "inner", posture: "opened", generation: 0 },
+        screenSize: { width: 2076, height: 2152 },
+      });
+      tracker.notifyAndroidTransition("fingerprint", {
+        change: "changed",
+        displayId: 0,
+        width: 2152,
+        height: 2076,
+        panelFingerprint: { width: 2076, height: 2152 },
+      });
+      expect(calls).toBe(1);
+      expect(tracker.revision("fingerprint")).toBe(0);
+    }
+  });
+  test("fold resolves once before invalidation and retains the new pending panel", () => {
+    const order: string[] = [];
+    const tracker = new DisplayTransitionTracker(
+      () => {},
+      () => {
+        order.push("drop");
+      },
+      (_id, size) => {
+        order.push("resolve");
+        return panelKeyForFingerprint(fingerprintInventory.panels, size);
+      },
+    );
+    tracker.record("fold", {
+      display: { key: "4619827259835644672", role: "inner", posture: "opened", generation: 0 },
+      screenSize: { width: 2076, height: 2152 },
+    });
+    const emitted: string[] = [];
+    tracker.subscribe("fold", (panel) => {
+      if (panel) {
+        emitted.push(panel.key);
+      }
+    });
+    tracker.notifyAndroidTransition("fold", {
+      change: "changed",
+      displayId: 0,
+      width: 1080,
+      height: 2364,
+      panelFingerprint: { width: 1080, height: 2364 },
+    });
+    expect(order).toEqual(["resolve", "drop"]);
+    expect(emitted).toEqual(["4619827551948147201"]);
+    expect(tracker.revision("fold")).toBe(1);
+    tracker.notifyAndroidTransition("fold", {
+      change: "changed",
+      displayId: 0,
+      width: 2364,
+      height: 1080,
+      panelUniqueId: "local:4619827551948147201",
+    });
+    expect(tracker.revision("fold")).toBe(1);
+  });
+  test("old frames do not invoke the resolver and still swallow rotation", () => {
+    let calls = 0;
+    const tracker = new DisplayTransitionTracker(
+      () => {},
+      () => {},
+      () => {
+        calls++;
+        return "other";
+      },
+    );
+    tracker.record("old", {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 0 },
+      screenSize: { width: 2076, height: 2152 },
+    });
+    tracker.notifyAndroidTransition("old", {
+      change: "changed",
+      displayId: 0,
+      width: 2152,
+      height: 2076,
+    });
+    expect(calls).toBe(0);
+    expect(tracker.revision("old")).toBe(0);
+  });
+});
+
+test("real pushed unique id wins over conflicting fingerprint evidence", () => {
+  let calls = 0;
+  const tracker = new DisplayTransitionTracker(
+    () => {},
+    () => {},
+    () => {
+      calls++;
+      return "cover";
+    },
+  );
+  const emitted: string[] = [];
+  tracker.subscribe("precedence", (panel) => {
+    if (panel) {
+      emitted.push(panel.key);
+    }
+  });
+  tracker.notifyAndroidTransition("precedence", {
+    change: "added",
+    displayId: 0,
+    panelUniqueId: "local:inner",
+    panelFingerprint: { width: 1080, height: 2364 },
+  });
+  expect(calls).toBe(0);
+  expect(emitted).toEqual(["inner"]);
 });

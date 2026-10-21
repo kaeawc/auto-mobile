@@ -11,21 +11,21 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { VideoRecorderService } from "../../src/features/video";
-import {
-  registerVideoRecordingTools,
-  resetSegmentedSessions,
-  setRecordingRequesterResolverForTesting,
-  setVideoRecordingDeviceDetectorForTesting,
-} from "../../src/server/videoRecordingTools";
+import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   listActiveVideoRecordings,
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import type { BootedDevice } from "../../src/models";
+import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+import { toolJson } from "../helpers/toolResponse";
+import { z } from "zod/v4";
+
+const videoRecording = createVideoRecordingToolsHarness();
 
 isolateToolRegistry();
 
@@ -59,7 +59,7 @@ describe("videoRecording stop by id from a caller with no session", () => {
 
   beforeAll(async () => {
     if (!ToolRegistry.getTool("videoRecording")) {
-      registerVideoRecordingTools();
+      videoRecording.register();
     }
     archiveRoot = await fsPromises.mkdtemp(
       path.join(os.tmpdir(), "auto-mobile-sessionless-vstop-"),
@@ -72,7 +72,7 @@ describe("videoRecording stop by id from a caller with no session", () => {
     backend.setNowProvider(() => new Date(timer.now()));
     const sessions = new FakeDeviceSessionManager();
     sessions.setConnectedDevices([device]);
-    setVideoRecordingDeviceDetectorForTesting(sessions);
+    videoRecording.configure({ deviceDetector: sessions });
     await setVideoRecordingManagerDependencies({
       videoRecorderService: new VideoRecorderService({
         backend,
@@ -86,21 +86,23 @@ describe("videoRecording stop by id from a caller with no session", () => {
       timer,
       now: () => new Date(timer.now()),
     });
-    setRecordingRequesterResolverForTesting({
-      baseSessionUuid: (uuid) => uuid.split(":")[0],
-      connectionOwnsDeviceSession: (mcpSessionId, deviceId, ownerBase) =>
-        mcpSessionId === owningConnection && deviceId === device.deviceId && ownerBase === HOLDER,
-      isDeviceHeld: () => deviceHeld,
+    videoRecording.configure({
+      requesterResolver: {
+        baseSessionUuid: (uuid) => uuid.split(":")[0],
+        connectionOwnsDeviceSession: (mcpSessionId, deviceId, ownerBase) =>
+          mcpSessionId === owningConnection && deviceId === device.deviceId && ownerBase === HOLDER,
+        isDeviceHeld: () => deviceHeld,
+      },
     });
     deviceHeld = true;
     owningConnection = undefined;
   });
 
   afterEach(() => {
-    setRecordingRequesterResolverForTesting(undefined);
+    videoRecording.clear();
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
-    setVideoRecordingDeviceDetectorForTesting(undefined);
+    videoRecording.clear();
   });
 
   afterAll(async () => {
@@ -138,7 +140,9 @@ describe("videoRecording stop by id from a caller with no session", () => {
 
   test("a sessionless segmented stop by handle is refused and the session keeps recording", async () => {
     const started = await outcome({ action: "start", maxDuration: 181, sessionUuid: HOLDER });
-    const handle = JSON.parse(started.response!.content[0].text).recordings[0].recordingId;
+    const handle = z
+      .object({ recordings: z.array(z.object({ recordingId: z.string() })) })
+      .parse(toolJson(started.response)).recordings[0].recordingId;
     const stopsBefore = backend.stopCalls.length;
 
     const { error } = await outcome({ action: "stop", recordingId: handle });

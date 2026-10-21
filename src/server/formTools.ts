@@ -1,17 +1,17 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SetUIState, type LiveDeadlineSubscriber } from "../features/action/SetUIState";
 import { BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { elementIdTextFieldsSchema, validateElementIdTextSelector } from "./elementSelectorSchemas";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import {
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_EXECUTION_START_TIME_PARAM,
-  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../daemon/constants";
+  elementIdTextFieldsSchema,
+  validateElementIdTextSelector,
+} from "../models/elementSelectorSchemas";
+import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../daemon/constants";
+import { resolveTransportDeadlineMs } from "./transportDeadline";
 import { getLiveDeadlineMs, subscribeLiveDeadline } from "../daemon/liveDeadlineRegistry";
 
 /**
@@ -79,12 +79,7 @@ const setUIStateResultSchema = z.object({
 
 export type SetUIStateArgs = z.infer<typeof setUIStateSchema>;
 
-// Injection seam for the setUIState handler (mirrors the tapAny factory seam
-// in interactionTools.ts). Lets a unit test exercise the registered handler
-// wiring with a fake SetUIState whose execute() returns a chosen
-// success/partial/failure result, instead of spying on the class prototype
-// (#6251 review — a prototype spy is a process-global patch that can leak
-// into unrelated tests running in the same process).
+// Narrow executor interface for per-handler dependency injection.
 export type SetUIStateLike = Pick<SetUIState, "execute">;
 
 function createDefaultSetUIState(device: BootedDevice): SetUIStateLike {
@@ -92,60 +87,10 @@ function createDefaultSetUIState(device: BootedDevice): SetUIStateLike {
   return new SetUIState(device, adb);
 }
 
-let setUIStateFactory: (device: BootedDevice) => SetUIStateLike = createDefaultSetUIState;
+export { resolveTransportDeadlineMs };
 
-export function setSetUIStateFactory(factory: (device: BootedDevice) => SetUIStateLike): void {
-  setUIStateFactory = factory;
-}
-
-export function resetSetUIStateFactory(): void {
-  setUIStateFactory = createDefaultSetUIState;
-}
-
-/**
- * Recover the ABSOLUTE deadline of the current MCP request from the internal
- * params the server attaches to every daemon-forwarded call (issue #6222
- * P1).
- *
- * Prefers `__mcpRequestDeadlineMs` ({@link INTERNAL_MCP_REQUEST_DEADLINE_PARAM}),
- * an absolute deadline the DAEMON anchored at the instant it captured the
- * remaining transport budget, immediately before the loopback
- * `mcpClient.callTool` (`UnixSocketServer.withSocketSessionAutolockKey`).
- * Falls back to recomputing `__executionStartTime + __mcpRequestTimeoutMs`
- * only when the newer param is absent (an older daemon build): `startTime`
- * is this execution's own start time on the SAME `defaultTimer` clock
- * `SetUIState` uses, but it is recorded only AFTER this process's HTTP
- * dispatch and admission/tool-selection repo reads -- re-deriving the
- * deadline from it RE-GRANTS whatever time that gap consumed, which can push
- * the computed deadline later than the daemon's actual outer abort (issue
- * #6222 review, PRRT_kwDOP-GF5M6fuyts P1). The anchored param removes that
- * gap entirely, so it is the preferred source whenever present.
- *
- * Neither field is present on a direct, non-daemon call, in which case there
- * is no transport deadline to bound against and `SetUIState` falls back to
- * its own conservative internal budget.
- */
-export function resolveTransportDeadlineMs(args: unknown): number | undefined {
-  if (!args || typeof args !== "object") {
-    return undefined;
-  }
-  const record = args as Record<string, unknown>;
-  const anchoredDeadlineMs = record[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-  if (typeof anchoredDeadlineMs === "number" && Number.isFinite(anchoredDeadlineMs)) {
-    return anchoredDeadlineMs;
-  }
-  const remainingMs = record[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-  const startTimeMs = record[INTERNAL_EXECUTION_START_TIME_PARAM];
-  if (
-    typeof remainingMs !== "number" ||
-    !Number.isFinite(remainingMs) ||
-    remainingMs <= 0 ||
-    typeof startTimeMs !== "number" ||
-    !Number.isFinite(startTimeMs)
-  ) {
-    return undefined;
-  }
-  return startTimeMs + remainingMs;
+export interface FormToolDependencies {
+  setUIStateFactory?: (device: BootedDevice) => SetUIStateLike;
 }
 
 /**
@@ -188,72 +133,77 @@ export function resolveLiveTransportDeadlineSubscriber(
   return key === undefined ? undefined : (listener) => subscribeLiveDeadline(key, listener);
 }
 
-export const setUIStateHandler = async (
-  device: BootedDevice,
-  args: SetUIStateArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-) => {
-  const setUIState = setUIStateFactory(device);
-  const transportDeadlineMs = resolveTransportDeadlineMs(args);
-  const getLiveTransportDeadlineMs = resolveLiveTransportDeadlineGetter(args);
-  const subscribeLiveTransportDeadline = resolveLiveTransportDeadlineSubscriber(args);
+export function createSetUIStateHandler({
+  setUIStateFactory = createDefaultSetUIState,
+}: FormToolDependencies = {}) {
+  return async (
+    device: BootedDevice,
+    args: SetUIStateArgs,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const setUIState = setUIStateFactory(device);
+    const transportDeadlineMs = resolveTransportDeadlineMs(args);
+    const getLiveTransportDeadlineMs = resolveLiveTransportDeadlineGetter(args);
+    const subscribeLiveTransportDeadline = resolveLiveTransportDeadlineSubscriber(args);
 
-  const result = await setUIState.execute(
-    {
-      fields: args.fields.map((f) => ({
-        selector: {
-          text: f.selector.text,
-          elementId: f.selector.elementId,
-        },
-        value: f.value,
-        selected: f.selected,
+    const result = await setUIState.execute(
+      {
+        fields: args.fields.map((f) => ({
+          selector: {
+            text: f.selector.text,
+            elementId: f.selector.elementId,
+          },
+          value: f.value,
+          selected: f.selected,
+        })),
+        scrollDirection: args.scrollDirection,
+      },
+      progress,
+      signal,
+      transportDeadlineMs,
+      getLiveTransportDeadlineMs,
+      subscribeLiveTransportDeadline,
+    );
+
+    const response = createStructuredToolResponse({
+      success: result.success,
+      fields: result.fields.map((f) => ({
+        selector: f.selector,
+        success: f.success,
+        attempts: f.attempts,
+        verified: f.verified,
+        error: f.error,
+        fieldType: f.fieldType,
+        skipped: f.skipped,
+        notAttempted: f.notAttempted,
+        timedOut: f.timedOut,
       })),
-      scrollDirection: args.scrollDirection,
-    },
-    progress,
-    signal,
-    transportDeadlineMs,
-    getLiveTransportDeadlineMs,
-    subscribeLiveTransportDeadline,
-  );
-
-  const response = createStructuredToolResponse({
-    success: result.success,
-    fields: result.fields.map((f) => ({
-      selector: f.selector,
-      success: f.success,
-      attempts: f.attempts,
-      verified: f.verified,
-      error: f.error,
-      fieldType: f.fieldType,
-      skipped: f.skipped,
-      notAttempted: f.notAttempted,
-      timedOut: f.timedOut,
-    })),
-    totalAttempts: result.totalAttempts,
-    error: result.error,
-    ...(result.warnings?.length ? { warnings: result.warnings } : {}),
-  });
-  // Genuine partial success (some fields set, others failed) keeps
-  // isError:false — the per-field `fields` array is the actionable status
-  // (#6237). But when EVERY field failed, the primary operation did not
-  // succeed at all and must be reported as such (#6200, #6251).
-  const allFieldsFailed = result.fields.length > 0 && result.fields.every((f) => !f.success);
-  return allFieldsFailed ? { ...response, isError: true as const } : response;
-};
+      totalAttempts: result.totalAttempts,
+      error: result.error,
+      ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+    });
+    // Genuine partial success (some fields set, others failed) keeps
+    // isError:false — the per-field `fields` array is the actionable status
+    // (#6237). But when EVERY field failed, the primary operation did not
+    // succeed at all and must be reported as such (#6200, #6251).
+    const allFieldsFailed = result.fields.length > 0 && result.fields.every((f) => !f.success);
+    return allFieldsFailed ? { ...response, isError: true as const } : response;
+  };
+}
 
 /**
  * Register form-related tools with the tool registry
  */
-export function registerFormTools(): void {
+export function registerFormTools(deps: FormToolDependencies = {}): void {
   // setUIState tool
   ToolRegistry.registerDeviceAware(
     "setUIState",
     "Set multiple form fields by desired state.",
     addDeviceTargetingToSchema(setUIStateSchema),
-    setUIStateHandler,
+    createSetUIStateHandler(deps),
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: true,
       supportsProgress: true,
       debugOnly: true,

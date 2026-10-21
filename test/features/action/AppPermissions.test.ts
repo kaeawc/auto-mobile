@@ -1,3 +1,4 @@
+import { FixtureTccReader } from "../../helpers/iosTccPhotosFixtures";
 import { readFileSync } from "node:fs";
 import { describe, expect, spyOn, test } from "bun:test";
 import { SetAndroidScheduleExactAlarmAppOp } from "../../../src/features/action/SetAndroidScheduleExactAlarmAppOp";
@@ -5,7 +6,8 @@ import { SetAndroidNotificationPolicyAccess } from "../../../src/features/action
 import { AppPermissions } from "../../../src/features/action/AppPermissions";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { FakePhotosAuthorizationVerifier } from "../../fakes/FakePhotosAuthorizationVerifier";
 import {
   CAPTURED_APP_ID,
   dumpsysNotificationFromCapture,
@@ -26,6 +28,7 @@ const iosSimulator: BootedDevice = {
   name: "iPhone 16",
   platform: "ios",
   deviceId: "12345678-1234-1234-1234-123456789ABC",
+  iosVersion: "27.0",
 };
 
 const iosPhysical: BootedDevice = {
@@ -133,6 +136,7 @@ describe("AppPermissions", () => {
       "com.example.app",
       {
         ...input,
+        permissions: [...input.permissions],
         action: "reset",
         notificationsEnabled: true,
         notificationPolicyAccess: true,
@@ -548,7 +552,7 @@ describe("AppPermissions", () => {
   });
 
   test("sets and queries iOS simulator permissions through the same facade", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const tccReader: TccPermissionReader = {
       readPermissions: async () => [
         {
@@ -601,6 +605,175 @@ describe("AppPermissions", () => {
       },
     ]);
   });
+
+  test("passes simulator Photos verification metadata through the facade", async () => {
+    const simctl = new FakeSimctl();
+    const tccReader = new FixtureTccReader("full");
+    const permissions = new AppPermissions(iosSimulator, { simctl, tccReader });
+    const getResult = await permissions.getPermissions("com.example.app", {
+      permissions: ["photos"],
+    });
+    expect(getResult.permissions[0]).toMatchObject({
+      state: "unknown",
+      source: "iosTcc",
+      authValue: 2,
+      verified: false,
+      accessLevel: "readWrite",
+      evidence: "storedTccGrant",
+      reason: expect.stringContaining("native PHPhotoLibrary"),
+      raw: expect.objectContaining({ auth_version: 2 }),
+    });
+    const setResult = await permissions.setPermissions("com.example.app", {
+      action: "grant",
+      permissions: ["photos"],
+    });
+    expect(setResult).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
+    expect(setResult.operations[0]).toMatchObject({
+      stepId: "ios_simctl_privacy:grant:photos",
+      success: true,
+      changedCount: 1,
+      failedCount: 0,
+      code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
+      result: {
+        permission: "photos",
+        success: true,
+        applied: true,
+        verified: false,
+        code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
+        accessLevel: "readWrite",
+        evidence: "storedTccGrant",
+      },
+    });
+    expect(setResult).not.toHaveProperty("error");
+    expect(setResult.operations[0]).not.toHaveProperty("error");
+    expect(setResult.operations[0].result).not.toHaveProperty("error");
+    expect(setResult.operations[0].warning).toContain("Photos grant was dispatched via simctl");
+    if (typeof setResult.operations[0].warning !== "string") {
+      throw new Error("Expected warning");
+    }
+    expect(setResult.warnings).toEqual([setResult.operations[0].warning]);
+    expect(setResult.operations[0].result).toHaveProperty(
+      "warning",
+      setResult.operations[0].warning,
+    );
+  });
+
+  test("an authorized Photos verifier yields a successful facade operation", async () => {
+    const photosVerifier = new FakePhotosAuthorizationVerifier("authorized");
+    const permissions = new AppPermissions(iosSimulator, {
+      simctl: new FakeSimctl(),
+      tccReader: new FixtureTccReader("full"),
+      photosVerifier,
+    });
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "grant",
+      permissions: ["photos"],
+    });
+    expect(result).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
+    expect(result.operations[0]).toMatchObject({
+      success: true,
+      changedCount: 1,
+      failedCount: 0,
+      result: { permission: "photos", success: true, applied: true, verified: true },
+    });
+    expect(result.operations[0]).not.toHaveProperty("code");
+    expect(result.operations[0].result).not.toHaveProperty("code");
+    expect(result).not.toHaveProperty("error");
+    expect(photosVerifier.calls).toEqual([
+      { deviceId: iosSimulator.deviceId, appId: "com.example.app" },
+    ]);
+  });
+
+  test("surfaces Photos readback failure as a non-fatal unverified facade operation", async () => {
+    const permissions = new AppPermissions(iosSimulator, {
+      simctl: new FakeSimctl(),
+      tccReader: {
+        readPermissions: async () => {
+          throw new Error("TCC unavailable");
+        },
+      },
+    });
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "grant",
+      permissions: ["photos"],
+    });
+    expect(result).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
+    expect(result.operations[0]).toMatchObject({
+      success: true,
+      changedCount: 1,
+      failedCount: 0,
+      code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
+      result: {
+        success: true,
+        applied: true,
+        verified: false,
+        code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
+        accessLevel: "readWrite",
+      },
+    });
+    expect(result).not.toHaveProperty("error");
+    expect(result.operations[0]).not.toHaveProperty("error");
+    expect(result.operations[0].result).not.toHaveProperty("error");
+    expect(result.operations[0].warning).toContain("Photos grant was dispatched via simctl");
+    expect(result.operations[0].result).not.toHaveProperty("evidence");
+    if (typeof result.operations[0].warning !== "string") {
+      throw new Error("Expected warning");
+    }
+    expect(result.warnings).toEqual([result.operations[0].warning]);
+    expect(result.operations[0].result).toHaveProperty("warning", result.operations[0].warning);
+  });
+
+  test.each(["photos", "all"])(
+    "reports a confirmed Photos failure separately for %s",
+    async (permission) => {
+      const permissions = new AppPermissions(iosSimulator, {
+        simctl: new FakeSimctl(),
+        tccReader: new FixtureTccReader("full"),
+        photosVerifier: new FakePhotosAuthorizationVerifier("limited"),
+      });
+      const result = await permissions.setPermissions("com.example.app", {
+        action: "grant",
+        permissions: [permission],
+      });
+      expect(result).toMatchObject({
+        success: false,
+        changedCount: permission === "all" ? 1 : 0,
+        failedCount: 1,
+      });
+      expect(result.operations).toHaveLength(permission === "all" ? 2 : 1);
+      const failedOperation = result.operations[permission === "all" ? 1 : 0];
+      expect(failedOperation).toMatchObject({
+        stepId: "ios_simctl_privacy:grant:photos",
+        success: false,
+        changedCount: 0,
+        failedCount: 1,
+        code: "PHOTOS_FULL_ACCESS_NOT_ESTABLISHED",
+        result: {
+          permission: "photos",
+          success: false,
+          applied: true,
+          verified: false,
+          accessLevel: "readWrite",
+          code: "PHOTOS_FULL_ACCESS_NOT_ESTABLISHED",
+        },
+      });
+      expect(result.error).toBe(failedOperation.error);
+      expect(result.error).toContain("PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite");
+      expect(failedOperation.result).toHaveProperty("error", result.error);
+      expect(result).not.toHaveProperty("warnings");
+      if (permission === "all") {
+        expect(result.operations[0]).toMatchObject({
+          stepId: "ios_simctl_privacy:grant:all",
+          success: true,
+          changedCount: 1,
+          failedCount: 0,
+          result: { permission: "all", success: true, applied: true },
+        });
+        expect(result.operations[0]).not.toHaveProperty("code");
+        expect(result.operations[0]).not.toHaveProperty("error");
+      }
+    },
+  );
 
   test("routes reset on a physical iOS device through the CtrlProxy runner", async () => {
     const iosPhysicalClient = new RecordingPhysicalPrivacyClient();
@@ -705,7 +878,7 @@ describe("AppPermissions", () => {
   // for nothing at all must not report success.
   describe("rejects unsupported requests", () => {
     test("rejects the Android-only notificationPolicyAccess field on iOS", async () => {
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",
@@ -722,7 +895,7 @@ describe("AppPermissions", () => {
     });
 
     test("rejects the Android-only scheduleExactAlarm field on iOS", async () => {
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",
@@ -736,7 +909,7 @@ describe("AppPermissions", () => {
     });
 
     test("rejects the Android-only notificationsEnabled field on iOS", async () => {
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",
@@ -752,7 +925,7 @@ describe("AppPermissions", () => {
     test("rejects an Android-only boolean field on iOS even when it is false", async () => {
       // The presence check is `!== undefined`, so a FALSE value must still reject.
       // A regression to a truthiness check would silently accept `false` here.
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",
@@ -767,7 +940,7 @@ describe("AppPermissions", () => {
     });
 
     test("lists every unsupported field when several are supplied on iOS", async () => {
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",

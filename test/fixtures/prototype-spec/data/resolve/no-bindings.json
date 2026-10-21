@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "resolve",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "children": [
+        {
+          "type": "text",
+          "text": "hello {state_key}"
+        }
+      ]
+    },
+    "data": {
+      "unused": 1
+    },
+    "state": {
+      "state_key": "world"
+    }
+  },
+  "root": {
+    "type": "box",
+    "children": [
+      {
+        "type": "text",
+        "text": "hello {state_key}"
+      }
+    ]
+  }
+}

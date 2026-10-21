@@ -1,0 +1,34 @@
+{
+  "id": "rich",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "spans": [
+      {
+        "text": "Terms",
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "terms"
+          }
+        ]
+      },
+      {
+        "text": "Toggle",
+        "onTap": [
+          {
+            "type": "toggle",
+            "key": "accepted"
+          }
+        ]
+      }
+    ]
+  },
+  "state": {
+    "accepted": false
+  }
+}

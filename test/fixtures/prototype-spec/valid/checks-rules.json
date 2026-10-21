@@ -1,0 +1,169 @@
+{
+  "id": "checks",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "textField": "",
+    "slider": 1,
+    "checkbox": false,
+    "switch": false,
+    "radioGroup": "a",
+    "datePicker": "2026-01-01",
+    "hour": 1,
+    "minute": 2
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "textField",
+        "stateKey": "textField",
+        "checks": [
+          {
+            "required": true,
+            "message": "Required"
+          },
+          {
+            "minLength": 1,
+            "message": "Short"
+          },
+          {
+            "maxLength": 80,
+            "message": "Long"
+          },
+          {
+            "format": "email",
+            "message": "Email"
+          },
+          {
+            "pattern": "[^@]+@[^@]+",
+            "message": "Pattern"
+          }
+        ],
+        "validateOn": "submit"
+      },
+      {
+        "type": "slider",
+        "stateKey": "slider",
+        "checks": [
+          {
+            "min": 1,
+            "message": "Low"
+          },
+          {
+            "max": 50,
+            "message": "High"
+          }
+        ],
+        "validateOn": "submit",
+        "min": 0,
+        "max": 100
+      },
+      {
+        "type": "checkbox",
+        "stateKey": "checkbox",
+        "checks": [
+          {
+            "required": true,
+            "message": "Required"
+          }
+        ],
+        "validateOn": "submit"
+      },
+      {
+        "type": "switch",
+        "stateKey": "switch",
+        "checks": [
+          {
+            "required": true,
+            "message": "Required"
+          }
+        ],
+        "validateOn": "submit"
+      },
+      {
+        "type": "radioGroup",
+        "stateKey": "radioGroup",
+        "checks": [
+          {
+            "required": true,
+            "message": "Required"
+          }
+        ],
+        "validateOn": "submit",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          },
+          {
+            "value": "b",
+            "label": "B"
+          }
+        ]
+      },
+      {
+        "type": "datePicker",
+        "stateKey": "datePicker",
+        "checks": [
+          {
+            "required": true,
+            "message": "Required"
+          }
+        ],
+        "validateOn": "submit"
+      },
+      {
+        "type": "timePicker",
+        "checks": [
+          {
+            "required": true,
+            "message": "Required"
+          }
+        ],
+        "validateOn": "submit",
+        "hourKey": "hour",
+        "minuteKey": "minute"
+      },
+      {
+        "type": "button",
+        "label": "Save",
+        "enabledWhen": {
+          "valid": ["textField", "slider"]
+        },
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "save",
+            "requireValid": ["textField", "slider"]
+          }
+        ],
+        "visibleWhen": {
+          "not": {
+            "valid": "textField"
+          }
+        },
+        "styleWhen": [
+          {
+            "when": {
+              "any": [
+                {
+                  "valid": "textField"
+                },
+                {
+                  "valid": ["slider"]
+                }
+              ]
+            },
+            "style": {
+              "alpha": 0.5
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

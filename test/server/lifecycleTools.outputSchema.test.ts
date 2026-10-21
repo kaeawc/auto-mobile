@@ -1,3 +1,4 @@
+import { readToolResponse, toolIsError, toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import type {
@@ -9,19 +10,12 @@ import type {
 } from "../../src/models";
 import type { WakeAndUnlockResult } from "../../src/features/action/WakeAndUnlock";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  setPressButtonFactory,
-  resetPressButtonFactory,
-  setWakeAndUnlockFactory,
-  resetWakeAndUnlockFactory,
 } from "../../src/server/interactionTools";
 import {
   registerAppTools,
   buildLaunchAppResponse,
-  setLaunchAppToolDependencies,
-  resetLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
-  resetTerminateAppToolDependencies,
   setInstalledAppResourceRefresh,
   resetInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
@@ -29,29 +23,36 @@ import { registerDeviceTools } from "../../src/server/deviceTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
-const createObserveResult = (): ObserveResult => ({
-  timestamp: 1,
-  screenSize: { width: 1080, height: 1920 },
-  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-  viewHierarchy: { node: {} },
-});
+import { buildObserveResult } from "../helpers/observeFixture";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
+const interactionDeps: InteractionToolDependencies = {};
+const appTools = createAppToolsHarness();
+const createObserveResult = (): ObserveResult =>
+  buildObserveResult({
+    updatedAt: 1,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: { hierarchy: { node: {} } },
+  });
 
 const device: BootedDevice = { name: "fake", deviceId: "emulator-5554", platform: "android" };
 
 beforeEach(() => {
   ToolRegistry.clearTools();
-  registerInteractionTools();
+  registerInteractionTools(interactionDeps);
   registerAppTools();
   registerUtilityTools();
-  setInstalledAppResourceRefresh(async () => {});
+  setInstalledAppResourceRefresh({ invalidate: () => {}, notify: async () => {} });
 });
 afterEach(() => {
-  resetPressButtonFactory();
-  resetWakeAndUnlockFactory();
-  resetLaunchAppToolDependencies();
-  resetTerminateAppToolDependencies();
+  delete interactionDeps.pressButtonFactory;
+  delete interactionDeps.wakeAndUnlockFactory;
   resetInstalledAppResourceRefresh();
-  ToolRegistry.clearTools();
+  appTools.clear();
 });
 
 async function checkResponse(
@@ -62,10 +63,10 @@ async function checkResponse(
 ) {
   const tool = ToolRegistry.getTool(name)!;
   const response = await tool.deviceAwareHandler!(device, args);
-  expect(response.structuredContent).toEqual(payload);
-  expect(response.content).toEqual(createJSONToolResponse(payload).content);
-  expect(response.isError).toBe(isError);
-  expect(tool.outputSchema!.parse(response.structuredContent)).toBeDefined();
+  expect(toolStructured(response)).toEqual(payload);
+  expect(readToolResponse(response).content).toEqual(createJSONToolResponse(payload).content);
+  expect(toolIsError(response)).toBe(isError === true);
+  expect(tool.outputSchema!.parse(toolStructured(response))).toBeDefined();
 }
 
 for (const success of [true, false]) {
@@ -77,7 +78,7 @@ for (const success of [true, false]) {
       observation: createObserveResult(),
       ...(success ? {} : { error: "failed" }),
     };
-    setPressButtonFactory(() => ({ execute: async () => result }));
+    interactionDeps.pressButtonFactory = () => ({ execute: async () => result });
     await checkResponse(
       "pressButton",
       { button: "home" },
@@ -98,7 +99,7 @@ for (const success of [true, false]) {
       unlocked: success,
       ...(success ? { warning: "runner recovering" } : { error: "failed" }),
     };
-    setWakeAndUnlockFactory(() => ({ execute: async () => result }));
+    interactionDeps.wakeAndUnlockFactory = () => ({ execute: async () => result });
     await checkResponse(
       "wakeAndUnlock",
       {},
@@ -135,10 +136,10 @@ for (const success of [true, false]) {
             : "failed",
           ...result,
         };
-        expect(response.structuredContent).toEqual(payload);
-        expect(response.content).toEqual(createJSONToolResponse(payload).content);
+        expect(toolStructured(response)).toEqual(payload);
+        expect(readToolResponse(response).content).toEqual(createJSONToolResponse(payload).content);
         expect(ToolRegistry.getTool(name)!.outputSchema!.parse(payload)).toBeDefined();
-        expect(response.isError).toBeUndefined();
+        expect(toolIsError(response)).toBe(false);
       } finally {
         stateSpy.mockRestore();
       }
@@ -162,7 +163,7 @@ test.each([false, true])(
           }
         : { observation: createObserveResult() }),
     };
-    setLaunchAppToolDependencies({ createLaunchApp: () => ({ execute: async () => result }) });
+    appTools.configure("launchApp", { createLaunchApp: () => ({ execute: async () => result }) });
     await checkResponse(
       "launchApp",
       { appId: "com.example" },
@@ -180,7 +181,9 @@ test("terminateApp preserves attached observation text", async () => {
     wasRunning: true,
     observation: createObserveResult(),
   };
-  setTerminateAppToolDependencies({ createTerminateApp: () => ({ execute: async () => result }) });
+  appTools.configure("terminateApp", {
+    createTerminateApp: () => ({ execute: async () => result }),
+  });
   await checkResponse(
     "terminateApp",
     { appId: "com.example" },
@@ -229,28 +232,28 @@ for (const target of [
         ...(target.platform === "android" ? { userId: 0 } : {}),
         ...fields,
       };
-      setTerminateAppToolDependencies({
+      appTools.configure("terminateApp", {
         createTerminateApp: () => ({ execute: async () => result }),
       });
       const tool = ToolRegistry.getTool("terminateApp")!;
       const response = await tool.deviceAwareHandler!(target, { appId: "com.example" });
       const payload = { message, observation: result.observation, ...result };
-      expect(response.structuredContent).toEqual(payload);
-      expect(response.content).toEqual(createJSONToolResponse(payload).content);
-      expect(response.isError).toBeUndefined();
-      expect(tool.outputSchema!.parse(response.structuredContent)).toBeDefined();
+      expect(toolStructured(response)).toEqual(payload);
+      expect(readToolResponse(response).content).toEqual(createJSONToolResponse(payload).content);
+      expect(toolIsError(response)).toBe(false);
+      expect(tool.outputSchema!.parse(toolStructured(response))).toBeDefined();
     },
   );
 }
 
 for (const name of ["launchApp", "terminateApp"] as const) {
   test(`${name} failures still throw without manufacturing a text payload`, async () => {
-    setLaunchAppToolDependencies({
+    appTools.configure("launchApp", {
       createLaunchApp: () => ({
         execute: async () => ({ success: false, packageName: "com.example", error: "failed" }),
       }),
     });
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => ({
         execute: async () => ({
           success: false,

@@ -2,6 +2,14 @@
 
 This directory contains build, validation, and utility scripts for the AutoMobile project.
 
+## Script References
+
+Fast Validation checks that every tracked script under `scripts/` has an inbound reference.
+Unused scripts belong in `conventions/unreferenced-scripts-allowlist.txt` with a reason.
+When adding a script, wire it into a workflow, `package.json`, another script, or documentation.
+Python modules ending in `.py` under `scripts/github/` and `scripts/manual-test/python/` count as
+referenced through discovery when the root contains `pyproject.toml`, `requirements*.txt`, or `uv.lock`.
+
 ## MCP Context Management
 
 ### Context Estimation
@@ -203,6 +211,25 @@ bun run benchmark-startup --threshold 1.3
 
 - Device discovery scenarios run only when `adb` is available and at least one device is connected.
 - The benchmark will run `adb kill-server` when measuring cold ADB startup impact.
+
+## Stateless MCP Endpoint Benchmark
+
+Time sequential requests against the daemon's stateless MCP HTTP endpoint
+(`/auto-mobile/streamable`, #13068) on a loopback port. Device discovery is a
+fake whose cost is modelled by `--discovery-cost-ms`, so no device, emulator,
+simulator or resident daemon is touched; the report counts discovery probes per
+request, which must stay at zero once warm. The harness injects its own token and
+sends `Authorization: Bearer <token>` on every request to harden daemon HTTP
+ingress with a per-daemon token. Local external clients read the daemon token
+file (or use `AUTOMOBILE_DAEMON_HTTP_TOKEN`); there is no unauthenticated fallback.
+See [daemon HTTP ingress](../docs/design-docs/mcp/daemon.md#http-ingress).
+
+Run the benchmark:
+
+```bash
+bun scripts/benchmark-stateless-endpoint.ts --iterations 200 --warmup 30 --discovery-cost-ms 5
+bun scripts/benchmark-stateless-endpoint.ts --max-p50-ms 6 --json
+```
 
 ## NPM Unpacked Size Benchmark
 
@@ -462,6 +489,14 @@ scripts/ios/video-recording-start-stop-integration.sh
 
 The script uses an already booted iPhone simulator when available, otherwise it uses AutoMobile product boot. It requires `bun`, `xcrun`, `jq`, `ffmpeg`, and `ffprobe`, records for `AUTOMOBILE_IOS_VIDEO_RECORDING_WAIT_MS` milliseconds when set, and fails if the finalized `.mp4` is missing, empty, unreadable, or lacks a video stream.
 
+## Artifact Qualification
+
+- `qualification/caseResult.ts` - Strict Zod case-result format, proof levels, sanitized fixture IDs and supported boundaries. Generate `case-result.schema.json` with `--write`; `--check` exits 1 on drift, 2 on usage error.
+- `qualification/runCase.ts` - `bun run qualify:run-case` records a reproducible command, elapsed operation timing, identity fields and evidence hashes. Requires metadata, `--out` and `-- <command...>`; `--not-exercised --boundary <text>` records a gap without spawning. Exits with the command's status, or 2 on usage error.
+- `qualification/aggregateResults.ts` - `bun run qualify:aggregate --results <dir> [--identity <file>] [--markdown <out>] [--require-pass]` validates non-recursive JSON cases and renders separate native, injected-fault, deterministic-test and gap tables. Rejects duplicate cases/mixed artifacts and warns on timing overruns; exits 1 on validation errors or required fail/blocked outcomes, 2 on usage error.
+- `release/write-build-info.ts` - Runs at `prepack`; writes reproducible source SHA, tracked-file dirtiness, package version, and native-resource checksum pins to `dist/build-info.json`. Skips with a warning when `dist/` is absent.
+- `qualification/artifactIdentity.ts` - Identifies an installed or extracted package, refuses source checkouts and mismatched expected SHAs, checks packed assets and native pins. Run `bun run qualify:identity --package-dir <dir>`; optional flags: `--tarball <tgz>`, `--expected-integrity <sri>`, `--repo <dir>`, `--expect-source-sha <sha>`, `--native-assets-dir <dir>`, `--out <file>`. Emits JSON plus checks on stderr; exits 0 identified, 1 refused, 2 usage error. Published-package proof requires matching expected tarball integrity and directory contents (extra node_modules files allowed).
+
 ## CI Integration
 
 The following scripts are invoked by GitHub Actions workflows:
@@ -499,3 +534,72 @@ All scripts should:
 - `scripts/android/prototype-frame-benchmark.sh` — explicit-device gfxinfo scenarios for the fixed benchmark prototype; supports command-only dry runs and stub executables.
 
 See [prototype performance measurement](../docs/design-docs/plat/android/prototype-performance-measurement.md) for prerequisites and output formats.
+
+### Manual Linux Qualification
+
+`.github/workflows/linux-qualification.yml` is dispatch-only; it never runs on
+push, pull request, or a schedule. No workflow is dispatched during development.
+`scripts/ci/linux-qualification/capture-proc-fixtures.sh <outdir>` captures real
+Alpine/Debian procfs bytes and a reproducible command/digest manifest (#11998).
+`scripts/ci/linux-qualification/emulator-cell.sh` runs the 4 GPU × 3 workload
+experiment (#12453), using `scripts/ci/linux-qualification/lib.sh` for bounded
+operations and injectable `NOW_CMD` / `SLEEP_CMD` clocks. The load drivers are
+`scripts/ci/linux-qualification/workload-automobile.sh`,
+`scripts/ci/linux-qualification/workload-raw-adb.sh`, and
+`scripts/ci/linux-qualification/workload-heartbeat.sh`.
+`scripts/ci/linux-qualification/classify-exit.sh <evidence-dir>` consumes timestamped
+harness evidence; `scripts/ci/linux-qualification/summarize.sh <artifact-dir>`
+produces three outcome lists, missing-cell coverage, and the experiment decision
+table offline. Tests are the three `test/bats/linux-qualification-*.bats` files.
+Defaults: 300 seconds, one cycle, 600-second boot bound, 4800-second cell budget measured from the first post-checkout step;
+reserve another 180 seconds for shutdown/evidence. Heartbeats allow 2 seconds of
+scheduling lateness and must return within 4 seconds. W and C run a serial
+Settings cold-launch/search-tap/text-and-enter/screenshot sequence with a one-second pause; H polls
+only get-state every five seconds. C uses tap (200,150), overridable by TAP_X/Y;
+W resolves the Settings “Search settings” label. These exercise the same
+operation cadence, but transport/selector latency and target coordinates differ.
+Each cycle cold boots (snapshot load/save disabled) with a fresh private daemon
+namespace for W. Host GPU boot refusal is UNEXERCISED. A crash is data and emits
+a warning; harness errors fail the cell. Inputs accept up to nine decimal digits. No runtime stability claim is made from
+one passing cycle. The artifacts can be large because cores and full logs are kept.
+
+## Host test workers and cancellation
+
+`scripts/test-ts.sh unit` and `changed` share a nonblocking host slot pool at
+`${AUTOMOBILE_COORDINATION_DIR:-$HOME/.auto-mobile}/test-slots` (the legacy
+`AUTO_MOBILE_COORDINATION_DIR` override is also supported). Worktrees must use
+one coordination directory to share the limit. `AUTOMOBILE_HOST_TEST_SLOTS`
+sets a positive pool capacity; the default is half the logical cores, rounded
+up, with a minimum of two. Set it to `off` to disable the semaphore.
+
+`AUTOMOBILE_UNIT_TEST_WORKERS` still bounds demand. Lanes acquire free slots in
+index order. Only a lane holding the entire base pool may acquire extra slots
+up to its demand, preserving the existing full worker count on an idle host,
+including hosted runners. Concurrent lanes divide the base pool; a lane with
+zero slots runs one **unslotted** worker so it can make progress. This is a
+cooperative cap, not an absolute process ceiling. Targeted runs also limit
+`--parallel` to the number of selected files. Coverage keeps `--parallel=1`.
+The `test-ts: host slots` stderr line reports demand, acquired slots and workers.
+
+INT, TERM and HUP stop the shard command and watchdog process groups, then
+escalate to KILL after `AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS` (default two
+seconds), release slots and exit with 128 plus the signal number. EXIT cleanup
+also runs on failures. Portable watchdogs check their caller every second;
+chunk runners check the original lane owner before starting another group.
+Dead slot owners are reclaimed on the next acquisition. Slots with an owner
+not yet published are conservatively left alone to avoid stealing an active
+acquisition.
+
+A timed-out unit shard is not retried when one-minute host load exceeds the
+logical core count. `AUTOMOBILE_TEST_LOADAVG_FILE` can inject a load-average
+file (first field is the one-minute value) for deterministic tests. Changed
+mode still delegates selection to Bun with `--changed` and `--shard`; only its
+shard count is capped. Sharing a changed-file list is deferred.
+
+`scripts/typecheck-baseline.sh` and the type-aware stage of `scripts/oxlint-baseline.sh` (`tsgo`, and
+`tsgolint` through `oxlint --type-aware`) run through `scripts/lib/host-heavy-run.sh`, which takes
+`AUTOMOBILE_HEAVY_CHECK_SLOTS` slots (default 4) from the same pool. A run that has the pool to
+itself keeps the tool's default parallelism; alongside another holder, or with fewer slots than it
+asked for, the checker is capped to the slots it holds (`GOMAXPROCS`, `tsgo --checkers`,
+`oxlint --threads`). With no free slot it waits up to `AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS`
+(default 60) and then runs on one thread. `AUTOMOBILE_HOST_TEST_SLOTS=off` disables the cap.

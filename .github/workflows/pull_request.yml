@@ -39,6 +39,7 @@ jobs:
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
       android_changed: ${{ steps.filter-android.outputs.android }}
       kotlin_changed: ${{ steps.filter-kotlin.outputs.kotlin }}
+      android_lint_changed: ${{ steps.filter-android-lint.outputs.lint }}
       installer_changed: ${{ steps.filter-installer.outputs.installer }}
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
@@ -326,6 +327,8 @@ jobs:
               # the Kotlin DesktopWireFixtureCompositionTest (#10669), so a
               # regenerated fixture must re-run the client side of the contract.
               - 'test/fixtures/desktop-wire/**'
+              # Replayed by the protocol serializer descriptor contract test.
+              - 'test/fixtures/android-contract/**'
               # The emulator jobs are exactly what this composite action drives,
               # so an edit to it must exercise them rather than skip them. #4199
               # rewired this action and only ran the emulator jobs incidentally,
@@ -364,6 +367,21 @@ jobs:
               - 'android/config/detekt/**'
               - '.github/actions/gradle-task-run/**'
 
+      # Lint reads resources and manifests as well as Kotlin sources. Changes to
+      # its enforcement must exercise the same cached Android analysis job.
+      - name: "Check for Android lint inputs"
+        id: filter-android-lint
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            lint:
+              - 'android/**'
+              - 'scripts/android/**'
+              - 'scripts/prepush-android.sh'
+              - '.github/actions/gradle-task-run/**'
+              - '.github/workflows/pull_request.yml'
+              - '.github/workflows/merge.yml'
+
       - name: "Check for iOS-related changes"
         id: filter-ios
         uses: dorny/paths-filter@v3
@@ -372,6 +390,8 @@ jobs:
             ios:
               - 'ios/**'
               - 'scripts/ios/**'
+              - 'test/fixtures/ios-contract/**'
+              - 'test/fixtures/ios-ctrlproxy-request-snapshots.json'
               - '.swiftformat'
               - '.swiftlint.yml'
 
@@ -566,7 +586,7 @@ jobs:
             webrtc:
               - 'src/features/webrtc/**'
               - 'src/features/screen-stream/**'
-              - 'src/server/webrtcStreamManager.ts'
+              - 'src/daemon/webrtcStreamManager.ts'
               - 'src/daemon/webrtc*'
               - 'src/daemon/videoStreamSocket*'
               - 'src/daemon/videoStreamFraming.ts'
@@ -991,7 +1011,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -1032,7 +1052,8 @@ jobs:
   # PR that touches no shell input finishes in seconds with "nothing to validate",
   # so the stable context name below always reports.
   shell-changed-gate:
-    timeout-minutes: 15
+    # The dependency helper alone may use its full 15-minute retry budget.
+    timeout-minutes: 25
     name: "Shell Changed Files"
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     steps:
@@ -1043,18 +1064,18 @@ jobs:
           # Full history so `origin/<base>...HEAD` has a merge-base.
           fetch-depth: 0
 
+      # prepush-shell.sh selects the same fast-validate checks Fast Validation
+      # runs (xml needs xmlstarlet, lychee-offline needs lychee), so install
+      # their tools with the same helper: pinned bats-core, xmlstarlet with a
+      # fallback mirror, and lychee, each bounded and retried.
       - name: "Install BATS"
         shell: bash
         background: true
         id: install-bats
+        # The helper budgets its retried operations for up to 870 s.
+        timeout-minutes: 15
         run: |
-          if command -v bats &>/dev/null; then
-            echo "bats already installed: $(bats --version)"
-          else
-            # Same pinned bats-core as the full BATS job.
-            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
-            sudo /tmp/bats-core/install.sh /usr/local
-          fi
+          scripts/ci/install-fast-validation-deps.sh
           if ! command -v shellcheck &>/dev/null; then
             echo "shellcheck missing on the runner" >&2
             exit 1
@@ -1099,16 +1120,15 @@ jobs:
     name: "Detekt"
     runs-on: ubuntu-latest
     needs: detect-changes
-    # detekt analyzes Kotlin only, so a PR touching none of the inputs in the
-    # `kotlin` filter cannot change what it reports. This gates whether the job
-    # runs at all; when it does run it analyzes the whole tree, so it is not a
-    # narrowing of what gets checked. merge.yml re-runs it unconditionally.
-    if: needs.detect-changes.outputs.kotlin_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    # Both analyzers run over the whole tree. Lint also needs resource-only
+    # changes; merge.yml re-runs both unconditionally.
+    if: (needs.detect-changes.outputs.kotlin_changed == 'true' || needs.detect-changes.outputs.android_lint_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 0
 
       # Deliberately the FULL task list, not a per-module subset. An earlier
       # revision scoped this to the modules a PR changed; that is unsafe with
@@ -1118,9 +1138,34 @@ jobs:
       # finding in a consumer, so scoping would land it on main and redden the
       # next unrelated PR. The Gradle build cache, not a shorter task list, is
       # what makes this fast.
+      # Android Lint, unlike Detekt, only looks at one module's own inputs
+      # (checkDependencies = false), so a PR lints just the modules it changes.
+      # Build-logic/Gradle/lint-gate/workflow changes select every module. The
+      # selection is shared with scripts/prepush-android.sh; merge.yml still
+      # lints every module on each push to main.
+      - name: "Select Android lint modules"
+        id: lint-select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if selection="$(git diff --name-only "${BASE_SHA}...HEAD" | bash scripts/android/select-lint-modules.sh)"; then
+            :
+          else
+            echo "Could not select lint modules; linting all."
+            selection=all
+          fi
+          if [[ "$selection" == all ]]; then
+            tasks=lintDebug
+          else
+            tasks="$(printf '%s' "$selection" | tr '\n' ' ' | sed 's/ *$//')"
+          fi
+          echo "Android lint tasks: ${tasks:-none}"
+          echo "tasks=${tasks}" >> "$GITHUB_OUTPUT"
+
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: "detektMain detektTest"
+          gradle-tasks: "detektMain detektTest :build-logic:test ${{ steps.lint-select.outputs.tasks }}"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           # Configuration-cache reuse is deliberately OFF here (#5332). A restored
@@ -1136,6 +1181,21 @@ jobs:
           # in test/bats/detekt-config-cache-disabled.bats pins it.
           reuse-configuration-cache: false
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Check Android lint baselines only shrink"
+        if: success() || failure()
+        run: bash scripts/android/check-lint-baseline-shrink.sh --base-ref origin/main
+
+      - name: "Upload Android Lint Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-lint-reports
+          path: |
+            android/**/build/reports/lint-results-*.html
+            android/**/build/reports/lint-results-*.sarif
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: "Upload Detekt Reports"
         if: failure()
@@ -1201,6 +1261,8 @@ jobs:
             # Pin the runner: newer development snapshots can miscount this
             # suite after executing every test, which makes a green run fail.
             git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            # Tags are mutable; the install runs under sudo, so check the commit.
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
             sudo /tmp/bats-core/install.sh /usr/local
           fi
           if command -v shellcheck &>/dev/null; then
@@ -1386,6 +1448,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/mac-queue-watchdog.sh
+
+  # =============================================================================
+  # Attestation Gate (shadow, advisory) (#11984)
+  # =============================================================================
+  # Advisory, shadow-only, never skips anything (#11984, #11985).
+  # The composite records excluded observations until an actual lane result is supplied.
+  attestation-gate-shadow:
+    name: "Attestation Gate (shadow, advisory)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    needs: detect-changes
+    if: always() && !cancelled() && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 1
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: ./.github/actions/attestation-gate
+        with:
+          commit-sha: ${{ github.event.pull_request.head.sha }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
 
   # =============================================================================
   # Node Checks (#10894)
@@ -2137,14 +2224,17 @@ jobs:
   # =============================================================================
 
   # Reports the required "Node TypeScript Build and Test (ubuntu-latest)" check.
-  # It is the one Linux unit-suite execution per PR (#10893): it used to run the
-  # suite under coverage while a separate Node Unit Tests (ubuntu-latest) leg ran
-  # it again for the 100ms timing budget. The plain unit lane and the timing
-  # budget now run here, so a unit failure still blocks merge through this
-  # required check; coverage and the README badge come from merge.yml's
-  # ts-code-coverage job on every push to main.
+  # It is the one Linux unit-suite execution per PR (#10893), with the 100ms
+  # budget in this required check. On Merge's ts-code-coverage job is the Ubuntu
+  # unit gate and produces the README badge on every push to main (#13569);
+  # its coverage samples select uninstrumented isolated timing rechecks.
   ts-build-and-test:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
+    # Job-level permissions replace the workflow's. This job only checks out,
+    # runs tests and uploads artifacts; actions: write is for the rerun dispatch.
+    permissions:
+      actions: write
+      contents: read
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
@@ -2204,13 +2294,19 @@ jobs:
       # gate is infeasible (~550 pre-existing errors), so this compares against a
       # committed baseline and fails only on NEW type errors. Runs on this single
       # ubuntu job with the pinned tsc so the baseline is reproducible.
-      # Gated on ts_changed: the baseline only references src/, so a diff that
+      # Gated on ts_changed: the gate only references src/, so a diff that
       # touches no TypeScript cannot introduce a local error -- skipping it avoids
       # blocking native-only PRs on base-branch drift. See
       # scripts/typecheck-baseline.sh.
       - name: "Run Typecheck Gate"
         if: needs.detect-changes.outputs.ts_changed == 'true'
         run: bun run typecheck
+
+      # Second pass over every test/**/*.ts (issue #11787) against its own
+      # count baseline; same one-way ratchet as the gate above.
+      - name: "Run Test Typecheck Gate"
+        if: needs.detect-changes.outputs.ts_changed == 'true'
+        run: bun run typecheck:test
 
       - name: "Run Build"
         shell: bash
@@ -2282,6 +2378,22 @@ jobs:
           name: mcp-build-test-logs-ubuntu-latest
           path: ci-logs/*.log
           retention-days: 7
+
+      # Last step on purpose: qualify a failure from this job's own summary file
+      # (test-ts.sh appends RUNNER-CONTENDED there) and, on attempt 1, ask
+      # rerun-contended-runner.yml to rerun the failed jobs once the run
+      # completes. A job cannot rerun its own in-progress run. Fork PRs have a
+      # read-only token, so they skip; the script is a logged no-op on any
+      # dispatch error and never changes this job's result (#12758).
+      - name: "Request fresh-runner rerun on runner contention"
+        if: failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
 
   # =============================================================================
   # Kotlin Code Coverage
@@ -2575,7 +2687,7 @@ jobs:
       - name: "Resolve Swift package dependencies"
         shell: bash
         run: |
-          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
             (cd "${package}" && swift package resolve)
           done
 
@@ -2729,7 +2841,7 @@ jobs:
       - name: "Resolve Xcode project Swift package dependencies"
         shell: bash
         run: |
-          for package in ios/highlight-core ios/auto-mobile-sdk ios/control-proxy; do
+          for package in ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy; do
             (cd "${package}" && swift package resolve)
           done
 
@@ -2836,7 +2948,7 @@ jobs:
           path: |
             ${{ runner.temp }}/automobile-derived-data-Playground/Build
             ${{ runner.temp }}/automobile-derived-data-Playground/ModuleCache.noindex
-          key: ${{ runner.os }}-${{ runner.environment }}-derived-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('ios/Playground/**/*.swift', 'ios/Playground/**/*.m', 'ios/Playground/**/*.mm', 'ios/Playground/**/*.h', 'ios/Playground/**/*.c', 'ios/Playground/**/*.cpp', 'ios/Playground/**/*.xcconfig', 'ios/Playground/**/*.plist', 'ios/Playground/**/*.entitlements', 'ios/Playground/**/*.storyboard', 'ios/Playground/**/*.xib', 'ios/Playground/**/*.xcassets/**', 'ios/Playground/**/*.strings', 'ios/Playground/**/*.ttf', 'ios/Playground/**/*.otf', 'ios/Playground/**/*.xcprivacy', 'ios/Playground/**/*.pbxproj', 'ios/Playground/**/*.xcscheme', 'ios/Playground/**/project.yml', 'ios/Playground/**/Package.swift', 'ios/Playground/**/Package.resolved', 'ios/highlight-core/**/*.swift', 'ios/highlight-core/**/*.m', 'ios/highlight-core/**/*.mm', 'ios/highlight-core/**/*.h', 'ios/highlight-core/**/*.c', 'ios/highlight-core/**/*.cpp', 'ios/highlight-core/**/*.xcconfig', 'ios/highlight-core/**/*.plist', 'ios/highlight-core/**/*.entitlements', 'ios/highlight-core/**/*.storyboard', 'ios/highlight-core/**/*.xib', 'ios/highlight-core/**/*.xcassets/**', 'ios/highlight-core/**/*.strings', 'ios/highlight-core/**/*.ttf', 'ios/highlight-core/**/*.otf', 'ios/highlight-core/**/*.xcprivacy', 'ios/highlight-core/**/*.pbxproj', 'ios/highlight-core/**/*.xcscheme', 'ios/highlight-core/**/project.yml', 'ios/highlight-core/**/Package.swift', 'ios/highlight-core/**/Package.resolved', 'ios/auto-mobile-sdk/**/*.swift', 'ios/auto-mobile-sdk/**/*.m', 'ios/auto-mobile-sdk/**/*.mm', 'ios/auto-mobile-sdk/**/*.h', 'ios/auto-mobile-sdk/**/*.c', 'ios/auto-mobile-sdk/**/*.cpp', 'ios/auto-mobile-sdk/**/*.xcconfig', 'ios/auto-mobile-sdk/**/*.plist', 'ios/auto-mobile-sdk/**/*.entitlements', 'ios/auto-mobile-sdk/**/*.storyboard', 'ios/auto-mobile-sdk/**/*.xib', 'ios/auto-mobile-sdk/**/*.xcassets/**', 'ios/auto-mobile-sdk/**/*.strings', 'ios/auto-mobile-sdk/**/*.ttf', 'ios/auto-mobile-sdk/**/*.otf', 'ios/auto-mobile-sdk/**/*.xcprivacy', 'ios/auto-mobile-sdk/**/*.pbxproj', 'ios/auto-mobile-sdk/**/*.xcscheme', 'ios/auto-mobile-sdk/**/project.yml', 'ios/auto-mobile-sdk/**/Package.swift', 'ios/auto-mobile-sdk/**/Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-derived-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('ios/Playground/**/*.swift', 'ios/Playground/**/*.m', 'ios/Playground/**/*.mm', 'ios/Playground/**/*.h', 'ios/Playground/**/*.c', 'ios/Playground/**/*.cpp', 'ios/Playground/**/*.xcconfig', 'ios/Playground/**/*.plist', 'ios/Playground/**/*.entitlements', 'ios/Playground/**/*.storyboard', 'ios/Playground/**/*.xib', 'ios/Playground/**/*.xcassets/**', 'ios/Playground/**/*.strings', 'ios/Playground/**/*.ttf', 'ios/Playground/**/*.otf', 'ios/Playground/**/*.xcprivacy', 'ios/Playground/**/*.pbxproj', 'ios/Playground/**/*.xcscheme', 'ios/Playground/**/project.yml', 'ios/Playground/**/Package.swift', 'ios/Playground/**/Package.resolved', 'ios/highlight-core/**/*.swift', 'ios/sdk-wire/**/*.swift', 'ios/highlight-core/**/*.m', 'ios/sdk-wire/**/*.m', 'ios/highlight-core/**/*.mm', 'ios/sdk-wire/**/*.mm', 'ios/highlight-core/**/*.h', 'ios/sdk-wire/**/*.h', 'ios/highlight-core/**/*.c', 'ios/sdk-wire/**/*.c', 'ios/highlight-core/**/*.cpp', 'ios/sdk-wire/**/*.cpp', 'ios/highlight-core/**/*.xcconfig', 'ios/sdk-wire/**/*.xcconfig', 'ios/highlight-core/**/*.plist', 'ios/sdk-wire/**/*.plist', 'ios/highlight-core/**/*.entitlements', 'ios/sdk-wire/**/*.entitlements', 'ios/highlight-core/**/*.storyboard', 'ios/sdk-wire/**/*.storyboard', 'ios/highlight-core/**/*.xib', 'ios/sdk-wire/**/*.xib', 'ios/highlight-core/**/*.xcassets/**', 'ios/sdk-wire/**/*.xcassets/**', 'ios/highlight-core/**/*.strings', 'ios/sdk-wire/**/*.strings', 'ios/highlight-core/**/*.ttf', 'ios/sdk-wire/**/*.ttf', 'ios/highlight-core/**/*.otf', 'ios/sdk-wire/**/*.otf', 'ios/highlight-core/**/*.xcprivacy', 'ios/sdk-wire/**/*.xcprivacy', 'ios/highlight-core/**/*.pbxproj', 'ios/sdk-wire/**/*.pbxproj', 'ios/highlight-core/**/*.xcscheme', 'ios/sdk-wire/**/*.xcscheme', 'ios/highlight-core/**/project.yml', 'ios/sdk-wire/**/project.yml', 'ios/highlight-core/**/Package.swift', 'ios/sdk-wire/**/Package.swift', 'ios/highlight-core/**/Package.resolved', 'ios/sdk-wire/**/Package.resolved', 'ios/auto-mobile-sdk/**/*.swift', 'ios/auto-mobile-sdk/**/*.m', 'ios/auto-mobile-sdk/**/*.mm', 'ios/auto-mobile-sdk/**/*.h', 'ios/auto-mobile-sdk/**/*.c', 'ios/auto-mobile-sdk/**/*.cpp', 'ios/auto-mobile-sdk/**/*.xcconfig', 'ios/auto-mobile-sdk/**/*.plist', 'ios/auto-mobile-sdk/**/*.entitlements', 'ios/auto-mobile-sdk/**/*.storyboard', 'ios/auto-mobile-sdk/**/*.xib', 'ios/auto-mobile-sdk/**/*.xcassets/**', 'ios/auto-mobile-sdk/**/*.strings', 'ios/auto-mobile-sdk/**/*.ttf', 'ios/auto-mobile-sdk/**/*.otf', 'ios/auto-mobile-sdk/**/*.xcprivacy', 'ios/auto-mobile-sdk/**/*.pbxproj', 'ios/auto-mobile-sdk/**/*.xcscheme', 'ios/auto-mobile-sdk/**/project.yml', 'ios/auto-mobile-sdk/**/Package.swift', 'ios/auto-mobile-sdk/**/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.environment }}-derived-playground-tests-${{ matrix.config.xcode }}-
 
@@ -2847,6 +2959,7 @@ jobs:
         shell: bash
         run: |
           (cd ios/highlight-core && swift package resolve)
+          (cd ios/sdk-wire && swift package resolve)
           (cd ios/auto-mobile-sdk && swift package resolve)
 
       - name: "Run Playground Tests"
@@ -2950,6 +3063,9 @@ jobs:
           SECONDS=0
           swift build -c release 2>&1
           echo "build took ${SECONDS}s"
+
+      - name: "Build AutoMobilePrototype library and embed consumer"
+        run: bash scripts/ios/prototype-library-build.sh
 
       # #11580: removing the isolated home removes only the cache symlink;
       # $RUNNER_TEMP/automobile-swiftpm-cache survives for the cache post-step save.
@@ -3427,7 +3543,7 @@ jobs:
           # :playground:app:compileDebugUnitTestKotlin keeps the app's unit-test
           # sources compiling as its own PR signal alongside the emulator lane (#10890; it
           # moved here from the removed Android Emulator Compile Smoke).
-          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
+          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest :playground:demos:testDebugUnitTest"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true
@@ -3624,6 +3740,7 @@ jobs:
           echo "Swift cache hit: ${{ steps.cache-webrtc-spm.outputs.cache-hit }}"
           brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version || true
           (cd ios/screen-capture && swift package resolve)
           SECONDS=0
           (cd ios/screen-capture && swift build)

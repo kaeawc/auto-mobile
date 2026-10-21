@@ -1,0 +1,136 @@
+{
+  "spec": {
+    "id": "patch-demo",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "count": 1,
+      "orders": [
+        {
+          "id": 1,
+          "title": "Tea"
+        },
+        {
+          "id": 2,
+          "title": "Coffee"
+        }
+      ],
+      "meta": {
+        "a": true,
+        "b": false
+      },
+      "a/b": {
+        "c~d": "old"
+      }
+    },
+    "state": {
+      "flag": true
+    },
+    "root": {
+      "type": "column",
+      "id": "root",
+      "children": [
+        {
+          "type": "card",
+          "id": "card",
+          "children": [
+            {
+              "type": "text",
+              "id": "title",
+              "text": "Orders"
+            }
+          ]
+        },
+        {
+          "type": "column",
+          "id": "repeater",
+          "repeat": {
+            "items": {
+              "path": "/orders"
+            },
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "id": "row",
+              "text": "{item.title}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "ops": [
+    {
+      "op": "remove",
+      "path": "/state/flag"
+    }
+  ],
+  "expected": {
+    "id": "patch-demo",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "count": 1,
+      "orders": [
+        {
+          "id": 1,
+          "title": "Tea"
+        },
+        {
+          "id": 2,
+          "title": "Coffee"
+        }
+      ],
+      "meta": {
+        "a": true,
+        "b": false
+      },
+      "a/b": {
+        "c~d": "old"
+      }
+    },
+    "state": {},
+    "root": {
+      "type": "column",
+      "id": "root",
+      "children": [
+        {
+          "type": "card",
+          "id": "card",
+          "children": [
+            {
+              "type": "text",
+              "id": "title",
+              "text": "Orders"
+            }
+          ]
+        },
+        {
+          "type": "column",
+          "id": "repeater",
+          "repeat": {
+            "items": {
+              "path": "/orders"
+            },
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "id": "row",
+              "text": "{item.title}"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

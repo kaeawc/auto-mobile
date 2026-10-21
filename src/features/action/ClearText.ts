@@ -1,10 +1,10 @@
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -24,6 +24,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toSearchable } from "../utility/SearchableNode";
 import { ANDROID_INPUT_CLASSES, isTruthyFlag } from "../utility/elementProperties";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
 export const DELETE_KEYEVENT_CHUNK_SIZE = 50;
@@ -309,7 +310,7 @@ export class ClearText extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | AdbClientFactory | null = null,
     parser: ElementParser = new DefaultElementParser(),
     timer: Timer = defaultTimer,
   ) {
@@ -354,14 +355,13 @@ export class ClearText extends BaseVisualChange {
         }
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false, // Whether text changed cannot be determined reliably.
+        // Whether text changed cannot be determined reliably; the a11y service already waited for the tree.
+        ...OBSERVED_INTERACTION_PROFILES.textEdit,
         tolerancePercent: 0.0,
-        timeoutMs: 100,
+        timeoutMs: SETTLE_BUDGET_MS.immediate,
         progress,
         signal,
         perf,
-        skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
       },
     );
   }
@@ -370,6 +370,14 @@ export class ClearText extends BaseVisualChange {
    * Execute Android-specific clear text using accessibility service.
    * Falls back to ADB delete key events if a11y service is unavailable.
    */
+  /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      executeAndroidClearText: this.executeAndroidClearText.bind(this),
+      executeiOSClearText: this.executeiOSClearText.bind(this),
+    };
+  }
+
   private async executeAndroidClearText(
     observeResult: ObserveResult,
     signal?: AbortSignal,

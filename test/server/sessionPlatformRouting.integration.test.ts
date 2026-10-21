@@ -3,28 +3,40 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { afterEach, beforeAll, beforeEach, expect, test, spyOn } from "bun:test";
 import { z } from "zod/v4";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const android: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
 const ios: BootedDevice = { deviceId: "iphone", platform: "ios", name: "iPhone" };
-let fixture: McpTestFixture | undefined;
-let originalManager: unknown;
-let originalRepository: unknown;
+let fixtureOrUndefined: McpTestFixture | undefined;
+
+function requireFixture(): McpTestFixture {
+  if (!fixtureOrUndefined) {
+    throw new Error("fixture not set up");
+  }
+  return fixtureOrUndefined;
+}
+let originalManager: ReturnType<
+  typeof ToolRegistry.getCollaboratorsForTesting
+>["deviceSessionManager"];
+let originalRepository: ReturnType<
+  typeof ToolRegistry.getCollaboratorsForTesting
+>["toolCallRepository"];
 let featureFlags: ReturnType<typeof spyOn> | undefined;
 let restorePipelineOverrides: (() => void) | undefined;
-let deviceSessionManagerSpy: ReturnType<typeof spyOn> | undefined;
 
 const received: string[] = [];
 
@@ -48,16 +60,19 @@ beforeEach(async () => {
   featureFlags = spyOn(FeatureFlagService, "getInstance").mockReturnValue(
     new FeatureFlagService(new FakeFeatureFlagRepository(), new FakeFeatureFlagApplier()),
   );
-  originalRepository = (ToolRegistry as any).toolCallRepository;
-  (ToolRegistry as any).toolCallRepository = { recordToolCall: async () => {} };
+  originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+  ToolRegistry.setCollaboratorsForTesting({
+    toolCallRepository: { recordToolCall: async () => {} },
+  });
   ToolRegistry.clearTools();
   clearDirectSessionDevices();
   received.length = 0;
-  originalManager = (ToolRegistry as any).deviceSessionManager;
+  originalManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
   const manager = new FakeDeviceSessionManager();
   manager.setConnectedDevices([android, ios]);
-  (ToolRegistry as any).deviceSessionManager = manager;
-  fixture = new McpTestFixture();
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
+  const fixture = new McpTestFixture();
+  fixtureOrUndefined = fixture;
   await fixture.setup();
   for (const [name, sessionUuid, device] of [
     ["getAndroid", "android-session", android],
@@ -92,18 +107,16 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   try {
-    await fixture?.teardown();
+    await fixtureOrUndefined?.teardown();
   } finally {
-    fixture = undefined;
-    deviceSessionManagerSpy?.mockRestore();
-    deviceSessionManagerSpy = undefined;
+    fixtureOrUndefined = undefined;
     featureFlags?.mockRestore();
     featureFlags = undefined;
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     PlatformDeviceManagerFactory.setInstance(null);
-    (ToolRegistry as any).toolCallRepository = originalRepository;
-    (ToolRegistry as any).deviceSessionManager = originalManager;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalRepository });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalManager });
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
   }
@@ -115,22 +128,22 @@ test("MCP platform and explicit sessions reach the correct device after two acqu
     { platform: "ios" },
     { sessionUuid: "android-session" },
   ]) {
-    await fixture.client.callTool({ name: "routingProbe", arguments: args });
+    await requireFixture().client.callTool({ name: "routingProbe", arguments: args });
   }
   expect(received).toEqual([android.deviceId, ios.deviceId, android.deviceId]);
 });
 
 test("successful setActiveDevice changes subsequent sessionless routing", async () => {
-  await fixture.client.callTool({
+  await requireFixture().client.callTool({
     name: "setActiveDevice",
     arguments: { deviceId: android.deviceId, platform: "android" },
   });
-  await fixture.client.callTool({ name: "routingProbe", arguments: {} });
+  await requireFixture().client.callTool({ name: "routingProbe", arguments: {} });
   expect(received).toEqual([android.deviceId]);
 });
 
 test("explicit session takes precedence over platform", async () => {
-  await fixture.client.callTool({
+  await requireFixture().client.callTool({
     name: "routingProbe",
     arguments: { sessionUuid: "android-session", platform: "ios" },
   });
@@ -141,16 +154,15 @@ test("direct setActiveDevice rebinds the default to a free device", async () => 
   const other: BootedDevice = { deviceId: "emulator-5556", platform: "android", name: "Other" };
   const manager = new FakeDeviceSessionManager();
   manager.setConnectedDevices([android, ios, other]);
-  deviceSessionManagerSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue(manager);
-  (ToolRegistry as any).deviceSessionManager = manager;
-  registerUtilityTools();
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
+  registerUtilityTools({ legacyDeviceSelection: () => manager });
   // Leave `other` out of the fake booted list so the legacy handler's
   // resumeCtrlProxyIfCurrentlyBooted call exits before touching CtrlProxy.
-  const result = await fixture.client.callTool({
+  const result = await requireFixture().client.callTool({
     name: "setActiveDevice",
     arguments: { deviceId: other.deviceId, platform: "android" },
   });
   expect(result.isError).not.toBe(true);
-  await fixture.client.callTool({ name: "routingProbe", arguments: {} });
+  await requireFixture().client.callTool({ name: "routingProbe", arguments: {} });
   expect(received).toEqual([other.deviceId]);
 });

@@ -4,7 +4,7 @@ import {
 } from "../../utils/deviceExecutionBinding";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionToolSelectionService } from "./SessionToolSelectionService";
-import type { ProgressCallback } from "../../server/toolRegistry";
+import type { ProgressCallback } from "../action/BaseVisualChange";
 
 export type ToolSelectionContext = {
   /** A device-aware wrapper already owns this execution's session resolution (#11680). */

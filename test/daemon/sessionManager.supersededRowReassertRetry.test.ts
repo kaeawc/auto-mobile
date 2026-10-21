@@ -13,6 +13,7 @@ import { BusyRewritePersistence } from "../fakes/BusyRewritePersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 
 const SESSION = "s1";
 const DEVICE = "emulator-5554";
@@ -38,7 +39,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     store = new BusyRewritePersistence();
-    manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.setSupersededRowReassertBackoff(fixedBackoff(RETRY_DELAY_MS));
     manager.setTerminalReleaseRetryBackoff(fixedBackoff(TERMINAL_RETRY_DELAY_MS));
@@ -60,11 +61,11 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
   test("successful own-row release and guarded rebind use the unguarded microtask budget", async () => {
     manager.attachDaemonSessionId("daemon-1");
-    const unguarded = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    const unguarded = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     unguarded.stopCleanupTimer();
     try {
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
-      await unguarded.createSession("unguarded", DEVICE, "android", IDLE_WINDOW_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
+      await unguarded.createSession("unguarded", DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
       for (const operation of ["rebind", "release"] as const) {
         let turn = 0;
         let guardedTurn: number | undefined;
@@ -109,10 +110,12 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
         discoveries++;
         throw new Error("unexpected PID-file discovery");
       });
-      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const session = await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+      });
       if (write === "release") {
         await manager.releaseSession(SESSION, "daemon-shutdown");
-        expect(await store.getSession?.(SESSION)).toMatchObject({
+        expect(await store.getSession(SESSION)).toMatchObject({
           release_reason: "daemon-shutdown",
         });
       } else if (write === "rebind") {
@@ -122,7 +125,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
         await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
         timer.advanceTime(1);
         expect(await refresh()).toBe("refreshed");
-        expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+        expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
       }
       expect(discoveries).toBe(0);
     },
@@ -137,8 +140,8 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
         discoveries++;
         return new Set(["daemon-1"]);
       });
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
-      const row = (await store.getSession?.(SESSION))!;
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
+      const row = (await store.getSession(SESSION))!;
       store.seed({
         ...row,
         daemon_session_id: "dead",
@@ -151,16 +154,16 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       });
       if (write === "release") {
         await manager.releaseSession(SESSION, "explicit-release");
-        expect(await store.getSession?.(SESSION)).toMatchObject({
+        expect(await store.getSession(SESSION)).toMatchObject({
           release_reason: "explicit-release",
         });
       } else if (write === "rebind") {
         await manager.rebindSession(SESSION, "emulator-5556", "android");
-        expect(await store.getSession?.(SESSION)).toMatchObject({ device_id: "emulator-5556" });
+        expect(await store.getSession(SESSION)).toMatchObject({ device_id: "emulator-5556" });
       } else {
         timer.advanceTime(1);
         expect(await refresh()).toBe("refreshed");
-        expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+        expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
       }
       expect(discoveries).toBe(1);
     },
@@ -178,8 +181,8 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
         fileSystem: files,
       }),
     );
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
-    store.seed({ ...(await store.getSession?.(SESSION))!, daemon_session_id: "dead" });
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
+    store.seed({ ...(await store.getSession(SESSION))!, daemon_session_id: "dead" });
     let fails = true;
     manager.attachLiveDaemonSessionIds(() => {
       if (fails) {
@@ -199,12 +202,12 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     land();
     await settleMicrotasks();
     expect(files.files.get(journalPath)).toContain("explicit-release");
-    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
     expect(timer.getPendingTimeouts()).toContain(TERMINAL_RETRY_DELAY_MS);
     fails = false;
     await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
     await settleMicrotasks();
-    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: "explicit-release" });
+    expect(await store.getSession(SESSION)).toMatchObject({ release_reason: "explicit-release" });
     expect(files.files.get(journalPath) ?? "").not.toContain("explicit-release");
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
@@ -213,9 +216,11 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     "failed fallback discovery on %s never ends a held session",
     async (write) => {
       manager.attachDaemonSessionId("daemon-1");
-      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const session = await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+      });
       const before = {
-        ...(await store.getSession?.(SESSION))!,
+        ...(await store.getSession(SESSION))!,
         daemon_session_id: "peer",
         ...(write === "activity"
           ? { status: "expired" as const, release_reason: "daemon-restart" }
@@ -235,7 +240,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       }
       expect(manager.getSession(SESSION)).toBe(session);
       expect(session.assignedDevice).toBe(DEVICE);
-      expect(await store.getSession?.(SESSION)).toEqual(before);
+      expect(await store.getSession(SESSION)).toEqual(before);
       expect(releases).toEqual([]);
     },
   );
@@ -249,8 +254,8 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
         discoveries++;
         return new Set(["peer"]);
       });
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
-      const own = (await store.getSession?.(SESSION))!;
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
+      const own = (await store.getSession(SESSION))!;
       const changeOwner = async () => {
         store.seed({ ...own, daemon_session_id: "peer" });
         store.afterRefusedUpsert = () => {
@@ -263,19 +268,19 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
           store.seed(own);
         };
         await manager.releaseSession(SESSION, "explicit-release");
-        expect(await store.getSession?.(SESSION)).toMatchObject({
+        expect(await store.getSession(SESSION)).toMatchObject({
           release_reason: "explicit-release",
         });
       } else if (write === "rebind") {
         store.duringPlainUpsert = changeOwner;
         await manager.rebindSession(SESSION, "emulator-5556", "android");
-        expect(await store.getSession?.(SESSION)).toMatchObject({ device_id: "emulator-5556" });
+        expect(await store.getSession(SESSION)).toMatchObject({ device_id: "emulator-5556" });
       } else {
         await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
         store.duringActivityUpsert = changeOwner;
         timer.advanceTime(1);
         expect(await refresh()).toBe("refreshed");
-        expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+        expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
       }
       expect(discoveries).toBe(0);
     },
@@ -286,7 +291,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     manager.attachLiveDaemonSessionIds(() => {
       throw new Error("unexpected discovery");
     });
-    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
     store.refuseGuardedUpserts = 2;
     await expect(manager.rebindSession(SESSION, "emulator-5556", "android")).rejects.toThrow(
       "two statement misses",
@@ -311,7 +318,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
         fileSystem: files,
       }),
     );
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     store.refuseGuardedReleaseWrites = 2;
     let land!: () => void;
     store.park = new Promise<void>((resolve) => {
@@ -327,10 +334,10 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(store.refuseGuardedReleaseWrites).toBe(0);
     expect(files.files.get(journalPath)).toContain("explicit-release");
     expect(timer.getPendingTimeouts()).toContain(TERMINAL_RETRY_DELAY_MS);
-    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
     await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
     await settleMicrotasks();
-    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: "explicit-release" });
+    expect(await store.getSession(SESSION)).toMatchObject({ release_reason: "explicit-release" });
     expect(files.files.get(journalPath) ?? "").not.toContain("explicit-release");
   });
 
@@ -338,14 +345,16 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     "concurrent activity re-persists on a %s row both succeed",
     async (reason) => {
       manager.attachDaemonSessionId("daemon-1");
-      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const session = await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+      });
       await store.markReleased(SESSION, "expired", timer.now(), reason);
       timer.advanceTime(1);
       store.activityUpserts = 0;
       expect(await Promise.all([refresh(), refresh()])).toEqual(["refreshed", "refreshed"]);
       expect(store.activityUpserts).toBeGreaterThanOrEqual(1);
       expect(store.activityUpserts).toBeLessThanOrEqual(2);
-      expect(await store.getSession?.(SESSION)).toMatchObject({
+      expect(await store.getSession(SESSION)).toMatchObject({
         status: "active",
         device_id: DEVICE,
       });
@@ -359,13 +368,15 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
    * late, under the session that lives on, and the rewrite of the live row fails `failures` times.
    */
   async function supersededReleaseWithFailingRewrite(failures: number): Promise<void> {
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     let landReleaseWrite!: () => void;
     store.park = new Promise<void>((resolve) => {
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
@@ -377,7 +388,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
     // The scenario was driven: the terminal row landed and the one rewrite of it failed.
     expect(store.plainUpserts).toBe(1);
-    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
+    expect(await store.getSession(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
     expect(manager.getSession(SESSION)).not.toBeNull();
     timer.advanceTime(1);
   }
@@ -389,7 +400,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
       const landReleaseWrite = await supersededReleaseWithParkedWrite();
       const before = {
-        ...(await store.getSession?.(SESSION))!,
+        ...(await store.getSession(SESSION))!,
         daemon_session_id: "daemon-peer",
         ...(shape === "terminal"
           ? { status: "released" as const, release_reason: "explicit-release" }
@@ -402,7 +413,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
       await settleMicrotasks();
 
-      expect(await store.getSession?.(SESSION)).toEqual(before);
+      expect(await store.getSession(SESSION)).toEqual(before);
       expect(timer.getPendingTimeoutCount()).toBe(0);
       expect(manager.getSession(SESSION)).not.toBeNull();
       expect(releases).toEqual([]);
@@ -411,7 +422,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
         expect(await refresh()).toBe("TerminalSessionError");
         expect(manager.getSession(SESSION)).toBeNull();
         expect(releases).toEqual(["explicit-release"]);
-        expect(await store.getSession?.(SESSION)).toEqual(before);
+        expect(await store.getSession(SESSION)).toEqual(before);
       }
     },
   );
@@ -421,9 +432,11 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     async (shape) => {
       manager.attachDaemonSessionId("daemon-1");
       manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
-      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const session = await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+      });
       const before = {
-        ...(await store.getSession?.(SESSION))!,
+        ...(await store.getSession(SESSION))!,
         daemon_session_id: "daemon-peer",
         ...(shape === "terminal"
           ? { status: "released" as const, release_reason: "explicit-release" }
@@ -442,28 +455,30 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
       expect(session.assignedDevice).toBe(DEVICE);
       expect(manager.getSessionForDevice("emulator-5556")).toBeNull();
-      expect(await store.getSession?.(SESSION)).toEqual(before);
+      expect(await store.getSession(SESSION)).toEqual(before);
       expect(manager.getSession(SESSION)).toBe(shape === "terminal" ? null : session);
       expect(releases).toEqual(shape === "terminal" ? ["explicit-release"] : []);
     },
   );
 
   test("a busy rebind keeps its old binding and a retry without a peer lands", async () => {
-    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
     store.failPlainUpserts = 1;
     await expect(manager.rebindSession(SESSION, "emulator-5556", "android")).rejects.toThrow(
       "SQLITE_BUSY",
     );
     expect(manager.getSession(SESSION)).toBe(session);
     expect(session.assignedDevice).toBe(DEVICE);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       device_id: DEVICE,
       status: "active",
     });
     expect(releases).toEqual([]);
     await manager.rebindSession(SESSION, "emulator-5556", "android");
     expect(session.assignedDevice).toBe("emulator-5556");
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       device_id: "emulator-5556",
       status: "active",
     });
@@ -472,7 +487,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   test.each(["explicit-release", "device-killed"])(
     "a committed terminal upgrade replaces its own earlier reason with %s",
     async (reason) => {
-      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const session = await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+      });
       let land!: () => void;
       store.park = new Promise<void>((resolve) => {
         land = resolve;
@@ -484,13 +501,15 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       store.park = undefined;
       land();
       await Promise.all([releasing, upgrading]);
-      expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: reason });
+      expect(await store.getSession(SESSION)).toMatchObject({ release_reason: reason });
       expect(manager.getSession(SESSION)).toBeNull();
     },
   );
 
   test("a finalized terminal reason is upgraded to device-killed in the row too", async () => {
-    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
     let upgraded: Promise<unknown> | undefined;
     manager.onSessionRelease((_id, _device, reason) => {
       if (reason === "explicit-release") {
@@ -506,27 +525,27 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
     await upgraded;
     expect(upgraded).toBeDefined();
-    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: "device-killed" });
+    expect(await store.getSession(SESSION)).toMatchObject({ release_reason: "device-killed" });
     expect(releases).toEqual(["explicit-release", "device-killed"]);
   });
 
   test("a refused superseded release owes no live rewrite", async () => {
     manager.attachDaemonSessionId("daemon-1");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
-    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
     let land!: () => void;
     store.park = new Promise<void>((resolve) => {
       land = resolve;
     });
     let superseded = false;
-    const released = manager.releaseSessionUnlessSuperseded(
-      SESSION,
-      DEVICE_LOSS,
-      () => !superseded,
-    );
+    const released = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks();
     const before = {
-      ...(await store.getSession?.(SESSION))!,
+      ...(await store.getSession(SESSION))!,
       status: "released" as const,
       release_reason: DEVICE_LOSS,
       daemon_session_id: "daemon-peer",
@@ -538,7 +557,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     land();
     expect(await released).toEqual({ superseded: true });
     expect(store.plainUpserts).toBe(0);
-    expect(await store.getSession?.(SESSION)).toEqual(before);
+    expect(await store.getSession(SESSION)).toEqual(before);
     expect(manager.getSession(SESSION)).toBe(session);
     expect(releases).toEqual([]);
   });
@@ -556,7 +575,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     );
     await settleMicrotasks();
     store.seed({
-      ...(await store.getSession?.(SESSION))!,
+      ...(await store.getSession(SESSION))!,
       status: "released",
       release_reason: "explicit-release",
     });
@@ -578,19 +597,21 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(await rebound).toBe("TerminalSessionError");
     expect(await drain).toBe(true);
     expect(manager.getSession(SESSION)).toBeNull();
-    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: "explicit-release" });
+    expect(await store.getSession(SESSION)).toMatchObject({ release_reason: "explicit-release" });
   });
 
   test("a current activity refusal over a live peer preserves the held session", async () => {
     manager.attachDaemonSessionId("daemon-1");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
-    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
     await store.markReleased(SESSION, "released", timer.now(), "daemon-restart");
-    const before = { ...(await store.getSession?.(SESSION))!, daemon_session_id: "daemon-peer" };
+    const before = { ...(await store.getSession(SESSION))!, daemon_session_id: "daemon-peer" };
     store.seed(structuredClone(before));
     timer.advanceTime(1);
     expect(await refresh()).toBe("SessionActivityPersistenceError");
-    expect(await store.getSession?.(SESSION)).toEqual(before);
+    expect(await store.getSession(SESSION)).toEqual(before);
     expect(manager.getSession(SESSION)).toBe(session);
     expect(releases).toEqual([]);
   });
@@ -600,7 +621,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     async (owner) => {
       manager.attachDaemonSessionId("daemon-1");
       manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
-      const old = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const old = await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+      });
       await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
       let land!: () => void;
       let parked = false;
@@ -630,22 +653,19 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
           hasReceivedHeartbeat: true,
         });
       } else {
-        replacement = await manager.createSession(
-          SESSION,
-          "emulator-5556",
-          "android",
-          IDLE_WINDOW_MS,
-        );
+        replacement = await manager.createSession(SESSION, "emulator-5556", "android", {
+          timeoutMs: IDLE_WINDOW_MS,
+        });
         expect(replacement).not.toBe(old);
       }
-      const before = structuredClone(await store.getSession?.(SESSION));
+      const before = structuredClone(await store.getSession(SESSION));
       land();
       await activity;
       await settleMicrotasks();
       await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
       await settleMicrotasks();
 
-      expect(await store.getSession?.(SESSION)).toEqual(before);
+      expect(await store.getSession(SESSION)).toEqual(before);
       expect(manager.getSession(SESSION)).toBe(replacement ?? null);
       expect(releases).toEqual(["plan-auto-release"]);
       expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -653,19 +673,21 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   );
 
   test("a busy activity re-persist keeps the held session and its next write lands without a peer", async () => {
-    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
     await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
     store.failActivityUpserts = 1;
     timer.advanceTime(1);
     expect(await refresh()).toBe("SessionActivityPersistenceError");
     expect(manager.getSession(SESSION)).toBe(session);
     expect(releases).toEqual([]);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "expired",
       release_reason: "daemon-restart",
     });
     expect(await refresh()).toBe("refreshed");
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
       device_id: DEVICE,
@@ -687,7 +709,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
 
     expect(store.plainUpserts).toBe(0);
-    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
+    expect(await store.getSession(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
     expect(manager.getSession(SESSION)).not.toBeNull();
     expect(releases).toEqual([]);
     expect(timer.getPendingTimeouts()).toContain(RETRY_DELAY_MS);
@@ -695,7 +717,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await timer.advanceTimeAsync(RETRY_DELAY_MS);
     await settleMicrotasks();
     expect(store.plainUpserts).toBe(1);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
     });
@@ -717,7 +739,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
 
     expect(store.plainUpserts).toBe(2);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
     });
@@ -727,13 +749,18 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   });
 
   /** R2 fences the session long enough to drop R1's owed entry, then is superseded too. */
-  async function overlapSupersededRelease(reason: string, failLateWrite = false): Promise<void> {
+  async function overlapSupersededRelease(
+    reason: SessionReleaseReason,
+    failLateWrite = false,
+  ): Promise<void> {
     let landReleaseWrite!: () => void;
     store.park = new Promise<void>((resolve) => {
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     await timer.advanceTimeAsync(RETRY_DELAY_MS);
     await settleMicrotasks();
@@ -750,13 +777,13 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
   }
 
-  test.each(["cli-idle-timeout", "heartbeat-timeout"])(
+  test.each(["cli-idle-timeout", "heartbeat-timeout"] as const)(
     "overlapping superseded %s preserves the live session after a busy rewrite",
     async (reason) => {
       await supersededReleaseWithFailingRewrite(1);
       await overlapSupersededRelease(reason, reason === "heartbeat-timeout");
 
-      expect(await store.getSession?.(SESSION)).toMatchObject({
+      expect(await store.getSession(SESSION)).toMatchObject({
         status: "active",
         release_reason: null,
       });
@@ -770,8 +797,8 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   test("an unrelated terminal release after overlapping superseded releases still ends the session", async () => {
     await supersededReleaseWithFailingRewrite(1);
     await overlapSupersededRelease("cli-idle-timeout");
-    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
-    const row = (await store.getSession?.(SESSION))!;
+    expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
+    const row = (await store.getSession(SESSION))!;
     store.seed({ ...row, status: "released", release_reason: "explicit-release" });
     timer.advanceTime(1);
 
@@ -787,13 +814,13 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
     const old = manager.getSession(SESSION);
     await manager.releaseSession(SESSION, "plan-auto-release");
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     expect(manager.getSession(SESSION)).not.toBe(old);
     releases.length = 0;
 
     // This incarnation supersedes only idle expiry; the old incarnation's device loss is foreign.
     store.duringPlainUpsert = async () => {
-      const row = (await store.getSession?.(SESSION))!;
+      const row = (await store.getSession(SESSION))!;
       store.seed({ ...row, status: "released", release_reason: DEVICE_LOSS });
     };
     await overlapSupersededRelease("cli-idle-timeout");
@@ -816,7 +843,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     peer.record({ sessionId: SESSION, reason: "explicit-release", at: timer.now() });
     const journal = createDaemonTerminalReleaseJournal({ ...options, daemonSessionId: "daemon-1" });
     manager.attachTerminalReleaseJournal(journal);
-    const row = (await store.getSession?.(SESSION))!;
+    const row = (await store.getSession(SESSION))!;
     store.seed({
       ...row,
       status: "active",
@@ -832,7 +859,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(store.failReleaseWrites).toBe(0);
     expect(store.plainUpserts).toBe(1);
     expect(files.files.has(terminalReleaseJournalPath("/data", "daemon-peer"))).toBe(true);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
       daemon_session_id: "daemon-peer",
@@ -857,7 +884,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
         await supersededReleaseWithFailingRewrite(1);
       }
       store.duringPlainUpsert = async () => {
-        const row = (await store.getSession?.(SESSION))!;
+        const row = (await store.getSession(SESSION))!;
         store.seed({ ...row, status: "released", release_reason: "explicit-release" });
       };
 
@@ -868,7 +895,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       await settleMicrotasks();
 
       expect(store.plainUpserts).toBe(attempt === "first" ? 1 : 2);
-      expect(await store.getSession?.(SESSION)).toMatchObject({
+      expect(await store.getSession(SESSION)).toMatchObject({
         status: "released",
         release_reason: "explicit-release",
       });
@@ -891,7 +918,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       const landReleaseWrite = await supersededReleaseWithParkedWrite();
       let peerRow: Awaited<ReturnType<NonNullable<typeof store.getSession>>>;
       store.duringPlainUpsert = async () => {
-        const row = (await store.getSession?.(SESSION))!;
+        const row = (await store.getSession(SESSION))!;
         peerRow = {
           ...row,
           status: "active",
@@ -906,9 +933,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       await settleMicrotasks();
 
       if (owner === "daemon-peer") {
-        expect(await store.getSession?.(SESSION)).toEqual(peerRow!);
+        expect(await store.getSession(SESSION)).toEqual(peerRow!);
       } else {
-        expect(await store.getSession?.(SESSION)).toMatchObject({
+        expect(await store.getSession(SESSION)).toMatchObject({
           status: "active",
           release_reason: null,
           daemon_session_id: "daemon-1",
@@ -922,7 +949,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       expect(manager.getSession(SESSION)).not.toBeNull();
       expect(releases).toEqual([]);
       if (owner === "daemon-peer") {
-        expect(await store.getSession?.(SESSION)).toEqual(peerRow!);
+        expect(await store.getSession(SESSION)).toEqual(peerRow!);
       }
     },
   );
@@ -947,7 +974,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     store.failPlainUpserts = 0;
     timer.advanceTime(1);
     expect(await refresh()).toBe("refreshed");
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
     });
@@ -956,7 +983,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
   test("a peer's terminal row under the owed rewrite still ends the session and is not revived", async () => {
     await supersededReleaseWithFailingRewrite(1);
-    const row = (await store.getSession?.(SESSION))!;
+    const row = (await store.getSession(SESSION))!;
     store.seed({ ...row, status: "released", release_reason: "explicit-release" });
 
     expect(await refresh()).toBe("TerminalSessionError");
@@ -966,7 +993,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
     await settleMicrotasks();
     expect(store.plainUpserts).toBe(1);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "explicit-release",
     });
@@ -975,7 +1002,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
   test("a retry that finds a peer's terminal row leaves it for the next activity write", async () => {
     await supersededReleaseWithFailingRewrite(1);
-    const row = (await store.getSession?.(SESSION))!;
+    const row = (await store.getSession(SESSION))!;
     store.seed({ ...row, status: "expired", release_reason: "heartbeat-timeout" });
 
     await timer.advanceTimeAsync(RETRY_DELAY_MS);
@@ -997,7 +1024,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
     await settleMicrotasks();
     expect(store.plainUpserts).toBe(1);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "explicit-release",
     });
@@ -1020,7 +1047,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
     expect(store.plainUpserts).toBe(2);
     expect(manager.getSession(SESSION)).toBeNull();
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "explicit-release",
     });
@@ -1048,7 +1075,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
     await settleMicrotasks();
     expect(store.plainUpserts).toBe(2);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "explicit-release",
     });
@@ -1067,14 +1094,14 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
     expect(store.afterPlainUpsert).toBeUndefined();
     expect(manager.getSession(SESSION)?.assignedDevice).toBe(REBOUND_DEVICE);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       device_id: REBOUND_DEVICE,
     });
     // The deferred retry then writes the session as rebound, and nothing is left armed.
     await timer.advanceTimeAsync(RETRY_DELAY_MS * 2);
     await settleMicrotasks();
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
       device_id: REBOUND_DEVICE,
@@ -1086,7 +1113,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   test("a rebind that outlasts every retry settles the owed rewrite, so a later terminal row with the same reason ends the session", async () => {
     const REBOUND_DEVICE = "emulator-5556";
     await supersededReleaseWithFailingRewrite(1);
-    const supersededRow = (await store.getSession?.(SESSION))!;
+    const supersededRow = (await store.getSession(SESSION))!;
     // The rebind's write stays in flight while every retry comes due and yields to it.
     store.duringPlainUpsert = async () => {
       for (let attempt = 0; attempt < SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS + 2; attempt++) {
@@ -1100,7 +1127,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     // The scenario was driven: only the rebind wrote, the retries are spent, and the row is live.
     expect(store.plainUpserts).toBe(2);
     expect(timer.getPendingTimeoutCount()).toBe(0);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       device_id: REBOUND_DEVICE,
     });
@@ -1113,18 +1140,20 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(store.plainUpserts).toBe(2);
     expect(manager.getSession(SESSION)).toBeNull();
     expect(releases).toEqual([DEVICE_LOSS]);
-    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
+    expect(await store.getSession(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
   });
 
   /** A device-loss release is superseded while its terminal write is parked past the deadline. */
   async function supersededReleaseWithParkedWrite(): Promise<() => void> {
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     let landReleaseWrite!: () => void;
     store.park = new Promise<void>((resolve) => {
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
@@ -1152,7 +1181,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(store.duringPlainUpsert).toBeUndefined();
     expect(manager.getSession(SESSION)).toBeNull();
     expect(releases).toEqual(["plan-auto-release"]);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "plan-auto-release",
     });
@@ -1175,17 +1204,138 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     landReleaseWrite();
     await settleMicrotasks();
     expect(manager.getSession(SESSION)).toBeNull();
-    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
     landPlanRelease();
     await released;
     await settleMicrotasks();
 
     expect(store.plainUpserts).toBe(1);
     expect(releases).toEqual(["plan-auto-release"]);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "plan-auto-release",
     });
+  });
+
+  test("a terminal release whose write is in flight when its own rewrite lands still releases the row", async () => {
+    const landReleaseWrite = await supersededReleaseWithParkedWrite();
+    let released: Promise<unknown> | undefined;
+    let landTerminal!: () => void;
+    store.duringPlainUpsert = async () => {
+      store.park = new Promise<void>((resolve) => {
+        landTerminal = resolve;
+      });
+      released = manager.releaseSession(SESSION, "explicit-release");
+      await settleMicrotasks(100);
+    };
+    landReleaseWrite();
+    await settleMicrotasks();
+    expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
+    store.park = undefined;
+    landTerminal();
+    await released;
+    await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
+    await settleMicrotasks();
+    expect(await store.getSession(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "explicit-release",
+    });
+  });
+
+  test.each(["first statement", "refusal retry"] as const)(
+    "a terminal release observes its own %s generation at statement settlement",
+    async (attempt) => {
+      manager.attachDaemonSessionId("daemon-1");
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
+      const files = new FakeTerminalReleaseJournalFileSystem();
+      const journal = createDaemonTerminalReleaseJournal({
+        dataDir: "/data",
+        daemonSessionId: "daemon-1",
+        liveDaemonSessionIds: new Set(["daemon-1"]),
+        fileSystem: files,
+      });
+      manager.attachTerminalReleaseJournal(journal);
+      // Repair a peer startup sweep's expiry through the real activity persistence path.
+      await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+      const landed = Promise.withResolvers<number>();
+      const statement = Promise.withResolvers<number>();
+      const upsert = store.upsertActiveSession.bind(store);
+      store.refuseGuardedUpserts = attempt === "refusal retry" ? 1 : 0;
+      store.upsertActiveSession = (...args) => {
+        if (store.refuseGuardedUpserts > 0) {
+          return upsert(...args);
+        }
+        // Land the fake DB write, but expose its statement promise's settlement separately.
+        void upsert(...args).then(landed.resolve, statement.reject);
+        return statement.promise;
+      };
+      timer.advanceTime(1);
+      const activity = refresh();
+      const generation = await landed.promise;
+      const read = store.getSession.bind(store);
+      let classified = false;
+      store.afterRefusedRelease = () => {
+        store.getSession = (sessionId) => {
+          store.getSession = read;
+          // Settle alongside the read's clock conversion, before its refusal classifier runs.
+          // The retry wrapper's await must not leave the generation unrecorded in that gap.
+          void Promise.resolve().then(() => statement.resolve(generation));
+          classified = true;
+          return read(sessionId);
+        };
+      };
+      await manager.releaseSession(SESSION, "explicit-release");
+      await activity;
+
+      expect(classified).toBe(true);
+      expect(store.activityUpserts).toBe(attempt === "refusal retry" ? 2 : 1);
+      expect(await store.getSession(SESSION)).toMatchObject({
+        status: "released",
+        release_reason: "explicit-release",
+      });
+      expect(journal.loadUnconfirmed()).toEqual([]);
+      expect(manager.getSession(SESSION)).toBeNull();
+    },
+  );
+
+  test("another own generation advance during terminal resolution keeps the release owed", async () => {
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
+    const files = new FakeTerminalReleaseJournalFileSystem();
+    const journal = createDaemonTerminalReleaseJournal({
+      dataDir: "/data",
+      daemonSessionId: "daemon-1",
+      liveDaemonSessionIds: new Set(["daemon-1"]),
+      fileSystem: files,
+    });
+    manager.attachTerminalReleaseJournal(journal);
+    // Model two already-issued own upserts landing before successive conditioned statements.
+    const row = (await store.getSession(SESSION))!;
+    let advances = 0;
+    const advanceOwnRow = () => {
+      advances++;
+      const generation = advances + 1;
+      store.seed({ ...row, stable_identity_generation: generation });
+      manager["recordPersistedRowGeneration"](session, generation);
+      if (advances < 2) {
+        store.afterRefusedRelease = advanceOwnRow;
+      }
+    };
+    store.refuseGuardedReleaseWrites = 2;
+    store.afterRefusedRelease = advanceOwnRow;
+    await expect(manager.releaseSession(SESSION, "explicit-release")).rejects.toThrow(
+      "row stayed writable",
+    );
+    // Bounded resolution surfaces a transient failure; it must not resolve the durable intent.
+    expect(journal.loadUnconfirmed()).toHaveLength(1);
+    await manager.releaseSession(SESSION, "explicit-release");
+    expect(advances).toBe(2);
+    expect(await store.getSession(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "explicit-release",
+    });
+    expect(journal.loadUnconfirmed()).toEqual([]);
   });
 
   test("a terminal release landing during a rewrite refuses it without needing a terminal re-write", async () => {
@@ -1207,7 +1357,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(store.plainUpserts).toBe(2);
     expect(store.failReleaseWrites).toBe(1);
     expect(manager.getSession(SESSION)).toBeNull();
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "explicit-release",
     });
@@ -1216,7 +1366,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
     await settleMicrotasks();
 
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "explicit-release",
     });
@@ -1240,7 +1390,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
     expect(store.failReleaseWrites).toBe(0);
     expect(timer.getPendingTimeouts()).toEqual([TERMINAL_RETRY_DELAY_MS]);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
     });
@@ -1249,7 +1399,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
     await settleMicrotasks();
 
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: DEVICE_LOSS,
     });
@@ -1264,7 +1414,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     store.duringPlainUpsert = async () => {
       landReleaseWrite();
       await settleMicrotasks();
-      expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
+      expect(await store.getSession(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
     };
 
     await manager.rebindSession(SESSION, REBOUND_DEVICE, "android");
@@ -1273,7 +1423,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     // Only the rebind wrote the row, and its landing settled the rewrite: no retry is armed.
     expect(store.plainUpserts).toBe(1);
     expect(timer.getPendingTimeoutCount()).toBe(0);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
       device_id: REBOUND_DEVICE,
@@ -1295,13 +1445,13 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     // The scenario was driven: the rewrite landed last, with the binding from before the rebind.
     expect(store.plainUpserts).toBe(2);
     expect(manager.getSession(SESSION)?.assignedDevice).toBe(REBOUND_DEVICE);
-    expect(await store.getSession?.(SESSION)).toMatchObject({ device_id: DEVICE });
+    expect(await store.getSession(SESSION)).toMatchObject({ device_id: DEVICE });
 
     await timer.advanceTimeAsync(RETRY_DELAY_MS);
     await settleMicrotasks();
 
     expect(store.plainUpserts).toBe(3);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
       device_id: REBOUND_DEVICE,
@@ -1311,7 +1461,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   });
 
   test("a terminal write that fails as its release gives up on it at the deadline is still retried", async () => {
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     let failReleaseWrite!: () => void;
     store.park = new Promise<void>((resolve) => {
       failReleaseWrite = resolve;
@@ -1328,13 +1478,13 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
 
     expect(manager.getSession(SESSION)).toBeNull();
-    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
     expect(timer.getPendingTimeouts()).toEqual([TERMINAL_RETRY_DELAY_MS]);
 
     await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
     await settleMicrotasks();
 
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: "explicit-release",
     });
@@ -1342,7 +1492,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   });
 
   test("a forced release's fence write that fails past its deadline is retried though the release never settles", async () => {
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     // A rebind whose write never lands; the release of the session waits on it and is forced.
     store.duringPlainUpsert = () => new Promise<void>(() => {});
     const rebind = manager.rebindSession(SESSION, "emulator-5556", "android");
@@ -1366,14 +1516,14 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     // The scenario was driven: the fence write failed and the stuck release is still pending.
     expect(store.failReleaseWrites).toBe(0);
     expect(manager.getSession(SESSION)).toBeNull();
-    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
     expect(await Promise.race([released, rebind, Promise.resolve("pending")])).toBe("pending");
     expect(timer.getPendingTimeouts()).toContain(TERMINAL_RETRY_DELAY_MS);
 
     await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
     await settleMicrotasks();
 
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "expired",
       release_reason: "heartbeat-timeout",
     });
@@ -1398,7 +1548,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
     // The drain's attempt has not written under the rebind, and no retry timer is armed.
     expect(store.plainUpserts).toBe(2);
-    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
+    expect(await store.getSession(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
 
     failRebindWrite();
 
@@ -1406,7 +1556,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(await drained).toBe(true);
     expect(store.plainUpserts).toBe(3);
     expect(manager.getSession(SESSION)?.assignedDevice).toBe(DEVICE);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
       device_id: DEVICE,
@@ -1433,7 +1583,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
     // A second drain (the database answered again) lands the row before it closes.
     expect(await manager.drainReleasePromises(1_000)).toBe(true);
-    expect(await store.getSession?.(SESSION)).toMatchObject({
+    expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       release_reason: null,
     });

@@ -5,7 +5,7 @@ import {
   POST_TAP_SETTLE_MS,
 } from "../../../src/features/action/androidGhostTapRetry";
 import type { ViewHierarchyResult } from "../../../src/models";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { logger } from "../../../src/utils/logger";

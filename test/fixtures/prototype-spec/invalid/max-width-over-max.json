@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "style": {
+        "maxWidth": 10001
+      }
+    }
+  },
+  "expectedPath": "root.style.maxWidth",
+  "expectedMessage": "Invalid number value"
+}

@@ -1,12 +1,16 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { FakeLogger } from "../fakes/FakeLogger";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function registerThrowingTool(name: string): void {
   ToolRegistry.register(name, "Throws for catch logging tests", z.object({}), async () => {
@@ -45,7 +49,7 @@ describe("PlanExecutor catch logging", () => {
   test("warns before returning a skipped status from an optional thrown step", async () => {
     const log = new FakeLogger();
     registerThrowingTool("optionalThrowingTool");
-    const executor = new DefaultPlanExecutor(undefined, log);
+    const executor = createDefaultPlanExecutor(undefined, log);
     const plan: Plan = {
       name: "optional catch logging",
       steps: [{ tool: "optionalThrowingTool", params: {}, optional: true }],
@@ -65,7 +69,7 @@ describe("PlanExecutor catch logging", () => {
   test("warns before returning a failed status from a thrown step", async () => {
     const log = new FakeLogger();
     registerThrowingTool("requiredThrowingTool");
-    const executor = new DefaultPlanExecutor(undefined, log);
+    const executor = createDefaultPlanExecutor(undefined, log);
     const plan: Plan = {
       name: "required catch logging",
       steps: [{ tool: "requiredThrowingTool", params: {} }],
@@ -84,7 +88,7 @@ describe("PlanExecutor catch logging", () => {
 
   test("returns a failed status for a structured failure envelope", async () => {
     registerStructuredFailureTool("structuredFailureTool");
-    const executor = new DefaultPlanExecutor(undefined, new FakeLogger());
+    const executor = createDefaultPlanExecutor(undefined, new FakeLogger());
     const plan: Plan = {
       name: "structured failure",
       steps: [{ tool: "structuredFailureTool", params: {} }],
@@ -103,7 +107,7 @@ describe("PlanExecutor catch logging", () => {
 
 describe("PlanExecutor result boundary warnings", () => {
   test("sequential failure keeps the plan error sentinel and warns", async () => {
-    const executor = new DefaultPlanExecutor(new FakeTimer(), new FakeLogger());
+    const executor = createDefaultPlanExecutor(new FakeTimer(), new FakeLogger());
     const error = new Error("before step failed");
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -138,12 +142,14 @@ describe("PlanExecutor result boundary warnings", () => {
   test.each(["step", "track"] as const)(
     "parallel %s failure preserves the failure sentinel and warns",
     async (boundary) => {
-      const executor = new DefaultPlanExecutor(new FakeTimer(), new FakeLogger());
+      const executor = createDefaultPlanExecutor(new FakeTimer(), new FakeLogger());
       const error = new Error(`${boundary} failed`);
       const failure =
         boundary === "step"
-          ? spyOn(executor, "executeStep").mockRejectedValue(error)
-          : spyOn(executor, "executeDeviceTrack").mockRejectedValue(error);
+          ? spyOn(ToolRegistry, "getToolForPlan").mockImplementation(() => {
+              throw error;
+            })
+          : spyOn(executor.planDeviceTrackExecutor, "executeDeviceTrack").mockRejectedValue(error);
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const result = await executor.executePlan(

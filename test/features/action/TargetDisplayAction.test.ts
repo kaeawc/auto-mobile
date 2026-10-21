@@ -1,7 +1,14 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { createExecResult } from "../../../src/utils/execResult";
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import type { SwipeGestureRequest } from "../../../src/features/action/swipeon/types";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
+import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
+import type { DragRequest } from "../../../src/utils/interfaces/DragRequest";
+import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
-import type WebSocket from "ws";
 import { CtrlProxyGestures } from "../../../src/features/observe/android/CtrlProxyGestures";
 import { RequestManager } from "../../../src/utils/RequestManager";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
@@ -18,7 +25,6 @@ import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { SwipeOnOptions } from "../../../src/models/SwipeOnOptions";
 import { sessionRenderedObservation } from "../../../src/features/action/TargetDisplayAction";
@@ -87,7 +93,7 @@ const ios = {
 function screen(key: string, text = "Settings"): ObserveResult {
   return {
     observationId: `observe-${key}`,
-    timestamp: 1,
+    updatedAt: 1,
     displayRevision: 0,
     display: {
       key,
@@ -106,7 +112,7 @@ function screen(key: string, text = "Settings"): ObserveResult {
       screenWidth: 200,
       screenHeight: 200,
     },
-  } as ObserveResult;
+  };
 }
 
 function promotedLabelScreen(
@@ -145,19 +151,21 @@ function focusScreen(focused: boolean): ObserveResult {
     ...observation.viewHierarchy!,
     updatedAt: focused ? 2 : 1,
     hierarchy: {
-      node: {
+      node: createFlatNodeForTest({
         class: "android.widget.EditText",
         "resource-id": "external-field",
         testTag: "external-field",
         editable: true,
         focused,
         bounds: { left: 20, top: 30, right: 80, bottom: 90 },
-        node: {
-          class: "android.widget.TextView",
-          text: "Field",
-          bounds: { left: 25, top: 35, right: 75, bottom: 45 },
-        },
-      },
+        node: [
+          {
+            class: "android.widget.TextView",
+            text: "Field",
+            bounds: { left: 25, top: 35, right: 75, bottom: 45 },
+          },
+        ],
+      }),
     },
   };
   return observation;
@@ -165,11 +173,13 @@ function focusScreen(focused: boolean): ObserveResult {
 
 function adb(): FakeAdbExecutor {
   const result = new FakeAdbExecutor();
-  result.setCommandResponse("cmd display get-displays", {
-    stdout:
+  result.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   return result;
 }
 
@@ -177,6 +187,43 @@ function adb(): FakeAdbExecutor {
 // keep these unit tests in memory so file IO is not charged to them.
 beforeEach(() => setObserveCacheStore(new FakeObserveCacheStore()));
 afterEach(() => resetObserveCacheStore());
+
+/** A swipe request laid out like the tap and drag calls, so shared tail assertions line up. */
+function swipeCallTails(calls: ReadonlyArray<readonly [SwipeRequest]>): unknown[][] {
+  return calls.map(([request]) => [
+    request.x1,
+    request.y1,
+    request.x2,
+    request.y2,
+    request.duration,
+    request.timeoutMs,
+    request.perf,
+    request.contextOptions,
+    request.onDispatch,
+    request.signal,
+    request.displayId,
+    request.beforeSend,
+  ]);
+}
+
+/** A drag request laid out like the tap calls, so shared tail assertions line up. */
+function dragCallTails(calls: ReadonlyArray<readonly [DragRequest]>): unknown[][] {
+  return calls.map(([request]) => [
+    request.x1,
+    request.y1,
+    request.x2,
+    request.y2,
+    request.pressDurationMs,
+    request.dragDurationMs,
+    request.holdDurationMs,
+    request.timeoutMs,
+    request.frameContext,
+    request.signal,
+    request.displayId,
+    request.beforeSend,
+    request.onDispatch,
+  ]);
+}
 
 describe("explicit action display", () => {
   let capabilitySpy: ReturnType<typeof spyOn>;
@@ -210,7 +257,7 @@ describe("explicit action display", () => {
       "abort-post-return",
       "abort-settle",
     ] as const) {
-      test(`${kind} targeted post-capture: ${outcome}`, async () => {
+      const scenario = async () => {
         const executor = adb();
         const timer = autoTimer();
         const before = screen("external", "Notifications");
@@ -295,11 +342,11 @@ describe("explicit action display", () => {
             : kind === "tapAt"
               ? new TapAtCoordinate(android, executor, deps)
               : kind === "swipeOn"
-                ? new SwipeOn(android, executor as unknown as AdbClient, {
+                ? new SwipeOn(android, executor, {
                     ...deps,
                     observeScreen: observe,
                   })
-                : new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
+                : new DragAndDrop(android, executor, timer, deps);
         action.observeScreen = observe;
         const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
         const invalidate = spyOn(client, "invalidateCache").mockImplementation(() => {
@@ -322,20 +369,17 @@ describe("explicit action display", () => {
             action instanceof TapOnElement
               ? action.execute(
                   { action: "tap", text: "Notifications", display: "external" },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 )
               : action instanceof TapAtCoordinate
                 ? action.execute(
                     { x: 40, y: 50, display: "external" },
-                    undefined,
-                    controller.signal,
+                    { signal: controller.signal },
                   )
                 : action instanceof SwipeOn
                   ? action.execute(
                       { direction: "up", display: "external" },
-                      undefined,
-                      controller.signal,
+                      { signal: controller.signal },
                     )
                   : action.execute(
                       {
@@ -343,8 +387,7 @@ describe("explicit action display", () => {
                         target: { text: "Notifications" },
                         display: "external",
                       },
-                      undefined,
-                      controller.signal,
+                      { signal: controller.signal },
                     );
           if (outcome.startsWith("abort-")) {
             await expect(pending).rejects.toThrow("Operation cancelled");
@@ -412,7 +455,8 @@ describe("explicit action display", () => {
           invalidate.mockRestore();
           dispatch.mockRestore();
         }
-      });
+      };
+      test(`${kind} targeted post-capture: ${outcome}`, scenario);
     }
   }
 
@@ -489,6 +533,7 @@ describe("explicit action display", () => {
     const calls: string[] = [];
     let dispatched = false;
     const client = {
+      requestDoubleTapCoordinates: async () => ({ success: true }),
       requestTapCoordinates: async () => {
         calls.push("dispatch");
         dispatched = true;
@@ -540,7 +585,10 @@ describe("explicit action display", () => {
     const executor = adb();
     const observe = new FakeObserveScreen();
     observe.setObserveResult(screen("external"));
-    const client = { requestTapCoordinates: async () => ({ success: true }) };
+    const client = {
+      requestTapCoordinates: async () => ({ success: true }),
+      requestDoubleTapCoordinates: async () => ({ success: true }),
+    };
     const action = new TapAtCoordinate(android, executor, {
       timer: autoTimer(),
       androidClient: client,
@@ -591,19 +639,19 @@ describe("explicit action display", () => {
     );
     const observe = new FakeObserveScreen();
     observe.setObserveResult(screen("external"));
-    const swipe = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const swipe = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: sessionRenderedObservation,
     });
     const signal = new AbortController().signal;
     expect(
-      (await swipe.execute({ direction: "up", display: "external" }, undefined, signal)).success,
+      (await swipe.execute({ direction: "up", display: "external" }, { signal })).success,
     ).toBe(true);
     expect(fakeAdb.getCommandCalls().at(-1)?.signal).toBe(signal);
     expect(observe.getExecuteOptions().at(-1)?.signal).toBe(signal);
 
-    const drag = new DragAndDrop(android, fakeAdb as unknown as AdbClient, autoTimer(), {
+    const drag = new DragAndDrop(android, fakeAdb, autoTimer(), {
       lastRenderedObservation: sessionRenderedObservation,
     });
     drag.observeScreen = observe;
@@ -617,7 +665,7 @@ describe("explicit action display", () => {
       ).success,
     ).toBe(true);
 
-    const pinch = new PinchOn(android, fakeAdb as unknown as AdbClient, {
+    const pinch = new PinchOn(android, fakeAdb, {
       timer: autoTimer(),
       lastRenderedObservation: sessionRenderedObservation,
     });
@@ -650,7 +698,10 @@ describe("explicit action display", () => {
     const observation = screen("external");
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
-    const client = { requestTapCoordinates: async () => ({ success: true }) };
+    const client = {
+      requestTapCoordinates: async () => ({ success: true }),
+      requestDoubleTapCoordinates: async () => ({ success: true }),
+    };
     const action = new TapAtCoordinate(android, executor, {
       timer: autoTimer(),
       androidClient: client,
@@ -670,7 +721,10 @@ describe("explicit action display", () => {
     observe.setObserveResult(screen("internal"));
     const taps: Array<[number, number]> = [];
     const client = {
-      requestTapCoordinates: async (x: number, y: number) => {
+      requestDoubleTapCoordinates: async () => ({ success: true }),
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y } = request;
+
         taps.push([x, y]);
         return { success: true };
       },
@@ -695,21 +749,23 @@ describe("explicit action display", () => {
     const executor = adb();
     const observation = screen("internal");
     const taps: Array<[number, number]> = [];
-    const ctrlProxy = {
-      requestTapCoordinates: async (x: number, y: number) => {
-        taps.push([x, y]);
-        return { success: true };
-      },
-    };
-    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      ctrlProxy as unknown as AndroidCtrlProxyClient,
-    );
+    const ctrlProxy = new FakeCtrlProxy();
+    spyOn(ctrlProxy, "requestTapCoordinates").mockImplementation(async (request) => {
+      const { x, y } = request;
+
+      taps.push([x, y]);
+      return { success: true, totalTimeMs: 0 };
+    });
+    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const action = new TapOnElement(android, executor, {
         timer: autoTimer(),
         tapStrategy: {
           isAccessibilityServiceEnabled: async () => false,
           shouldRunPreTapStability: () => false,
+          settlesFocusChangeAfterTap: false,
+          rethrowsKeyboardOcclusion: true,
+          applyRefreshedObservationRotation: () => {},
         } as never,
       });
       Object.assign(action, {
@@ -738,7 +794,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const swipes: string[] = [];
-    const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const action = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
     });
@@ -765,21 +821,18 @@ describe("explicit action display", () => {
     const fakeAdb = new FakeAdbClient();
     const timer = autoTimer();
     timer.enableAutoAdvance();
-    const drags: number[][] = [];
-    const client = {
-      requestDrag: async (...coordinates: number[]) => {
-        drags.push(coordinates);
-        return { success: true };
-      },
-    };
+    const drags: Array<[number, number, number, number]> = [];
+    const client = new FakeCtrlProxy();
+    spyOn(client, "requestDrag").mockImplementation(async ({ x1, y1, x2, y2 }: DragRequest) => {
+      drags.push([x1, y1, x2, y2]);
+      return { success: true, totalTimeMs: 0 };
+    });
     const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
     } as never);
-    const service = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as AndroidCtrlProxyClient,
-    );
+    const service = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     try {
-      const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, timer);
+      const action = new DragAndDrop(android, fakeAdb, timer);
       Object.assign(action, {
         observedInteraction: async (run: (observation: ObserveResult) => Promise<object>) =>
           run(screen("internal")),
@@ -801,21 +854,20 @@ describe("explicit action display", () => {
 
   test("pinchOn without display keeps CtrlProxy dispatch and never probes displays", async () => {
     const fakeAdb = new FakeAdbClient();
-    const pinches: number[][] = [];
-    const client = {
-      requestPinch: async (...coordinates: number[]) => {
+    const pinches: Array<Parameters<FakeCtrlProxy["requestPinch"]>> = [];
+    const client = new FakeCtrlProxy();
+    spyOn(client, "requestPinch").mockImplementation(
+      async (...coordinates: Parameters<FakeCtrlProxy["requestPinch"]>) => {
         pinches.push(coordinates);
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
-    };
+    );
     const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
     } as never);
-    const service = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as AndroidCtrlProxyClient,
-    );
+    const service = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     try {
-      const action = new PinchOn(android, fakeAdb as unknown as AdbClient);
+      const action = new PinchOn(android, fakeAdb);
       Object.assign(action, {
         observedInteraction: async (run: () => Promise<object>) => run(),
         resolveTarget: async () => ({
@@ -876,10 +928,10 @@ describe("explicit action display", () => {
   test("tapOn reports input usage output as a failed display tap", async () => {
     const executor = adb();
     const observation = screen("external");
-    executor.setCommandResponse("shell input touchscreen -d 2 tap 50 60", {
-      stdout: "Unknown command: touchscreen",
-      stderr: "",
-    });
+    executor.setCommandResponse(
+      "shell input touchscreen -d 2 tap 50 60",
+      createExecResult("Unknown command: touchscreen", ""),
+    );
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
@@ -898,13 +950,13 @@ describe("explicit action display", () => {
   test("swipeOn reports input usage output as a failed display swipe", async () => {
     const executor = adb();
     const observation = screen("external");
-    executor.setCommandResponse("shell input touchscreen -d 2 swipe", {
-      stdout: "Unknown command: touchscreen",
-      stderr: "",
-    });
+    executor.setCommandResponse(
+      "shell input touchscreen -d 2 swipe",
+      createExecResult("Unknown command: touchscreen", ""),
+    );
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
-    const action = new SwipeOn(android, executor as unknown as AdbClient, {
+    const action = new SwipeOn(android, executor, {
       timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: () => observation,
@@ -1001,7 +1053,7 @@ describe("explicit action display", () => {
     ];
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
-    const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, autoTimer(), {
+    const action = new DragAndDrop(android, fakeAdb, autoTimer(), {
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
@@ -1031,7 +1083,7 @@ describe("explicit action display", () => {
     );
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
-    const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const action = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: () => observation,
@@ -1049,7 +1101,7 @@ describe("explicit action display", () => {
     );
 
     const defaultCoordinates: number[] = [];
-    const defaultAction = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const defaultAction = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
     });
@@ -1057,7 +1109,7 @@ describe("explicit action display", () => {
       observedInteraction: async (run: (current: ObserveResult) => Promise<object>) =>
         run(observation),
       talkBackExecutor: {
-        executeSwipeGesture: async (x1: number, y1: number, x2: number, y2: number) => {
+        executeSwipeGesture: async ({ x1, y1, x2, y2 }: SwipeGestureRequest) => {
           defaultCoordinates.push(x1, y1, x2, y2);
           return { success: true, x1, y1, x2, y2, duration: 300 };
         },
@@ -1158,19 +1210,17 @@ describe("explicit action display", () => {
       timer.enableAutoAdvance();
       const defaultAction = new TapOnElement(android, adb(), { timer });
       const defaultPoints: Array<{ x: number; y: number }> = [];
-      defaultAction.observedInteraction = async (run) => ({
-        ...(await run(observation)),
-        observation,
-      });
-      defaultAction.refreshViewHierarchy = async () => observation.viewHierarchy;
+      defaultAction.observedInteraction = runBlockWithEnvelope(observation, { observation });
+      defaultAction.refreshViewHierarchy = async () => observation.viewHierarchy ?? null;
       defaultAction.executeAndroidTap = async (_action, x, y) => {
         defaultPoints.push({ x, y });
       };
       defaultAction.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+        effect: undefined,
         observation: current,
       });
-      defaultAction.captureTerminalObservationScreenshot = async () => {};
-      defaultAction.recordDeferredPredictionOutcome = async () => {};
+      defaultAction.testHooks.setTerminalScreenshotCapture(async () => {});
+      defaultAction.testHooks.setDeferredPredictionRecorder(async () => {});
       defaultAction.enforceFreshnessConsistencyWithEffect = () => {};
       const defaultResult = await defaultAction.execute({
         text: "Network & internet",
@@ -1239,14 +1289,11 @@ describe("explicit action display", () => {
             text: "Settings",
             "resource-id": "owner",
             clickable: true,
-            bounds: "[20,30][80,90]",
+            bounds: { left: 20, top: 30, right: 80, bottom: 90 },
           },
         };
         const ctrl = new FakeCtrlProxy();
-        const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-          // @ts-expect-error -- Fake supplies the client methods exercised by this test.
-          ctrl,
-        );
+        const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
         const action = new TapOnElement(target, adb(), {
           timer: autoTimer(),
           tapStrategy: new FakeTapStrategy(),
@@ -1260,7 +1307,9 @@ describe("explicit action display", () => {
         const tap = spyOn(action, "executeAndroidTap").mockResolvedValue(undefined);
         const capture = spyOn(action, "prepareSelectionCapture").mockResolvedValue(null);
         const link = spyOn(ctrl, "requestActivateAccessibilityLink");
-        action.observedInteraction = async (run) => ({ ...(await run(observation)), observation });
+        action.observedInteraction = runBlockWithEnvelope(observation, { observation });
+        action.testHooks.setTerminalScreenshotCapture(async () => {});
+        action.testHooks.setDeferredPredictionRecorder(async () => {});
         const explicit = route.includes("explicit");
         const pin = route === "sole pin" ? "internal" : "external";
         try {
@@ -1338,7 +1387,7 @@ describe("explicit action display", () => {
     const unsupported: Array<Partial<SwipeOnOptions>> = [{ focusTarget: true }];
     const observe = new FakeObserveScreen();
     const fakeAdb = new FakeAdbClient();
-    const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const action = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
     });
@@ -1355,7 +1404,10 @@ describe("explicit action display", () => {
     const executor = adb();
     const observe = new FakeObserveScreen();
     observe.setObserveResult(screen("external"));
-    const client = { requestTapCoordinates: async () => ({ success: true }) };
+    const client = {
+      requestTapCoordinates: async () => ({ success: true }),
+      requestDoubleTapCoordinates: async () => ({ success: true }),
+    };
     const action = new TapAtCoordinate(android, executor, {
       timer: autoTimer(),
       androidClient: client,
@@ -1376,7 +1428,10 @@ describe("explicit action display", () => {
       "execute",
       new Error('Display "external" is not the active panel on iOS. Active panel: internal'),
     );
-    const client = { requestTapCoordinates: async () => ({ success: true }) };
+    const client = {
+      requestTapCoordinates: async () => ({ success: true }),
+      requestDoubleTapCoordinates: async () => ({ success: true }),
+    };
     const action = new TapAtCoordinate(ios, executor, {
       timer: autoTimer(),
       androidClient: client,
@@ -1395,7 +1450,10 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     displayTransitions.notifyTransition(android.deviceId, "panel changed");
-    const client = { requestTapCoordinates: async () => ({ success: true }) };
+    const client = {
+      requestTapCoordinates: async () => ({ success: true }),
+      requestDoubleTapCoordinates: async () => ({ success: true }),
+    };
     const action = new TapAtCoordinate(android, executor, {
       timer: autoTimer(),
       androidClient: client,
@@ -1513,15 +1571,15 @@ describe("explicit action display", () => {
             }
           }
           if (outcome === "already-focused") {
-            expect(result.wasAlreadyFocused).toBe(true);
-            expect(result.focusChanged).toBe(false);
+            expect("wasAlreadyFocused" in result ? result.wasAlreadyFocused : undefined).toBe(true);
+            expect("focusChanged" in result ? result.focusChanged : undefined).toBe(false);
           }
           if (outcome === "confirmed" || outcome === "unconfirmed") {
             if (route === "CtrlProxy") {
               expect(tap).toHaveBeenCalledTimes(1);
-              expect(tap.mock.calls[0].slice(0, 2)).toEqual([50, 60]);
-              expect(tap.mock.calls[0].at(-2)).toBe(2);
-              expect(tap.mock.calls[0].at(-1)).toBeFunction();
+              expect(tap.mock.calls[0][0]).toMatchObject({ x: 50, y: 60 });
+              expect(tap.mock.calls[0][0].displayId).toBe(2);
+              expect(tap.mock.calls[0][0].beforeSend).toBeFunction();
               expect(commands).toEqual([]);
             } else {
               expect(tap).not.toHaveBeenCalled();
@@ -1601,7 +1659,7 @@ describe("explicit action display", () => {
       );
       expect(result.success).toBe(true);
       expect(tap).toHaveBeenCalledTimes(1);
-      expect(tap.mock.calls[0].at(-2)).toBe(2);
+      expect(tap.mock.calls[0][0].displayId).toBe(2);
       expect(typed).toEqual(["hello"]);
       expect(executed).toEqual(["type", "clear", "key:done"]);
       expect(observe.getExecuteOptions().at(-1)?.display).toBe("external");
@@ -1686,11 +1744,11 @@ describe("CtrlProxy display-targeted action routing", () => {
           : kind === "tapAt"
             ? new TapAtCoordinate(android, executor, deps)
             : kind === "swipeOn"
-              ? new SwipeOn(android, executor as unknown as AdbClient, {
+              ? new SwipeOn(android, executor, {
                   ...deps,
                   observeScreen: observe,
                 })
-              : new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
+              : new DragAndDrop(android, executor, timer, deps);
       action.observeScreen = observe;
       const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
       const capability = spyOn(client, "supportsCommand").mockResolvedValue(true);
@@ -1710,21 +1768,18 @@ describe("CtrlProxy display-targeted action routing", () => {
         const result =
           action instanceof TapOnElement
             ? await action.execute(
-                { text: "Notifications", display: "external" },
-                undefined,
-                controller.signal,
+                { text: "Notifications", action: "tap", display: "external" },
+                { signal: controller.signal },
               )
             : action instanceof TapAtCoordinate
               ? await action.execute(
                   { x: 40, y: 50, display: "external" },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 )
               : action instanceof SwipeOn
                 ? await action.execute(
                     { direction: "up", display: "external" },
-                    undefined,
-                    controller.signal,
+                    { signal: controller.signal },
                   )
                 : await action.execute(
                     {
@@ -1732,8 +1787,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                       target: { text: "Notifications" },
                       display: "external",
                     },
-                    undefined,
-                    controller.signal,
+                    { signal: controller.signal },
                   );
         expect(result.success).toBe(true);
         expect(result.observation?.display.key).toBe("external");
@@ -1742,11 +1796,22 @@ describe("CtrlProxy display-targeted action routing", () => {
         );
         expect(result.effect?.screenChanged).toBe(true);
         expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
-        const requests = [...tap.mock.calls, ...swipe.mock.calls, ...drag.mock.calls];
+        const requests = [
+          ...tap.mock.calls,
+          ...swipeCallTails(swipe.mock.calls),
+          ...dragCallTails(drag.mock.calls),
+        ];
         expect(requests).toHaveLength(1);
-        expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
-        expect(requests[0].at(kind === "dragAndDrop" ? -3 : -2)).toBe(2);
-        expect(requests[0].at(kind === "dragAndDrop" ? -2 : -1)).toBeFunction();
+        const tapRequest = tap.mock.calls[0]?.[0];
+        if (tapRequest) {
+          expect(tapRequest.signal).toBe(controller.signal);
+          expect(tapRequest.displayId).toBe(2);
+          expect(tapRequest.beforeSend).toBeFunction();
+        } else {
+          expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
+          expect(requests[0].at(kind === "dragAndDrop" ? -3 : -2)).toBe(2);
+          expect(requests[0].at(kind === "dragAndDrop" ? -2 : -1)).toBeFunction();
+        }
         expect(
           executor.getExecutedCommands().filter((cmd) => cmd.startsWith("shell input")),
         ).toEqual([]);
@@ -1845,15 +1910,14 @@ describe("CtrlProxy display-targeted action routing", () => {
                     display: panel,
                     action: gesture === "longPressAt" ? "longPress" : "tap",
                   },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               } else if (
                 gesture === "tapOn" ||
                 gesture === "longPressOn" ||
                 gesture === "doubleTapOn"
               ) {
-                const action = new TapOnElement(android, executor as unknown as AdbClient, deps);
+                const action = new TapOnElement(android, executor, deps);
                 action.observeScreen = observe;
                 result = await action.execute(
                   {
@@ -1866,26 +1930,19 @@ describe("CtrlProxy display-targeted action routing", () => {
                           ? "doubleTap"
                           : "tap",
                   },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               } else if (gesture === "swipe") {
-                const action = new SwipeOn(android, executor as unknown as AdbClient, {
+                const action = new SwipeOn(android, executor, {
                   ...deps,
                   observeScreen: observe,
                 });
                 result = await action.execute(
                   { direction: "up", display: panel },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               } else if (gesture === "drag") {
-                const action = new DragAndDrop(
-                  android,
-                  executor as unknown as AdbClient,
-                  timer,
-                  deps,
-                );
+                const action = new DragAndDrop(android, executor, timer, deps);
                 action.observeScreen = observe;
                 result = await action.execute(
                   {
@@ -1893,11 +1950,10 @@ describe("CtrlProxy display-targeted action routing", () => {
                     target: { text: "Settings" },
                     display: panel,
                   },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               } else {
-                const action = new PinchOn(android, executor as unknown as AdbClient, deps);
+                const action = new PinchOn(android, executor, deps);
                 action.observeScreen = observe;
                 Object.assign(action, {
                   observedInteraction: async (run: () => Promise<object>) => run(),
@@ -1908,14 +1964,13 @@ describe("CtrlProxy display-targeted action routing", () => {
                     display: panel,
                     autoTarget: false,
                   },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               }
               const calls = [
                 ...tap.mock.calls,
-                ...swipe.mock.calls,
-                ...drag.mock.calls,
+                ...swipeCallTails(swipe.mock.calls),
+                ...dragCallTails(drag.mock.calls),
                 ...pinch.mock.calls,
               ];
               const inputs = executor
@@ -1936,17 +1991,26 @@ describe("CtrlProxy display-targeted action routing", () => {
                 expect(calls).toHaveLength(
                   gesture === "doubleTapOn" && (!failure || fallsBack) ? 2 : 1,
                 );
-                expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
-                  panel === "external" ? 2 : undefined,
-                );
-                expect(calls[0].at(gesture === "drag" ? -2 : -1)).toBeFunction();
-                if (panel === "external") {
-                  expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
+                const tapRequest = tap.mock.calls[0]?.[0] ?? pinch.mock.calls[0]?.[0];
+                if (tapRequest) {
+                  expect(tapRequest.displayId).toBe(panel === "external" ? 2 : undefined);
+                  expect(tapRequest.beforeSend).toBeFunction();
+                  if (panel === "external") {
+                    expect(tapRequest.signal).toBe(controller.signal);
+                  }
+                } else {
+                  expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
+                    panel === "external" ? 2 : undefined,
+                  );
+                  expect(calls[0].at(gesture === "drag" ? -2 : -1)).toBeFunction();
+                  if (panel === "external") {
+                    expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
+                  }
                 }
                 expect(inputs).toEqual(
                   fallsBack
                     ? tap.mock.calls.map(
-                        ([x, y, duration]) =>
+                        ([{ x, y, duration }]) =>
                           `shell input touchscreen -d 2 ${
                             gesture === "longPressAt" || gesture === "longPressOn"
                               ? `swipe ${x} ${y} ${x} ${y} ${duration}`
@@ -1956,20 +2020,20 @@ describe("CtrlProxy display-targeted action routing", () => {
                     : [],
                 );
                 if (gesture === "longPressAt") {
-                  expect(tap.mock.calls[0][2]).toBe(1000);
-                  expect(tap.mock.calls[0][3]).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+                  expect(tap.mock.calls[0][0]?.duration).toBe(1000);
+                  expect(tap.mock.calls[0][0]?.timeoutMs).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
                 }
                 if (gesture === "longPressOn") {
-                  expect(tap.mock.calls[0][2]).toBe(800);
-                  expect(tap.mock.calls[0][3]).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+                  expect(tap.mock.calls[0][0]?.duration).toBe(800);
+                  expect(tap.mock.calls[0][0]?.timeoutMs).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
                 }
                 if (gesture === "tapAt" || gesture === "tapOn" || gesture === "doubleTapOn") {
                   for (const call of tap.mock.calls) {
-                    expect(call[3]).toBeUndefined();
+                    expect(call[0].timeoutMs).toBeUndefined();
                   }
                 }
                 if (gesture === "pinch") {
-                  expect(pinch.mock.calls[0].slice(0, 2)).toEqual([100, 100]);
+                  expect(pinch.mock.calls[0][0]).toMatchObject({ centerX: 100, centerY: 100 });
                 }
               } else if (gesture === "pinch") {
                 expect(result.error).toBe(
@@ -2043,42 +2107,37 @@ describe("display routing capability lookup fences", () => {
             action.observeScreen = observe;
             pending = action.execute(
               { x: 40, y: 50, display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           } else if (gesture === "tapOn") {
-            const action = new TapOnElement(android, executor as unknown as AdbClient, deps);
+            const action = new TapOnElement(android, executor, deps);
             action.observeScreen = observe;
             pending = action.execute(
-              { text: "Settings", display: "external" },
-              undefined,
-              controller.signal,
+              { text: "Settings", action: "tap", display: "external" },
+              { signal: controller.signal },
             );
           } else if (gesture === "swipe") {
-            const action = new SwipeOn(android, executor as unknown as AdbClient, {
+            const action = new SwipeOn(android, executor, {
               ...deps,
               observeScreen: observe,
             });
             pending = action.execute(
               { direction: "up", display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           } else if (gesture === "drag") {
-            const action = new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
+            const action = new DragAndDrop(android, executor, timer, deps);
             action.observeScreen = observe;
             pending = action.execute(
               { source: { text: "Settings" }, target: { text: "Settings" }, display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           } else {
-            const action = new PinchOn(android, executor as unknown as AdbClient, deps);
+            const action = new PinchOn(android, executor, deps);
             action.observeScreen = observe;
             pending = action.execute(
               { direction: "in", display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           }
           if (interrupt === "cancel") {
@@ -2143,11 +2202,13 @@ describe("display gesture dispatch boundary race", () => {
           }
         }
         const executor = phase === "adbTransition" ? new DispatchAdb() : adb();
-        executor.setCommandResponse("cmd display get-displays", {
-          stdout:
+        executor.setCommandResponse(
+          "cmd display get-displays",
+          createExecResult(
             'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-          stderr: "",
-        });
+            "",
+          ),
+        );
         const observation = screen("external");
         const observe = new FakeObserveScreen();
         observe.setObserveResult(observation);
@@ -2155,14 +2216,11 @@ describe("display gesture dispatch boundary race", () => {
         const wireTimer = new FakeTimer();
         const requestManager = new RequestManager(wireTimer);
         const sent: string[] = [];
-        const socket = {
-          readyState: 1,
-          send: (data: string) => {
-            sent.push(data);
-            const message = JSON.parse(data) as { requestId: string };
-            requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
-          },
-        } as WebSocket;
+        const socket = new FakeOpenSocket((data) => {
+          sent.push(data);
+          const message = JSON.parse(data) as { requestId: string };
+          requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
+        });
         const deps = {
           timer,
           lastRenderedObservation: () => observation,
@@ -2174,13 +2232,13 @@ describe("display gesture dispatch boundary race", () => {
             : kind === "tapAt" || kind === "defaultTapAt"
               ? new TapAtCoordinate(android, executor, deps)
               : kind === "swipe"
-                ? new SwipeOn(android, executor as unknown as AdbClient, {
+                ? new SwipeOn(android, executor, {
                     ...deps,
                     observeScreen: observe,
                   })
                 : kind === "drag"
-                  ? new DragAndDrop(android, executor as unknown as AdbClient, timer, deps)
-                  : new PinchOn(android, executor as unknown as AdbClient, deps);
+                  ? new DragAndDrop(android, executor, timer, deps)
+                  : new PinchOn(android, executor, deps);
         action.observeScreen = observe;
         const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
         const previousGestures = client["_gestures"];
@@ -2208,21 +2266,22 @@ describe("display gesture dispatch boundary race", () => {
           const display = kind === "defaultTapAt" ? undefined : "external";
           const pending = (
             action instanceof TapOnElement
-              ? action.execute({ text: "Settings", display }, undefined, controller.signal)
+              ? action.execute(
+                  { text: "Settings", action: "tap", display },
+                  { signal: controller.signal },
+                )
               : action instanceof TapAtCoordinate
-                ? action.execute({ x: 40, y: 50, display }, undefined, controller.signal)
+                ? action.execute({ x: 40, y: 50, display }, { signal: controller.signal })
                 : action instanceof SwipeOn
-                  ? action.execute({ direction: "up", display }, undefined, controller.signal)
+                  ? action.execute({ direction: "up", display }, { signal: controller.signal })
                   : action instanceof DragAndDrop
                     ? action.execute(
                         { source: { text: "Settings" }, target: { text: "Settings" }, display },
-                        undefined,
-                        controller.signal,
+                        { signal: controller.signal },
                       )
                     : action.execute(
                         { direction: "in", display, autoTarget: false },
-                        undefined,
-                        controller.signal,
+                        { signal: controller.signal },
                       )
           ).then(
             (result) => ({ result, error: undefined }),
@@ -2295,24 +2354,28 @@ describe("post-action screenshot resolved display", () => {
       serverConfig.setAccessibilityAuditConfig(null);
       displayTransitions.reset(android.deviceId);
       const executor = adb();
-      executor.setCommandResponse("dumpsys SurfaceFlinger", { stdout: "", stderr: "" });
-      executor.setCommandResponse("screencap", {
-        stdout: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64"),
-        stderr: "",
-      });
-      const timer = autoTimer();
-      const screenshot = new TakeScreenshot(
-        android,
-        new FakeAdbClientFactory(executor),
-        timer,
-        new FakeIdGenerator(["capture", "command"]),
-        new FakeScreenshotFileWriter(),
-        new FakeFileSystem(),
-        () => "/fake/screenshots",
-        new FakeAndroidPhysicalDisplayIdResolver(new Map([[2, EXTERNAL_PHYSICAL_DISPLAY_ID]])),
-        false,
-        { pathProtection: new FakeScreenshotPathProtection(timer) },
+      executor.setCommandResponse("dumpsys SurfaceFlinger", createExecResult("", ""));
+      executor.setCommandResponse(
+        "screencap",
+        createExecResult(
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64"),
+          "",
+        ),
       );
+      const timer = autoTimer();
+      const screenshot = new TakeScreenshot(android, {
+        adbFactory: new FakeAdbClientFactory(executor),
+        timer,
+        idGenerator: new FakeIdGenerator(["capture", "command"]),
+        fileWriter: new FakeScreenshotFileWriter(),
+        fileSystem: new FakeFileSystem(),
+        cacheDirResolver: () => "/fake/screenshots",
+        physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+          new Map([[2, EXTERNAL_PHYSICAL_DISPLAY_ID]]),
+        ),
+        cleanupOnCreate: false,
+        pathProtection: new FakeScreenshotPathProtection(timer),
+      });
       const ids: Array<number | undefined> = [];
       // Forward production display selection to the real screenshot transport.
       class CaptureRecorder extends FakeScreenshotRecorder {
@@ -2368,13 +2431,11 @@ describe("post-action screenshot resolved display", () => {
         const wireTimer = new FakeTimer();
         const socket = new FakeWebSocket("ws://fake", "none", 0, wireTimer);
         socket.readyState = WebSocketState.OPEN;
-        const client = AndroidCtrlProxyClient.createForTesting(
-          android,
-          executor,
-          () => socket as WebSocket,
-          wireTimer,
-        );
-        client["ws"] = socket as WebSocket;
+        const client = AndroidCtrlProxyClient.createForTesting(android, executor, {
+          webSocketFactory: () => socket,
+          timer: wireTimer,
+        });
+        client["ws"] = socket;
         client["connectWebSocket"] = async () => true;
         client["screenshotBackoffScheduler"] = new FakeScreenshotBackoffScheduler();
         socket.send = (data: string) => {
@@ -2490,20 +2551,20 @@ describe("selected-display double tap delivery", () => {
           AndroidCtrlProxyClient.prototype,
           "requestTapCoordinates",
         ).mockImplementation(async (...args) => {
-          args[9]?.();
-          expect(args[8]).toBe(2);
+          args[0].beforeSend?.();
+          expect(args[0].displayId).toBe(2);
           if (failure === "first tap pre-dispatch failure") {
-            return { success: false, error: "Stale frame context" };
+            return { success: false, totalTimeMs: 0, error: "Stale frame context" };
           }
           if (failure === "pre-dispatch fallback" && tap.mock.calls.length === 1) {
-            return { success: false, error: "Not connected" };
+            return { success: false, totalTimeMs: 0, error: "Not connected" };
           }
-          args[6]?.();
+          args[0].onDispatch?.();
           if (failure === "second tap post-send failure" && tap.mock.calls.length === 2) {
-            return { success: false, error: "Tap timed out after send" };
+            return { success: false, totalTimeMs: 0, error: "Tap timed out after send" };
           }
           tapsDelivered++;
-          return { success: true };
+          return { success: true, totalTimeMs: 0 };
         });
         // The real method opens a localhost WebSocket (#10470), so keep the sequential two-tap
         // path under test deterministic and off the network.
@@ -2538,7 +2599,7 @@ describe("selected-display double tap delivery", () => {
           const action =
             kind === "tapOn"
               ? new TapOnElement(android, executor, deps)
-              : new TapAnyElement(android, executor as unknown as AdbClient, deps);
+              : new TapAnyElement(android, executor, deps);
           action.observeScreen = observe;
           if (failure === "abort before dispatch") {
             controller.abort(new Error(OPERATION_CANCELLED_MESSAGE));
@@ -2547,13 +2608,11 @@ describe("selected-display double tap delivery", () => {
             action instanceof TapOnElement
               ? action.execute(
                   { text: "Settings", action: "doubleTap", display: "external" },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 )
               : action.execute(
                   { action: "doubleTap", display: "external" },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
           const partial =
             failure === "abort in gap" ||

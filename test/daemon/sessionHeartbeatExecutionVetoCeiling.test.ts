@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   SessionHeartbeatMonitor,
@@ -7,7 +8,7 @@ import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettle
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeout";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -53,9 +54,9 @@ describe("unsettled-execution veto ceiling (#10663)", () => {
       },
       timer,
     );
-    await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     expect(await sessionManager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    sessionManager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(sessionManager, SESSION, { livenessOwnerToken: OWNER });
   });
 
   afterEach(async () => {
@@ -107,7 +108,7 @@ describe("unsettled-execution veto ceiling (#10663)", () => {
     await monitor.tick();
 
     // The owner comes back: the session is live again and the veto record is dropped.
-    sessionManager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(sessionManager, SESSION, { livenessOwnerToken: OWNER });
     await monitor.tick();
     const returnedAt = timer.now();
 

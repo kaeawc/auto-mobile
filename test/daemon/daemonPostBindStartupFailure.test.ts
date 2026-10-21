@@ -14,12 +14,6 @@ import { FakeDaemonExitRecordFileSystem } from "../fakes/SafeDaemonManager";
 // for sessions rehydrated before the bind. start() must await a bounded stop()
 // before rethrowing.
 
-interface DaemonStartPhases {
-  exitRecordFileSystem: FakeDaemonExitRecordFileSystem;
-  startThroughSocketBind(): Promise<void>;
-  startAfterSocketBind(): Promise<void>;
-}
-
 class PostBindFailure extends Error {}
 
 describe("Daemon post-bind startup failure (#11156)", () => {
@@ -37,30 +31,33 @@ describe("Daemon post-bind startup failure (#11156)", () => {
   function startableDaemon(timer: FakeTimer, failure: { prebind?: Error; postbind?: Error }) {
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
-    const phases = daemon as unknown as DaemonStartPhases;
     const exitFiles = new FakeDaemonExitRecordFileSystem();
-    phases.exitRecordFileSystem = exitFiles;
+    daemon.testHooks.setExitRecordFileSystem(exitFiles);
     const events: string[] = [];
     const spies = [
       spyOn(logger, "error").mockImplementation(() => {}),
       spyOn(logger, "warn").mockImplementation(() => {}),
-      spyOn(phases, "startThroughSocketBind").mockImplementation(async () => {
+    ];
+    daemon.testHooks.overrideStartupStages({
+      startThroughSocketBind: async () => {
         events.push("bind");
         if (failure.prebind) {
           throw failure.prebind;
         }
-      }),
-      spyOn(phases, "startAfterSocketBind").mockImplementation(async () => {
+      },
+      startAfterSocketBind: async () => {
         events.push("post-bind");
         if (failure.postbind) {
           throw failure.postbind;
         }
-      }),
-    ];
+      },
+    });
     for (const spy of spies) {
       restores.push(() => spy.mockRestore());
     }

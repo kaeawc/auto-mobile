@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "style": {
+        "offset": {
+          "x": 0,
+          "y": -10001
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.offset.y",
+  "expectedMessage": "Invalid number value"
+}

@@ -9,10 +9,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // #11156: a terminal-attached daemon died on SIGHUP without cleanup. Daemon
 // mode must route hangup through the same graceful shutdown as SIGTERM.
 
-interface DaemonShutdownWiring {
-  setupShutdownHandlers(): void;
-}
-
 describe("Daemon hangup shutdown wiring (#11156)", () => {
   const restores: Array<() => void> = [];
 
@@ -28,9 +24,11 @@ describe("Daemon hangup shutdown wiring (#11156)", () => {
   test("daemon shutdown handlers include SIGHUP", () => {
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const hangup = spyOn(processLifecycle, "installHangupShutdownHandler").mockImplementation(
       () => {},
@@ -45,7 +43,7 @@ describe("Daemon hangup shutdown wiring (#11156)", () => {
       restores.push(() => spy.mockRestore());
     }
 
-    (daemon as unknown as DaemonShutdownWiring).setupShutdownHandlers();
+    daemon.testHooks.setupShutdownHandlers();
 
     expect(hangup).toHaveBeenCalledTimes(1);
   });

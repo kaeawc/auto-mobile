@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "first-error",
+    "window": {
+      "placement": {
+        "type": "sheet",
+        "edge": "bottom",
+        "height": 1e30
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": 5
+    }
+  },
+  "expectedPath": "root.text",
+  "expectedMessage": "Invalid string value"
+}

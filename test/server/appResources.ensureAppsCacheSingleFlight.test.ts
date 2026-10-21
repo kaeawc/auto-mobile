@@ -2,12 +2,20 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   invalidateInstalledAppsCache,
   queryInstalledApps,
-  setListInstalledAppsFactoryForTests,
+  type AppResourceDependencies,
 } from "../../src/server/appResources";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
+import type { InstalledAppsDetailedResult } from "../../src/features/observe/ListInstalledApps";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
+
+let deps: AppResourceDependencies = {};
+function useListInstalledAppsFactoryForTests(
+  value: AppResourceDependencies["listInstalledAppsFactory"] | null,
+): void {
+  deps = { ...deps, listInstalledAppsFactory: value ?? undefined };
+}
 
 const firstDevice: BootedDevice = {
   deviceId: "single-flight-device-1",
@@ -20,7 +28,7 @@ const secondDevice: BootedDevice = {
   platform: "android",
 };
 
-function successfulAppsResult(packageName = "com.example.app") {
+function successfulAppsResult(packageName = "com.example.app"): InstalledAppsDetailedResult {
   return {
     apps: {
       profiles: {
@@ -38,7 +46,7 @@ function successfulAppsResult(packageName = "com.example.app") {
       system: [],
     },
     successful: true,
-  } as const;
+  };
 }
 
 describe("ensureAppsCacheEntry single-flight", () => {
@@ -52,17 +60,17 @@ describe("ensureAppsCacheEntry single-flight", () => {
   });
 
   afterEach(() => {
-    setListInstalledAppsFactoryForTests(null);
+    useListInstalledAppsFactoryForTests(null);
     PlatformDeviceManagerFactory.setInstance(null);
     invalidateInstalledAppsCache(firstDevice.deviceId);
     invalidateInstalledAppsCache(secondDevice.deviceId);
   });
 
   test("shares one fetch and returns the same cache snapshot to concurrent callers", async () => {
-    const pending = Promise.withResolvers<ReturnType<typeof successfulAppsResult>>();
+    const pending = Promise.withResolvers<InstalledAppsDetailedResult>();
     const fetchStarted = Promise.withResolvers<void>();
     let fetches = 0;
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         fetches += 1;
         fetchStarted.resolve();
@@ -73,8 +81,8 @@ describe("ensureAppsCacheEntry single-flight", () => {
       },
     }));
 
-    const first = queryInstalledApps({ deviceId: firstDevice.deviceId });
-    const second = queryInstalledApps({ deviceId: firstDevice.deviceId });
+    const first = queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
+    const second = queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
     await fetchStarted.promise;
     expect(fetches).toBe(1);
 
@@ -85,11 +93,11 @@ describe("ensureAppsCacheEntry single-flight", () => {
   });
 
   test("shares a rejected fetch and retries on the next call", async () => {
-    const pending = Promise.withResolvers<ReturnType<typeof successfulAppsResult>>();
+    const pending = Promise.withResolvers<InstalledAppsDetailedResult>();
     const fetchStarted = Promise.withResolvers<void>();
     const failure = new Error("listing failed");
     let fetches = 0;
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         fetches += 1;
         if (fetches === 1) {
@@ -103,14 +111,14 @@ describe("ensureAppsCacheEntry single-flight", () => {
       },
     }));
 
-    const first = queryInstalledApps({ deviceId: firstDevice.deviceId });
-    const second = queryInstalledApps({ deviceId: firstDevice.deviceId });
+    const first = queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
+    const second = queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
     await fetchStarted.promise;
     pending.reject(failure);
     await expect(Promise.all([first, second])).rejects.toBe(failure);
     expect(fetches).toBe(1);
 
-    const retry = await queryInstalledApps({ deviceId: firstDevice.deviceId });
+    const retry = await queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
     expect(retry.devices[0].apps).toHaveLength(1);
     expect(fetches).toBe(2);
   });
@@ -118,7 +126,7 @@ describe("ensureAppsCacheEntry single-flight", () => {
   test("does not share fetches across different devices", async () => {
     const started = new Set<string>();
     const bothStarted = Promise.withResolvers<void>();
-    setListInstalledAppsFactoryForTests((device) => ({
+    useListInstalledAppsFactoryForTests((device) => ({
       executeDetailedResult: async () => {
         started.add(device.deviceId);
         if (started.size === 2) {
@@ -131,20 +139,20 @@ describe("ensureAppsCacheEntry single-flight", () => {
       },
     }));
 
-    const first = queryInstalledApps({ deviceId: firstDevice.deviceId });
-    const second = queryInstalledApps({ deviceId: secondDevice.deviceId });
+    const first = queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
+    const second = queryInstalledApps({ deviceId: secondDevice.deviceId }, undefined, deps);
     await bothStarted.promise;
     await Promise.all([first, second]);
     expect(started).toEqual(new Set([firstDevice.deviceId, secondDevice.deviceId]));
   });
 
   test("starts a fresh fetch after invalidation while an older fetch is pending", async () => {
-    const oldFetch = Promise.withResolvers<ReturnType<typeof successfulAppsResult>>();
+    const oldFetch = Promise.withResolvers<InstalledAppsDetailedResult>();
     const oldStarted = Promise.withResolvers<void>();
     const newStarted = Promise.withResolvers<void>();
     let oldResult: Awaited<ReturnType<typeof queryInstalledApps>> | undefined;
     let fetches = 0;
-    setListInstalledAppsFactoryForTests(() => ({
+    useListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {
         fetches += 1;
         if (fetches === 1) {
@@ -164,7 +172,7 @@ describe("ensureAppsCacheEntry single-flight", () => {
       },
     }));
 
-    const stale = queryInstalledApps({ deviceId: firstDevice.deviceId });
+    const stale = queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
     const staleResolved = stale.then((result) => {
       oldResult = result;
       return result;
@@ -172,7 +180,7 @@ describe("ensureAppsCacheEntry single-flight", () => {
     await oldStarted.promise;
     await getInstalledAppsCacheWriteCoordinator().invalidate(firstDevice.deviceId, async () => {});
 
-    const fresh = queryInstalledApps({ deviceId: firstDevice.deviceId });
+    const fresh = queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
     await newStarted.promise;
     expect(fetches).toBe(2);
     const freshResult = await fresh;
@@ -182,7 +190,7 @@ describe("ensureAppsCacheEntry single-flight", () => {
     await staleResolved;
     expect(oldResult?.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.old"]);
 
-    const cached = await queryInstalledApps({ deviceId: firstDevice.deviceId });
+    const cached = await queryInstalledApps({ deviceId: firstDevice.deviceId }, undefined, deps);
     expect(cached.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.new"]);
     expect(fetches).toBe(2);
   });

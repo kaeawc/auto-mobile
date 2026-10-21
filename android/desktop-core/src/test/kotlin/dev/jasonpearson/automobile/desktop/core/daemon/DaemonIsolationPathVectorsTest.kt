@@ -17,7 +17,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 class DaemonIsolationPathVectorsTest {
   @Test
-  fun `control socket and PID paths match the shared daemon vectors`() {
+  fun `control socket PID and token paths match the shared daemon vectors`() {
     assertTrue(cases.isNotEmpty())
     // The vectors are POSIX paths; on Windows `/tmp/...` is not even absolute.
     if (File.separatorChar != '/') return
@@ -26,6 +26,17 @@ class DaemonIsolationPathVectorsTest {
       val env = case.getValue("env").jsonObject.mapValues { it.value.jsonPrimitive.content }
       // Every vector is absolute or names an absolute launch cwd, so userDir must never be used.
       val userDir = "/never/used"
+      assertEquals(
+        case.getValue("tokenFilePath").jsonPrimitive.content,
+        AutoMobileSocketPaths.daemonStatePath(
+          DaemonStateFile.TOKEN,
+          { uid },
+          env::get,
+          userDir,
+          tokenPlatform = DaemonTokenPlatform(windows = false),
+        ),
+        name,
+      )
       assertEquals(
         case.getValue("suffix").jsonPrimitive.content,
         AutoMobileSocketPaths.daemonIsolationSuffix(env::get, userDir),

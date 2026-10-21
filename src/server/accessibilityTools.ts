@@ -1,40 +1,42 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
-import { ToolRegistry } from "./toolRegistry";
-import type { ProgressCallback } from "./toolRegistry";
+import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
 import { ActionableError, BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { TalkBackToggle } from "../features/accessibility/TalkBackToggle";
 import { VoiceOverToggle } from "../features/accessibility/VoiceOverToggle";
-import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
+import {
+  FeatureFlagService,
+  type FeatureFlagReader,
+} from "../features/featureFlags/FeatureFlagService";
+import { accessibilityDetector } from "../ctrlProxy/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../features/accessibility/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../utils/logger";
 import { accessibilityStateSchema } from "./toolOutputSchemas";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import type { ScreenReaderToggleOptions } from "../models/AccessibilityResult";
 import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
 import { runSessionScreenReaderMutation } from "./sessionScreenReader";
 
-export const accessibilitySchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      talkback: z
-        .boolean()
-        .optional()
-        .describe("Enable (true) or disable (false) TalkBack on the active Android device"),
-      voiceover: z
-        .boolean()
-        .optional()
-        .describe(
-          "Enable (true) or disable (false) VoiceOver on an iOS device (Simulator via simctl; physical devices are driven through the Settings app)",
-        ),
-    })
-    .strict(),
-);
+// `defineDeviceTool` applies `.strict()` and device targeting; the handler args below
+// (including `sessionUuid`) are inferred from this schema.
+const accessibilityInput = z.object({
+  talkback: z
+    .boolean()
+    .optional()
+    .describe("Enable (true) or disable (false) TalkBack on the active Android device"),
+  voiceover: z
+    .boolean()
+    .optional()
+    .describe(
+      "Enable (true) or disable (false) VoiceOver on an iOS device (Simulator via simctl; physical devices are driven through the Settings app)",
+    ),
+});
+
+type AccessibilityArgs = z.output<DeviceToolSchema<typeof accessibilityInput>>;
 
 /**
  * Which feature flag, if any, overrides what the action tools (tapOn, swipeOn, observe) assume
@@ -42,7 +44,7 @@ export const accessibilitySchema = addDeviceTargetingToSchema(
  * `enabled` is what the device reports, this says what the tools will treat it as. Force wins
  * over auto-detect-off, matching `resolveState`/`resolveVoiceOverState`.
  */
-function detectionOverride(featureFlags: FeatureFlagService): {
+function detectionOverride(featureFlags: FeatureFlagReader): {
   detectionOverride?: { mode: "forced-on" | "auto-detect-off"; effectiveEnabled: boolean };
 } {
   if (featureFlags.isEnabled("force-accessibility-mode")) {
@@ -52,12 +54,6 @@ function detectionOverride(featureFlags: FeatureFlagService): {
     return { detectionOverride: { mode: "auto-detect-off", effectiveEnabled: false } };
   }
   return {};
-}
-
-interface AccessibilityArgs {
-  talkback?: boolean;
-  voiceover?: boolean;
-  sessionUuid?: string;
 }
 
 /**
@@ -72,11 +68,9 @@ async function toggleRecordingPreviousState<
   device: BootedDevice,
   args: AccessibilityArgs,
   run: (options: ScreenReaderToggleOptions) => Promise<R>,
+  daemon: DaemonContext = defaultDaemonContext,
 ): Promise<R> {
-  const manager =
-    args.sessionUuid && DaemonState.getInstance().isInitialized()
-      ? DaemonState.getInstance().getSessionManager()
-      : undefined;
+  const manager = args.sessionUuid ? daemon.sessionManager() : undefined;
   const platform = device.platform === "ios" ? "ios" : "android";
   return runSessionScreenReaderMutation(
     manager,
@@ -221,12 +215,12 @@ async function handleIosAccessibility(device: BootedDevice, args: AccessibilityA
   return createStructuredToolResponse({ enabled: state, service, ...override });
 }
 
-export function registerAccessibilityTools() {
-  const accessibilityHandler = async (
-    device: BootedDevice,
-    args: AccessibilityArgs,
-    _progress?: ProgressCallback,
-  ) => {
+const accessibilityTool = defineDeviceTool({
+  name: "accessibility",
+  description:
+    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
+  input: accessibilityInput,
+  handler: async (device, args) => {
     if (device.platform === "android") {
       return await handleAndroidAccessibility(device, args);
     }
@@ -234,19 +228,19 @@ export function registerAccessibilityTools() {
       return await handleIosAccessibility(device, args);
     }
     throw new ActionableError(`Unsupported platform: ${device.platform}`);
-  };
+  },
+  options: {
+    ...PLAN_RELEVANT,
+    defaultEnabled: false,
+    outputSchema: accessibilityStateSchema,
+    // The check form (no talkback/voiceover) reads (#10965); a toggle is control.
+    deviceReadOnly: (args) => args.talkback === undefined && args.voiceover === undefined,
+    deviceReadOnlyArgs: [{ absentArguments: ["talkback", "voiceover"] }],
+  },
+});
 
-  ToolRegistry.registerDeviceAware(
-    "accessibility",
-    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
-    accessibilitySchema,
-    accessibilityHandler,
-    {
-      defaultEnabled: false,
-      outputSchema: accessibilityStateSchema,
-      // The check form (no talkback/voiceover) reads (#10965); a toggle is control.
-      deviceReadOnly: (args: AccessibilityArgs) =>
-        args.talkback === undefined && args.voiceover === undefined,
-    },
-  );
+export const accessibilitySchema = accessibilityTool.schema;
+
+export function registerAccessibilityTools() {
+  accessibilityTool.register();
 }

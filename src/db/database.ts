@@ -1,3 +1,4 @@
+import { DatabaseClosedForShutdownError } from "./DatabaseClosedForShutdownError";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   Kysely,
@@ -20,10 +21,15 @@ import {
   IN_MEMORY_DB_OPT_IN_ENV,
   selectMigrationLock,
 } from "./migrationLock";
+import { ENV, readEnvRaw } from "../config/env";
 import { logger } from "../utils/logger";
 import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../utils/bunTestRunnerProcess";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { BunSqliteDialect, DEFAULT_OPTIMIZE_INTERVAL_MS } from "./bunSqliteDialect";
+import {
+  BunSqliteDialect,
+  DEFAULT_OPTIMIZE_INTERVAL_MS,
+  DEFAULT_RETRY_TOTAL_WAIT_MS,
+} from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
   createIncompleteExtractionError,
@@ -43,6 +49,14 @@ type BunDatabase = import("bun:sqlite").Database;
 let bunDatabaseConstructor: BunDatabaseConstructor | null = null;
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+/**
+ * bun:sqlite waits synchronously: keep app waits short and let the dialect's async
+ * retry cover DEFAULT_RETRY_TOTAL_WAIT_MS while yielding between attempts (#11858).
+ */
+export const SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS = 250;
+export const APP_CONNECTION_MAX_RETRY_ATTEMPTS =
+  Math.ceil(DEFAULT_RETRY_TOTAL_WAIT_MS / SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS) + 1;
 
 /**
  * Runtime cap on the WAL file: after each passive/auto checkpoint SQLite
@@ -95,9 +109,12 @@ function resolveBunDatabaseConstructor(): BunDatabaseConstructor {
   return bunDatabaseConstructor;
 }
 
-export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
+export function configureSqliteDatabase(
+  sqliteDb: SqlitePragmaDatabase,
+  busyTimeoutMs = SQLITE_BUSY_TIMEOUT_MS,
+): void {
   // Wait for transient writer locks instead of failing immediately with SQLITE_BUSY
-  sqliteDb.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
+  sqliteDb.exec(`PRAGMA busy_timeout = ${busyTimeoutMs};`);
 
   // Enable WAL mode for better concurrent read performance
   sqliteDb.exec("PRAGMA journal_mode = WAL;");
@@ -125,6 +142,8 @@ export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
 }
 
 // Database file location (defaults to ~/.auto-mobile/auto-mobile.db)
+// Keep the database home-relative: AUTOMOBILE_DATA_DIR is per-agent state, while
+// the DB has its own AUTOMOBILE_DB_DIR / AUTOMOBILE_DB_PATH overrides.
 const DEFAULT_DB_DIR = path.join(os.homedir(), ".auto-mobile");
 // @deprecated AUTO_MOBILE_DB_PATH - use AUTOMOBILE_DB_PATH instead
 // @deprecated AUTO_MOBILE_DB_DIR - use AUTOMOBILE_DB_DIR instead
@@ -132,7 +151,7 @@ export function resolveDatabasePathFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
   defaultDbDir: string = DEFAULT_DB_DIR,
 ): string {
-  const envDbPath = env.AUTOMOBILE_DB_PATH ?? env.AUTO_MOBILE_DB_PATH;
+  const envDbPath = readEnvRaw(ENV.DB_PATH, env);
   if (envDbPath) {
     // The `:memory:` sentinel is not a filesystem path: routing it through the
     // daemon-launch-cwd resolver would `path.resolve(":memory:")` into a bogus
@@ -161,7 +180,7 @@ export function resolveDatabasePathFromEnvironment(
     return resolvePathFromDaemonLaunchWorkingDirectory(envDbPath);
   }
 
-  const envDbDir = env.AUTOMOBILE_DB_DIR ?? env.AUTO_MOBILE_DB_DIR;
+  const envDbDir = readEnvRaw(ENV.DB_DIR, env);
   const dbDir = envDbDir ? resolvePathFromDaemonLaunchWorkingDirectory(envDbDir) : defaultDbDir;
   return path.join(dbDir, "auto-mobile.db");
 }
@@ -182,10 +201,10 @@ function isUnitTestDbGuardArmed(env: NodeJS.ProcessEnv): boolean {
 // location. A test that sets any of these has explicitly opted into a real
 // file-backed (or `:memory:`) DB it controls, so the guard leaves it alone.
 export const DB_PATH_OVERRIDE_ENV_KEYS = [
-  "AUTOMOBILE_DB_PATH",
-  "AUTO_MOBILE_DB_PATH",
-  "AUTOMOBILE_DB_DIR",
-  "AUTO_MOBILE_DB_DIR",
+  ENV.DB_PATH.name,
+  ENV.DB_PATH.legacyName,
+  ENV.DB_DIR.name,
+  ENV.DB_DIR.legacyName,
 ] as const;
 
 function hasExplicitDbPathOverride(env: NodeJS.ProcessEnv): boolean {
@@ -374,10 +393,13 @@ function createSqliteKysely<T>(dbPath: string, beforeQuery?: () => Promise<void>
   });
 }
 
-function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
+function openConfiguredSqliteDatabase(
+  dbPath: string,
+  busyTimeoutMs = SQLITE_BUSY_TIMEOUT_MS,
+): BunDatabase {
   const BunDatabaseConstructor = resolveBunDatabaseConstructor();
   const sqliteDb = new BunDatabaseConstructor(dbPath);
-  configureSqliteDatabase(sqliteDb);
+  configureSqliteDatabase(sqliteDb, busyTimeoutMs);
   return sqliteDb;
 }
 
@@ -480,9 +502,10 @@ function createApplicationDatabase(dbPath: string): Kysely<DatabaseSchema> {
   const sqliteDialect = new BunSqliteDialect({
     database: () => {
       assertActive();
-      return openConfiguredSqliteDatabase(dbPath);
+      return openConfiguredSqliteDatabase(dbPath, SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS);
     },
     beforeQuery: waitForMigrationsBeforeQuery,
+    retry: { maxAttempts: APP_CONNECTION_MAX_RETRY_ATTEMPTS },
     optimizeIntervalMs: DEFAULT_OPTIMIZE_INTERVAL_MS,
   });
   const driver = sqliteDialect.createDriver();
@@ -714,12 +737,6 @@ export async function awaitPromiseBounded(
     throw error;
   }
 }
-
-/**
- * A query, transaction or migration wait that reached the database after graceful shutdown had
- * closed it. The work is refused: nothing is written and the database is not reopened.
- */
-export class DatabaseClosedForShutdownError extends ActionableError {}
 
 /** Refusals logged in full (with the caller's stack) before only the count keeps growing. */
 const SHUTDOWN_CLOSE_REFUSAL_LOG_LIMIT = 5;

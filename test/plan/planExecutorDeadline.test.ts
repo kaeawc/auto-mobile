@@ -1,14 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeTimer } from "../fakes/FakeTimer";
-import {
-  resetSetUIStateFactory,
-  setSetUIStateFactory,
-  setUIStateHandler,
-} from "../../src/server/formTools";
+import { createSetUIStateHandler } from "../../src/server/formTools";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import {
   getLiveDeadlineMs,
@@ -25,7 +21,7 @@ import {
 describe("plan internal request inheritance", () => {
   afterEach(() => {
     ToolRegistry.clearTools();
-    resetSetUIStateFactory();
+
     unregisterLiveDeadline("plan-deadline");
   });
 
@@ -62,7 +58,7 @@ describe("plan internal request inheritance", () => {
         },
       },
       () =>
-        new DefaultPlanExecutor(timer).executePlan(
+        createDefaultPlanExecutor(timer).executePlan(
           {
             name: "deadline",
             mcpVersion: "1.0",
@@ -78,12 +74,14 @@ describe("plan internal request inheritance", () => {
   test("setUIState inside a plan sees the enclosing deadline through its existing handler", async () => {
     const snapshots: unknown[] = [];
     const progress = async () => {};
-    setSetUIStateFactory(() => ({
-      execute: async (_options, inheritedProgress, _signal, deadlineMs, liveDeadline) => {
-        snapshots.push(deadlineMs, liveDeadline?.(), inheritedProgress);
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (_options, inheritedProgress, _signal, deadlineMs, liveDeadline) => {
+          snapshots.push(deadlineMs, liveDeadline?.(), inheritedProgress);
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
     registerLiveDeadline("plan-deadline", new ProgressExtendableDeadline(0, 80_000));
     ToolRegistry.register(
       "deadlineForm",
@@ -100,7 +98,7 @@ describe("plan internal request inheritance", () => {
     await runWithToolSelectionContext(
       { planRequest: { deadlineMs: 80_000, liveDeadlineKey: "plan-deadline", progress } },
       () =>
-        new DefaultPlanExecutor(new FakeTimer()).executePlan(
+        createDefaultPlanExecutor(new FakeTimer()).executePlan(
           { name: "form", mcpVersion: "1.0", steps: [{ tool: "deadlineForm", params: {} }] },
           0,
         ),
@@ -115,7 +113,7 @@ describe("plan internal request inheritance", () => {
       return { success: true };
     });
     await runWithToolSelectionContext({ planRequest: { deadlineMs: 42 } }, () =>
-      new DefaultPlanExecutor(new FakeTimer()).executePlan(
+      createDefaultPlanExecutor(new FakeTimer()).executePlan(
         {
           name: "spoof",
           mcpVersion: "1.0",

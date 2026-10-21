@@ -1,5 +1,6 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, expect, spyOn, test } from "bun:test";
+import { observeToolScreen } from "../helpers/observeToolScreen";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../src/models";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import {
@@ -29,17 +30,10 @@ async function observe(
 ) {
   const screen = options.screen ?? new FakeObserveScreen();
   screen.setObserveResult(result);
-  const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
   try {
     registerObserveTools({
       hidesPrototypeForScreenshot: async () => options.hidesPrototype ?? false,
-      createScreen: () => ({
-        execute: screen.execute.bind(screen),
-        executeDeviceRead: screen.execute.bind(screen),
-        captureScreenshot: screen.captureScreenshot.bind(screen),
-        appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
-        getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
-      }),
+      createScreen: () => observeToolScreen(screen),
     });
     const tool = ToolRegistry.getTool("observe")!;
     return await tool.deviceAwareHandler!(
@@ -47,7 +41,6 @@ async function observe(
       tool.schema.parse({ screenshot: "none", ...args }),
     );
   } finally {
-    notify.mockRestore();
     ToolRegistry.clearTools();
   }
 }
@@ -93,9 +86,7 @@ describe("observe waitFor with layer (#9305)", () => {
     return waitForObservation(
       screen,
       { text: "YouTube", timeout: 300, layer } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
   };
 
@@ -126,9 +117,7 @@ describe("observe waitFor with layer (#9305)", () => {
     const outcome = await waitForObservation(
       screen,
       { for: "appear", text: "YouTube", timeout: 300, layer } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(matched);
   });
@@ -234,4 +223,12 @@ describe("observe layer screenshot with device-side prototype hiding (#9305)", (
     );
     expect(structured(response).screenshotIncludesPrototype).toBeUndefined();
   });
+});
+
+let notify: ReturnType<typeof spyOn<typeof ResourceRegistry, "notifyResourcesUpdated">>;
+beforeEach(() => {
+  notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
+});
+afterEach(() => {
+  notify.mockRestore();
 });

@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "stack-demo",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "pop",
+              "stack": "missing"
+            }
+          ]
+        },
+        "detail": {
+          "type": "text",
+          "text": "Screen"
+        },
+        "third": {
+          "type": "text",
+          "text": "Third"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"home\"].onTap[0].stack"
+}

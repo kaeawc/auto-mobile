@@ -54,6 +54,9 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
@@ -63,6 +66,7 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentBut
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.design.system.components.AutoMobileIconButton
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
+import java.util.Locale
 
 sealed class VideoResource {
   data class UriVideo(val uri: Uri) : VideoResource()
@@ -199,45 +203,11 @@ private fun VideoPlayerContent(
   viewModel: MediaPlayerViewModel,
 ) {
   val context = LocalContext.current
-  val activity = LocalActivity.current
   val player by viewModel.playerState.collectAsState()
   val playbackError by viewModel.playbackError.collectAsState()
   val shouldShowControls by viewModel.shouldShowControls.collectAsState()
 
-  // Enable immersive mode
-  LaunchedEffect(Unit) {
-    activity?.let { act ->
-      WindowCompat.setDecorFitsSystemWindows(act.window, false)
-      val windowInsetsController =
-        WindowCompat.getInsetsController(act.window, act.window.decorView)
-      windowInsetsController.apply {
-        hide(WindowInsetsCompat.Type.systemBars())
-        systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-      }
-    }
-  }
-
-  // Initialize player when video URL is provided
-  LaunchedEffect(videoData.videoResource) {
-    if (videoData.videoResource !is VideoResource.PlaceholderVideo) {
-      viewModel.initializePlayer(context, videoData.videoResource)
-    }
-  }
-
-  // Cleanup player and restore system UI on disposal
-  DisposableEffect(Unit) {
-    onDispose {
-      viewModel.savePlayerState()
-      viewModel.releasePlayer()
-      // Restore system bars when leaving video player
-      activity?.let { act ->
-        WindowCompat.setDecorFitsSystemWindows(act.window, true)
-        val windowInsetsController =
-          WindowCompat.getInsetsController(act.window, act.window.decorView)
-        windowInsetsController.show(WindowInsetsCompat.Type.systemBars())
-      }
-    }
-  }
+  VideoPlayerEffects(videoData, viewModel)
 
   Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
     // Video content or thumbnail
@@ -275,34 +245,88 @@ private fun VideoPlayerContent(
 
     // Top bar with back button and title - Show only when controls are visible
     if (shouldShowControls) {
-      Row(
-        modifier =
-          Modifier.fillMaxWidth()
-            .padding(16.dp)
-            .padding(top = 24.dp), // Additional top padding for status bar area
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        AutoMobileIconButton(
-          onClick = onNavigateBack,
-          modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)),
-        ) {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Back",
-            tint = Color.White,
-          )
-        }
+      VideoPlayerTitle(videoData.title, onNavigateBack)
+    }
+  }
+}
 
-        Spacer(modifier = Modifier.width(16.dp))
-
-        Text(
-          text = videoData.title,
-          color = Color.White,
-          fontSize = 18.sp,
-          fontWeight = FontWeight.Bold,
-        )
+@Composable
+private fun VideoPlayerEffects(videoData: VideoData, viewModel: MediaPlayerViewModel) {
+  val context = LocalContext.current
+  val activity = LocalActivity.current
+  // Enable immersive mode
+  LaunchedEffect(Unit) {
+    activity?.let { act ->
+      WindowCompat.setDecorFitsSystemWindows(act.window, false)
+      val windowInsetsController =
+        WindowCompat.getInsetsController(act.window, act.window.decorView)
+      windowInsetsController.apply {
+        hide(WindowInsetsCompat.Type.systemBars())
+        systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
       }
     }
+  }
+
+  // Initialize player when video URL is provided
+  LaunchedEffect(videoData.videoResource) {
+    if (videoData.videoResource !is VideoResource.PlaceholderVideo) {
+      viewModel.initializePlayer(context, videoData.videoResource)
+    }
+  }
+
+  val lifecycleOwner = LocalLifecycleOwner.current
+  DisposableEffect(lifecycleOwner, viewModel) {
+    val observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_STOP) viewModel.onHostStopped()
+    }
+    lifecycleOwner.lifecycle.addObserver(observer)
+    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+  }
+
+  // Cleanup player and restore system UI on disposal
+  DisposableEffect(Unit) {
+    onDispose {
+      viewModel.savePlayerState()
+      viewModel.releasePlayer()
+      // Restore system bars when leaving video player
+      activity?.let { act ->
+        WindowCompat.setDecorFitsSystemWindows(act.window, true)
+        val windowInsetsController =
+          WindowCompat.getInsetsController(act.window, act.window.decorView)
+        windowInsetsController.show(WindowInsetsCompat.Type.systemBars())
+      }
+    }
+  }
+}
+
+@Composable
+private fun VideoPlayerTitle(title: String, onNavigateBack: () -> Unit) {
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .padding(16.dp)
+        .padding(top = 24.dp), // Additional top padding for status bar area
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    AutoMobileIconButton(
+      onClick = onNavigateBack,
+      modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)),
+    ) {
+      Icon(
+        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+        contentDescription = "Back",
+        tint = Color.White,
+      )
+    }
+
+    Spacer(modifier = Modifier.width(16.dp))
+
+    Text(
+      text = title,
+      color = Color.White,
+      fontSize = 18.sp,
+      fontWeight = FontWeight.Bold,
+    )
   }
 }
 
@@ -395,7 +419,7 @@ private fun formatTime(timeMs: Long): String {
   val seconds = (timeMs / 1000).toInt()
   val minutes = seconds / 60
   val remainingSeconds = seconds % 60
-  return "%02d:%02d".format(minutes, remainingSeconds)
+  return "%02d:%02d".format(Locale.ROOT, minutes, remainingSeconds)
 }
 
 private fun parseDuration(duration: String): Float {

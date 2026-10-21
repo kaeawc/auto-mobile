@@ -23,8 +23,13 @@ class CorrelatedErrorReporterTest {
 
   private fun reporter(
     broadcastError: suspend (ErrorResponse) -> Unit = { broadcasts += it },
+    clock: () -> Long = System::currentTimeMillis,
   ): CorrelatedErrorReporter =
-    CorrelatedErrorReporter(broadcastError) { message, error -> logs += message to error }
+    CorrelatedErrorReporter(
+      broadcastError = broadcastError,
+      logError = { message, error -> logs += message to error },
+      clock = clock,
+    )
 
   // ---------------------------------------------------------------------------
   // guarding
@@ -160,10 +165,29 @@ class CorrelatedErrorReporterTest {
 
   @Test
   fun `frame preserves the request id and error text verbatim`() {
+    val timestamp = 1234L
     assertEquals(
-      ErrorResponse(requestId = "req-1", error = "Hierarchy extraction failed: boom"),
-      CorrelatedErrorReporter.frame("req-1", "Hierarchy extraction failed: boom"),
+      ErrorResponse(
+        requestId = "req-1",
+        error = "Hierarchy extraction failed: boom",
+        timestamp = timestamp,
+      ),
+      CorrelatedErrorReporter.frame("req-1", "Hierarchy extraction failed: boom", timestamp),
     )
+  }
+
+  @Test
+  fun `guarding stamps emitted frame with injected clock`() = runTest {
+    reporter(clock = { 1234L }).guarding(
+      requestId = "req-1",
+      failureLogMessage = { "failure log" },
+      errorMessagePrefix = { "Action 'foo' failed" },
+      doubleFailureLogMessage = { "double failure log" },
+    ) {
+      throw IllegalStateException("boom")
+    }
+
+    assertEquals(1234L, broadcasts.single().timestamp)
   }
 
   // ---------------------------------------------------------------------------

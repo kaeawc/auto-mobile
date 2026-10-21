@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   arithmeticWork,
+  attemptSlowdown,
   type CalibrationClock,
   type CalibrationScheduler,
   formatCalibrationSample,
@@ -127,6 +128,39 @@ describe("calibration samples", () => {
       "shard-1": 1,
       "changed-shard-2": 3,
     });
+  });
+
+  test("attemptSlowdown takes the max of exact start/end labels only", () => {
+    const samples = parseCalibrationSamples(
+      [
+        "unit shard 0 attempt 1 start\t100\t25",
+        "unit shard 0 attempt 1 end\t200\t25",
+        "unit shard 0 attempt 2 end\t900\t25",
+        "unit shard 1 attempt 1 end\t900\t25",
+        "changed shard 0 attempt 1 end\t900\t25",
+        "unit shard 0 attempt 1 end extra\t900\t25",
+        "unit shard 0 attempt 1 start\tbroken\t25",
+      ].join("\n"),
+    );
+    expect(attemptSlowdown(samples, "unit shard 0 attempt 1")).toBe(8);
+    expect(attemptSlowdown(samples, "unit shard 0 attempt 2")).toBe(36);
+    expect(attemptSlowdown(samples, "unit shard 2 attempt 1")).toBeNull();
+    expect(attemptSlowdown([], "unit shard 0 attempt 1")).toBeNull();
+  });
+
+  test("attemptSlowdown works with just a start or end probe", () => {
+    expect(
+      attemptSlowdown(
+        parseCalibrationSamples("unit shard 0 attempt 1 start\t100\t25"),
+        "unit shard 0 attempt 1",
+      ),
+    ).toBe(4);
+    expect(
+      attemptSlowdown(
+        parseCalibrationSamples("unit shard 0 attempt 1 end\t10\t25"),
+        "unit shard 0 attempt 1",
+      ),
+    ).toBe(1);
   });
 
   test("readCalibrationDirectory reads only calibration TSV files", () => {

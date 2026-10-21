@@ -57,7 +57,7 @@ fi
 [[ $# -gt 0 ]] || fail 'missing command'
 env_file="${batch_dir}/daemon${daemon}/env.sh"
 [[ -f "$env_file" ]] || fail "missing env file ${env_file}"
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090 # The selected private daemon generates its environment file at runtime.
 source "$env_file"
 [[ "${AUTOMOBILE_AUX_SOCKET_DIR:-}" == /* && "${AUTOMOBILE_DAEMON_SOCKET_PATH:-}" == /* ]] || fail 'env needs absolute aux/socket paths'
 case "$1" in

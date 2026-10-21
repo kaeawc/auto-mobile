@@ -6,16 +6,13 @@ import {
   buildTestRunUri,
 } from "../../src/server/testRunResources";
 import { TestExecutionRepository, type TestRun } from "../../src/db/testExecutionRepository";
-import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely } from "kysely";
-import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import type {
   Database as DatabaseSchema,
   NewTestExecution,
   NewTestExecutionStep,
   NewTestExecutionScreen,
 } from "../../src/db/types";
-import { runMigrations } from "../../src/db/migrator";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -72,7 +69,7 @@ describe("testRunResources deviceId scoping", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new TestExecutionRepository(new FakeTimer(), db);
+    repo = new TestExecutionRepository(db, new FakeTimer());
   });
 
   afterEach(async () => {
@@ -139,16 +136,8 @@ describe("TestRunResources - Database Schema", () => {
   let db: Kysely<DatabaseSchema>;
 
   beforeAll(async () => {
-    const sqliteDb = new BunDatabase(":memory:");
-    // Enable foreign key constraints for cascade delete
-    sqliteDb.exec("PRAGMA foreign_keys = ON;");
-
-    db = new Kysely<DatabaseSchema>({
-      dialect: new BunSqliteDialect({
-        database: sqliteDb,
-      }),
-    });
-    await runMigrations(db);
+    // Foreign key constraints on, for cascade delete
+    db = await createTestDatabase({ foreignKeys: true });
   });
 
   afterAll(async () => {

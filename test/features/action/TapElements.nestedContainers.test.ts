@@ -1,10 +1,14 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+import type { ElementSelectionOptions } from "../../../src/utils/interfaces/ElementSelector";
+import type { ElementQuery } from "../../../src/models/ElementQuery";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { Element, TapOnElementOptions, ViewHierarchyResult } from "../../../src/models";
 import {
   encodeAndroidFlat,
@@ -21,7 +25,7 @@ import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigation
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const scope = { elementId: "item_42", container: { elementId: "cart_A" } };
 function node(id: string, children: LogicalNode[] = [], top = 0): LogicalNode {
@@ -75,13 +79,17 @@ class RecordingTapOn extends TapOnElement {
   }
 }
 class RecordingSelector extends ResolverElementSelector {
-  readonly clickableOptions: Parameters<ResolverElementSelector["selectClickable"]>[1][] = [];
-  override selectClickable(
+  readonly clickableOptions: ElementSelectionOptions[] = [];
+  override select(
     capture: ViewHierarchyResult,
-    options: Parameters<ResolverElementSelector["selectClickable"]>[1] = {},
+    query: ElementQuery,
+    options: ElementSelectionOptions = {},
   ) {
-    this.clickableOptions.push(options);
-    return super.selectClickable(capture, options);
+    // tapAny's clickable lookup is the only caller that selects with an empty query.
+    if (Object.keys(query).length === 0) {
+      this.clickableOptions.push(options);
+    }
+    return super.select(capture, query, options);
   }
 }
 function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
@@ -96,7 +104,9 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
   const nativeActions: string[] = [];
   const coordinateTaps: { x: number; y: number }[] = [];
   const accessibilityService = {
-    requestTapCoordinates: async (x: number, y: number) => {
+    requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+      const { x, y } = request;
+
       coordinateTaps.push({ x, y });
       return { success: true, totalTimeMs: 1 };
     },
@@ -112,12 +122,12 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
   };
   const action =
     kind === "tapOn"
-      ? new RecordingTapOn(device, adb as AdbClient, {
+      ? new RecordingTapOn(device, adb, {
           timer,
           elementSelector: selector,
           tapStrategy: new FakeTapStrategy(),
         })
-      : new TapAnyElement(device, adb as AdbClient, {
+      : new TapAnyElement(device, adb, {
           timer,
           elementSelector: selector,
           accessibilityDetector: detector,
@@ -126,12 +136,18 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
           accessibilityService,
         });
   if (action instanceof TapAnyElement) {
-    action.setRefreshViewHierarchyForTesting(async () => null);
+    action.testHooks.setRefreshViewHierarchy(async () => null);
   }
-  action.observedInteraction = (callback) =>
-    callback(
-      recordObservationRead({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
-    );
+  action.observedInteraction = runBlockWith(() =>
+    recordObservationRead(
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: hierarchy,
+        screenSize: { width: 500, height: 500 },
+      }),
+    ),
+  );
   const execute = (options: Partial<TapOnElementOptions> = {}) => {
     const request = {
       elementId: "remove",
@@ -141,7 +157,13 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
       verification: { refresh: async () => null },
       ...options,
     };
-    return action.execute(request);
+    if (action instanceof RecordingTapOn) {
+      return action.execute(request);
+    }
+    if (request.action === "focus") {
+      throw new Error("tapAny does not support focus");
+    }
+    return action.execute({ ...request, action: request.action });
   };
   const taps = () =>
     action instanceof RecordingTapOn
@@ -273,7 +295,7 @@ test("tapAny re-resolves the full scoped unique selector on retry", async () => 
   if (!(h.action instanceof TapAnyElement)) {
     throw new Error("Expected tapAny");
   }
-  h.action.setRefreshViewHierarchyForTesting(async () => hierarchy);
+  h.action.testHooks.setRefreshViewHierarchy(async () => hierarchy);
   const result = await h.execute();
   expect(result.success).toBe(true);
   expect(h.selector.clickableOptions).toHaveLength(2);
@@ -396,7 +418,10 @@ test("unique ensureChecked refreshes the scoped toggle and skips an already-chec
       },
     },
   };
-  const result = await h.action.execute(request);
+  const result =
+    h.action instanceof RecordingTapOn
+      ? await h.action.execute(request)
+      : await h.action.execute(request);
   expect(result.success).toBe(true);
   expect(result.skipped).toBe("already-checked");
   expect(refreshes).toBe(1);
@@ -457,7 +482,7 @@ for (const action of ["tap", "longPress"] as const) {
     const driver = new FakeTalkBackNavigationDriver();
     const tap = new TapOnElement(
       { name: "fake", platform: "android", deviceId: "fake-native" },
-      adb as AdbClient,
+      adb,
       { timer, talkBackStrategy: talkBack, talkBackDriverFactory: { createDriver: () => driver } },
     );
     const element = new ResolverElementSelector().selectByResourceId(capture(), "remove", {
@@ -467,16 +492,10 @@ for (const action of ["tap", "longPress"] as const) {
     if (!element) {
       throw new Error("Expected scoped target");
     }
-    await tap.executeAndroidTap(
-      action,
-      50,
-      50,
-      500,
-      element,
-      undefined,
-      { action, container: scope, selectionStrategy: "unique" },
-      true,
-    );
+    await tap.executeAndroidTap(action, 50, 50, 500, element, {
+      options: { action, container: scope, selectionStrategy: "unique" },
+      isTalkBackEnabled: true,
+    });
     expect(talkBack.directActivationCalls).toHaveLength(0);
     expect(talkBack.longPressCalls).toHaveLength(0);
     expect(action === "tap" ? talkBack.preciseTapCalls : talkBack.fallbackCalls).toHaveLength(1);
@@ -487,7 +506,7 @@ for (const action of ["tap", "longPress"] as const) {
     h.detector.setDefaultResult(true, "talkback");
     if (h.action instanceof TapAnyElement) {
       let captures = 0;
-      h.action.setRefreshViewHierarchyForTesting(async () => (++captures === 1 ? capture() : null));
+      h.action.testHooks.setRefreshViewHierarchy(async () => (++captures === 1 ? capture() : null));
     }
     expect((await h.execute({ action })).success).toBe(true);
     expect(h.talkBack.directActivationCalls).toHaveLength(0);
@@ -507,11 +526,9 @@ test("tapAny scoped long press does not reselect a global native resource ID", a
 test("tapOn scoped long press does not reselect a global native resource ID", async () => {
   const adb = new FakeAdbClient();
   const timer = new FakeTimer();
-  const tap = new TapOnElement(
-    { name: "fake", platform: "android", deviceId: "fake-long" },
-    adb as AdbClient,
-    { timer },
-  );
+  const tap = new TapOnElement({ name: "fake", platform: "android", deviceId: "fake-long" }, adb, {
+    timer,
+  });
   const element = new ResolverElementSelector().selectByResourceId(capture(), "remove", {
     container: scope,
     strategy: "unique",
@@ -528,16 +545,10 @@ test("tapOn scoped long press does not reselect a global native resource ID", as
     "requestAction",
   ).mockResolvedValue({ success: true, action: "long_click", totalTimeMs: 1 });
   try {
-    await tap.executeAndroidTap(
-      "longPress",
-      50,
-      50,
-      500,
-      element,
-      undefined,
-      { action: "longPress", container: scope, selectionStrategy: "unique" },
-      false,
-    );
+    await tap.executeAndroidTap("longPress", 50, 50, 500, element, {
+      options: { action: "longPress", container: scope, selectionStrategy: "unique" },
+      isTalkBackEnabled: false,
+    });
     expect(native).not.toHaveBeenCalled();
     expect(adb.getCommandCalls().map(({ command }) => command)).toEqual([
       "shell input touchscreen swipe 50 50 50 50 500",
@@ -550,9 +561,7 @@ test.each([true, false])(
   "tapAny scoped VoiceOver activation is bounded (label=%s)",
   async (labelled) => {
     const client = new FakeIOSCtrlProxy();
-    const override = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as IOSCtrlProxyClient,
-    );
+    const override = spyOnIosClientInstance(client);
     try {
       const detector = new FakeIosVoiceOverDetector();
       detector.setVoiceOverEnabled(true);
@@ -574,13 +583,16 @@ test.each([true, false])(
         timer,
         iosVoiceOverDetector: detector,
       });
-      tap.observedInteraction = (callback) =>
-        callback(
-          recordObservationRead({
+      tap.observedInteraction = runBlockWith(() =>
+        recordObservationRead(
+          buildObserveResult({
+            updatedAt: 0,
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
             viewHierarchy: hierarchy,
             screenSize: { width: 500, height: 500 },
           }),
-        );
+        ),
+      );
       const result = await tap.execute({
         action: "tap",
         container: scope,
@@ -595,7 +607,7 @@ test.each([true, false])(
       }
       expect(result).toMatchObject({ success: true });
       expect(client.getActionHistory()).toHaveLength(0);
-      expect(client.getVoiceOverActivateHistory()).toEqual([
+      expect<unknown>(client.getVoiceOverActivateHistory()).toEqual([
         {
           label: "remove",
           action: "activate",

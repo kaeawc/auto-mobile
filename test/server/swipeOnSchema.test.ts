@@ -2,16 +2,17 @@ import { expect, test } from "bun:test";
 import type { SwipeOnOptions } from "../../src/models";
 import { z } from "zod/v4";
 import {
+  type InteractionToolDependencies,
   swipeOnSchema,
   swipeOnHandler,
-  setSwipeOnFactory,
-  resetSwipeOnFactory,
 } from "../../src/server/interactionTools";
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
+
+const interactionDeps: InteractionToolDependencies = {};
 const scope = { elementId: "list", container: { text: "Panel", index: 0 } };
 for (const field of ["container", "lookFor"] as const) {
   test(`${field} accepts a recursive scope and every selection strategy`, () => {
-    for (const selectionStrategy of ["first", "random", "unique"]) {
+    for (const selectionStrategy of ["first", "random", "unique"] as const) {
       const selector = { text: "Target", container: scope, selectionStrategy };
       expect(swipeOnSchema.parse({ direction: "down", [field]: selector })[field]).toEqual(
         selector,
@@ -76,7 +77,7 @@ test("advertised schema retains recursive scope and strategy fields", () => {
 
 test("handler forwards complete selectors and reports a structured resolution failure", async () => {
   const calls: SwipeOnOptions[] = [];
-  setSwipeOnFactory(() => ({
+  interactionDeps.swipeOnFactory = () => ({
     execute: async (options) => {
       calls.push(options);
       return {
@@ -90,7 +91,7 @@ test("handler forwards complete selectors and reports a structured resolution fa
         duration: 0,
       };
     },
-  }));
+  });
   try {
     const scoped = {
       direction: "down",
@@ -100,11 +101,14 @@ test("handler forwards complete selectors and reports a structured resolution fa
     const response = await swipeOnHandler(
       { name: "fake", deviceId: "swipe-schema-fake", platform: "android" },
       swipeOnSchema.parse(scoped),
+      undefined,
+      undefined,
+      interactionDeps,
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject(scoped);
     expect(response.isError).toBe(true);
   } finally {
-    resetSwipeOnFactory();
+    delete interactionDeps.swipeOnFactory;
   }
 });

@@ -1,9 +1,9 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { androidTransportCouldAliasHeldDevice } from "../../src/daemon/frameDeviceIdentity";
-import type { ManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
-import type { ManagedDeviceEntry } from "../../src/daemon/managedSlots/slotRegistry";
+import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import type { ManagedDeviceEntry } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { BootedDevice } from "../../src/models";
 import { withAndroidTransportId } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
@@ -11,9 +11,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 const USB = "PHONE-A";
 const WIRELESS = "192.168.1.20:5555";
@@ -21,7 +19,7 @@ const row = (deviceId: string, transportId = deviceId): BootedDevice =>
   withAndroidTransportId({ deviceId, name: deviceId, platform: "android" }, transportId);
 const timers: FakeTimer[] = [];
 afterEach(() => timers.splice(0).forEach((timer) => timer.reset()));
-function harness(managedSlotExclusion?: ManagedSlotExclusion) {
+function harness(bindingExclusion?: BindingExclusion) {
   const timer = new FakeTimer();
   timers.push(timer);
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -30,15 +28,12 @@ function harness(managedSlotExclusion?: ManagedSlotExclusion) {
   adb.setCommandResponse("ro.serialno", createExecResult(USB, ""));
   adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
   adb.setCommandResponse("boot_id", createExecResult("boot-a", ""));
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "control-alias", {
-      timer,
-      deviceManager: manager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      androidAdbFactory: new FakeAdbClientFactory(adb),
-      managedSlotExclusion,
-    }),
-  );
+  const pool = makePool(sessions, "control-alias", {
+    timer,
+    deviceManager: manager,
+    androidAdbFactory: new FakeAdbClientFactory(adb),
+    bindingExclusion,
+  });
   return { pool, adb, manager, timer };
 }
 
@@ -166,19 +161,19 @@ describe("positive evidence distinguishing an unassignable control transport", (
   });
 });
 
-describe("managed-slot Android hold snapshot", () => {
+describe("binding Android hold snapshot", () => {
   test("refreshes with the input's one-second budget and counts only unrepresented Android holds", async () => {
     const entry: ManagedDeviceEntry = {
       platform: "android",
       stableDeviceId: "Pixel",
-      holder: "slot",
+      holder: "session_broker",
       scopeKey: "scope",
-      slotIndex: 0,
+      bindingIndex: 0,
       scopeState: "valid",
       execSessionUuid: "slot-session",
     };
     const refreshes: unknown[] = [];
-    const exclusion: ManagedSlotExclusion = {
+    const exclusion: BindingExclusion = {
       refresh: async (options) => {
         refreshes.push(options);
       },
@@ -186,13 +181,13 @@ describe("managed-slot Android hold snapshot", () => {
       holderOf: () => entry,
     };
     const { pool } = harness(exclusion);
-    expect(await pool.androidManagedSlotHold([])).toEqual({ entry });
-    expect(await pool.androidManagedSlotHold(["Pixel"])).toBeUndefined();
+    expect(await pool.androidBindingHold([])).toEqual({ entry });
+    expect(await pool.androidBindingHold(["Pixel"])).toBeUndefined();
     expect(refreshes).toEqual([{ maxAgeMs: 1000 }, { maxAgeMs: 1000 }]);
   });
 
   test("recognizes a session's pooled emulator by its stable AVD id", async () => {
-    const exclusion: ManagedSlotExclusion = {
+    const exclusion: BindingExclusion = {
       refresh: async () => {},
       stableIdsFor: () => new Set(["Pixel"]),
       holderOf: () => undefined,
@@ -200,7 +195,7 @@ describe("managed-slot Android hold snapshot", () => {
     const { pool, manager } = harness(exclusion);
     manager.setBootedDevices("android", [{ ...row("emulator-5554"), name: "Pixel" }]);
     await pool.refreshDevices();
-    expect(await pool.androidManagedSlotHold(["emulator-5554"])).toBeUndefined();
-    expect(await pool.androidManagedSlotHold([])).toEqual({ entry: undefined });
+    expect(await pool.androidBindingHold(["emulator-5554"])).toBeUndefined();
+    expect(await pool.androidBindingHold([])).toEqual({ entry: undefined });
   });
 });

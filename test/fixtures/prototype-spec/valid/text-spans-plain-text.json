@@ -1,0 +1,12 @@
+{
+  "id": "rich",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": ""
+  }
+}

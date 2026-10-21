@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "sheet",
+        "edge": "bottom",
+        "height": 10001
+      }
+    },
+    "root": {
+      "type": "column",
+      "style": {
+        "width": {
+          "dp": 1e30
+        }
+      },
+      "children": [
+        {
+          "type": "spacer",
+          "style": {
+            "elevation": 1001
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].style.elevation",
+  "expectedMessage": "Invalid number value"
+}

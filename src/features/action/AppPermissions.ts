@@ -21,13 +21,11 @@ import {
   normalizePermissions,
   type IosSimulatorPermissionAction,
   type IosSimulatorPrivacyClient,
+  type PhotosAuthorizationVerifier,
   type TccPermissionReader,
 } from "./IosSimulatorPermissions";
-import {
-  CtrlProxyIosPhysicalPrivacyClient,
-  IosPhysicalPermissions,
-  type IosPhysicalPrivacyClient,
-} from "./IosPhysicalPermissions";
+import { IosPhysicalPermissions, type IosPhysicalPrivacyClient } from "./IosPhysicalPermissions";
+import { CtrlProxyIosPhysicalPrivacyClient } from "./CtrlProxyIosPhysicalPrivacyClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
@@ -91,6 +89,10 @@ export interface AppPermissionStateResult {
   state: AppPermissionState;
   service?: string;
   source: "androidRuntime" | "iosTcc";
+  verified?: boolean;
+  reason?: string;
+  accessLevel?: "readWrite" | "addOnly";
+  evidence?: "storedTccGrant" | "impliedByFullPhotosGrant";
   authValue?: number;
   raw?: Record<string, string | number | boolean | null>;
 }
@@ -103,6 +105,7 @@ export interface AppPermissionOperationResult {
   skipped?: boolean;
   result?: unknown;
   error?: string;
+  code?: string;
   /** Set when the operation succeeded but its outcome could not be verified. */
   warning?: string;
 }
@@ -117,7 +120,7 @@ export interface SetAppPermissionsResult {
   failedCount: number;
   operations: AppPermissionOperationResult[];
   error?: string;
-  /** Operation warnings (e.g. an unverified outcome); present only on Android when any exist. */
+  /** Operation warnings (e.g. an unverified outcome); present on Android or iOS simulator Photos grants when any exist. */
   warnings?: string[];
 }
 
@@ -134,6 +137,7 @@ export interface AppPermissionsDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPrivacyClient | null;
   tccReader?: TccPermissionReader | null;
+  photosVerifier?: PhotosAuthorizationVerifier;
   iosPhysicalClient?: IosPhysicalPrivacyClient | null;
 }
 
@@ -146,6 +150,8 @@ export class AppPermissions {
 
   private tccReader: TccPermissionReader | null;
 
+  private photosVerifier: PhotosAuthorizationVerifier | undefined;
+
   private iosPhysicalClient: IosPhysicalPrivacyClient | null;
 
   constructor(device: BootedDevice, dependencies: AppPermissionsDependencies = {}) {
@@ -153,6 +159,7 @@ export class AppPermissions {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl ?? null;
     this.tccReader = dependencies.tccReader ?? null;
+    this.photosVerifier = dependencies.photosVerifier;
     this.iosPhysicalClient = dependencies.iosPhysicalClient ?? null;
   }
 
@@ -212,7 +219,13 @@ export class AppPermissions {
       return this.setIosPhysicalPermissions(appId, action, permissions);
     }
 
-    const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
+    const iosPermissions = new IosSimulatorPermissions(
+      this.device,
+      this.simctl,
+      this.tccReader,
+      undefined,
+      this.photosVerifier,
+    );
     const result = await iosPermissions.setPermissions(action, appId, permissions);
 
     return {
@@ -229,9 +242,12 @@ export class AppPermissions {
         changedCount: permissionResult.success ? 1 : 0,
         failedCount: permissionResult.success ? 0 : 1,
         result: permissionResult,
+        ...(permissionResult.code ? { code: permissionResult.code } : {}),
         ...(permissionResult.error ? { error: permissionResult.error } : {}),
+        ...(permissionResult.warning ? { warning: permissionResult.warning } : {}),
       })),
       ...(result.error ? { error: result.error } : {}),
+      ...(result.warnings ? { warnings: result.warnings } : {}),
     };
   }
 
@@ -448,6 +464,10 @@ export class AppPermissions {
         service: permission.service,
         state: permission.state,
         source: "iosTcc",
+        ...(permission.verified === undefined ? {} : { verified: permission.verified }),
+        ...(permission.reason === undefined ? {} : { reason: permission.reason }),
+        ...(permission.accessLevel === undefined ? {} : { accessLevel: permission.accessLevel }),
+        ...(permission.evidence === undefined ? {} : { evidence: permission.evidence }),
         ...(permission.authValue === undefined ? {} : { authValue: permission.authValue }),
         ...(permission.raw ? { raw: permission.raw } : {}),
       })),
@@ -478,9 +498,7 @@ export class AppPermissions {
       });
       const result = await adb.executeCommand(
         `shell dumpsys package ${shellQuote(normalizedAppId)}`,
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-        true,
+        { maxBuffer: DUMPSYS_MAX_BUFFER, noRetry: true },
       );
       const stdout = result.stdout;
       if (outputReportsMissingPackage(stdout)) {

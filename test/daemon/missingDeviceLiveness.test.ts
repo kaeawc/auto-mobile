@@ -1,3 +1,4 @@
+import { statusOf } from "../../src/daemon/deviceBinding";
 import { describe, expect, spyOn, test } from "bun:test";
 import { Mutex } from "async-mutex";
 import {
@@ -7,6 +8,7 @@ import {
 } from "../../src/daemon/missingDeviceLiveness";
 import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import type { PooledDevice } from "../../src/daemon/devicePool";
+import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 import type {
   PlatformDeviceManager,
   BootedDeviceDiscovery,
@@ -14,12 +16,25 @@ import type {
 } from "../../src/devices/deviceUtils";
 import { AdbClient, resetAdbClientCaches } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { ExecResult } from "../../src/models";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
+import { registerDeviceResourceInvalidation } from "../../src/daemon/deviceResourceInvalidation";
 
 const deviceId = "emulator-5554";
 
-function pooled(): PooledDevice {
+// Answers every discovery with whatever the scenario currently scripts.
+class ScriptedDiscoveryManager extends FakeDeviceManager {
+  constructor(private readonly current: () => BootedDeviceDiscovery) {
+    super();
+  }
+
+  override async getBootedDevicesDetailed(): Promise<BootedDeviceDiscovery> {
+    return this.current();
+  }
+}
+
+function pooled(): MutablePooledDevice {
   return {
     id: deviceId,
     name: "Pixel",
@@ -59,13 +74,11 @@ function harness() {
     devices: [],
     succeededPlatforms: new Set(["android"]),
   };
-  const manager = {
-    getBootedDevicesDetailed: async () => discovery,
-  } as PlatformDeviceManager;
+  const manager = new ScriptedDiscoveryManager(() => discovery);
   const port: MissingDeviceLivenessPoolPort = {
     getDevices: () => devices,
     getRefreshMissingDeviceMisses: () => misses,
-    getAssignmentMutex: () => mutex,
+    withAssignmentLock: (operation) => mutex.runExclusive(operation),
     getDeviceManager: () => manager,
     getRefreshGeneration: () => generation,
     shouldRebootDisconnectedAndroidDevice: () => reboot,
@@ -156,6 +169,29 @@ function emptyRefresh(h: ReturnType<typeof harness>) {
 }
 
 describe("MissingDeviceLiveness", () => {
+  test("fresh presence invalidates both resource caches through the daemon port", async () => {
+    const resets: string[] = [];
+    const restore = registerDeviceResourceInvalidation({
+      resetBootedDevicesResourceCache: () => {
+        resets.push("booted");
+      },
+      resetAndroidDeviceImageResourceCache: () => {
+        resets.push("images");
+      },
+    });
+    try {
+      const h = harness();
+      h.port.getDeviceManager = () =>
+        new ScriptedDiscoveryManager(() => {
+          expect(resets).toEqual(["booted", "images"]);
+          return { devices: [], succeededPlatforms: new Set(["android"]) };
+        });
+      await h.liveness.takeFreshPresenceDiscovery("android");
+      expect(resets).toEqual(["booted", "images"]);
+    } finally {
+      restore();
+    }
+  });
   test("fresh presence bypasses only its own adb read while a concurrent caller keeps the cached list", async () => {
     resetAdbClientCaches();
     const h = harness();
@@ -176,8 +212,8 @@ describe("MissingDeviceLiveness", () => {
         includes: (searchString: string) => stdout.includes(searchString),
       };
     };
-    const livenessAdb = new AdbClient(null, exec, null, undefined, h.timer);
-    const normalAdb = new AdbClient(null, exec, null, undefined, h.timer);
+    const livenessAdb = new AdbClient(null, exec, { timer: h.timer });
+    const normalAdb = new AdbClient(null, exec, { timer: h.timer });
     h.port.getDeviceManager = () =>
       ({
         getBootedDevicesDetailed: async (_platform, options) => {
@@ -226,7 +262,7 @@ describe("MissingDeviceLiveness", () => {
     }
   });
 
-  test("refresh and monitor share one consecutive-miss streak", async () => {
+  test("refresh and monitor share one missing-observation streak", async () => {
     const h = harness();
     h.devices.set(deviceId, pooled());
     expect(await emptyRefresh(h)).toBe(0);
@@ -284,13 +320,9 @@ describe("MissingDeviceLiveness", () => {
       }
       expect(evaluate(false).disconnected).toEqual([]);
       expect(await refresh(false)).toBe(0);
-      expect(monitorMisses.has(deviceId)).toBe(false);
-      expect(h.misses.has(deviceId)).toBe(false);
-      for (let miss = 1; miss < MISSING_DEVICE_MISS_THRESHOLD; miss++) {
-        h.timer.advanceTime(5_000);
-        expect(evaluate(true).disconnected).toEqual([]);
-        expect(await refresh(true)).toBe(0);
-      }
+      // Unknown discovery is not evidence of presence, for Android or pool refresh either.
+      expect(monitorMisses.get(deviceId)).toBe(2);
+      expect(h.misses.get(deviceId)).toBe(2);
       h.timer.advanceTime(5_000);
       expect(evaluate(true).disconnected).toEqual([deviceId]);
       expect(await refresh(true)).toBe(1);
@@ -338,7 +370,7 @@ describe("MissingDeviceLiveness", () => {
     h.delayIncident();
     const checking = h.liveness.ensurePooledDevicePresent(device, false, false, true);
     await flushUntil(() => h.timer.getPendingSleepCount() === 1);
-    expect(device.status).toBe("error");
+    expect(statusOf(device)).toBe("error");
     expect(h.devices.get(deviceId)).toBe(device);
     h.timer.advanceTime(5);
     expect(await checking).toBe(false);
@@ -602,7 +634,7 @@ describe("MissingDeviceLiveness", () => {
     try {
       expect(await h.liveness.ensurePooledDevicePresent(device, true, false, false)).toBe(false);
       await flushUntil(() => h.timer.getPendingSleepCount() === 1);
-      expect(device.status).toBe("error");
+      expect(statusOf(device)).toBe("error");
       h.timer.advanceTime(5);
       await flushUntil(() =>
         warnSpy.mock.calls.some(([message]) =>

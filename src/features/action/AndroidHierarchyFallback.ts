@@ -7,6 +7,7 @@ import { parseBounds } from "../../utils/bounds";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
+import { rawNodeValue } from "../utility/elementProperties";
 import { DefaultElementParser } from "../utility/ElementParser";
 
 const DUMP_CLEANUP_TIMEOUT_MS = 1500;
@@ -29,12 +30,9 @@ function nodeKey(attributes: Record<string, unknown>, bounds: unknown): string {
   return JSON.stringify([
     attributes.package,
     attributes.class,
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves hierarchy fingerprint identity; this does not select an action target.
-    attributes["resource-id"] ?? "",
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves hierarchy fingerprint identity; this does not select an action target.
-    attributes.text ?? "",
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves hierarchy fingerprint identity; this does not select an action target.
-    attributes["content-desc"] ?? "",
+    rawNodeValue(attributes, "resource-id") ?? "",
+    rawNodeValue(attributes, "text") ?? "",
+    rawNodeValue(attributes, "content-desc") ?? "",
     rect ? [rect.left, rect.top, rect.right, rect.bottom] : null,
   ]);
 }

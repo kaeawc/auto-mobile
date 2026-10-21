@@ -8,14 +8,25 @@ import * as path from "path";
 import { z } from "zod/v4";
 import { ScreenshotJobTracker } from "../../../src/utils/ScreenshotJobTracker";
 import {
-  setScreenshotFileSystem,
-  resetScreenshotFileSystem,
+  registerObservationResources,
+  type ObservationResourceDependencies,
 } from "../../../src/server/observationResources";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+
+let deps: ObservationResourceDependencies = {};
+function useScreenshotFileSystem(
+  value: ObservationResourceDependencies["screenshotFileSystem"] | null,
+): void {
+  deps = { ...deps, screenshotFileSystem: value ?? undefined };
+  registerObservationResources(deps);
+}
+function clearScreenshotFileSystem(): void {
+  deps = { ...deps, screenshotFileSystem: undefined };
+}
 
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
@@ -82,7 +93,7 @@ describe("MCP Resources Read", () => {
   afterEach(() => {
     RealObserveScreen.clearCache();
     ScreenshotJobTracker.resetTimer();
-    resetScreenshotFileSystem();
+    clearScreenshotFileSystem();
   });
 
   afterAll(async () => {
@@ -192,7 +203,7 @@ describe("MCP Resources Read", () => {
     const fakeImageData = Buffer.from("fake screenshot data");
     const screenshotPath = path.join("/tmp/auto-mobile", "screenshots", `screenshot_fake.png`);
 
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async (_p: string) => ({ isFile: () => true }),
       readFile: async (_p: string) => fakeImageData,
     });

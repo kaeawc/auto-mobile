@@ -5,6 +5,7 @@ import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { executeCommandOptionsOf } from "../fakes/executeCommandOptionsOf";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -215,13 +216,17 @@ describe("WorkProfileMonitor", () => {
 
   test("warns when an ADB command times out and runs the next polling tick", async () => {
     let commandCount = 0;
-    const command = spyOn(adb, "executeCommand").mockImplementation((_cmd, timeoutMs) => {
+    const command = spyOn(adb, "executeCommand").mockImplementation((cmd, options) => {
+      const { timeoutMs } = executeCommandOptionsOf([cmd, options]);
       commandCount++;
       if (commandCount > 1) {
         return Promise.resolve(packageListResult());
       }
+      if (timeoutMs === undefined) {
+        throw new Error("Expected ADB command timeout");
+      }
       return new Promise<ExecResult>((_resolve, reject) => {
-        timer.setTimeout(() => reject(new Error("ADB command timed out")), timeoutMs);
+        timer.setTimeout(() => reject(new Error("ADB command timed out")), timeoutMs ?? 0);
       });
     });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
@@ -229,11 +234,13 @@ describe("WorkProfileMonitor", () => {
     monitor.start();
 
     timer.advanceTime(5000);
-    expect(command.mock.calls[0]?.[1]).toBe(10_000);
+    expect(command.mock.calls[0]?.[1]).toMatchObject({ timeoutMs: 10_000 });
     timer.advanceTime(10_000);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // The rejection settles through several promise hops (spy wrapper, bounded call, single-flight
+    // finally); flush enough turns for the in-flight poll to clear before the next tick.
+    for (let turn = 0; turn < 10; turn++) {
+      await Promise.resolve();
+    }
 
     timer.advanceTime(5000);
     expect(commandCount).toBe(2);

@@ -33,37 +33,32 @@ teardown() {
   [[ "$output" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+Z$ ]]
 }
 
-@test "dead-code detection excludes ts-prune exports used in their module" {
+@test "dead-code detection reads knip's issues-array JSON report and applies the allowlist" {
   local detector
   detector="$(cd scripts && pwd)/detect-dead-code-ts.sh"
   local bin="$WORK_DIR/bin"
   local report="$WORK_DIR/report"
   mkdir -p "$bin" "$WORK_DIR/scripts"
   : > "$WORK_DIR/scripts/fixture.sh"
+  printf '%s\n' '{"ignoreEntries":[{"file":"src/example.ts","name":"AllowedExport","reason":"fixture"}]}' \
+    > "$WORK_DIR/dead-code-allowlist.json"
 
   cat > "$bin/bunx" <<'EOF'
 #!/usr/bin/env bash
-if [ "$1" = "ts-prune" ]; then
-  printf '%s\n' \
-    'src/example.ts:1 - UsedExport (used in module)' \
-    'src/example.ts:2 - DeadExport'
-  exit 1
-fi
-
 if [ "$1" = "knip" ]; then
-  printf '%s\n' '{}'
-  exit 0
+  printf '%s\n' '{"issues":[{"file":"src/example.ts","files":[],"exports":[{"name":"DeadExport","line":2},{"name":"AllowedExport","line":3}],"types":[]},{"file":"package.json","dependencies":[{"name":"left-pad"}],"devDependencies":[]}]}'
+  exit 1
 fi
 
 exit 2
 EOF
   chmod +x "$bin/bunx"
 
-  run env PATH="$bin:$PATH" bash -c 'cd "$1" && "$2" --json --output-dir="$3" --threshold=1' _ "$WORK_DIR" "$detector" "$report"
+  run env PATH="$bin:$PATH" bash -c 'cd "$1" && "$2" --json --output-dir="$3" --threshold=5' _ "$WORK_DIR" "$detector" "$report"
 
   [ "$status" -eq 0 ]
-  [ "$(jq '.totalIssues' "$report/dead-code-report.json")" -eq 1 ]
-  [ "$(jq -r '.issues[0].name' "$report/dead-code-report.json")" = "DeadExport" ]
+  [ "$(jq '.totalIssues' "$report/dead-code-report.json")" -eq 2 ]
+  [ "$(jq -r '[.issues[].name] | sort | join(",")' "$report/dead-code-report.json")" = "DeadExport,left-pad" ]
 }
 
 # --- B ---------------------------------------------------------------------

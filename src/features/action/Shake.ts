@@ -2,7 +2,11 @@ import { runWithAbortSignal } from "../../utils/AbortContext";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { BootedDevice, ShakeOptions, ShakeResult } from "../../models";
 import {
   SHAKE_DURATION_MAX_MS,
@@ -17,23 +21,40 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { emulatorConsoleReportsFailure } from "../utility/DeviceState";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
 // Issue #10250 reports this as the emulator's default resting gravity vector.
 const FALLBACK_RESTING_ACCELERATION = "0:9.77622:0";
+/** Bound on the best-effort emulator sensor restore after a shake. */
+const SHAKE_RESTORE_TIMEOUT_MS = 1_000;
 
 export class Shake extends BaseVisualChange {
   private shakeTimer: Timer;
 
-  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
-    super(device, adb, timer);
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    timer: Timer = defaultTimer,
+    collaborators: DisplayFenceDependencies = {},
+  ) {
+    super(device, adb, timer, undefined, collaborators);
     this.shakeTimer = timer;
   }
 
+  async execute(options?: ShakeOptions, call?: ActionCall): Promise<ShakeResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
-    options: ShakeOptions = {},
+    options?: ShakeOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<ShakeResult>;
+  async execute(
+    options: ShakeOptions = {},
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<ShakeResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("shake");
@@ -97,8 +118,7 @@ export class Shake extends BaseVisualChange {
           }
         },
         {
-          usesObservationForResolution: false,
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
           timeoutMs: duration + 2000,
           tolerancePercent: 0.0,
           progress,
@@ -165,8 +185,8 @@ export class Shake extends BaseVisualChange {
         }
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false, // Shake typically doesn't change UI directly
+        // Shake typically doesn't change UI directly
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
         timeoutMs: duration + 2000, // Give extra time beyond shake duration
         tolerancePercent: 0.0,
         progress,
@@ -180,8 +200,15 @@ export class Shake extends BaseVisualChange {
     try {
       const result = await runWithAbortSignal(undefined, () =>
         raceWithDeadline(
-          () => this.adb.executeCommand(`emu sensor set acceleration ${acceleration}`, 1000),
-          { timer: this.shakeTimer, timeoutMs: 1000, label: "Restore shake acceleration" },
+          () =>
+            this.adb.executeCommand(`emu sensor set acceleration ${acceleration}`, {
+              timeoutMs: SHAKE_RESTORE_TIMEOUT_MS,
+            }),
+          {
+            timer: this.shakeTimer,
+            timeoutMs: SHAKE_RESTORE_TIMEOUT_MS,
+            label: "Restore shake acceleration",
+          },
         ),
       );
       if (emulatorConsoleReportsFailure(result.stdout, result.stderr)) {

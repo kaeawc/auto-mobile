@@ -1,6 +1,6 @@
 # Device-description audit
 
-All device-facing projections are built by `src/server/deviceDescription.ts`.
+All device-facing projections are built by `src/daemon/deviceDescription.ts`.
 Phase 3 is complete: public surfaces emit only the canonical
 `DeviceDescription` keys, and every canonical key is present. An unavailable
 fact is `null`, not omitted.
@@ -20,7 +20,7 @@ Canonical fields after phase 3:
   (`deviceId`, `connectionId`, and `deviceSessionUuid`) live under `runtime`.
 - `osVersion`, `apiLevel`, `runtimeId`, `deviceType`, `model`, `architecture`,
   and `formFactor` are top-level static facts.
-- `runtime.lifecycle`, `runtime.readiness`, `runtime.poolStatus` (`assigned` also covers a device held by a managed slot or another daemon, with `runtime.heldBy` of `managed_slot`/`other_daemon`), and
+- `runtime.lifecycle`, `runtime.readiness`, `runtime.poolStatus` (`assigned` also covers a device held by the session broker or another daemon, with `runtime.heldBy` of `session_broker`/`other_daemon`), and
   `runtime.session` describe observed state and ownership.
 - A held device its platform still lists in a transitional state is published, never dropped, and
   counted `assigned`: an Android device adb lists outside `device` carries

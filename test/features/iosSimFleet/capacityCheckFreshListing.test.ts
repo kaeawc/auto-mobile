@@ -66,7 +66,7 @@ async function outcome(check: Promise<void>): Promise<unknown> {
 
 /**
  * `assertCapacityAvailable` is the check callers run BEFORE a side effect they would have to undo
- * (a managed-slot replacement deleting the slot's device, creating a simulator). Like an admission
+ * (a broker-binding replacement deleting the slot's device, creating a simulator). Like an admission
  * and the Android check, it must decide on a listing begun inside its own ledger sample window: a
  * boot that finishes while a listing is open is otherwise in neither the ledger nor the listing,
  * and the check passes at the limit (#11643).

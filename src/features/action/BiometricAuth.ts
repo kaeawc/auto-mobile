@@ -1,6 +1,10 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { BootedDevice, BiometricAuthResult, ExecResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
@@ -19,6 +23,10 @@ import {
 } from "./IosSdkTrigger";
 import type { SdkTriggerRequest } from "../observe/ios/CtrlProxySdkTrigger";
 import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
+
+// The biometric prompt needs a brief settle before verification.
+export const BIOMETRIC_PROMPT_SETTLE_MS = 100;
 
 export interface BiometricAuthOptions {
   action: "match" | "fail" | "cancel" | "error" | "enroll" | "unenroll";
@@ -74,12 +82,13 @@ export class BiometricAuth extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private simctl: BiometricSimctl | null = null,
     private readonly iosSdkTriggers: IosSdkTriggerSenderFactory = defaultIosSdkTriggerSenderFactory,
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, undefined, collaborators);
     this.device = device;
   }
 
@@ -188,9 +197,8 @@ export class BiometricAuth extends BaseVisualChange {
         return result;
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false,
-        timeoutMs: 5000,
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
+        timeoutMs: SETTLE_BUDGET_MS.lifecycle,
         progress,
         perf,
       },
@@ -615,7 +623,7 @@ export class BiometricAuth extends BaseVisualChange {
         };
       }
 
-      await this.timer.sleep(100);
+      await this.timer.sleep(BIOMETRIC_PROMPT_SETTLE_MS);
 
       const removeResult = await this.adb.executeCommand(`emu finger remove ${fingerprintId}`);
 

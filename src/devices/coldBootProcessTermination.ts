@@ -4,6 +4,8 @@ import { logger } from "../utils/logger";
 import { isProcessRunning } from "../utils/processLiveness";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
+import type { LockOwnerGenerationProbe } from "../utils/fileLock";
+import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 
 export const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
 /** Cadence of the liveness re-check on an emulator that survived SIGTERM and SIGKILL (#9920). */
@@ -14,7 +16,7 @@ type TerminationTimer = Pick<Timer, "setTimeout" | "clearTimeout">;
 export interface ColdBootTermination {
   /** Resolves when the process emits `exit`; already resolved for a settled or non-observable handle. */
   exited: Promise<void>;
-  /** True once the process is confirmed gone; false when it survived SIGTERM and SIGKILL. */
+  /** True once termination is confirmed; false for a surviving process or failed simulator cleanup. */
   confirmed: Promise<boolean>;
 }
 
@@ -24,6 +26,8 @@ export interface ColdBootTermination {
  * more bounded wait. `kill()` only requests signal delivery, so the emulator is
  * still holding its AVD lock files until it emits `exit`; callers must not
  * release the AVD's lifecycle lease before `confirmed` resolves true.
+ * A simulator handle owns its bounded shutdown instead: wait for its
+ * exit event and confirm only a successful cleanup exit code.
  *
  * The first signal is sent synchronously, before this returns.
  */
@@ -48,9 +52,11 @@ export function terminateColdBootProcess(
   }
   return {
     exited,
-    confirmed: alreadySettled
-      ? Promise.resolve(true)
-      : awaitColdBootSettlement(exited, processHandle, label, timer),
+    confirmed:
+      processHandle.terminationConfirmed ??
+      (alreadySettled
+        ? Promise.resolve(true)
+        : awaitColdBootSettlement(exited, processHandle, label, timer)),
   };
 }
 
@@ -129,7 +135,7 @@ function unrefTimer(handle: NodeJS.Timeout): void {
 
 /**
  * Resolves once a process that survived SIGTERM and SIGKILL is gone: either its
- * `exit` event fires, or a periodic liveness probe by pid finds it absent (an
+ * `exit` event fires, or a periodic probe finds its pid absent or recycled (an
  * unkillable process, or one whose exit event was missed, would otherwise keep
  * the AVD's lifecycle lease forever, #9920). The re-check timer is unref'd and
  * cleared as soon as the watch settles, so it can never hold the daemon open.
@@ -141,8 +147,13 @@ export function watchSurvivingProcess(
   label: string,
   timer: TerminationTimer,
   isRunning: (pid: number) => boolean = isProcessRunning,
+  processGeneration: Pick<
+    LockOwnerGenerationProbe,
+    "current" | "compare"
+  > = defaultLockOwnerGenerationProbe,
 ): Promise<void> {
   const pid = processHandle.pid;
+  const token = pid === undefined ? undefined : processGeneration.current(pid);
   return new Promise<void>((resolve) => {
     let pending: NodeJS.Timeout | undefined;
     let settled = false;
@@ -163,6 +174,14 @@ export function watchSurvivingProcess(
       if (settled) {
         return;
       }
+      // No token or an unknown/unreadable comparison preserves PID-only behavior.
+      if (token !== undefined && processGeneration.compare(pid, token) === "different") {
+        logger.warn(
+          `[ColdBoot] Cold boot ${label} process ${pid} now names a different process; releasing its AVD`,
+        );
+        finish();
+        return;
+      }
       if (!isRunning(pid)) {
         logger.warn(`[ColdBoot] Cold boot ${label} process ${pid} is gone; releasing its AVD`);
         finish();
@@ -181,16 +200,20 @@ export function watchSurvivingProcess(
  * `gone` promise that settles once the process is finally absent; the AVD's
  * lifecycle lease must be held until then. `unobservable` means the exit could
  * not even be observed, so nothing can be held on.
+ * `cleanup-unconfirmed` is a failed synthetic resource shutdown, without a
+ * surviving process or an AVD hold to apply to queued lifecycle requests.
  */
 export type OwnedTermination =
   | { state: "confirmed" }
   | { state: "survived"; gone: Promise<void> }
+  | { state: "cleanup-unconfirmed" }
   | { state: "unobservable" };
 
 export interface OwnedEmulatorTerminationOptions {
   /** Marks the AVD's lease as held by a process that survived both signals. */
   markHeldByUnkillableProcess?: (pid: number | undefined) => void;
   isProcessRunning?: (pid: number) => boolean;
+  processGeneration?: Pick<LockOwnerGenerationProbe, "current" | "compare">;
 }
 
 /**
@@ -213,6 +236,13 @@ export async function terminateOwnedEmulatorProcess(
       return { state: "confirmed" };
     }
   } catch (error) {
+    if (handle.terminationConfirmed !== undefined) {
+      logger.warn(
+        `[startDevice] Resource cleanup for ${label} was unconfirmed: ${errorMessage(error)}`,
+        error,
+      );
+      return { state: "cleanup-unconfirmed" };
+    }
     // The exit could not even be observed, so nothing can be held on: the lease is
     // released at once and the owner's own failure stays the one surfaced.
     logger.warn(
@@ -221,11 +251,22 @@ export async function terminateOwnedEmulatorProcess(
     );
     return { state: "unobservable" };
   }
+  if (handle.terminationConfirmed !== undefined) {
+    logger.warn(`[startDevice] Resource cleanup for ${label} was unconfirmed`);
+    return { state: "cleanup-unconfirmed" };
+  }
   logger.warn(
     `[startDevice] Emulator process ${handle.pid ?? "unknown"} for ${label} survived ` +
       "SIGTERM and SIGKILL; holding the AVD lifecycle lease until it is gone",
   );
-  const gone = watchSurvivingProcess(handle, exited, label, timer, options.isProcessRunning);
+  const gone = watchSurvivingProcess(
+    handle,
+    exited,
+    label,
+    timer,
+    options.isProcessRunning,
+    options.processGeneration,
+  );
   options.markHeldByUnkillableProcess?.(handle.pid);
   return { state: "survived", gone };
 }

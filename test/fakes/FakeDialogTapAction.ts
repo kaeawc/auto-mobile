@@ -1,6 +1,6 @@
 import type { BaseActionResult, BootedDevice } from "../../src/models";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { ProgressCallback } from "../../src/features/action/BaseVisualChange";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 import type { TapOnElementOptions } from "../../src/models/TapOnElementOptions";
 import type {
   DialogTapAction,
@@ -27,10 +27,7 @@ export class FakeDialogTapAction implements DialogTapAction {
     this.error = options.error;
   }
 
-  async execute(
-    options: TapOnElementOptions,
-    _progress?: ProgressCallback,
-  ): Promise<BaseActionResult> {
+  async execute(options: TapOnElementOptions, _call?: ActionCall): Promise<BaseActionResult> {
     this.calls.push(options);
     if (this.error) {
       throw this.error;

@@ -1,3 +1,4 @@
+import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, test } from "bun:test";
 import {
   calculateClaudeCost,
@@ -6,7 +7,9 @@ import {
 } from "../../src/vision/ClaudeVisionClient";
 import type { ClaudeVisionAnalysis } from "../../src/vision/VisionTypes";
 
-const makeResponse = (text: string) => ({ content: [{ type: "text", text }] }) as any;
+const makeResponse = (text: string): Pick<Anthropic.Message, "content"> => ({
+  content: [{ type: "text", text, citations: null }],
+});
 
 const analysis = (overrides: Partial<ClaudeVisionAnalysis> = {}): ClaudeVisionAnalysis => ({
   elementFound: true,
@@ -40,7 +43,7 @@ describe("parseClaudeResponse", () => {
   test("preserves all populated fields from an inline response", () => {
     const expected = {
       elementFound: true,
-      elementLocation: { x: 1, y: 2 },
+      elementLocation: { width: 0, height: 0, x: 1, y: 2 },
       suggestedText: "OK",
       suggestedResourceId: "id",
       navigationRequired: true,

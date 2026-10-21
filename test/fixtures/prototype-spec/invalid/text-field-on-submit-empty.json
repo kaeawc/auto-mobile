@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "text-actions",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "coffee"
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "query",
+      "onSubmit": []
+    }
+  },
+  "expectedPath": "root.onSubmit"
+}

@@ -3,24 +3,23 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DAEMON_TOOL_SELECTION_PROFILE_PARAM } from "../../src/daemon/constants";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-interface McpForwardRoute {
-  executionKey: string;
-  clientKey: string;
-  toolSelectionProfileUuid?: string;
-}
 
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -30,93 +29,66 @@ function createFakeDaemonState() {
   };
 }
 
-function createServer(): UnixSocketServer {
-  return new UnixSocketServer(
+function createServer(): UnixSocketServerHarness {
+  return createHarnessServer(
     join(tmpdir(), `fix-sessionless-provision-tool-profile-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     new FakeTimer(),
   );
 }
 
-function route(
-  server: UnixSocketServer,
+async function route(
+  server: UnixSocketServerHarness,
   socketSessionId: string,
   profileUuid: string | undefined,
-): McpForwardRoute {
+) {
   const arguments_ = {
     ...(profileUuid ? { [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: profileUuid } : {}),
   };
   const request: DaemonRequest = {
     id: randomUUID(),
+    type: "mcp_request",
     method: "tools/call",
     params: { name: "provisionDevice", arguments: arguments_ },
   };
-  return (
-    server as unknown as {
-      getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
-    }
-  ).getMcpForwardRoute(request, socketSessionId);
+  return await server.forwardRouteFor(request, socketSessionId);
 }
 
 describe("UnixSocketServer sessionless acquisition tool-selection forwarding", () => {
-  test("inventory reads with an expired session identity do not bind a socket client", () => {
+  test("inventory reads with an expired session identity do not bind a socket client", async () => {
     const server = createServer();
-    const internals = server as unknown as {
-      getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
-      recordBoundMcpClientKey: (
-        request: DaemonRequest,
-        socketSessionId: string,
-        route: McpForwardRoute,
-        sessionWasActiveBeforeForward: boolean,
-        response: unknown,
-      ) => void;
-      boundMcpClientKeysBySocketSession: Map<string, unknown>;
-    };
     for (const name of ["listDevices", "listDeviceImages"]) {
       const socketSessionId = `socket-${name}`;
       const request: DaemonRequest = {
         id: name,
+        type: "mcp_request",
         method: "tools/call",
         params: { name, arguments: { sessionUuid: "expired-session" } },
       };
-      const route = internals.getMcpForwardRoute(request, socketSessionId);
-      internals.recordBoundMcpClientKey(request, socketSessionId, route, false, { content: [] });
-      expect(internals.boundMcpClientKeysBySocketSession.has(socketSessionId)).toBe(false);
+      const forwardRoute = await server.forwardRouteFor(request, socketSessionId);
+      server.recordForwardResult(request, socketSessionId, forwardRoute, false, { content: [] });
+      expect(server.boundClientSocketSessionIds).not.toContain(socketSessionId);
     }
   });
 
-  test("carries a connection profile from setToolEnabled to sessionless provisionDevice", () => {
+  test("carries a connection profile from setToolEnabled to sessionless provisionDevice", async () => {
     const server = createServer();
     const socketSessionId = "socket-enabled";
     const profileUuid = "profile-enabled";
     const enableRequest: DaemonRequest = {
       id: "enable",
+      type: "mcp_request",
       method: "tools/call",
       params: { name: "setToolEnabled", arguments: { toolName: "provisionDevice", enabled: true } },
     };
-    const enableRoute = (
-      server as unknown as {
-        getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
-      }
-    ).getMcpForwardRoute(enableRequest, socketSessionId);
-    (
-      server as unknown as {
-        recordBoundMcpClientKey: (
-          request: DaemonRequest,
-          socketSessionId: string,
-          route: McpForwardRoute,
-          sessionWasActiveBeforeForward: boolean,
-          response: unknown,
-        ) => void;
-      }
-    ).recordBoundMcpClientKey(enableRequest, socketSessionId, enableRoute, false, {
+    const enableRoute = await server.forwardRouteFor(enableRequest, socketSessionId);
+    server.recordForwardResult(enableRequest, socketSessionId, enableRoute, false, {
       content: [{ type: "text", text: JSON.stringify({ sessionUuid: profileUuid }) }],
     });
 
     // DaemonMcpProxy remembers this profile from the preceding setToolEnabled
     // response and attaches it to the following sessionless acquisition call.
-    const resolved = route(server, socketSessionId, profileUuid);
+    const resolved = await route(server, socketSessionId, profileUuid);
 
     expect(resolved).toEqual({
       executionKey: `socket:${socketSessionId}:acquisition:provisionDevice`,
@@ -125,8 +97,8 @@ describe("UnixSocketServer sessionless acquisition tool-selection forwarding", (
     });
   });
 
-  test("keeps an unenabled sessionless provisionDevice unseeded", () => {
-    const resolved = route(createServer(), "socket-unenabled", undefined);
+  test("keeps an unenabled sessionless provisionDevice unseeded", async () => {
+    const resolved = await route(createServer(), "socket-unenabled", undefined);
 
     expect(resolved).toEqual({
       executionKey: "socket:socket-unenabled:acquisition:provisionDevice",
@@ -134,11 +106,11 @@ describe("UnixSocketServer sessionless acquisition tool-selection forwarding", (
     });
   });
 
-  test("keeps different socket profiles isolated for the same acquisition tool", () => {
+  test("keeps different socket profiles isolated for the same acquisition tool", async () => {
     const server = createServer();
-    const first = route(server, "socket-a", "profile-a");
-    const unenabledSecond = route(server, "socket-b", undefined);
-    const enabledSecond = route(server, "socket-b", "profile-b");
+    const first = await route(server, "socket-a", "profile-a");
+    const unenabledSecond = await route(server, "socket-b", undefined);
+    const enabledSecond = await route(server, "socket-b", "profile-b");
 
     expect(first.clientKey).not.toBe(enabledSecond.clientKey);
     expect(first.toolSelectionProfileUuid).toBe("profile-a");

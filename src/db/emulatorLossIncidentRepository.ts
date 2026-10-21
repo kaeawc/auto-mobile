@@ -9,7 +9,7 @@ import {
   type EmulatorLossRecoverySettlement,
   type EmulatorRecoveryOutcome,
   type OpenEmulatorLossIncidentInput,
-} from "../daemon/emulatorLossIncident";
+} from "../utils/emulatorLossIncident";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import type { Timer } from "../utils/SystemTimer";
@@ -39,7 +39,13 @@ function isIncident(value: unknown): value is EmulatorLossIncident {
 function decodeIncident(value: string): EmulatorLossIncident | undefined {
   try {
     const parsed: unknown = JSON.parse(value);
-    return isIncident(parsed) ? parsed : undefined;
+    if (!isIncident(parsed)) {
+      return undefined;
+    }
+    if (parsed.outputUnavailable !== "adopted") {
+      delete parsed.outputUnavailable;
+    }
+    return parsed;
   } catch (error) {
     logger.warn(`[EmulatorLossIncidentRepository] Invalid stored incident: ${error}`, error);
     return undefined;
@@ -53,10 +59,10 @@ function decodeIncident(value: string): EmulatorLossIncident | undefined {
  */
 export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore {
   constructor(
+    private readonly database?: Kysely<Database>,
     private readonly timer: Timer = defaultTimer,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
     private readonly maxRetained: number = DEFAULT_MAX_RETAINED_EMULATOR_LOSS_INCIDENTS,
-    private readonly database?: Kysely<Database>,
   ) {}
 
   async open(input: OpenEmulatorLossIncidentInput): Promise<EmulatorLossIncident> {
@@ -70,6 +76,9 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
       detectionPath: input.detectionPath,
       ...(input.processExit ? { processExit: { ...input.processExit } } : {}),
       ...(input.outputTail ? { outputTail: input.outputTail } : {}),
+      ...(input.outputUnavailable === "adopted"
+        ? { outputUnavailable: input.outputUnavailable }
+        : {}),
       ...(input.lastAdbState ? { lastAdbState: input.lastAdbState } : {}),
       ...(input.session ? { session: { ...input.session } } : {}),
       recovery: {

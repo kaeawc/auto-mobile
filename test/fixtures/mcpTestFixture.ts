@@ -1,32 +1,52 @@
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import type {
-  JsonSchemaType,
-  JsonSchemaValidator,
-  jsonSchemaValidator,
-} from "@modelcontextprotocol/sdk/validation";
-import type { AnySchema, SchemaOutput } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import {
+  type JsonSchemaType,
+  type JsonSchemaValidator,
+  type jsonSchemaValidator,
+  type Request,
+  type RequestMethod,
+  type RequestOptions,
+  type ResultTypeMap,
+  type StandardSchemaV1,
+} from "@modelcontextprotocol/client";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import type { createMcpServer } from "../../src/server/index";
+import { Client } from "@modelcontextprotocol/client";
 
 export const MCP_TEST_REQUEST_TIMEOUT_MS = 4_000;
 
-type McpClientRequest = Parameters<Client["request"]>[0];
-type McpRequestOptions = Parameters<Client["request"]>[2];
+function bounded(options: RequestOptions | undefined): RequestOptions {
+  return { ...options, timeout: options?.timeout ?? MCP_TEST_REQUEST_TIMEOUT_MS };
+}
+
+function isResultSchema(
+  value: StandardSchemaV1 | RequestOptions | undefined,
+): value is StandardSchemaV1 {
+  return value !== undefined && "~standard" in value;
+}
 
 // `Client.callTool()` delegates to `this.request()`, so this one typed override
 // bounds every fixture MCP round trip. Keep it below the integration lane's 5s
 // Bun timeout so a stalled request reports the SDK's RequestTimeout diagnostic.
 class BoundedMcpTestClient extends Client {
-  override request<T extends AnySchema>(
-    request: McpClientRequest,
+  override request<M extends RequestMethod>(
+    request: { method: M; params?: Record<string, unknown> },
+    options?: RequestOptions,
+  ): Promise<ResultTypeMap[M]>;
+  override request<T extends StandardSchemaV1>(
+    request: Request,
     resultSchema: T,
-    options?: McpRequestOptions,
-  ): Promise<SchemaOutput<T>> {
-    return super.request(request, resultSchema, {
-      ...options,
-      timeout: options?.timeout ?? MCP_TEST_REQUEST_TIMEOUT_MS,
-    });
+    options?: RequestOptions,
+  ): Promise<StandardSchemaV1.InferOutput<T>>;
+  override request(
+    request: { method: RequestMethod; params?: Record<string, unknown> },
+    schemaOrOptions?: StandardSchemaV1 | RequestOptions,
+    maybeOptions?: RequestOptions,
+  ): Promise<unknown> {
+    if (isResultSchema(schemaOrOptions)) {
+      return super.request(request, schemaOrOptions, bounded(maybeOptions));
+    }
+    return super.request(request, bounded(schemaOrOptions));
   }
 }
 

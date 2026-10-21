@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import type { Plan } from "../../src/models/Plan";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -316,7 +316,7 @@ describe("barrier tool", () => {
         name: "barrier device loss",
         steps: [{ tool: "barrier", params: { device: "A", lock: "loss-lock", deviceCount: 1 } }],
       };
-      const error = await new DefaultPlanExecutor(timer)
+      const error = await createDefaultPlanExecutor(timer)
         .executePlan(
           plan,
           0,
@@ -412,9 +412,10 @@ describe("barrier tool", () => {
     // ToolCallRepository, which would resolve the real file-backed DB (#3067).
     // Swap in a no-op repository for the duration of this test, as
     // toolRegistry.pipeline.test.ts does.
-    const registryInternals = ToolRegistry as unknown as { toolCallRepository: unknown };
-    const originalToolCallRepository = registryInternals.toolCallRepository;
-    registryInternals.toolCallRepository = { recordToolCall: async () => {} };
+    const originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         resolveExecutionTarget: async (input) => {
@@ -452,7 +453,7 @@ describe("barrier tool", () => {
         ],
       };
 
-      const result = await new DefaultPlanExecutor().executePlan(
+      const result = await createDefaultPlanExecutor().executePlan(
         plan,
         0,
         "android",
@@ -467,7 +468,7 @@ describe("barrier tool", () => {
       expect(new Set(resolvedDeviceIds)).toEqual(new Set(["device-a", "device-b"]));
     } finally {
       restore();
-      registryInternals.toolCallRepository = originalToolCallRepository;
+      ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     }
   });
 });

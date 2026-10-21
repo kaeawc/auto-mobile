@@ -18,9 +18,8 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import type { CtrlProxyKeyboardResult } from "../observe/ios/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
@@ -30,9 +29,16 @@ import { getImeOccluder, getVisibleIosImeBounds } from "../observe/output/Skelet
 import type { A11yActionResult, AccessibilityNodeSelector } from "../observe/android/types";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError } from "../../models/ActionableError";
 import { stableNodeSelectorForElement } from "../talkback/TalkBackTapStrategy";
 import { keyboardNodeClickTargetError } from "./keyboardNodeClickTarget";
+import { resolveSignalCall, type ActionCall } from "./ActionCall";
+import {
+  KeyboardOpenIndeterminateError,
+  keyboardOpenIndeterminateMessage,
+} from "./KeyboardOpenIndeterminateError";
+import { DefaultKeyboardHierarchyProvider } from "./DefaultKeyboardHierarchyProvider";
+
+export { KeyboardOpenIndeterminateError };
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -67,36 +73,6 @@ export function selectKeyboardHierarchyCache(
   androidCache: () => KeyboardHierarchyCache,
 ): KeyboardHierarchyCache {
   return platform === "ios" ? iosCache() : androidCache();
-}
-
-export class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvider {
-  private viewHierarchy: Pick<ViewHierarchy, "getViewHierarchy">;
-  private cache: KeyboardHierarchyCache;
-
-  constructor(
-    viewHierarchy: Pick<ViewHierarchy, "getViewHierarchy">,
-    cache: KeyboardHierarchyCache,
-  ) {
-    this.viewHierarchy = viewHierarchy;
-    this.cache = cache;
-  }
-
-  async getViewHierarchy(
-    signal?: AbortSignal,
-    options?: KeyboardHierarchyReadOptions,
-  ): Promise<ViewHierarchyResult | null> {
-    if (options?.forceFresh) {
-      this.cache.invalidateCache();
-    }
-    return this.viewHierarchy.getViewHierarchy(
-      undefined,
-      new NoOpPerformanceTracker(),
-      false,
-      0,
-      signal,
-      options?.timeoutMs,
-    );
-  }
 }
 
 type KeyboardDetection = {
@@ -139,18 +115,6 @@ type NodeClickOutcome =
   | { kind: "sent" }
   | { kind: "unconfirmed"; error?: string };
 
-function keyboardOpenIndeterminateMessage(dispatched: string, reason?: string): string {
-  return `Keyboard open outcome is indeterminate: the ${dispatched} was dispatched but no result was confirmed (${reason ?? "request cancelled"}). The keyboard may have opened. Do not retry automatically; observe before retrying.`;
-}
-
-/** A cancelled open whose click/tap was already sent: the device may have applied it. */
-export class KeyboardOpenIndeterminateError extends ActionableError {
-  constructor(dispatched: string, reason?: string) {
-    super(keyboardOpenIndeterminateMessage(dispatched, reason));
-    this.name = "KeyboardOpenIndeterminateError";
-  }
-}
-
 function sameBounds(a: ElementBounds[] | undefined, b: ElementBounds[]): boolean {
   return (
     a?.length === b.length &&
@@ -164,6 +128,16 @@ function sameBounds(a: ElementBounds[] | undefined, b: ElementBounds[]): boolean
   );
 }
 
+export interface KeyboardOptions {
+  adbFactory?: AdbClientFactory;
+  hierarchyProvider?: KeyboardHierarchyProvider;
+  timer?: Timer;
+  parser?: ElementParser;
+  geometry?: ElementGeometry;
+  finder?: FocusedInputQuery;
+  openClient?: KeyboardOpenClient;
+}
+
 export class Keyboard {
   private static readonly INPUT_METHOD_WINDOW_TYPE = 2;
   // The IME show/hide animation runs ~200-400ms on typical devices, so a single
@@ -172,6 +146,8 @@ export class Keyboard {
   private static readonly STATE_CONFIRMATION_TIMEOUT_MS = 2_000;
   private static readonly IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS = 2_000;
   private static readonly STATE_CONFIRMATION_POLL_INTERVAL_MS = 100;
+  /** Bound on the follow-up keyboard detect after a close request. */
+  private static readonly CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS = 2000;
   private device: BootedDevice;
   private adb: AdbExecutor;
   private hierarchyProvider: KeyboardHierarchyProvider;
@@ -182,16 +158,16 @@ export class Keyboard {
   private adbFactory: AdbClientFactory;
   private openClient: KeyboardOpenClient | undefined;
 
-  constructor(
-    device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    hierarchyProvider?: KeyboardHierarchyProvider,
-    timer: Timer = defaultTimer,
-    parser: ElementParser = new DefaultElementParser(),
-    geometry: ElementGeometry = new DefaultElementGeometry(),
-    finder: FocusedInputQuery = new DefaultFocusedInputQuery(),
-    openClient?: KeyboardOpenClient,
-  ) {
+  constructor(device: BootedDevice, options: KeyboardOptions = {}) {
+    const {
+      adbFactory = defaultAdbClientFactory,
+      hierarchyProvider,
+      timer = defaultTimer,
+      parser = new DefaultElementParser(),
+      geometry = new DefaultElementGeometry(),
+      finder = new DefaultFocusedInputQuery(),
+      openClient,
+    } = options;
     this.device = device;
     this.adbFactory = adbFactory;
     this.openClient = openClient;
@@ -215,7 +191,14 @@ export class Keyboard {
     }
   }
 
-  async execute(action: KeyboardAction, signal?: AbortSignal): Promise<KeyboardResult> {
+  async execute(action: KeyboardAction, call?: ActionCall): Promise<KeyboardResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(action: KeyboardAction, signal?: AbortSignal): Promise<KeyboardResult>;
+  async execute(
+    action: KeyboardAction,
+    signalOrCall?: AbortSignal | ActionCall,
+  ): Promise<KeyboardResult> {
+    const { signal } = resolveSignalCall(signalOrCall);
     throwIfAborted(signal);
     if (this.device.platform === "ios") {
       return this.executeIOS(action, signal);
@@ -327,7 +310,7 @@ export class Keyboard {
   private async iosFailure(
     action: KeyboardAction,
     result: CtrlProxyKeyboardResult,
-    client: IOSCtrlProxyClient,
+    client: IosCtrlProxy,
     signal?: AbortSignal,
   ): Promise<KeyboardResult> {
     if (
@@ -352,17 +335,25 @@ export class Keyboard {
   }
 
   private async confirmIOSCloseAfterTimeout(
-    client: IOSCtrlProxyClient,
+    client: IosCtrlProxy,
     signal?: AbortSignal,
   ): Promise<boolean> {
     try {
       throwIfAborted(signal);
       const detected = await awaitWhileRequestIsLive(
-        raceWithDeadline(client.requestKeyboard("detect", 2000, undefined, signal), {
-          timer: this.timer,
-          timeoutMs: 2000,
-          label: "Keyboard close follow-up detect",
-        }),
+        raceWithDeadline(
+          client.requestKeyboard(
+            "detect",
+            Keyboard.CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS,
+            undefined,
+            signal,
+          ),
+          {
+            timer: this.timer,
+            timeoutMs: Keyboard.CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS,
+            label: "Keyboard close follow-up detect",
+          },
+        ),
         signal,
       );
       return detected.success && !detected.open;
@@ -624,13 +615,7 @@ export class Keyboard {
 
     throwIfAborted(signal);
     await awaitWhileRequestIsLive(
-      this.adb.executeCommand(
-        "shell input keyevent KEYCODE_BACK",
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      ),
+      this.adb.executeCommand("shell input keyevent KEYCODE_BACK", { signal }),
       signal,
     );
 
@@ -863,14 +848,10 @@ export class Keyboard {
     try {
       // Do not stop waiting on abort: the adb process is terminated and awaited (bounded by
       // the adb client's grace period) so a started tap has settled before callers restore state.
-      await this.adb.executeCommand(
-        `shell input tap ${x} ${y}`,
-        undefined,
-        undefined,
-        undefined,
+      await this.adb.executeCommand(`shell input tap ${x} ${y}`, {
         signal,
-        true,
-      );
+        waitForProcessSettlementAfterAbort: true,
+      });
     } catch (error) {
       // The tap command had started, so it may have reached the device.
       if (signal?.aborted) {

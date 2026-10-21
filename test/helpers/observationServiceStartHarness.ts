@@ -17,11 +17,9 @@ export async function observationServiceStartHarness(platform: "android" | "ios"
     name: "Read device",
     platform,
   };
-  const sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const manager = new FakeDeviceManager();
   manager.bootedDevices = [device];
   const lifecycle = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

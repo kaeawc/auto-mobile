@@ -69,8 +69,15 @@ setup() {
     'unset AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH' \
     'unset AUTO_MOBILE_DB_PATH' \
     'unset AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH' \
-    'unset AUTOMOBILE_MANAGED_SLOT_CONFIG' >> "${BATCH}/daemon1/env.sh"
-  sh -c '. "$1"' sh "${BATCH}/daemon1/env.sh"
+    'unset AUTOMOBILE_SESSION_BROKER_CONFIG' \
+    'unset AUTOMOBILE_SESSION_CONFIG' \
+    'unset AUTOMOBILE_MANAGED_SLOT_CONFIG' \
+    'unset AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES' >> "${BATCH}/daemon1/env.sh"
+  AUTOMOBILE_SESSION_BROKER_CONFIG=/inherited/broker \
+    AUTOMOBILE_SESSION_CONFIG=/inherited/session \
+    AUTOMOBILE_MANAGED_SLOT_CONFIG=/inherited/legacy \
+    AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES=999 \
+    sh -c '. "$1"; test "${AUTOMOBILE_SESSION_BROKER_CONFIG+x}${AUTOMOBILE_SESSION_CONFIG+x}${AUTOMOBILE_MANAGED_SLOT_CONFIG+x}${AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES+x}" = ""' sh "${BATCH}/daemon1/env.sh"
 }
 
 @test "daemon shorthand uses built server and --daemon" {

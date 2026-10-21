@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ProgressCallback, RegisteredTool, ToolRegistry } from "../../src/server/toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
 import { ActionableError } from "../../src/models/ActionableError";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -125,7 +125,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     // A gated (debugOnly) but planExecutable tool: getTool hides it, getToolForPlan
     // returns it. Only the `forPlan` resolution should reach it.
     registerCapturingTool("hiddenStep", { debugOnly: true });
-    ((ToolRegistry as any).tools.get("hiddenStep") as RegisteredTool).planExecutable = true;
+    (ToolRegistry.getRegisteredTool("hiddenStep") as RegisteredTool).planExecutable = true;
 
     // Sanity: getTool hides it, so the default (non-forPlan) resolution must fail.
     expect(ToolRegistry.getTool("hiddenStep")).toBeUndefined();
@@ -180,8 +180,8 @@ describe("ToolRegistry.callInternal (#3108)", () => {
 
   test("propagates outer execution metadata to a nested device-aware plan step", async () => {
     const device = { name: "Pixel", deviceId: "emulator-5554", platform: "android" as const };
-    const originalRecorder = (ToolRegistry as any).navigationToolCallRecorder;
-    const originalRepository = (ToolRegistry as any).toolCallRepository;
+    const originalRecorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
+    const originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         async resolveExecutionTarget(input: any) {
@@ -207,8 +207,8 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       },
       planLifecycleManager: { async afterExecution() {} },
     });
-    (ToolRegistry as any).navigationToolCallRecorder = { record() {} };
-    (ToolRegistry as any).toolCallRepository = { async recordToolCall() {} };
+    ToolRegistry.setCollaboratorsForTesting({ navigationToolCallRecorder: { record() {} } });
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: { async recordToolCall() {} } });
     try {
       ToolRegistry.registerDeviceAware(
         "nestedStep",
@@ -231,8 +231,8 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       expect(captured[0].args.__executionStartTime).toBe(123);
     } finally {
       restore();
-      (ToolRegistry as any).navigationToolCallRecorder = originalRecorder;
-      (ToolRegistry as any).toolCallRepository = originalRepository;
+      ToolRegistry.setCollaboratorsForTesting({ navigationToolCallRecorder: originalRecorder });
+      ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalRepository });
     }
   });
 

@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository";
 import {
   resetDeviceSnapshotManagerDependencies,
   setDeviceSnapshotManagerDependencies,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { registerDeviceSnapshotResources } from "../../src/server/deviceSnapshotResources";
-import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/server/deviceSnapshotResourceUris";
+import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/daemon/deviceSnapshotResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
@@ -20,6 +20,8 @@ function makeRecord(overrides: Partial<DeviceSnapshotRecord> = {}): DeviceSnapsh
     deviceName: "Test Device",
     platform: "android",
     snapshotType: "adb",
+    includeAppData: true,
+    includeSettings: true,
     sizeBytes: 1024,
     createdAt: "2024-06-01T12:00:00.000Z",
     lastAccessedAt: "2024-06-01T12:00:00.000Z",
@@ -65,9 +67,9 @@ describe("deviceSnapshotResources", () => {
     await configRepository.setConfig({ maxArchiveSizeMb: 500 } as never);
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),
@@ -122,9 +124,9 @@ describe("deviceSnapshotResources", () => {
     avdSnapshots.setVmSnapshot("am-api34", "emulator-5554_2026-08-11_23-05-15-803Z", 17_300);
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: new FakeDeviceSnapshotConfigRepository() as any,
-      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      snapshotRepository: repository,
+      configRepository: new FakeDeviceSnapshotConfigRepository(),
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots,
       timer: new FakeTimer(),
       now: () => new Date(0),
@@ -153,9 +155,9 @@ describe("deviceSnapshotResources", () => {
 
   test("getSnapshotArchive returns an empty envelope when there are no snapshots", async () => {
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: new FakeDeviceSnapshotRepository() as any,
-      configRepository: new FakeDeviceSnapshotConfigRepository() as any,
-      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      snapshotRepository: new FakeDeviceSnapshotRepository(),
+      configRepository: new FakeDeviceSnapshotConfigRepository(),
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),
@@ -169,14 +171,12 @@ describe("deviceSnapshotResources", () => {
   });
 
   test("getSnapshotArchive returns an error payload when listing snapshots fails", async () => {
+    const failingRepository = new FakeDeviceSnapshotRepository();
+    spyOn(failingRepository, "listSnapshots").mockRejectedValue(new Error("db unavailable"));
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: {
-        listSnapshots: async () => {
-          throw new Error("db unavailable");
-        },
-      } as any,
-      configRepository: new FakeDeviceSnapshotConfigRepository() as any,
-      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      snapshotRepository: failingRepository,
+      configRepository: new FakeDeviceSnapshotConfigRepository(),
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),

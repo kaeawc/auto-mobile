@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "anchor": {
+        "type": "bounds",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 10001
+        }
+      }
+    }
+  },
+  "expectedPath": "root.anchor.bounds.height",
+  "expectedMessage": "Invalid number value"
+}

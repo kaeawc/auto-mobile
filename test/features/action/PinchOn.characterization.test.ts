@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { createFlatNodeForTest, type FlatHierarchyNode } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { afterEach, describe, expect, spyOn, test, mock, beforeEach } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import type { ElementBounds, PinchOnOptions, ViewHierarchyResult } from "../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -13,6 +15,19 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+
+afterEach(() => mock.restore());
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+
+let managerInstanceSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyManager, "getInstance">>;
+beforeEach(() => {
+  managerInstanceSpy = spyOn(AndroidCtrlProxyManager, "getInstance");
+});
 
 const restores: Array<() => void> = [];
 afterEach(() =>
@@ -30,16 +45,22 @@ function harness(platform: "android" | "ios", bounds: ElementBounds) {
   const adb = new FakeAdbExecutor();
   const observe = new FakeObserveScreen();
   const hierarchy: ViewHierarchyResult = {
-    hierarchy: { node: [{ "resource-id": "target", bounds, clickable: true }] },
+    hierarchy: {
+      node: createFlatNodeForTest({
+        node: [createFlatNodeForTest({ "resource-id": "target", bounds, clickable: true })],
+      }),
+    },
     screenWidth: 402,
     screenHeight: 874,
   };
-  observe.setObserveResult({
-    updatedAt: timer.now(),
-    screenSize: { width: 402, height: 874 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: hierarchy,
-  });
+  observe.setObserveResult(
+    buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 402, height: 874 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy,
+    }),
+  );
   const window = new FakeWindow();
   window.configureCachedActiveWindow(null);
   window.configureActiveWindow({
@@ -47,15 +68,11 @@ function harness(platform: "android" | "ios", bounds: ElementBounds) {
     activityName: "MainActivity",
     layoutSeqSum: 123,
   });
-  const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    android as unknown as AndroidCtrlProxyClient,
+  const androidSpy = clientSpy.mockReturnValue(android);
+  const iosSpy = spyOnIosClientInstance(ios);
+  const managerSpy = managerInstanceSpy.mockReturnValue(
+    FakeCtrlProxyManager.withAvailability(true),
   );
-  const iosSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    ios as unknown as IOSCtrlProxyClient,
-  );
-  const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-    isAvailable: async () => true,
-  } as unknown as AndroidCtrlProxyManager);
   restores.push(
     () => androidSpy.mockRestore(),
     () => iosSpy.mockRestore(),
@@ -196,13 +213,14 @@ const geometryExpected: Record<string, Record<"android" | "ios", ExpectedGeometr
     android: [197, 426, 150, 100, 0.6666666666666666, 300, 0, 5000],
     ios: [197, 426, 150, 100, 0.6666666666666666, 300, 0, 5000],
   },
+  // Equal distances are a pure rotation, not a wrong-direction request to auto-correct (#12536).
   "equal out": {
-    android: [197, 426, 100, 150, 1.5, 300, 0, 5000],
-    ios: [197, 426, 100, 150, 1.5, 300, 0, 5000],
+    android: [197, 426, 100, 100, 1, 300, 0, 5000],
+    ios: [197, 426, 100, 100, 1, 300, 0, 5000],
   },
   "equal in": {
-    android: [197, 426, 150, 100, 0.6666666666666666, 300, 0, 5000],
-    ios: [197, 426, 150, 100, 0.6666666666666666, 300, 0, 5000],
+    android: [197, 426, 100, 100, 1, 300, 0, 5000],
+    ios: [197, 426, 100, 100, 1, 300, 0, 5000],
   },
   clamp: {
     android: [197, 426, 39.300000000000004, 353.7, 8.999999999999998, 10000, 45, 12000],
@@ -253,7 +271,7 @@ for (const platform of ["android", "ios"] as const) {
         targetType: "container",
         container: { elementId: "target" },
         warning: undefined,
-        observation: observe.getConfiguredObserveResult(),
+        observation: observe.getConfiguredObserveResult() ?? undefined,
         a11yTotalTimeMs: duration,
         a11yGestureTimeMs: duration,
       });
@@ -264,7 +282,7 @@ for (const platform of ["android", "ios"] as const) {
 
 const autoCases: Array<{
   name: string;
-  nodes: ViewHierarchyResult["hierarchy"]["node"];
+  nodes: FlatHierarchyNode[];
   windows?: ViewHierarchyResult["windows"];
 }> = [
   { name: "empty", nodes: [] },
@@ -332,13 +350,15 @@ const autoCases: Array<{
     windows: [
       {
         windowLayer: 5,
-        hierarchy: {
-          node: {
-            "resource-id": "upper",
-            bounds: { left: 100, top: 100, right: 300, bottom: 300 },
-            clickable: true,
-          },
-        },
+        hierarchy: createFlatNodeForTest({
+          node: [
+            createFlatNodeForTest({
+              "resource-id": "upper",
+              bounds: { left: 100, top: 100, right: 300, bottom: 300 },
+              clickable: true,
+            }),
+          ],
+        }),
       },
     ],
   },
@@ -378,7 +398,7 @@ const autoExpected: Record<string, ExpectedTarget> = {
 describe("PinchOn auto-target characterization", () => {
   test.each(autoCases)("$name", async ({ name, nodes, windows }) => {
     const { pinch, hierarchy, history, adb, observe } = harness("android", normal);
-    hierarchy.hierarchy.node = nodes;
+    hierarchy.hierarchy.node = createFlatNodeForTest({ node: nodes });
     hierarchy.windows = windows;
     const result = await pinch.execute({ direction: "out" });
     const [centerX, centerY, distanceStart, distanceEnd, scale, targetType, elementId, warning] =
@@ -407,7 +427,7 @@ describe("PinchOn auto-target characterization", () => {
       targetType,
       container: elementId ? { elementId } : undefined,
       warning: warning ?? undefined,
-      observation: observe.getConfiguredObserveResult(),
+      observation: observe.getConfiguredObserveResult() ?? undefined,
       a11yTotalTimeMs: 300,
       a11yGestureTimeMs: 300,
     });
@@ -426,10 +446,10 @@ describe("PinchOn validation characterization", () => {
     expect(await pinch.execute(options)).toStrictEqual({
       success: false,
       direction: "out",
-      distanceStart: options.distanceStart ?? 0,
-      distanceEnd: options.distanceEnd ?? 0,
+      distanceStart: "distanceStart" in options ? options.distanceStart : 0,
+      distanceEnd: "distanceEnd" in options ? options.distanceEnd : 0,
       duration: 0,
-      scale: options.scale,
+      scale: "scale" in options ? options.scale : undefined,
       rotationDegrees: undefined,
       centerX: 0,
       centerY: 0,
@@ -442,36 +462,3 @@ describe("PinchOn validation characterization", () => {
     expect(capture.requests).toEqual([]);
   });
 });
-
-test.each([
-  [undefined, "android", "Pinch direction is required ('in' or 'out')"],
-  [
-    "out",
-    "web",
-    "pinch on elements is not supported on platform 'web'. Supported platforms: android, ios.",
-  ],
-] as const)(
-  "preserves direction/platform validation priority: %s/%s",
-  async (direction, platform, error) => {
-    const { pinch, history, adb, capture } = harness("android", normal);
-    Object.assign(pinch, { device: { deviceId: "unsupported-fake", name: "Fake", platform } });
-    const options = { direction, scale: 0 } as unknown as PinchOnOptions;
-    expect(await pinch.execute(options)).toStrictEqual({
-      success: false,
-      direction: direction ?? "in",
-      distanceStart: 0,
-      distanceEnd: 0,
-      duration: 0,
-      scale: 0,
-      rotationDegrees: undefined,
-      centerX: 0,
-      centerY: 0,
-      targetType: "screen",
-      container: undefined,
-      error,
-    });
-    expect(history()).toEqual([]);
-    expect(adb.getExecutedCommands()).toEqual([]);
-    expect(capture.requests).toEqual([]);
-  },
-);

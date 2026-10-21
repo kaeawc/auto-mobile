@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ActionableError } from "../../src/models/ActionableError";
 import { useScratchRoot } from "../helpers/scratchRoot";
+import { parseProbeJson } from "../helpers/spawnProbe";
 import {
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
@@ -15,6 +16,10 @@ import {
   ensureSecureTempDirSync,
   TEMP_SUBDIRS,
 } from "../../src/utils/tempDir";
+
+// A cold Bun start in a fresh HOME/USERPROFILE outlived 5 s on loaded Windows runners
+// (SIGTERM via exitedDueToTimeout, empty stdout); the probe itself takes ~20 ms on Linux.
+const PROBE_TIMEOUT_MS = 30_000;
 
 describe("coordination defaults in a child Bun process", () => {
   const scratch = useScratchRoot("coordination-home-");
@@ -58,12 +63,12 @@ console.log(JSON.stringify({ homedir: os.userInfo().homedir,
       env,
       stdout: "pipe",
       stderr: "pipe",
-      timeout: 5000,
+      timeout: PROBE_TIMEOUT_MS,
     });
     exitCode = result.exitCode;
     stderr = result.stderr.toString();
-    child = JSON.parse(result.stdout.toString());
-  });
+    child = parseProbeJson(result);
+  }, PROBE_TIMEOUT_MS + 5_000);
 
   test("both coordination roots follow the child's os.userInfo().homedir", () => {
     expect(stderr).toBe("");
@@ -245,6 +250,16 @@ describe("getTempDir", () => {
 });
 
 describe("getSharedAutoMobileDir", () => {
+  test("CtrlProxy shared directories ignore AUTOMOBILE_DATA_DIR and honor coordination overrides", () => {
+    for (const subdir of ["ctrl-proxy-ios", "ctrl-proxy/entitlements"]) {
+      expect(getSharedAutoMobileDir(subdir, "/home/u", { AUTOMOBILE_DATA_DIR: "/x" })).toBe(
+        path.join(path.resolve("/home/u"), ".auto-mobile", subdir),
+      );
+      expect(getSharedAutoMobileDir(subdir, "/home/u", { AUTOMOBILE_COORDINATION_DIR: "/c" })).toBe(
+        path.join("/c", subdir),
+      );
+    }
+  });
   test("defaults to the home returned by os.userInfo", () => {
     const userInfoSpy = spyOn(os, "userInfo").mockReturnValue({
       uid: 501,

@@ -1,0 +1,37 @@
+{
+  "id": "swipe",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "pager",
+    "id": "p",
+    "axis": "vertical",
+    "children": [
+      {
+        "type": "column",
+        "children": [
+          {
+            "type": "listItem",
+            "headline": "Order",
+            "swipeActions": {
+              "end": [
+                {
+                  "label": "Delete",
+                  "onTap": [
+                    {
+                      "type": "emit",
+                      "name": "delete"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

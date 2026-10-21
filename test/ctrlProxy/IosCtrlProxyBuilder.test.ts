@@ -2,17 +2,23 @@ import { promises as fsPromises } from "node:fs";
 import { ActionableError } from "../../src/models/ActionableError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  CtrlProxyStaleRunnerCacheError,
   IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
   IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV,
   IosCtrlProxyBuilder,
 } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import { CtrlProxyStaleRunnerCacheError } from "../../src/ctrlProxy/CtrlProxyStaleRunnerCacheError";
 import {
   RELEASE_CHECKSUM_REGISTRY,
   resolveAssetVersion,
   resolvePinnedVersion,
 } from "../../src/constants/release";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
+import {
+  DefaultCtrlProxyCodesignVerifier,
+  type CodesignExec,
+  type CodesignExecOutput,
+} from "../../src/utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { getSharedAutoMobileDir, getTempDir } from "../../src/utils/tempDir";
@@ -80,7 +86,8 @@ describe("IosCtrlProxyBuilder", function () {
     const cached = path.join(tempDir, "stale.xctestrun");
     builder["cachedXctestrunPath"].set("any", cached);
     const access = spyOn(fs, "access").mockRejectedValue(new Error("removed"));
-    const listing = spyOn(fsPromises, "readdir").mockResolvedValue(["fresh.xctestrun"]);
+    const directoryReader: { readdir: (target: string) => Promise<string[]> } = fsPromises;
+    const listing = spyOn(directoryReader, "readdir").mockResolvedValue(["fresh.xctestrun"]);
     const log = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       expect(await builder.getXctestrunPath()).toBe(
@@ -212,10 +219,13 @@ describe("IosCtrlProxyBuilder", function () {
 
     // Reset singleton instances
     IosCtrlProxyBuilder.resetInstances();
-    IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("");
+    IosCtrlProxyBuilder.configure({
+      expectedRunnerChecksum: "",
+      expectedRunnerChecksumTarget: null,
+    });
     // Default to a passing, in-process codesign verifier so pre-launch tests
     // never spawn a real `codesign`/`spctl` (issue #4760).
-    IosCtrlProxyBuilder.setCodesignVerifierForTesting(new FakeCtrlProxyCodesignVerifier());
+    IosCtrlProxyBuilder.configure({ codesignVerifier: new FakeCtrlProxyCodesignVerifier() });
     delete process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN;
     delete process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID;
   });
@@ -314,8 +324,11 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "replacement-checksum";
       downloader.runnerChecksum = "wrong-runner-checksum";
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("replacement-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("expected-runner-checksum", "xctest");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "replacement-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "expected-runner-checksum",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir },
         { downloader },
@@ -490,7 +503,7 @@ describe("IosCtrlProxyBuilder", function () {
           path.join(tempDir, "ctrl-proxy-ios-bundle.json"),
           JSON.stringify({ checksum, appHashes: { simulator: storedHash } }),
         );
-        IosCtrlProxyBuilder.setExpectedChecksumForTesting(expectedChecksum);
+        IosCtrlProxyBuilder.configure({ expectedChecksum: expectedChecksum });
         const artifacts = spyOn(builder, "getXctestrunPath").mockResolvedValue("cached.xctestrun");
         const expected = spyOn(builder, "getExpectedAppHash").mockReturnValue("expected-app");
         const actual = spyOn(builder, "getAppBundleHash").mockResolvedValue(localHash);
@@ -563,7 +576,7 @@ describe("IosCtrlProxyBuilder", function () {
         }),
       );
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("test-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "test-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance({
         derivedDataPath,
         bundleCacheDir: cacheDir,
@@ -1050,8 +1063,10 @@ describe("IosCtrlProxyBuilder", function () {
       // prefetch is observable on every CI host.
       originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
       Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
-      IosCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting({
-        hasIosPrerequisites: async () => true,
+      IosCtrlProxyBuilder.configure({
+        prerequisiteDetector: {
+          hasIosPrerequisites: async () => true,
+        },
       });
     });
 
@@ -1066,7 +1081,7 @@ describe("IosCtrlProxyBuilder", function () {
     ): Promise<IosCtrlProxyBuilder> {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1080,7 +1095,10 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "new-release-runner-sha";
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("new-release-runner-sha", "xctest");
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "new-release-runner-sha",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = await buildWithRunner(downloader);
 
       // The registry moved to a new release but the extracted runner on disk is
@@ -1100,19 +1118,24 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "new-release-runner-sha";
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("new-release-runner-sha", "xctest");
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "new-release-runner-sha",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = await buildWithRunner(downloader);
       downloader.runnerChecksum = "nightly-runner-not-in-registry";
 
       const release = Promise.withResolvers<void>();
-      IosCtrlProxyBuilder.setPrefetchBuilderForTesting({
-        needsRebuild: async () => true,
-        build: async () => {
-          await release.promise;
-          return { success: true, message: "prefetched" };
+      IosCtrlProxyBuilder.configure({
+        prefetchBuilder: {
+          needsRebuild: async () => true,
+          build: async () => {
+            await release.promise;
+            return { success: true, message: "prefetched" };
+          },
+          getBuildProductsPath: async () => null,
+          getXctestrunPath: async () => null,
         },
-        getBuildProductsPath: async () => null,
-        getXctestrunPath: async () => null,
       });
       const first = IosCtrlProxyBuilder.prefetchBuild();
       expect(IosCtrlProxyBuilder.prefetchBuild()).toBe(first);
@@ -1135,7 +1158,10 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "new-release-runner-sha";
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("new-release-runner-sha", "xctest");
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "new-release-runner-sha",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = await buildWithRunner(downloader);
       downloader.runnerChecksum = "swapped-attacker-checksum";
 
@@ -1150,8 +1176,11 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = previousRelease.runnerSha256;
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("new-release-runner-sha", "xctest");
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "new-release-runner-sha",
+        expectedRunnerChecksumTarget: "xctest",
+      });
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath: path.join(tempDir, "DerivedData"),
@@ -1175,7 +1204,7 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "local-override-checksum";
       await fs.writeFile(overridePath, "a".repeat(12000));
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = overridePath;
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("local-override-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "local-override-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1194,7 +1223,7 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       await fs.writeFile(overridePath, "a".repeat(12000));
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = overridePath;
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "" });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1212,7 +1241,7 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "expected-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
@@ -1238,7 +1267,7 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "expected-checksum";
       downloader.extractedSubdir = "NestedRoot";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
@@ -1264,8 +1293,11 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.runnerChecksum = "xctest-checksum";
       downloader.legacyRunnerChecksum = "xctrunner-stub-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "xctest-checksum",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1295,8 +1327,11 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "wrong-xctest-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("expected-xctest-checksum", "xctest");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "expected-xctest-checksum",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1314,7 +1349,7 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "expected-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1338,8 +1373,11 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "xctest-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "xctest-checksum",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1363,8 +1401,11 @@ describe("IosCtrlProxyBuilder", function () {
 
       process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = sourceBuiltChecksum;
       process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = "xctest";
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: null,
+        expectedRunnerChecksumTarget: null,
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1384,8 +1425,11 @@ describe("IosCtrlProxyBuilder", function () {
 
       process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = "not-a-sha256";
       process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = "xctest";
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: null,
+        expectedRunnerChecksumTarget: null,
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath: path.join(tempDir, "DerivedData"),
@@ -1405,8 +1449,11 @@ describe("IosCtrlProxyBuilder", function () {
 
       process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = "a".repeat(64);
       process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = "app";
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: null,
+        expectedRunnerChecksumTarget: null,
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath: path.join(tempDir, "DerivedData"),
@@ -1427,8 +1474,11 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "xctest-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "xctest-checksum",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1457,8 +1507,11 @@ describe("IosCtrlProxyBuilder", function () {
         const downloader = new FakeIOSCtrlProxyBundleDownloader();
         downloader.checksum = "expected-checksum";
         downloader.runnerChecksum = "xctest-checksum";
-        IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-        IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+        IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+        IosCtrlProxyBuilder.configure({
+          expectedRunnerChecksum: "xctest-checksum",
+          expectedRunnerChecksumTarget: "xctest",
+        });
         const builder = IosCtrlProxyBuilder.getInstance(
           { derivedDataPath, bundleCacheDir: cacheDir },
           { downloader },
@@ -1521,7 +1574,10 @@ describe("IosCtrlProxyBuilder", function () {
         const { builder, downloader } = await builtBuilder();
         const downloadsBefore = downloader.downloadedUrls.length;
         process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = "a".repeat(64);
-        IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+        IosCtrlProxyBuilder.configure({
+          expectedRunnerChecksum: null,
+          expectedRunnerChecksumTarget: null,
+        });
         downloader.runnerChecksum = "b".repeat(64);
 
         const error = await builder.verifyRunnerBinaryBeforeLaunch("simulator").catch((e) => e);
@@ -1538,10 +1594,13 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "c".repeat(64);
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       // Release-pinned checksum the local build can never match.
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
-      IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "a".repeat(64),
+        expectedRunnerChecksumTarget: "xctest",
+      });
+      IosCtrlProxyBuilder.configure({ useLocalBuild: true });
       await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
@@ -1563,9 +1622,12 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "c".repeat(64);
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
-      IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "a".repeat(64),
+        expectedRunnerChecksumTarget: "xctest",
+      });
+      IosCtrlProxyBuilder.configure({ useLocalBuild: true });
       await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
@@ -1589,9 +1651,12 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "c".repeat(64);
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
-      IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "a".repeat(64),
+        expectedRunnerChecksumTarget: "xctest",
+      });
+      IosCtrlProxyBuilder.configure({ useLocalBuild: true });
       await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
@@ -1618,9 +1683,12 @@ describe("IosCtrlProxyBuilder", function () {
       // explicit value must remain enforced (mismatch => hard refusal).
       process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = "e".repeat(64);
       process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = "xctest";
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
-      IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: null,
+        expectedRunnerChecksumTarget: null,
+      });
+      IosCtrlProxyBuilder.configure({ useLocalBuild: true });
       await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
@@ -1670,10 +1738,13 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.checksum = "expected-checksum";
       downloader.runnerChecksum = "xctest-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "xctest-checksum",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const verifier = new FakeCtrlProxyCodesignVerifier();
-      IosCtrlProxyBuilder.setCodesignVerifierForTesting(verifier);
+      IosCtrlProxyBuilder.configure({ codesignVerifier: verifier });
 
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
@@ -1697,6 +1768,133 @@ describe("IosCtrlProxyBuilder", function () {
         true,
       );
     });
+
+    test.each([false, true])(
+      "cache requires an unchanged bundle during inspection (mutate=%s)",
+      async (mutate) => {
+        if (process.platform !== "darwin") {
+          return;
+        }
+        const { builder, verifier } = await buildForCodesign();
+        process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+        const appPath = await builder.getRunnerAppPath("simulator");
+        if (!appPath) {
+          throw new Error("missing fixture app");
+        }
+        const resource = path.join(appPath, "cache-race-resource");
+        await fs.writeFile(resource, "tampered");
+        const checking = spyOn(verifier, "verifyAppBundle").mockImplementation(async () => {
+          if (mutate) {
+            await fs.writeFile(resource, "good");
+          }
+          return verifier.outcome;
+        });
+        try {
+          await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+          // Restore the pre-check tree: a poisoned cache would accept it here.
+          await fs.writeFile(resource, "tampered");
+          if (mutate) {
+            verifier.outcome = {
+              verified: false,
+              notarized: false,
+              teamId: null,
+              detail: "tampered",
+            };
+            await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+              "Refusing to launch",
+            );
+          } else {
+            await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+          }
+          expect(checking).toHaveBeenCalledTimes(mutate ? 2 : 1);
+        } finally {
+          checking.mockRestore();
+        }
+      },
+    );
+
+    test("unchanged signed bundle executes 3 then 0 commands; changed resources and signatures reverify", async () => {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder } = await buildForCodesign();
+      let calls = 0;
+      const exec: CodesignExec = async () => {
+        calls++;
+        return { code: 0, stdout: "", stderr: "TeamIdentifier=ABCDE12345" };
+      };
+      IosCtrlProxyBuilder.configure({
+        codesignVerifier: new DefaultCtrlProxyCodesignVerifier(exec, new FakeTimer()),
+      });
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(calls).toBe(3);
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(calls).toBe(3);
+      const appPath = await builder.getRunnerAppPath("simulator");
+      if (!appPath) {
+        throw new Error("missing fixture app");
+      }
+      await fs.writeFile(path.join(appPath, "Info.plist"), "updated resource");
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(calls).toBe(6);
+      await fs.mkdir(path.join(appPath, "_CodeSignature"), { recursive: true });
+      await fs.writeFile(path.join(appPath, "_CodeSignature", "CodeResources"), "new seal");
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(calls).toBe(9);
+      // A cached raw success must still obey policy changes between launches.
+      process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+      process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID = "OTHERTEAM";
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "Team ID mismatch",
+      );
+      expect(calls).toBe(9);
+    });
+
+    test("failed assessments retry and still refuse when required mode is enabled later", async () => {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+      verifier.outcome = { verified: false, notarized: false, teamId: null, detail: "rejected" };
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "Refusing to launch",
+      );
+      expect(verifier.verifiedPaths).toHaveLength(2);
+    });
+
+    test.each(["--verify", "-dvv", "--assess"])(
+      "hung %s warns by default, refuses when required, and is never cached",
+      async (flag) => {
+        if (process.platform !== "darwin") {
+          return;
+        }
+        const { builder } = await buildForCodesign();
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        let hangs = 0;
+        const exec: CodesignExec = async (_file, args) => {
+          if (args[0] === flag) {
+            hangs++;
+            return new Promise<CodesignExecOutput>(() => {});
+          }
+          return { code: 0, stdout: "", stderr: "TeamIdentifier=ABCDE12345" };
+        };
+        IosCtrlProxyBuilder.configure({
+          codesignVerifier: new DefaultCtrlProxyCodesignVerifier(exec, timer),
+        });
+        await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+        expect(timer.now()).toBe(15_000);
+        process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+        await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+          `${flag} timed out after 15000ms`,
+        );
+        expect(timer.now()).toBe(30_000);
+        expect(hangs).toBe(2);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
 
     test("codesign verification is skipped (exec seam never invoked) on non-darwin (#4760)", async function () {
       if (process.platform === "darwin") {
@@ -1809,19 +2007,19 @@ describe("IosCtrlProxyBuilder", function () {
         process.env.AUTOMOBILE_VERSION = version;
         delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH;
         delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
-        IosCtrlProxyBuilder.setExpectedChecksumForTesting(null);
+        IosCtrlProxyBuilder.configure({ expectedChecksum: null });
         try {
           process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "true";
           expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false);
           process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "false";
           expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true);
-          IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+          IosCtrlProxyBuilder.configure({ useLocalBuild: true });
           expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false);
           process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "true";
-          IosCtrlProxyBuilder.setUseLocalBuildForTesting(false);
+          IosCtrlProxyBuilder.configure({ useLocalBuild: false });
           expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true);
         } finally {
-          IosCtrlProxyBuilder.setUseLocalBuildForTesting(null);
+          IosCtrlProxyBuilder.configure({ useLocalBuild: null });
           if (previousVersion === undefined) {
             delete process.env.AUTOMOBILE_VERSION;
           } else {
@@ -1870,7 +2068,7 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "actual-checksum-from-download";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("different-expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "different-expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
@@ -1912,7 +2110,7 @@ describe("IosCtrlProxyBuilder", function () {
         return origComputeSha(filePath);
       };
       downloader.checksum = "new-checksum";
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("new-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "new-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
@@ -1942,8 +2140,11 @@ describe("IosCtrlProxyBuilder", function () {
       process.env[envName] = path.join("build", "control-proxy.ipa");
 
       IosCtrlProxyBuilder.resetInstances();
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "",
+        expectedRunnerChecksumTarget: null,
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
@@ -1976,7 +2177,7 @@ describe("IosCtrlProxyBuilder", function () {
         throw new Error("network unreachable");
       };
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -2019,7 +2220,7 @@ describe("IosCtrlProxyBuilder", function () {
         };
       };
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -2034,6 +2235,100 @@ describe("IosCtrlProxyBuilder", function () {
       expect(downloader.extractedPaths).toHaveLength(0);
     });
 
+    describe("download-to-temp keeps the cached bundle (#11857)", function () {
+      const bundleName = "control-proxy.ipa";
+
+      async function cachedBuilder(downloader: FakeIOSCtrlProxyBundleDownloader, cached = true) {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const productsDir = path.join(derivedDataPath, "Build", "Products");
+        await fs.mkdir(path.join(productsDir, "Debug-iphonesimulator"), { recursive: true });
+        await fs.writeFile(
+          path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
+          "mock",
+        );
+        const cacheDir = path.join(tempDir, "cache");
+        await fs.mkdir(cacheDir, { recursive: true });
+        if (cached) {
+          await fs.writeFile(path.join(cacheDir, bundleName), "c".repeat(12000));
+        }
+        return {
+          cacheDir,
+          builder: IosCtrlProxyBuilder.getInstance(
+            { derivedDataPath, bundleCacheDir: cacheDir },
+            { downloader },
+          ),
+        };
+      }
+
+      test("a download that fails midway leaves the old bundle and no temp file", async function () {
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        downloader.download = async (_url, destination) => {
+          await fs.writeFile(destination, "partial");
+          throw new Error("connection reset");
+        };
+        let calls = 0;
+        downloader.computeFileSha256 = async () => ({
+          checksum: ++calls === 1 ? "stale" : "expected-checksum",
+          source: "node" as const,
+        });
+        IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+        const { builder, cacheDir } = await cachedBuilder(downloader);
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(true); // fell back to the verified cached bundle
+        expect(await fs.readFile(path.join(cacheDir, bundleName), "utf8")).toBe("c".repeat(12000));
+        expect((await fs.readdir(cacheDir)).filter((n) => n.endsWith(".download"))).toEqual([]);
+      });
+
+      test("a checksum mismatch on the fresh download keeps the old bundle and does not fall back", async function () {
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        let calls = 0;
+        downloader.computeFileSha256 = async () => ({
+          checksum: ++calls === 1 ? "stale" : "tampered",
+          source: "node" as const,
+        });
+        IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+        const { builder, cacheDir } = await cachedBuilder(downloader);
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("checksum verification failed");
+        expect(await fs.readFile(path.join(cacheDir, bundleName), "utf8")).toBe("c".repeat(12000));
+        expect((await fs.readdir(cacheDir)).filter((n) => n.endsWith(".download"))).toEqual([]);
+      });
+
+      test("a too-small download is rejected without replacing the old bundle", async function () {
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        downloader.download = async (_url, destination) => {
+          await fs.writeFile(destination, "tiny");
+        };
+        downloader.checksum = "stale";
+        IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+        const { builder, cacheDir } = await cachedBuilder(downloader);
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("too small");
+        expect(await fs.readFile(path.join(cacheDir, bundleName), "utf8")).toBe("c".repeat(12000));
+      });
+
+      test("with no checksum configured the download is published without hashing it", async function () {
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        IosCtrlProxyBuilder.configure({ expectedChecksum: "" });
+        const { builder, cacheDir } = await cachedBuilder(downloader, false);
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(true);
+        expect(downloader.downloadedUrls).toHaveLength(1);
+        expect(await fs.readFile(path.join(cacheDir, bundleName), "utf8")).toBe("a".repeat(12000));
+        expect(downloader.checksummedFilePaths.some((p) => p.endsWith(bundleName))).toBe(false);
+      });
+    });
+
     test("rejects a plaintext http:// bundle URL override by default (#4761)", async function () {
       const prevUrl = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL;
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL = "http://mirror.test/control-proxy.ipa";
@@ -2042,7 +2337,7 @@ describe("IosCtrlProxyBuilder", function () {
         const cacheDir = path.join(tempDir, "cache");
         const downloader = new FakeIOSCtrlProxyBundleDownloader();
         downloader.checksum = "expected-checksum";
-        IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
         const builder = IosCtrlProxyBuilder.getInstance(
           { derivedDataPath, bundleCacheDir: cacheDir },
           { downloader },
@@ -2069,8 +2364,11 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.includeDeviceProducts = true;
       downloader.runnerChecksum = "xctest-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "xctest-checksum",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -2113,8 +2411,11 @@ describe("IosCtrlProxyBuilder", function () {
         return { checksum: "expected-checksum", source: "node" as const };
       };
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: "xctest-checksum",
+        expectedRunnerChecksumTarget: "xctest",
+      });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -2145,7 +2446,7 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new DeferredDownloader();
       downloader.checksum = "expected-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -2189,7 +2490,7 @@ describe("IosCtrlProxyBuilder", function () {
         downloader.checksum = "expected-checksum";
         downloader.includeDeviceProducts = includeDeviceProducts;
 
-        IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
         const builder = IosCtrlProxyBuilder.getInstance(
           { derivedDataPath, bundleCacheDir: cacheDir },
           { downloader },
@@ -2252,7 +2553,7 @@ describe("IosCtrlProxyBuilder", function () {
       const downloader = new DestructiveDeferredDownloader();
       downloader.checksum = "expected-checksum";
 
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -2279,7 +2580,7 @@ describe("IosCtrlProxyBuilder", function () {
       downloader.download = async () => {
         throw new Error("download unavailable");
       };
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       const builder = IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath: path.join(tempDir, "DerivedData"),
@@ -2326,7 +2627,7 @@ describe("IosCtrlProxyBuilder", function () {
 
     function createBuilder(downloader: SignalBoundDownloader) {
       downloader.checksum = "expected-checksum";
-      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IosCtrlProxyBuilder.configure({ expectedChecksum: "expected-checksum" });
       return IosCtrlProxyBuilder.getInstance(
         {
           derivedDataPath: path.join(tempDir, "DerivedData"),

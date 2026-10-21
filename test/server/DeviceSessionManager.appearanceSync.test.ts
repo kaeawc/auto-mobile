@@ -1,20 +1,18 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
-import { applyAppearanceOnConnect } from "../../src/server/applyAppearanceOnConnect";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { applyAppearanceOnConnect } from "../../src/daemon/applyAppearanceOnConnect";
 import { isAppearanceSyncEnabled } from "../../src/utils/appearance/appearanceSyncPolicy";
 import { installDeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
-import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 
 const config: AppearanceConfig = {
   syncWithHost: true,
@@ -35,20 +33,17 @@ function harness(
   const adb = new FakeAdbExecutor();
   const simctl = new FakeSimctl();
   const ctrlProxyManager = new FakeCtrlProxyManager();
-  const ctrlProxyClient = {
-    isConnected: () => false,
-    waitForConnection: async () => true,
-    verifyServiceReady: async () => true,
-    resetConnectionBudget: () => {},
-  } as unknown as AndroidCtrlProxy;
-  const appearanceSimctl = new FakeSimCtlClient();
+  const ctrlProxyClient = new FakeCtrlProxy();
+  ctrlProxyClient.setConnected(false);
+  ctrlProxyClient.setWaitForConnectionResult(true);
+  const appearanceSimctl = new FakeSimctl();
   const devices = new FakeDeviceUtils();
   const window = new FakeWindow();
   window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
   adb.setDevices(platform === "android" ? [device] : []);
   devices.setBootedDevices(platform, [device]);
   simctl.setBootedSimulators(platform === "ios" ? [device] : []);
-  simctl.setAvailableSimulators([device]);
+  simctl.setAvailableSimulators([{ ...device, isRunning: true }]);
   simctl.setDeviceInfo(device.deviceId, {
     udid: device.deviceId,
     name: device.name,
@@ -66,7 +61,7 @@ function harness(
   });
   const dependencies = { isSyncEnabled, getConfig, resolveMode, apply };
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(adb, devices, simctl as unknown as SimCtlClient, {
+    new FakeDeviceClientProvider(adb, devices, simctl, {
       window,
       ctrlProxyManager,
       ctrlProxyClient,

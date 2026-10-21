@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -10,14 +10,14 @@ import {
   getDeviceGestureRecordingStatus,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { noActiveDeviceSessionPayload } from "../../src/server/proxyServer";
+import { noActiveDeviceSessionPayload } from "../../src/daemon/deviceSessionResult";
 
 class TestableServer extends DeviceGestureRecordingSocketServer {
   invoke(request: DeviceGestureRecordingCommand) {
@@ -36,13 +36,11 @@ describe("device gesture recording start holder admission (#11665)", () => {
   let selectionCalls: number;
   let server: TestableServer;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();
     discovery.setBootedDevices("android", [device]);
@@ -74,7 +72,19 @@ describe("device gesture recording start holder admission (#11665)", () => {
       },
       async () => {},
     );
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(async () => {
     if (getDeviceGestureRecordingStatus(timer)) {
@@ -85,65 +95,74 @@ describe("device gesture recording start holder admission (#11665)", () => {
   });
 
   for (const sessionUuid of ["stranger", undefined]) {
-    test(`${sessionUuid ?? "sessionless"} is refused on the held physical iPhone before selection or setup`, async () => {
-      const response = await server.invoke({
-        command: "start",
-        deviceId: iphone.deviceId,
-        sessionUuid,
-      });
+    arranged(
+      `${sessionUuid ?? "sessionless"} is refused on the held physical iPhone before selection or setup`,
+      async () => {
+        const response = await server.invoke({
+          command: "start",
+          deviceId: iphone.deviceId,
+          sessionUuid,
+        });
+        expect(response).toMatchObject({
+          success: false,
+          code: "device_owned_by_other_session",
+          retryable: false,
+          deviceId: iphone.deviceId,
+        });
+        expect(selectionCalls).toBe(0);
+        expect(readyCalls).toBe(0);
+        expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
+      },
+    );
+  }
+
+  arranged(
+    "a non-holder omitting deviceId is refused against the selected device before setup",
+    async () => {
+      const response = await server.invoke({ command: "start", sessionUuid: "stranger" });
       expect(response).toMatchObject({
         success: false,
         code: "device_owned_by_other_session",
         retryable: false,
-        deviceId: iphone.deviceId,
+        deviceId: device.deviceId,
       });
-      expect(selectionCalls).toBe(0);
+      expect(selectionCalls).toBe(1);
       expect(readyCalls).toBe(0);
-      expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
-    });
-  }
-
-  test("a non-holder omitting deviceId is refused against the selected device before setup", async () => {
-    const response = await server.invoke({ command: "start", sessionUuid: "stranger" });
-    expect(response).toMatchObject({
-      success: false,
-      code: "device_owned_by_other_session",
-      retryable: false,
-      deviceId: device.deviceId,
-    });
-    expect(selectionCalls).toBe(1);
-    expect(readyCalls).toBe(0);
-  });
+    },
+  );
 
   for (const sessionUuid of ["stranger", "unknown-session", undefined]) {
     for (const deviceId of [device.deviceId, undefined]) {
-      test(`${sessionUuid ?? "sessionless"} gets the acquire-session refusal on an unheld ${deviceId ? "explicit" : "selected"} device with no setup`, async () => {
-        await manager.releaseSession("holder");
-        const response = await server.invoke({ command: "start", deviceId, sessionUuid });
-        const { error } = noActiveDeviceSessionPayload({
-          message:
-            `deviceGestureRecording start refused: no session of yours holds device '${device.deviceId}'. ` +
-            "Call getAndroid or getApple to acquire a session on it first.",
-          reason: "device_not_held",
-        });
-        expect(response).toEqual({
-          success: false,
-          ...error,
-          error: error.message,
-        });
-        expect(response).toMatchObject({
-          code: "no_active_device_session",
-          retryable: false,
-          nextAction: "acquire_new_session",
-          recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
-        });
-        expect(readyCalls).toBe(0);
-        expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
-      });
+      arranged(
+        `${sessionUuid ?? "sessionless"} gets the acquire-session refusal on an unheld ${deviceId ? "explicit" : "selected"} device with no setup`,
+        async () => {
+          await manager.releaseSession("holder");
+          const response = await server.invoke({ command: "start", deviceId, sessionUuid });
+          const { error } = noActiveDeviceSessionPayload({
+            message:
+              `deviceGestureRecording start refused: no session of yours holds device '${device.deviceId}'. ` +
+              "Call getAndroid or getApple to acquire a session on it first.",
+            reason: "device_not_held",
+          });
+          expect(response).toEqual({
+            success: false,
+            ...error,
+            error: error.message,
+          });
+          expect(response).toMatchObject({
+            code: "no_active_device_session",
+            retryable: false,
+            nextAction: "acquire_new_session",
+            recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+          });
+          expect(readyCalls).toBe(0);
+          expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
+        },
+      );
     }
   }
 
-  test("an unheld managed-slot target keeps its slot refusal before any setup", async () => {
+  arranged("an unheld broker-binding target keeps its slot refusal before any setup", async () => {
     await manager.releaseSession("holder");
     let slotCalls = 0;
     const gatedServer = new TestableServer(
@@ -160,18 +179,18 @@ describe("device gesture recording start holder admission (#11665)", () => {
       },
       async () => {
         slotCalls++;
-        throw new Error("device_assigned_to_managed_slot");
+        throw new Error("device_assigned_to_binding");
       },
     );
     await expect(
       gatedServer.invoke({ command: "start", deviceId: device.deviceId }),
-    ).rejects.toThrow("device_assigned_to_managed_slot");
+    ).rejects.toThrow("device_assigned_to_binding");
     expect(slotCalls).toBe(1);
     expect(readyCalls).toBe(0);
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
-  test("a holder released during the slot gate is refused before setup", async () => {
+  arranged("a holder released during the slot gate is refused before setup", async () => {
     const gatedServer = new TestableServer(
       undefined,
       timer,
@@ -196,7 +215,7 @@ describe("device gesture recording start holder admission (#11665)", () => {
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
-  test("ownership is rechecked after the managed-slot gate before setup", async () => {
+  arranged("ownership is rechecked after the broker-binding gate before setup", async () => {
     let owner = "holder";
     const ownership = spyOn(manager, "getSessionForDevice").mockImplementation(() => owner);
     const gatedServer = new TestableServer(
@@ -232,7 +251,7 @@ describe("device gesture recording start holder admission (#11665)", () => {
     }
   });
 
-  test("the holder starts successfully with readiness called once", async () => {
+  arranged("the holder starts successfully with readiness called once", async () => {
     // An already-active fake capture keeps the ingress's real manager call device-free.
     const active = await startDeviceGestureRecording(
       device,
@@ -255,21 +274,15 @@ describe("device gesture recording start holder admission (#11665)", () => {
     expect(readyCalls).toBe(1);
   });
 
-  test("the acquiring connection starts under the session it acquired", async () => {
+  arranged("the acquiring connection starts under the session it acquired", async () => {
     await manager.releaseSession("holder");
-    const acquired = await pool.bindOrReuseDeviceSession(
-      "connection-holder",
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "acquiring-connection",
-    );
+    const acquired = await pool.bindOrReuseDeviceSession({
+      sessionId: "connection-holder",
+      deviceId: device.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "acquiring-connection",
+    });
     expect(
       pool.resolveOwnedDeviceSessionForMcpSession("acquiring-connection", device.deviceId),
     ).toBe(acquired);

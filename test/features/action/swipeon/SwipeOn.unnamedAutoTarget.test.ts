@@ -1,4 +1,10 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import {
+  flatHierarchyFromFixture,
+  flatNodeFromFixture,
+} from "../../../helpers/flatHierarchyFixture";
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
+import { observeResultFromFixture } from "../../../helpers/observeFixture";
+import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
 import type { AutoTargetSelectorService } from "../../../../src/features/action/swipeon/types";
@@ -8,7 +14,6 @@ import { DefaultElementGeometry } from "../../../../src/features/utility/Element
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { Element, ObserveResult, SwipeOnOptions } from "../../../../src/models";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
@@ -27,7 +32,10 @@ import { harness as displayHarness } from "./displaySwipeHarness";
 
 const textObservation: ObserveResult = {
   ...textCapture,
-  timestamp: 0,
+  viewHierarchy: flatHierarchyFromFixture(textCapture.viewHierarchy),
+  updatedAt: 0,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: { width: 1080, height: 2400 },
   systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
 };
@@ -53,17 +61,17 @@ function harness({
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const ctrl = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    ctrl as unknown as AndroidCtrlProxyClient,
-  );
+  clientSpy.mockReturnValue(ctrl);
   const gesture = new FakeGestureExecutor();
   const observe = new FakeObserveScreen();
   observe.setObserveResult(() => (gesture.getSwipeCalls().length ? after : before));
   const action = new SwipeOn(
     { name: "fake", platform: "android", deviceId: "unnamed" },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       timer,
+      awaitIdle: new FakeAwaitIdle(),
+      window: new FakeWindow(),
       observeScreen: observe,
       executeGesture: gesture,
       accessibilityDetector,
@@ -72,8 +80,6 @@ function harness({
       scrollables: elementFinder,
     },
   );
-  action.awaitIdle = new FakeAwaitIdle() as unknown as typeof action.awaitIdle;
-  action.window = new FakeWindow() as unknown as typeof action.window;
   return { action, gesture, ctrl };
 }
 
@@ -113,7 +119,12 @@ describe("Android unchanged swipe warning", () => {
   test.each([false, true])(
     "changed boomerang swipe with autoTarget=%s keeps its effect",
     async (autoTarget) => {
-      const after = { ...textObservation, ...changedTextCapture, timestamp: 1 };
+      const after = {
+        ...textObservation,
+        ...changedTextCapture,
+        viewHierarchy: flatHierarchyFromFixture(changedTextCapture.viewHierarchy),
+        timestamp: 1,
+      };
       const result = await harness({ after }).action.execute({
         direction: "up",
         boomerang: true,
@@ -128,9 +139,9 @@ describe("Android unchanged swipe warning", () => {
   test.each([true, false])("TalkBack named container with boomerang=%s", async (boomerang) => {
     const accessibilityDetector = new FakeAccessibilityDetector();
     accessibilityDetector.setTalkBackEnabled(true);
-    const before = { ...scrollBefore, timestamp: 0 } as ObserveResult;
+    const before = observeResultFromFixture({ ...scrollBefore, updatedAt: 0 });
     const h = harness({ before, accessibilityDetector });
-    spyOn(h.ctrl, "getAccessibilityHierarchy").mockResolvedValue(before.viewHierarchy);
+    spyOn(h.ctrl, "getAccessibilityHierarchy").mockResolvedValue(before.viewHierarchy ?? null);
     const result = await h.action.execute({
       direction: "up",
       container: { elementId: "tap_screen_content" },
@@ -184,19 +195,21 @@ describe("Android unnamed auto-target capture regression", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: [
-              encodeAndroidFlat({
-                attrs: { scrollable: "true", class: "androidx.viewpager2.widget.ViewPager2" },
-                bounds: pagerBounds,
-                children: [
-                  {
-                    attrs: { scrollable: "true", class: "androidx.core.widget.NestedScrollView" },
-                    bounds: listBounds,
-                    children: [],
-                  },
-                ],
-              }),
-            ],
+            node: createFlatNodeForTest({
+              node: [
+                encodeAndroidFlat({
+                  attrs: { scrollable: "true", class: "androidx.viewpager2.widget.ViewPager2" },
+                  bounds: pagerBounds,
+                  children: [
+                    {
+                      attrs: { scrollable: "true", class: "androidx.core.widget.NestedScrollView" },
+                      bounds: listBounds,
+                      children: [],
+                    },
+                  ],
+                }),
+              ],
+            }),
           },
         },
       };
@@ -216,18 +229,20 @@ describe("Android unnamed auto-target capture regression", () => {
       ...textObservation,
       viewHierarchy: {
         hierarchy: {
-          node: [
-            encodeAndroidFlat({
-              attrs: { scrollable: "true", class: "android.widget.HorizontalScrollView" },
-              bounds: horizontalBounds,
-              children: [],
-            }),
-            encodeAndroidFlat({
-              attrs: { scrollable: "true", class: "android.widget.ScrollView" },
-              bounds: verticalBounds,
-              children: [],
-            }),
-          ],
+          node: createFlatNodeForTest({
+            node: [
+              encodeAndroidFlat({
+                attrs: { scrollable: "true", class: "android.widget.HorizontalScrollView" },
+                bounds: horizontalBounds,
+                children: [],
+              }),
+              encodeAndroidFlat({
+                attrs: { scrollable: "true", class: "android.widget.ScrollView" },
+                bounds: verticalBounds,
+                children: [],
+              }),
+            ],
+          }),
         },
       },
     };
@@ -290,8 +305,8 @@ describe("Android unnamed auto-target capture regression", () => {
   });
 
   test("keeps named auto-target and explicit-container coordinates identical", async () => {
-    const before = { ...scrollBefore, timestamp: 0 } as ObserveResult;
-    const after = { ...scrollAfter, timestamp: 1 } as ObserveResult;
+    const before = observeResultFromFixture({ ...scrollBefore, updatedAt: 0 });
+    const after = observeResultFromFixture({ ...scrollAfter, updatedAt: 1 });
     const named = finder
       .findScrollableElements(before.viewHierarchy!)
       .find((element) => element["resource-id"] === "tap_screen_content")!;
@@ -316,11 +331,11 @@ describe("Android unnamed auto-target capture regression", () => {
   });
 
   test("no scrollable uses screen coordinates inside all four safe edges", async () => {
-    const before = {
+    const before = observeResultFromFixture({
       ...noScrollCapture,
-      timestamp: 0,
+      updatedAt: 0,
       systemInsets: { top: 300, bottom: 400, left: 100, right: 120 },
-    } as ObserveResult;
+    });
     expect(finder.findScrollableElements(before.viewHierarchy!)).toEqual([]);
     for (const direction of ["up", "down", "left", "right"] as const) {
       const result = await harness({ before }).action.execute({ direction });
@@ -339,7 +354,7 @@ describe("Android unnamed auto-target capture regression", () => {
   });
 
   test("single direction mismatch preserves screen fallback in the safe area", async () => {
-    const before = { ...scrollBefore, timestamp: 0 } as ObserveResult;
+    const before = observeResultFromFixture({ ...scrollBefore, updatedAt: 0 });
     // Add explicit axis metadata to the real captured container for this
     // synthetic direction-mismatch case; its shape no longer implies an axis.
     const only = finder
@@ -390,7 +405,7 @@ describe("Android unnamed auto-target capture regression", () => {
     };
     const before: ObserveResult = {
       ...textObservation,
-      viewHierarchy: { hierarchy: { node: [] } },
+      viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ node: [] }) } },
     };
     const h = harness({ before, selector, elementFinder });
     const result = await h.action.execute({ direction: "up" });
@@ -439,7 +454,12 @@ describe("Android unnamed auto-target capture regression", () => {
   });
 
   test("changed hierarchy reports the existing effect without a no-op warning", async () => {
-    const after = { ...textObservation, ...changedTextCapture, timestamp: 1 };
+    const after = {
+      ...textObservation,
+      ...changedTextCapture,
+      viewHierarchy: flatHierarchyFromFixture(changedTextCapture.viewHierarchy),
+      timestamp: 1,
+    };
     const result = await harness({ after }).action.execute({ direction: "up" });
     expect(result.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
     expect(result.warning).not.toContain("did not change");
@@ -474,11 +494,20 @@ test("unnamed captured container avoids a clickable sibling overlay using bounds
     viewHierarchy: {
       ...textObservation.viewHierarchy,
       windows: undefined,
-      hierarchy: { node: [...textCapture.viewHierarchy.hierarchy.node, overlay] },
+      hierarchy: {
+        node: createFlatNodeForTest({
+          node: [...textCapture.viewHierarchy.hierarchy.node.map(flatNodeFromFixture), overlay],
+        }),
+      },
     },
   };
   const result = await harness({ before }).action.execute({ direction: "up" });
   expect(result.y1).toBeLessThan(1700);
   expectEndpointsInside(result, largest);
   expect(result.warning).not.toContain("No unobstructed swipe area");
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 });

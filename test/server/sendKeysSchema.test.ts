@@ -1,17 +1,18 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn, test } from "bun:test";
+import type { output } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import {
-  assertSendKeysRunnerCompatible,
+  type InteractionToolDependencies,
   registerInteractionTools,
   sendKeysSchema,
-  setSendKeysFactory,
-  resetSendKeysFactory,
 } from "../../src/server/interactionTools";
+import { assertSendKeysRunnerCompatible } from "../../src/server/interactionToolHandlers";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { SendKeys } from "../../src/features/action/SendKeys";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 
+const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 
 describe("sendKeysSchema", () => {
@@ -30,7 +31,7 @@ describe("sendKeysSchema", () => {
     }
   });
   test("advertises nested scope, strategies, and selector dependencies", () => {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     const schema = ToolRegistry.getToolDefinitions().find(
       (tool) => tool.name === "sendKeys",
     )?.inputSchema;
@@ -43,11 +44,13 @@ describe("sendKeysSchema", () => {
     });
   });
   test("handler forwards scope options and preserves structured focus failure as isError", async () => {
-    let handler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
+    let handler:
+      | ((device: BootedDevice, args: output<typeof sendKeysSchema>) => unknown)
+      | undefined;
     const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation(
       (...args) => {
         if (args[0] === "sendKeys") {
-          handler = args[3];
+          handler = (device, input) => args[3](device, args[2].parse(input));
         }
       },
     );
@@ -58,14 +61,14 @@ describe("sendKeysSchema", () => {
     const calls: Parameters<SendKeys["execute"]>[] = [];
     const error =
       "Container level 2 ambiguous: item_42; Candidates: resourceId=item_42 text=item_42 bounds=[0,0,100,20]";
-    setSendKeysFactory(() => ({
+    interactionDeps.sendKeysFactory = () => ({
       execute: async (...args) => {
         calls.push(args);
         return { success: false, completedCommands: 0, failedIndex: 0, commands: [], error };
       },
-    }));
+    });
     try {
-      registerInteractionTools();
+      registerInteractionTools(interactionDeps);
       expect(handler).toBeDefined();
       const args = sendKeysSchema.parse({ ...scoped, display: "external" });
       const response = await handler!(
@@ -81,7 +84,7 @@ describe("sendKeysSchema", () => {
         content: [expect.objectContaining({ text: expect.stringContaining(error) })],
       });
     } finally {
-      resetSendKeysFactory();
+      delete interactionDeps.sendKeysFactory;
       capability.mockRestore();
       registration.mockRestore();
     }
@@ -158,7 +161,7 @@ describe("sendKeysSchema", () => {
   });
 
   test("accepts keyboard profiles only with automatic or IME delivery", () => {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     for (const mode of [undefined, "auto", "ime"]) {
       expect(
         sendKeysSchema.safeParse({
@@ -207,7 +210,7 @@ describe("sendKeysSchema", () => {
   });
 
   test("accepts an optional auto, ime or a11y clear mode and leaves it unset by default", () => {
-    for (const mode of ["auto", "ime", "a11y"]) {
+    for (const mode of ["auto", "ime", "a11y"] as const) {
       expect(
         sendKeysSchema.parse({ platform: "android", commands: [{ action: "clear", mode }] })
           .commands[0],

@@ -14,7 +14,7 @@
 import { DaemonState } from "../src/daemon/daemonState";
 import { DevicePool } from "../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../src/daemon/foreignDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../src/daemon/sessionManager";
 import { AndroidBootAdmissionGate } from "../src/features/bootAdmission/AndroidBootAdmissionGate";
 import type { BootedDevice } from "../src/models";
@@ -24,14 +24,14 @@ import {
 } from "../src/server/deviceTools";
 import { PlatformDeviceManagerFactory } from "../src/utils/factories/PlatformDeviceManagerFactory";
 import { DefaultRetryExecutor } from "../src/utils/retry/RetryExecutor";
-import { assignManagedSlotDevice } from "../test/daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../test/daemon/sessionBroker/provisioning/bindingFixtures";
 import { FakeAdbClientFactory } from "../test/fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../test/fakes/FakeAdbExecutor";
 import { FakeAndroidCapacitySource } from "../test/fakes/FakeAndroidCapacitySource";
 import { FakeDeviceSessionPersistence } from "../test/fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../test/fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../test/fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../test/fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../test/fakes/FakeBindingRegistry";
 import { FakeTimer } from "../test/fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../test/helpers/devicePoolDependencies";
 
@@ -93,8 +93,8 @@ export async function installListDevicesFixture(
 
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-  const registry = new FakeSlotRegistry(timer);
-  await assignManagedSlotDevice(registry, "android", SLOT_DEVICE.name);
+  const registry = new FakeBindingRegistry(timer);
+  await assignBindingDevice(registry, "android", SLOT_DEVICE.name);
   const foreignOwnership: ForeignDeviceOwnership = {
     async refresh() {},
     foreignOwnerPid: (deviceId) =>
@@ -109,7 +109,7 @@ export async function installListDevicesFixture(
       retryExecutor: new DefaultRetryExecutor(timer),
       installedAppsRepository: new FakeInstalledAppsRepository(),
       foreignDeviceOwnership: foreignOwnership,
-      managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
     }),
   );
   await pool.initializeWithDevices(devices);

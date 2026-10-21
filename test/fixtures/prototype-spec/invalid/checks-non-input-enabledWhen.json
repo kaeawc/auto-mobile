@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": ""
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "enabledWhen": {
+        "key": "value",
+        "equals": ""
+      }
+    }
+  },
+  "expectedPath": "root.enabledWhen"
+}

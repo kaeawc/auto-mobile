@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "rich",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "as": "item",
+        "items": [
+          {
+            "title": "x"
+          }
+        ]
+      },
+      "children": [
+        {
+          "type": "text",
+          "spans": [
+            {
+              "text": "{item.nope}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].spans[0].text",
+  "expectedMessage": "Unknown repeat field \"nope\""
+}

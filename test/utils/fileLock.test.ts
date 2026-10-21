@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import * as fs from "fs";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
+
 import { basename, join } from "path";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
@@ -19,16 +20,13 @@ import { logger } from "../../src/utils/logger";
 import { nodeLockFileSystem } from "../../src/utils/lockFileSystem";
 
 describe("fileLock primitive", () => {
+  const scratch = useScratchRoot("file-lock-");
   let dir: string;
   let lockPath: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "file-lock-"));
+    dir = scratch.next();
     lockPath = join(dir, "thing.lock");
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
   });
 
   test("the node lock filesystem exclusively creates private publication files", () => {
@@ -43,15 +41,15 @@ describe("fileLock primitive", () => {
   test("publication never rewrites a lock through a leftover hard-linked tmp", () => {
     const raw = "500\nlive-foreign-owner\nmetadata  ";
     writeFileSync(lockPath, raw);
-    const realStat = fs.statSync;
+    const realStat = nodeLockFileSystem.stat;
     let sampled = false;
-    const stat = spyOn(fs, "statSync").mockImplementation((path, options) => {
+    const stat = spyOn(nodeLockFileSystem, "stat").mockImplementation((path) => {
       if (path === lockPath && !sampled) {
         sampled = true;
         // Exercise publication even after the initial-sample optimisation is added.
         throw Object.assign(new Error("sample unavailable"), { code: "EACCES" });
       }
-      return realStat(path, options);
+      return realStat(path);
     });
     const realWrite = fs.writeFileSync;
     const realUnlink = fs.unlinkSync;
@@ -699,9 +697,9 @@ describe("fileLock primitive", () => {
       try {
         expect(() => releaseExclusiveLock(lockPath, 100)).not.toThrow();
         expect(warnSpy).toHaveBeenCalledWith(
-          `src/utils/fileLock.ts: failed to release exclusive lock at ${lockPath}: permission denied`,
+          `Failed to release exclusive lock at ${lockPath}; marker unlink exhausted`,
         );
-        expect(unlinkSpy).toHaveBeenCalledTimes(1);
+        expect(unlinkSpy).toHaveBeenCalledTimes(3);
       } finally {
         unlinkSpy.mockRestore();
         warnSpy.mockRestore();

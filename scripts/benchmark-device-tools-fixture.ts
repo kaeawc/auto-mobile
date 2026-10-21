@@ -1,3 +1,4 @@
+import { AndroidCtrlProxyClient } from "../src/features/observe/android/AndroidCtrlProxyClient";
 /**
  * Deterministic fixtures for the `observe`, `pressButton`, `tapOn`, `launchApp` and `installApp`
  * benchmarks (#11375).
@@ -21,18 +22,14 @@ import type { InstallAppResult } from "../src/models/InstallAppResult";
 import type { LaunchAppResult } from "../src/models/LaunchAppResult";
 import type { PressButtonResult } from "../src/models/PressButtonResult";
 import {
-  resetInstallAppToolDependencies,
+  registerAppTools,
   resetInstalledAppResourceRefresh,
-  resetLaunchAppToolDependencies,
-  setInstallAppToolDependencies,
   setInstalledAppResourceRefresh,
-  setLaunchAppToolDependencies,
+  type AppToolsDependencies,
 } from "../src/server/appTools";
 import {
-  resetPressButtonFactory,
-  resetTapOnElementFactory,
-  setPressButtonFactory,
-  setTapOnElementFactory,
+  registerInteractionTools,
+  type InteractionToolDependencies,
 } from "../src/server/interactionTools";
 import { registerObserveTools } from "../src/server/observeTools";
 import { ResourceRegistry } from "../src/server/resourceRegistry";
@@ -82,7 +79,7 @@ function installObserveFixture(): ToolFixture {
     pathProtection: new FakeScreenshotPathProtection(timer),
     createScreen: () => ({
       execute: screen.execute.bind(screen),
-      executeDeviceRead: screen.execute.bind(screen),
+      executeDeviceRead: () => screen.execute(),
       captureScreenshot: screen.captureScreenshot.bind(screen),
       appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
       getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
@@ -96,6 +93,21 @@ function installObserveFixture(): ToolFixture {
       registerObserveTools();
     },
   };
+}
+
+// Fixtures share one registration of the interaction tools, so each keeps only its own fake.
+const interactionToolFakes: InteractionToolDependencies = {};
+
+function setInteractionToolFake<K extends keyof InteractionToolDependencies>(
+  family: K,
+  fake: InteractionToolDependencies[K] | undefined,
+): void {
+  if (fake === undefined) {
+    delete interactionToolFakes[family];
+  } else {
+    interactionToolFakes[family] = fake;
+  }
+  registerInteractionTools(interactionToolFakes);
 }
 
 async function installTapOnFixture(): Promise<ToolFixture> {
@@ -119,7 +131,7 @@ async function installTapOnFixture(): Promise<ToolFixture> {
       ? initial
       : { ...initial, observationId: "after-tap", viewHierarchy: capturedAt(index) },
   );
-  setTapOnElementFactory((device: BootedDevice) => {
+  const tapOnElementFactory = (device: BootedDevice) => {
     const tap = new TapOnElement(device, new FakeAdbExecutor(), {
       lastRenderedObservation: () => initial,
       timer,
@@ -130,9 +142,13 @@ async function installTapOnFixture(): Promise<ToolFixture> {
     });
     tap.observeScreen = observe;
     tap.window.getCachedActiveWindow = async () => null;
-    tap["accessibilityService"].requestTapCoordinates = async () => ({ success: true });
+    AndroidCtrlProxyClient.getInstance(device).requestTapCoordinates = async () => ({
+      success: true,
+      totalTimeMs: 0,
+    });
     return tap;
-  });
+  };
+  setInteractionToolFake("tapOnElementFactory", tapOnElementFactory);
   return {
     args: {
       platform: "android",
@@ -142,7 +158,7 @@ async function installTapOnFixture(): Promise<ToolFixture> {
       retryIfNoChange: false,
     },
     async dispose() {
-      resetTapOnElementFactory();
+      setInteractionToolFake("tapOnElementFactory", undefined);
       await navigation.dispose();
     },
   };
@@ -155,13 +171,32 @@ function installPressButtonFixture(): ToolFixture {
     keyCode: 3,
     observation: capturedObservation(),
   };
-  setPressButtonFactory(() => ({ execute: async () => result }));
-  return { args: { platform: "android", button: "home" }, dispose: resetPressButtonFactory };
+  setInteractionToolFake("pressButtonFactory", () => ({ execute: async () => result }));
+  return {
+    args: { platform: "android", button: "home" },
+    dispose: () => setInteractionToolFake("pressButtonFactory", undefined),
+  };
 }
 
 /** The installed-app resource refresh invalidates a cache and notifies subscribers of the resource. */
 function fakeInstalledAppResourceRefresh(): void {
   setInstalledAppResourceRefresh({ invalidate() {}, notify: async () => {} });
+}
+
+// Fixtures share one registration of the app tools, so each keeps only its own family of fakes
+// and every change re-registers the tools with whatever is currently installed.
+const installedAppToolFakes: AppToolsDependencies = {};
+
+function setAppToolFake<K extends keyof AppToolsDependencies>(
+  family: K,
+  fake: AppToolsDependencies[K] | undefined,
+): void {
+  if (fake === undefined) {
+    delete installedAppToolFakes[family];
+  } else {
+    installedAppToolFakes[family] = fake;
+  }
+  registerAppTools(installedAppToolFakes);
 }
 
 function installLaunchAppFixture(): ToolFixture {
@@ -171,11 +206,11 @@ function installLaunchAppFixture(): ToolFixture {
     observation: capturedObservation(),
   };
   fakeInstalledAppResourceRefresh();
-  setLaunchAppToolDependencies({ createLaunchApp: () => ({ execute: async () => result }) });
+  setAppToolFake("launchApp", { createLaunchApp: () => ({ execute: async () => result }) });
   return {
     args: { platform: "android", appId: APP_ID },
     dispose() {
-      resetLaunchAppToolDependencies();
+      setAppToolFake("launchApp", undefined);
       resetInstalledAppResourceRefresh();
     },
   };
@@ -188,11 +223,11 @@ function installInstallAppFixture(): ToolFixture {
     packageName: APP_ID,
   };
   fakeInstalledAppResourceRefresh();
-  setInstallAppToolDependencies({ createInstallApp: () => ({ execute: async () => result }) });
+  setAppToolFake("installApp", { createInstallApp: () => ({ execute: async () => result }) });
   return {
     args: { platform: "android", artifactPath: ARTIFACT_PATH },
     dispose() {
-      resetInstallAppToolDependencies();
+      setAppToolFake("installApp", undefined);
       resetInstalledAppResourceRefresh();
     },
   };

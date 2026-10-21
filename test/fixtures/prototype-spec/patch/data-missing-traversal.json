@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "patch-demo",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "enabled": true,
+      "label": "Ready",
+      "total": 1
+    },
+    "root": {
+      "type": "column",
+      "id": "root",
+      "children": [
+        {
+          "type": "card",
+          "id": "card",
+          "children": [
+            {
+              "type": "text",
+              "id": "title",
+              "text": "Orders"
+            }
+          ]
+        },
+        {
+          "type": "switch",
+          "id": "toggle",
+          "stateKey": "enabled"
+        }
+      ]
+    }
+  },
+  "ops": [
+    {
+      "op": "replace",
+      "path": "/data/count",
+      "value": 3
+    }
+  ],
+  "stage": "apply",
+  "expectedPath": "ops[0].path",
+  "expectedMessage": "Path does not exist"
+}

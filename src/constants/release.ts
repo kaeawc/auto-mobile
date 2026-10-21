@@ -26,6 +26,7 @@
  */
 
 import { ActionableError } from "../models/ActionableError";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 export const LATEST_RELEASE_VERSION = "latest";
 
@@ -64,6 +65,12 @@ export interface ReleaseChecksumEntry {
    */
   prototypeAgentSha256?: string;
   /**
+   * SHA-256 of the universal ad-hoc-signed iOS-simulator prototype-viewer archive
+   * (`AutoMobilePrototypeViewer.zip`, #12255). Optional: releases that
+   * predate it degrade to "viewer unavailable".
+   */
+  prototypeViewerSha256?: string;
+  /**
    * SHA-256 of the signed, notarized universal macOS Network Filter app archive
    * (`automobile-network-filter-macos-universal.zip`, packed with
    * `ditto -c -k --keepParent` so the nested system extension keeps its
@@ -78,6 +85,42 @@ export interface ReleaseChecksumEntry {
  * Each entry represents a validated release build.
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
+  {
+    version: "0.0.87",
+    apkSha256: "65e6c420b48b9af28377df9b68073b6151567a90059cefb33e677a5310cb6544",
+    ipaSha256: "0d5bc367976e67475400fd85a84b85c2e51bd4efa31060bfb43fbba47c4fab7c",
+    runnerSha256: "1063cab4de18f363b8a7d1177d7df89687bcb19b85f0b93b504f509a12d6053e",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "943adc314a3a573108619cba3326b2a07ae42c9d631b15bb284e480115e639ab",
+    screenCaptureHelperSha256: "02034a9b3973240097b853c4281b0debbd979195ab256c825f2d1a207a86e64b",
+    prototypeAgentSha256: "9f329aea7173a371c180364849d5823fd12f96c0b5716953b68e255de1fb5b41",
+    prototypeViewerSha256: "60ac1b236434ac112aa293efcce258123db2a6f341bc6f809438f0b375b97fd9",
+    networkFilterSha256: "b177bccc11732773f7df2bfc0c398924739a92eca2fef2a5e822a3098561511f",
+  },
+  {
+    version: "0.0.86",
+    apkSha256: "49ce5a2cc5cbc6f1cf5d05652793707d17ac795383f054296f9fe2777309300d",
+    ipaSha256: "95e1619c2b9c2de8125f30ac741bc584d82452ad07636a0aba0204cbb9e6502f",
+    runnerSha256: "70160935df86b56665036ffa62265249b3acf2feee992984793abfe99e8e56d4",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "943adc314a3a573108619cba3326b2a07ae42c9d631b15bb284e480115e639ab",
+    screenCaptureHelperSha256: "369d76f31b01eb9a4b3423749680e9e29b625a7437f18eb3b41a9c23a3321aa5",
+    prototypeAgentSha256: "a7566c028ddc75d621096ebee255a9d040c75f638d65d542376578e109e5cd21",
+    prototypeViewerSha256: "7d96eb2096c9783d98693aafa54d6b956d89a66bfbd8b34bee7c7742946cd5c6",
+    networkFilterSha256: "d711d57ddd831477c9f08164954b7605e7f77027959e24eca282f95e396401ac",
+  },
+  {
+    version: "0.0.85",
+    apkSha256: "0e27ecf86d6c9c034d35fcb4bcc1f0235ad7aa49c5bce59459a979d7efa57c20",
+    ipaSha256: "70b14816e153e190ebf13461510382f0ef08852caa3f2d75451a49ac00f9e0ca",
+    runnerSha256: "ff0ed610f1616d0e83e79355b75cec3f04ad5193788bae9c8a7697e8f2b5f549",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "77c3a86153ce9cc906f96da73d617d21d4bad1081270157cfbe80a6c83ea5e59",
+    screenCaptureHelperSha256: "b0d7a7eb1c319a46cca5b49279ae90556af40acdc3e8c2e860d9e9f857bcf1b6",
+    prototypeAgentSha256: "d729d1511995c36b2f9fbbfbb2a081fc2a5ab910c063c390d5b1b8082bbf64a9",
+    prototypeViewerSha256: "928a2eed6311fbbd1173497f1f936a4ba2381ceb42aceddc1b302f9286a6cb75",
+    networkFilterSha256: "cd065f488ba7c6d708fc0d3246e77f00f7340736ecff510ae1fcbd7e580f38d4",
+  },
   {
     version: "0.0.84",
     apkSha256: "9e551d6d686c3e25100346302aaad3383fa185ede00c102a221c3183830f4651",
@@ -597,11 +640,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "00d4ab91767aa4531e3efbb649f940ef90395f9f4d2a9d2b95fb3102ee7d7ebc",
-  ipaSha256: "e574ed89be7fc2ca7eed030770f06352a9cd3fd32539a72ef2d0afa37ce5572a",
+  apkSha256: "c109b1b5606bf5a6765aa568b28813502f597da441aedabc4471c88046a63cbd",
+  ipaSha256: "b6dfd41f2b0cb57288143ffe9ef9a54dc9775fd01f2686a090f05fa9829fd984",
   runnerSha256Target: "xctest",
-  videoJarSha256: "ff288b15e0720a02a831a8c166f5c63e580e1242c641a62ed8b03973fd6ebe11",
-  runnerSha256: "29ccbcf851eb1be9526d71c264789c4d0f7f1ddd4cef51d85aaf5546846e0355",
+  videoJarSha256: "3bdfb96984674aa9ad97c89e14e76b17346387106eadc86a85c908c520eeb593",
+  runnerSha256: "a25cce30e3e250182f9e64d6cd9efa547f4b524038ce66b7c3795e937fcd1e06",
 };
 
 /**
@@ -728,10 +771,10 @@ export function resolveAssetVersion(
 export const DAEMON_PACKAGE_NAME = "@kaeawc/auto-mobile";
 
 /** Environment variable that pins daemon + APK + IPA to one coherent version. */
-export const AUTOMOBILE_VERSION_ENV = "AUTOMOBILE_VERSION";
+export const AUTOMOBILE_VERSION_ENV = ENV.VERSION.name;
 
 /** Environment variable that mirrors the APK/IPA download host for offline CI. */
-export const AUTOMOBILE_ASSET_BASE_URL_ENV = "AUTOMOBILE_ASSET_BASE_URL";
+export const AUTOMOBILE_ASSET_BASE_URL_ENV = ENV.ASSET_BASE_URL.name;
 
 /**
  * Opt-out that permits a plaintext `http://` asset base/bundle URL (issue #4761).
@@ -741,7 +784,7 @@ export const AUTOMOBILE_ASSET_BASE_URL_ENV = "AUTOMOBILE_ASSET_BASE_URL";
  * checksum still blocks substitution). Set to `1`/`true` ONLY for a trusted
  * loopback/dev mirror (e.g. `http://127.0.0.1:8080` or `http://localhost`).
  */
-export const AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV = "AUTOMOBILE_ALLOW_INSECURE_ASSET_URL";
+export const AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV = ENV.ALLOW_INSECURE_ASSET_URL.name;
 
 /** Default GitHub Releases base for versioned asset downloads. */
 export const DEFAULT_ASSET_BASE_URL = "https://github.com/kaeawc/auto-mobile/releases/download";
@@ -750,7 +793,7 @@ type EnvLike = Record<string, string | undefined>;
 
 /** True when the plaintext-http opt-out ({@link AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}) is set. */
 function isInsecureAssetUrlAllowed(env: EnvLike): boolean {
-  const value = env[AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV];
+  const value = readEnvRaw(ENV.ALLOW_INSECURE_ASSET_URL, env);
   return value === "1" || value?.toLowerCase() === "true";
 }
 
@@ -795,7 +838,7 @@ export function assertHttpsAssetUrl(url: string, label: string, env: EnvLike = p
  * yet a 404 URL (an incoherent triple).
  */
 export function resolvePinnedVersion(env: EnvLike = process.env): string {
-  const trimmed = env[AUTOMOBILE_VERSION_ENV]?.trim();
+  const trimmed = readEnvTrimmed(ENV.VERSION, env);
   if (!trimmed || trimmed.length === 0) {
     return LATEST_RELEASE_VERSION;
   }
@@ -833,7 +876,7 @@ export function isPinnedVersionKnown(
  * (trimmed, trailing slashes stripped) when set, otherwise the GitHub default.
  */
 export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
-  const trimmed = env[AUTOMOBILE_ASSET_BASE_URL_ENV]?.trim();
+  const trimmed = readEnvTrimmed(ENV.ASSET_BASE_URL, env);
   if (trimmed && trimmed.length > 0) {
     let parsed: URL;
     try {
@@ -975,6 +1018,30 @@ export function resolvePrototypeAgentChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.prototypeAgentSha256 ?? "";
+}
+
+/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS-simulator prototype viewer (#12255). */
+export const PROTOTYPE_VIEWER_ARCHIVE_FILENAME = "AutoMobilePrototypeViewer.zip";
+
+/** Download URL for the iOS-simulator prototype-viewer archive. */
+export function resolvePrototypeViewerUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    PROTOTYPE_VIEWER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected prototype-viewer archive SHA-256 for the pinned version; "" when unknown. */
+export function resolvePrototypeViewerChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.prototypeViewerSha256 ?? "";
 }
 
 /** Download URL for the signed macOS ScreenCaptureKit helper archive. */

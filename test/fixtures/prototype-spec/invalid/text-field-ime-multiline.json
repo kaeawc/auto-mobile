@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "text-actions",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "coffee"
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "query",
+      "multiline": true,
+      "imeAction": "done"
+    }
+  },
+  "expectedPath": "root.imeAction"
+}

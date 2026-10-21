@@ -36,8 +36,11 @@ import type {
   IosRunnerInspectorHooks,
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
-import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
+import type { SecurityClientApi } from "../../src/utils/ios-cmdline-tools/SecurityClient";
 import { FakeLogger } from "../fakes/FakeLogger";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import type { CtrlProxyHierarchy } from "../../src/features/observe/ios/types";
+import type { ViewHierarchyResult } from "../../src/models";
 import { createDoctorDeadline, DoctorDeadlineError } from "../../src/doctor/deadline";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -95,17 +98,19 @@ const baseDependencies: IosDoctorDependencies = {
   securityClient: {
     getDiagnostics: async () => ({ available: true, version: null }),
     listCodeSigningIdentities: async () => [],
-  } as SecurityClient,
+    decodeCms: async () => "",
+  } satisfies SecurityClientApi,
   logger: new FakeLogger(),
   createSimctlClient: () => ({
     setDevice: () => {},
     executeCommand: async () => createExecResult(""),
     isAvailable: async () => true,
     isSimulatorRunning: async () => false,
-    startSimulator: async () => ({}) as any,
+    startSimulator: async () => new FakeChildProcess(),
     killSimulator: async () => {},
     waitForSimulatorReady: async () => ({ name: "sim", platform: "ios", deviceId: "123" }),
     listSimulatorImages: async () => [],
+    readSimulatorTarget: async () => undefined,
     getBootedSimulators: async () => [],
     getBootedSimulatorsChecked: async () => [],
     getDeviceInfo: async () => null,
@@ -120,6 +125,16 @@ const baseDependencies: IosDoctorDependencies = {
     terminateApp: async () => {},
     getScreenSize: async () => ({ width: 100, height: 100 }),
     setAppearance: async () => {},
+    executeCommandArgs: async () => createExecResult(""),
+    startCommandArgs: async () => new FakeChildProcess(),
+    eraseSimulator: async () => {},
+    installApp: async () => {},
+    uninstallApp: async () => {},
+    enumerateDisplays: async () => [],
+    screenshot: async () => Buffer.alloc(0),
+    openSimulatorApp: async () => true,
+    presentSimulatorAfterStart: async () => {},
+    pushNotification: async () => ({ success: true }),
   }),
   runnerInspector: {
     inspectBootedRunners: async () => [],
@@ -682,7 +697,7 @@ describe("iOS doctor checks", () => {
         securityClient: {
           ...baseDependencies.securityClient,
           listCodeSigningIdentities: async () => [],
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("warn");
@@ -697,7 +712,7 @@ describe("iOS doctor checks", () => {
           listCodeSigningIdentities: async () => [
             { fingerprint: "ABC123", name: "Apple Development: test@test.com" },
           ],
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("pass");
@@ -723,7 +738,7 @@ describe("iOS doctor checks", () => {
             timeoutMs = options?.timeoutMs;
             return { available: true, version: null };
           },
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(timeoutMs).toBe(5000);
@@ -735,7 +750,7 @@ describe("iOS doctor checks", () => {
         securityClient: {
           ...baseDependencies.securityClient,
           getDiagnostics: async () => ({ available: false, version: null }),
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("fail");
@@ -752,7 +767,7 @@ describe("iOS doctor checks", () => {
           getDiagnostics: async () => {
             throw new Error("security probe failed");
           },
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("fail");
@@ -981,7 +996,7 @@ describe("iOS doctor checks", () => {
           listCodeSigningIdentities: async () => {
             throw new Error("security exploded");
           },
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("warn");
@@ -1049,8 +1064,7 @@ describe("iOS doctor checked simctl listings", () => {
         expect(command).toBe("xcrun simctl list devices --json");
         throw new Error(message);
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
 
     const result = await checkBootedSimulators({
@@ -1096,8 +1110,7 @@ describe("iOS doctor checked simctl listings", () => {
         expect(command).toBe("xcrun simctl list runtimes --json");
         return createExecResult(stdout);
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
 
     const result = await checkSimulatorRuntimes({
@@ -1138,8 +1151,7 @@ describe("iOS doctor checked simctl listings", () => {
         listingStarted();
         return await pendingListing;
       },
-      timer,
-      "darwin",
+      { timer, platform: "darwin" },
     );
 
     try {
@@ -1265,7 +1277,7 @@ describe("iOS doctor cancellation", () => {
             observedSignal = options?.signal;
             observedTimeoutMs = options?.timeoutMs;
             await new Promise<void>((resolve) => {
-              options?.signal?.addEventListener("abort", resolve, { once: true });
+              options?.signal?.addEventListener("abort", () => resolve(), { once: true });
             });
             try {
               options?.signal?.throwIfAborted();
@@ -1784,7 +1796,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     try {
@@ -1878,7 +1890,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     const hooks = {
@@ -1949,7 +1961,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     const runner = createIosCtrlProxyRunnerInspector(() => simctl, new FakeLogger(), {
@@ -1983,7 +1995,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       expect(restart).not.toHaveBeenCalled();
       expect(spawn).not.toHaveBeenCalled();
       expect(client["consecutiveConnectionFailures"]).toBe(0);
-      expect(client["restartRearmTimeout"]).toBeNull();
+      expect(client.getRunnerRecoveryTestHooks().diagnostics().restartRearmTimeout).toBeNull();
     } finally {
       await client.close();
       spawn.mockRestore();
@@ -2011,7 +2023,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     };
 
     const inspector = createIosCtrlProxyRunnerInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2044,7 +2056,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     };
 
     const inspector = createIosCtrlProxyRunnerInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2075,7 +2087,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     };
 
     const inspector = createIosCtrlProxyRunnerInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2102,7 +2114,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     };
 
     const inspector = createIosCtrlProxyRunnerInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2149,7 +2161,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
         createClient: () => probe,
       };
       const inspector = createIosCtrlProxyRunnerInspector(
-        () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+        () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
         new FakeLogger(),
         hooks,
       );
@@ -2227,7 +2239,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
         simctlReturning([
           { name: "Unrelated", deviceId: "SIM-OTHER" },
           { name: "Target", deviceId: "SIM-TARGET" },
-        ]) as any,
+        ]),
       new FakeLogger(),
       hooks,
     );
@@ -2396,19 +2408,25 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     getServicePort: () => 8790,
     discoverRunnerPort: async () => 8790,
   };
-  const viewHierarchy = {
+  const springboardHierarchy: CtrlProxyHierarchy = {
+    updatedAt: 1,
+    packageName: "SpringBoard",
+    hierarchy: {},
+  };
+  const viewHierarchy: ViewHierarchyResult = {
     hierarchy: { node: { $: { text: "Home" } } },
     screenWidth: 390,
     screenHeight: 844,
   };
-  const elementsBuilder = {
-    build: () => ({
-      clickable: [{ index: 0 }],
+  const elementBounds = { left: 0, top: 0, right: 1, bottom: 1 };
+  const elementsBuilder = new ObserveElementsBuilder({
+    collect: () => ({
+      clickable: [{ bounds: elementBounds }],
       scrollable: [],
-      text: [{ index: 1 }],
+      text: [{ bounds: elementBounds }],
       media: [],
     }),
-  } as any;
+  });
 
   test("bounds a never-settling runner port probe by the doctor deadline", async () => {
     const timer = new FakeTimer();
@@ -2429,7 +2447,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
       elementsBuilder,
     };
     const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2453,9 +2471,9 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         return {
           getConnectionPortForDiagnostics: () => port,
           requestHierarchySyncForDiagnostics: async () => ({
-            hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
+            hierarchy: springboardHierarchy,
           }),
-          convertToViewHierarchyResult: () => viewHierarchy as any,
+          convertToViewHierarchyResult: () => viewHierarchy,
           close: async () => {
             closes += 1;
           },
@@ -2465,7 +2483,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     };
 
     const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2491,9 +2509,9 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     const existing = {
       getConnectionPortForDiagnostics: () => 8765,
       requestHierarchySyncForDiagnostics: async () => ({
-        hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
+        hierarchy: springboardHierarchy,
       }),
-      convertToViewHierarchyResult: () => viewHierarchy as any,
+      convertToViewHierarchyResult: () => viewHierarchy,
       close: async () => {
         closes += 1;
       },
@@ -2509,7 +2527,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     };
 
     const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2525,9 +2543,9 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     const existing = {
       getConnectionPortForDiagnostics: () => 8765,
       requestHierarchySyncForDiagnostics: async () => ({
-        hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
+        hierarchy: springboardHierarchy,
       }),
-      convertToViewHierarchyResult: () => viewHierarchy as any,
+      convertToViewHierarchyResult: () => viewHierarchy,
       close: async () => {},
     };
     const hooks: IosObserveRoundTripInspectorHooks = {
@@ -2545,7 +2563,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     };
 
     const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2566,9 +2584,9 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
       getConnectionPortForDiagnostics: () => currentClientPort,
       requestHierarchySyncForDiagnostics: async () => {
         currentClientPort = 8790;
-        return { hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any };
+        return { hierarchy: springboardHierarchy };
       },
-      convertToViewHierarchyResult: () => viewHierarchy as any,
+      convertToViewHierarchyResult: () => viewHierarchy,
       close: async () => {},
     };
     const hooks: IosObserveRoundTripInspectorHooks = {
@@ -2579,7 +2597,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     };
 
     const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2606,7 +2624,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     };
 
     const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );
@@ -2675,16 +2693,16 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
       createClient: (_device, port) => ({
         getConnectionPortForDiagnostics: () => port,
         requestHierarchySyncForDiagnostics: async () => ({
-          hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
+          hierarchy: springboardHierarchy,
         }),
-        convertToViewHierarchyResult: () => viewHierarchy as any,
+        convertToViewHierarchyResult: () => viewHierarchy,
         close: async () => {},
       }),
       elementsBuilder,
     };
 
     const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
       new FakeLogger(),
       hooks,
     );

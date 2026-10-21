@@ -1,18 +1,18 @@
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { expect, test } from "bun:test";
 import { daemonResponseError } from "../../src/daemon/client";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { DeviceOutsideManagedSlotsError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceOutsideBrokerGrantError } from "../../src/daemon/sessionBroker/connectionRefusal";
 import {
   SessionRecoveryIdentityLossError,
   SessionSuspectError,
   TerminalSessionError,
 } from "../../src/daemon/sessionManager";
-import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { DeviceOutsideBoundSessionError } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
@@ -144,13 +144,13 @@ test("device_outside_bound_session names the bound session and device on the fra
   expect(frameFields(error)).toEqual(mcpFields(error));
 });
 
-test("device_outside_managed_slots names the refused target on the frame", () => {
-  const error = new DeviceOutsideManagedSlotsError("tapOn", "device", "scope-1", {
+test("device_outside_broker_grant names the refused target on the frame", () => {
+  const error = new DeviceOutsideBrokerGrantError("tapOn", "device", "scope-1", {
     deviceId: "emulator-5556",
   });
 
   expect(mcpRequestFailureDetails(error, undefined)).toEqual({
-    code: "device_outside_managed_slots",
+    code: "device_outside_broker_grant",
     retryable: false,
     details: { action: "tapOn", reason: "device", scopeKey: "scope-1", deviceId: "emulator-5556" },
   });
@@ -193,7 +193,7 @@ test("a suspect-session refusal is the retryable suspect refusal on the frame", 
     details: { sessionUuid: "quiet-session", remainingMs: 2_500 },
   });
   // The MCP error is the same fields plus the message, which the frame carries as `error`.
-  expect({ ...frameFields(error), message: error.message }).toEqual(mcp.error);
+  expect(mcp.error).toEqual({ ...frameFields(error), message: error.message });
 });
 
 test("a terminal-session refusal is session_ownership_lost on the frame", () => {

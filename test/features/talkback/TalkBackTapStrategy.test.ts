@@ -1,3 +1,4 @@
+import { buildElement } from "../../helpers/elementBuilder";
 import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { HierarchyTalkBackDriver as FakeTalkBackNavigationDriver } from "./HierarchyTalkBackDriver";
@@ -44,10 +45,10 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executeTap", () => {
-    test.each([null, undefined, 5])(
+    test.each<number | null>([null, 5])(
       "requests current focus when traversal focus is %s",
       async (focusedIndex) => {
-        const element = { "resource-id": "test:id/button" };
+        const element = buildElement({ "resource-id": "test:id/button" });
         driver.setElements([element], 0);
         driver.queueTraversalResult({
           elements: [element],
@@ -60,9 +61,10 @@ describe("TalkBackTapStrategy", () => {
         expect(focus).toHaveBeenCalled();
         // The cursor was already on the target, so no focus request was needed.
         expect(driver.getFocusRequestCount()).toBe(0);
-        expect(result).toEqual({
+        // The target carries bounds, so activation is the coordinate gesture on the focused node.
+        expect(result).toMatchObject({
           success: true,
-          method: "accessibility-action",
+          method: "focus-navigation",
           screenReaderNavigation: {
             reachable: true,
             traversalOrder: [element],
@@ -73,7 +75,7 @@ describe("TalkBackTapStrategy", () => {
     );
 
     test("ignores a failed focus reply even if it contains a focused element", async () => {
-      const element = { "resource-id": "test:id/button" };
+      const element = buildElement({ "resource-id": "test:id/button" });
       driver.setElements([element], null);
       driver.queueTraversalResult({
         elements: [element],
@@ -93,7 +95,7 @@ describe("TalkBackTapStrategy", () => {
     });
 
     test("rejects without activation when the executor returns false", async () => {
-      const element = { "resource-id": "test:id/button" };
+      const element = buildElement({ "resource-id": "test:id/button" });
       driver.setElements([element], 0);
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(false);
       await expect(strategy.executeTap("device-1", element, driver)).rejects.toThrow(
@@ -104,7 +106,7 @@ describe("TalkBackTapStrategy", () => {
     });
 
     test("a typed failure while reading the screen rejects instead of falling back", async () => {
-      const element = { text: "Button" };
+      const element = buildElement({ text: "Button" });
       spyOn(driver, "requestTraversalOrder").mockRejectedValue(
         new ActionableError("Service failed"),
       );
@@ -114,9 +116,11 @@ describe("TalkBackTapStrategy", () => {
     });
 
     test("opt-in activation retains uncertainty after its ACTION_CLICK fallback", async () => {
-      const element = { "resource-id": "test:id/button" };
+      const element = buildElement({ "resource-id": "test:id/button" });
       driver.setElements([element], 0);
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
+      // The coordinate gesture is unavailable, so activation falls back to ACTION_CLICK.
+      driver.doubleTapCapabilitySupported = false;
       driver.setActionResult({
         success: false,
         action: "click",
@@ -425,30 +429,30 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.getFocusRequestCount()).toBe(0);
     });
 
-    test.each([{ elements: [] }, { elements: [{ "resource-id": "test:id/other" }] }])(
-      "reports child-cap truncation when the target is absent from %j",
-      async ({ elements }) => {
-        driver.queueTraversalResult({
-          elements,
-          focusedIndex: null,
-          totalCount: elements.length,
-          totalTimeMs: 1,
-          truncationReasons: ["max_children"],
-        });
+    test.each<{ elements: Element[] }>([
+      { elements: [] },
+      { elements: [buildElement({ "resource-id": "test:id/other" })] },
+    ])("reports child-cap truncation when the target is absent from %j", async ({ elements }) => {
+      driver.queueTraversalResult({
+        elements,
+        focusedIndex: null,
+        totalCount: elements.length,
+        totalTimeMs: 1,
+        truncationReasons: ["max_children"],
+      });
 
-        const result = await strategy.executeTap(
-          "device-1",
-          { "resource-id": "test:id/missing" },
-          driver,
-        );
+      const result = await strategy.executeTap(
+        "device-1",
+        buildElement({ "resource-id": "test:id/missing" }),
+        driver,
+      );
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain(
-          "the accessibility traversal was truncated (max_children); the target may be beyond the cap",
-        );
-        expect(driver.getTapCount()).toBe(0);
-      },
-    );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        "the accessibility traversal was truncated (max_children); the target may be beyond the cap",
+      );
+      expect(driver.getTapCount()).toBe(0);
+    });
 
     test("activates a target present in a truncated traversal", async () => {
       const element: Element = {
@@ -484,7 +488,7 @@ describe("TalkBackTapStrategy", () => {
 
       const result = await strategy.executeTap(
         "device-1",
-        { "resource-id": "test:id/missing" },
+        buildElement({ "resource-id": "test:id/missing" }),
         driver,
       );
 
@@ -500,7 +504,13 @@ describe("TalkBackTapStrategy", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
-      driver.queueTraversalResult({ error: "Service unavailable", totalTimeMs: 1 });
+      driver.queueTraversalResult({
+        elements: [],
+        focusedIndex: null,
+        totalCount: 0,
+        error: "Service unavailable",
+        totalTimeMs: 1,
+      });
 
       const result = await strategy.executeTap("device-1", element, driver);
 
@@ -521,7 +531,13 @@ describe("TalkBackTapStrategy", () => {
         error: "Action timeout after 5000ms",
       });
       await expect(
-        strategy.executeLongPress(50, 50, 800, { "resource-id": "test:id/button" }, driver),
+        strategy.executeLongPress(
+          50,
+          50,
+          800,
+          buildElement({ "resource-id": "test:id/button" }),
+          driver,
+        ),
       ).rejects.toThrow("outcome is indeterminate");
       expect(driver.getTapCount()).toBe(0);
     });
@@ -806,7 +822,7 @@ describe("TalkBackTapStrategy", () => {
       "a thrown error after coordinate dispatch is indeterminate: %j",
       async (error) => {
         const tap = spyOn(driver, "requestTapCoordinates").mockImplementation(
-          async (_x, _y, _duration, onDispatch) => {
+          async ({ onDispatch: onDispatch }) => {
             onDispatch?.();
             throw error;
           },
@@ -862,7 +878,9 @@ describe("TalkBackTapStrategy", () => {
         });
         await expect(
           strategy.executeDirectActivation(
-            nodeSelector ? { "unique-id": "button" } : { "resource-id": "test:id/button" },
+            nodeSelector
+              ? buildElement({ "unique-id": "button" })
+              : buildElement({ "resource-id": "test:id/button" }),
             driver,
           ),
         ).rejects.toThrow("Tap outcome is indeterminate");

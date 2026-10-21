@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "text-fields",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "name": "Ada",
+      "quantity": "12",
+      "password": "secret",
+      "notes": "Hello"
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "name",
+      "label": ""
+    }
+  },
+  "expectedPath": "root.label"
+}

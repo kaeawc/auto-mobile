@@ -1,5 +1,3 @@
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { spyOn } from "bun:test";
 import { DAEMON_OWNED_SESSIONS_PARAM } from "../../../src/daemon/constants";
 import { DaemonState } from "../../../src/daemon/daemonState";
@@ -13,13 +11,12 @@ import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
 } from "../../../src/daemon/toolCallActivity";
-import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { BootedDevice } from "../../../src/models";
-import { sessionOwnershipLostPayload } from "../../../src/server/deviceSessionResult";
-import { executionTracker } from "../../../src/server/executionTracker";
+import { sessionOwnershipLostPayload } from "../../../src/daemon/deviceSessionResult";
+import { executionTracker } from "../../../src/daemon/executionTracker";
 import { createSetActiveDeviceHandler } from "../../../src/server/setActiveDevice";
-import { shapeToolCallError } from "../../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../../src/daemon/shapeToolCallError";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
@@ -29,7 +26,10 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 import { RealToolCallPath } from "../../helpers/realToolCallPath";
+import { NonThrowingFakeSocket } from "../../fakes/FakeNetServer";
 import { createFakeDeviceManager } from "./inputSocketHarness";
+import { parseDaemonResponseLine } from "./parseDaemonResponseLine";
+import { createHarnessServer } from "./UnixSocketServerHarness";
 
 /**
  * Drives the REAL daemon request handlers with the frames the desktop/IDE client
@@ -80,7 +80,7 @@ export interface WireExchange {
   repeat?: number;
   everyMs?: number;
   request: { method: string; params: Record<string, unknown> };
-  response: { success: boolean; result?: unknown; error?: string; code?: string };
+  response: Omit<DaemonResponse, "id" | "type">;
 }
 
 export interface WireFixture {
@@ -91,44 +91,38 @@ export interface WireFixture {
   exchanges: WireExchange[];
 }
 
-class RecordingSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
+class RecordingSocket extends NonThrowingFakeSocket {
   private readonly waiters = new Map<string, (response: DaemonResponse) => void>();
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    for (const line of data.split("\n").filter((chunk) => chunk.length > 0)) {
-      const response = JSON.parse(line) as DaemonResponse;
-      this.waiters.get(response.id)?.(response);
-      this.waiters.delete(response.id);
+  write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
+  write(
+    str: string | Uint8Array,
+    encoding?: BufferEncoding,
+    cb?: (err?: Error | null) => void,
+  ): boolean;
+  write(
+    data: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
+    const text = typeof data === "string" ? data : Buffer.from(data).toString();
+    for (const line of text.split("\n").filter((chunk) => chunk.length > 0)) {
+      const response = parseDaemonResponseLine(line);
+      if (response.id !== null) {
+        this.waiters.get(response.id)?.(response);
+        this.waiters.delete(response.id);
+      }
     }
     callback?.();
     return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
   }
   request(request: DaemonRequest): Promise<DaemonResponse> {
     const response = new Promise<DaemonResponse>((resolve) => {
       this.waiters.set(request.id, resolve);
     });
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
+    this.simulateData(`${JSON.stringify(request)}\n`);
     return response;
   }
-}
-
-interface SocketServerInternals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
 }
 
 const setActiveDeviceTool = createSetActiveDeviceHandler({
@@ -177,22 +171,15 @@ class DaemonUnderTest {
       timer,
     );
     this.monitor.start();
-    const server = new UnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      DaemonState.getInstance(),
-      timer,
-    ) as unknown as SocketServerInternals;
-    server.acceptingRequests = true;
-    server.handleConnection(this.socket as unknown as Socket);
+    const server = createHarnessServer("unused", DaemonState.getInstance(), timer);
+    server.allowRequests();
+    server.connect(this.socket);
   }
 
   static async start(timer: FakeTimer, devices: BootedDevice[]): Promise<DaemonUnderTest> {
-    const manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", devices);
     const pool = new DevicePool(
@@ -394,7 +381,7 @@ export class DesktopWireHarness {
 
   private async callTool(params: Record<string, unknown>): Promise<DaemonResponse> {
     const name = params.name;
-    const args = (params.arguments ?? {}) as Record<string, unknown> & { sessionUuid?: string };
+    const args = recordOf(params.arguments);
     if (name === "rotate") {
       return this.callDeviceControl(name, args);
     }
@@ -406,11 +393,10 @@ export class DesktopWireHarness {
     // session, which these scenarios do not observe.
     const forwarded: Record<string, unknown> = { ...args };
     delete forwarded[DAEMON_OWNED_SESSIONS_PARAM];
-    const execution = executionTracker.startExecution(name, undefined, args.sessionUuid);
+    const sessionUuid = typeof args.sessionUuid === "string" ? args.sessionUuid : undefined;
+    const execution = executionTracker.startExecution(name, undefined, sessionUuid);
     try {
-      const result = await setActiveDeviceTool(
-        forwarded as Parameters<typeof setActiveDeviceTool>[0],
-      );
+      const result = await setActiveDeviceTool(setActiveDeviceArgsOf(forwarded));
       return { id: "tool", type: "mcp_response", success: true, result };
     } catch (error) {
       return { id: "tool", type: "mcp_response", success: true, result: toolErrorResult(error) };
@@ -468,7 +454,32 @@ function collapse(run: WireExchange[]): WireExchange {
 
 /** The socket envelope minus its per-request `id` and constant `type`. */
 function envelopeOf(response: DaemonResponse): WireExchange["response"] {
-  return Object.fromEntries(
-    Object.entries(response).filter(([key]) => key !== "id" && key !== "type"),
-  ) as WireExchange["response"];
+  const { id, type, ...envelope } = response;
+  void id;
+  void type;
+  return envelope;
+}
+
+/** A request's `arguments` as a plain record; anything else is an empty argument list. */
+function recordOf(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : {};
+}
+
+/** The typed arguments of a forwarded `setActiveDevice` call, read field by field. */
+function setActiveDeviceArgsOf(
+  args: Record<string, unknown>,
+): Parameters<typeof setActiveDeviceTool>[0] {
+  const { deviceId, platform, display, sessionUuid, __mcpSessionId } = args;
+  if (typeof deviceId !== "string") {
+    throw new Error("desktop wire harness: setActiveDevice needs a string deviceId");
+  }
+  return {
+    deviceId,
+    ...(platform === "android" || platform === "ios" ? { platform } : {}),
+    ...(typeof display === "string" || display === null ? { display } : {}),
+    ...(typeof sessionUuid === "string" ? { sessionUuid } : {}),
+    ...(typeof __mcpSessionId === "string" ? { __mcpSessionId } : {}),
+  };
 }

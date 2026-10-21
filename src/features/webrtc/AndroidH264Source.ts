@@ -7,10 +7,8 @@ import {
   type BackoffPolicy,
 } from "../../utils/Backoff";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import {
-  defaultAdbClientFactory,
-  type AdbClientFactory,
-} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { VideoSourceAdb, VideoSourceAdbFactory } from "./videoSourceAdb";
 import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
 import { H264AnnexBParser, isVclNal } from "./h264";
@@ -18,8 +16,6 @@ import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "
 import { capToQualityPreset, qualityPresetBitrateBps } from "./qualityPresets";
 export { capToQualityPreset } from "./qualityPresets";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
-
-export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
 
 /**
  * `screenrecord` enforces a 180s `--time-limit`. Start the next segment a few
@@ -53,7 +49,7 @@ export const ANDROID_RUNNING_RETRY_BACKOFF: BackoffInput = exponentialBackoff({
 });
 
 export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
-  adbFactory?: AdbClientFactory;
+  adbFactory?: VideoSourceAdbFactory;
   timer?: Timer;
   /** Override the per-segment time limit (seconds); capped at the screenrecord max. */
   segmentTimeLimitSeconds?: number;
@@ -75,7 +71,7 @@ export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
  */
 export class AndroidH264Source implements H264CaptureSource {
   private readonly options: AndroidH264SourceOptions;
-  private readonly adbFactory: AdbClientFactory;
+  private readonly adbFactory: VideoSourceAdbFactory;
   private readonly timer: Timer;
   private readonly segmentTimeLimitSeconds: number;
   private readonly segmentRotateMs: number;
@@ -394,9 +390,7 @@ export class AndroidH264Source implements H264CaptureSource {
     }
   }
 
-  private async captureSize(
-    adb: ReturnType<AdbClientFactory["create"]>,
-  ): Promise<{ width: number; height: number }> {
+  private async captureSize(adb: VideoSourceAdb): Promise<{ width: number; height: number }> {
     if (this.options.size) {
       return this.options.size;
     }

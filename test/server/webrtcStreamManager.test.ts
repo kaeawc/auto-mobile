@@ -1,8 +1,8 @@
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as manager from "../../src/server/webrtcStreamManager";
+import * as manager from "../../src/daemon/webrtcStreamManager";
 import { logger } from "../../src/utils/logger";
-import { createWebRtcStreamDeviceIncarnationListener } from "../../src/server/webrtcStreamIncarnationListener";
+import { createWebRtcStreamDeviceIncarnationListener } from "../../src/daemon/webrtcStreamIncarnationListener";
 import {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,
@@ -17,17 +17,16 @@ import {
   waitForWebRtcStreamReadiness,
   WEBRTC_STREAM_LEASE_TTL_MS,
   type WebRtcStreamManagerDependencies,
-} from "../../src/server/webrtcStreamManager";
+} from "../../src/daemon/webrtcStreamManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import type {
-  AndroidH264Source,
   H264CaptureSourceMetrics,
-  WebRtcPublisher,
   WebRtcPublisherLifecycleEvent,
   WebRtcStreamDescriptor,
 } from "../../src/features/webrtc";
+import type { WebRtcStreamingOverrides } from "../../src/features/webrtc/webrtcStreamingConfig";
 
 const ANDROID: BootedDevice = {
   deviceId: "emulator-5554",
@@ -160,12 +159,12 @@ function installFakes() {
     createPublisher: (config, deps) => {
       const publisher = new FakePublisher(config, deps);
       publishers.push(publisher);
-      return publisher as unknown as WebRtcPublisher;
+      return publisher;
     },
     createSource: () => {
       const source = new FakeSource();
       sources.push(source);
-      return source as unknown as AndroidH264Source;
+      return source;
     },
     // Hermetic: never resolve the real jar (which could attempt a GitHub
     // download once the registry carries a videoJarSha256).
@@ -318,7 +317,7 @@ describe("webrtcStreamManager", () => {
           await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason: "device_removed" });
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
     });
     const stream = await startWebRtcStream({
@@ -698,9 +697,8 @@ describe("webrtcStreamManager", () => {
     let releaseJar: ((path: string | null) => void) | undefined;
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
+      createSource: () => new FakeSource(),
       resolveVideoJar: () =>
         new Promise((resolve) => {
           releaseJar = resolve;
@@ -727,9 +725,9 @@ describe("webrtcStreamManager", () => {
       idGenerator: new CountingIdGenerator("id"),
       createPublisher: (config, deps) => {
         publishersCreated++;
-        return new FakePublisher(config, deps) as unknown as WebRtcPublisher;
+        return new FakePublisher(config, deps);
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: () =>
         new Promise((resolve) => {
           releaseJar = resolve;
@@ -844,9 +842,9 @@ describe("webrtcStreamManager", () => {
           enteredStart?.();
           await allowStartToReturn;
         };
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
     });
@@ -870,8 +868,7 @@ describe("webrtcStreamManager", () => {
     const sources: FakeSource[] = [];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: () => {
         const source = new FakeSource();
         const originalStart = source.start.bind(source);
@@ -880,7 +877,7 @@ describe("webrtcStreamManager", () => {
           await stopWebRtcStream("race");
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -909,7 +906,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => {
         const publisher = new FakePublisher(config, deps);
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: (options) => {
         const source = new FakeSource();
@@ -918,7 +915,7 @@ describe("webrtcStreamManager", () => {
           options.onError?.(new Error("helper exited after first frame"));
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -947,12 +944,12 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => {
         const publisher = new FakePublisher(config, deps);
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: (options) => {
         emit = options.onData;
         endPacket = options.onEncodedAccessUnit;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -986,11 +983,10 @@ describe("webrtcStreamManager", () => {
     const jarPaths: (string | null)[] = [];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (_options, jarPath) => {
         jarPaths.push(jarPath);
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => {
         resolveCalls++;
@@ -1009,11 +1005,10 @@ describe("webrtcStreamManager", () => {
     const jarPaths: (string | null)[] = [];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (_options, jarPath) => {
         jarPaths.push(jarPath);
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1033,9 +1028,9 @@ describe("webrtcStreamManager", () => {
       idGenerator: new CountingIdGenerator("id"),
       createPublisher: (config, deps) => {
         publisherCreated++;
-        return new FakePublisher(config, deps) as unknown as WebRtcPublisher;
+        return new FakePublisher(config, deps);
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => {
         throw new ActionableError("video-server jar checksum verification failed");
       },
@@ -1067,12 +1062,12 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => {
         const publisher = new FakePublisher(config, deps);
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: (options, jarPath) => {
         capturedSourceOptions = options;
         capturedJarPath = jarPath;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1122,11 +1117,10 @@ describe("webrtcStreamManager", () => {
     };
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         sourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-24T00:00:00.000Z"),
@@ -1150,11 +1144,10 @@ describe("webrtcStreamManager", () => {
       | undefined;
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         capturedSourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-23T00:00:00.000Z"),
@@ -1177,11 +1170,10 @@ describe("webrtcStreamManager", () => {
       | undefined;
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         capturedSourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-23T00:00:00.000Z"),
@@ -1203,7 +1195,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => {
         const publisher = new AsyncConnectedPublisher(config, deps);
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: () => {
         const source = new FakeSource();
@@ -1212,7 +1204,7 @@ describe("webrtcStreamManager", () => {
           throw new Error("REMOTE_SUBMIX failed");
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1243,7 +1235,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => {
         const publisher = new AsyncConnectedPublisher(config, deps);
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: () => {
         createSourceCalls++;
@@ -1255,7 +1247,7 @@ describe("webrtcStreamManager", () => {
           };
         }
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1292,8 +1284,7 @@ describe("webrtcStreamManager", () => {
     });
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: () => {
         const source = new FakeSource();
         sourceCalls++;
@@ -1305,7 +1296,7 @@ describe("webrtcStreamManager", () => {
             });
           };
         }
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       timer,
@@ -1355,15 +1346,14 @@ describe("webrtcStreamManager", () => {
     const timer = new FakeTimer();
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new AsyncConnectedPublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new AsyncConnectedPublisher(config, deps),
       createSource: () => {
         const source = new FakeSource();
         source.start = async () => {
           source.started = true;
           throw new Error("REMOTE_SUBMIX failed");
         };
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       timer,
@@ -1388,11 +1378,10 @@ describe("webrtcStreamManager", () => {
     let createSourceCalls = 0;
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: () => {
         createSourceCalls++;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: () =>
         new Promise((resolve) => {
@@ -1419,11 +1408,10 @@ describe("webrtcStreamManager", () => {
     let sourceOptions!: Parameters<NonNullable<WebRtcStreamManagerDependencies["createSource"]>>[0];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         sourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
     });
@@ -1465,7 +1453,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => {
         const publisher = new AsyncConnectedPublisher(config, deps);
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: () => {
         createSourceCalls++;
@@ -1480,7 +1468,7 @@ describe("webrtcStreamManager", () => {
           };
         }
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1523,7 +1511,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => {
         const publisher = new AsyncConnectedPublisher(config, deps);
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: () => {
         const source = new FakeSource();
@@ -1532,7 +1520,7 @@ describe("webrtcStreamManager", () => {
           source.started = true;
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1577,7 +1565,7 @@ describe("webrtcStreamManager", () => {
           publisher.started = true;
         };
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
     });
 
@@ -1607,7 +1595,7 @@ describe("webrtcStreamManager", () => {
           publisher.started = true;
         };
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
     });
 
@@ -1649,11 +1637,11 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => {
         const publisher = new FakePublisher(config, deps);
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: (options) => {
         sourceOptions.push(options);
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
     });
@@ -1683,11 +1671,11 @@ describe("webrtcStreamManager", () => {
           publisher.started = true;
         };
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
       createSource: (options) => {
         sourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-24T00:00:00.000Z"),
@@ -1722,9 +1710,9 @@ describe("webrtcStreamManager", () => {
         publisher.start = async () => {
           await publisher.onBeforeEstablish?.();
         };
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => null,
       timer,
       now: () => new Date("2026-07-24T00:00:00.000Z"),
@@ -1759,9 +1747,9 @@ describe("webrtcStreamManager", () => {
         publisher.start = async () => {
           await publisher.onBeforeEstablish?.();
         };
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => null,
       timer,
     });
@@ -1827,9 +1815,9 @@ describe("webrtcStreamManager", () => {
         publisher.start = async () => {
           await publisher.onBeforeEstablish?.();
         };
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => null,
       timer,
     });
@@ -1869,11 +1857,10 @@ describe("webrtcStreamManager", () => {
     let sourceOptions!: Parameters<NonNullable<WebRtcStreamManagerDependencies["createSource"]>>[0];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) =>
-        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         sourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
     });
@@ -2002,7 +1989,7 @@ describe("WebRTC own-lease and owner control regressions", () => {
         const publisher = new FakePublisher(config, deps);
         publisher.start = async () => {};
         publishers.push(publisher);
-        return publisher as unknown as WebRtcPublisher;
+        return publisher;
       },
     });
     const first = await startWebRtcStream({
@@ -2068,7 +2055,7 @@ describe("WebRTC own-lease and owner control regressions", () => {
     await stopping;
     expect(settled).toBe(true);
   });
-  test.each([
+  test.each<WebRtcStreamingOverrides>([
     { whipEndpoint: "https://elsewhere.example/private" },
     { bearerToken: "secret" },
     { iceServers: [{ urls: "turn:private", credential: "secret" }] },

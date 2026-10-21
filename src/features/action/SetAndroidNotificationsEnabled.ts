@@ -47,7 +47,7 @@ export class SetAndroidNotificationsEnabled {
     const command = `shell cmd notification set_enabled ${shellQuote(packageName)} ${input.enabled}`;
     try {
       await perf.track("setEnabled", async () => {
-        const result = await this.adb.executeCommand(command, undefined, undefined, true);
+        const result = await this.adb.executeCommand(command, { noRetry: true });
         const stdout = result.stdout;
         const stderr = result.stderr ?? "";
         if (outputLooksLikeShellFailure(stdout, stderr)) {

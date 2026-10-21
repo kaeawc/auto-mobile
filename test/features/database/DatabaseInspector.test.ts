@@ -4,8 +4,12 @@ import type { BootedDevice } from "../../../src/models";
 import { shellQuote } from "../../../src/utils/shellQuote";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { ActionableError } from "../../../src/models";
+import { SdkTooOldError } from "../../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../../src/models/AppNotRunningError";
-import { ProviderUnavailableError } from "../../../src/features/storage/ProviderUnavailableError";
+import {
+  ProviderUnavailableError,
+  resourceErrorFields,
+} from "../../../src/features/storage/ProviderUnavailableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("DatabaseInspector", () => {
@@ -23,6 +27,7 @@ describe("DatabaseInspector", () => {
   let inspector: DatabaseInspector;
 
   beforeEach(() => {
+    DatabaseInspector.clearReadOnlyCapabilityCache();
     fakeAdb = new FakeAdbClient();
     const setCommandResult = fakeAdb.setCommandResult.bind(fakeAdb);
     fakeAdb.setCommandResult = (command, stdout, stderr = "") => {
@@ -54,6 +59,143 @@ describe("DatabaseInspector", () => {
       expect(commands.some((c) => c.includes("--extra readOnly:s:'true'"))).toBe(true);
       expect(commands.filter((c) => c.includes("readOnly"))).toHaveLength(1);
     });
+  });
+
+  describe("non-owner SDK read-only capability (#11354)", () => {
+    const probe = `shell content call --uri 'content://${appId}.automobile.database' --method getReadOnlyCapability`;
+    const sql = `shell content call --uri 'content://${appId}.automobile.database' --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'select 1' --extra readOnly:s:'true'`;
+    const old =
+      "Bundle[{success=false, errorType=INVALID_ARGUMENT, error=Unknown method: getReadOnlyCapability}]";
+    const capable = 'Bundle[{success=true, result={"readOnlyEnforced":true}}]';
+    const ok = 'Bundle[{success=true, result={"type":"query","rows":[[1]]}}]';
+    const watcher = () => new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+    const read = (reader: DatabaseInspector) =>
+      reader.executeSQL(appId, databasePath, "select 1", true);
+
+    test("old SDK refuses SQL without issuing it", async () => {
+      fakeAdb.setCommandResult(probe, old);
+      fakeAdb.setCommandResult(sql, ok);
+      const error = await read(watcher()).catch((e) => e);
+      expect(error).toBeInstanceOf(SdkTooOldError);
+      expect(error.cause).toBeInstanceOf(ActionableError);
+      expect(error.cause.message).toBe(
+        "Database error (INVALID_ARGUMENT): Unknown method: getReadOnlyCapability",
+      );
+      expect(error.toPayload()).toEqual({
+        code: "sdk_too_old",
+        deviceId: device.deviceId,
+        minimumSdkVersion: "0.0.85",
+        retryable: false,
+      });
+      expect(error.message).toContain(appId);
+      expect(error.message).toContain(device.deviceId);
+      expect(error.message).toContain("0.0.85");
+      expect(fakeAdb.getAllCommands()).not.toContain(sql);
+    });
+
+    test("current SDK serves SQL and shares a successful probe across instances", async () => {
+      fakeAdb.setCommandResult(probe, capable);
+      fakeAdb.setCommandResult(sql, ok);
+      expect((await read(watcher())).rows).toEqual([[1]]);
+      expect((await read(watcher())).rows).toEqual([[1]]);
+      expect(fakeAdb.getAllCommands().filter((c) => c === probe)).toHaveLength(1);
+    });
+
+    test("absent provider propagates on a non-owner read without caching the probe", async () => {
+      fakeAdb.setCommandResultSequence(probe, ["Could not find provider", capable]);
+      fakeAdb.setCommandResult(sql, ok);
+
+      const error = await read(watcher()).catch((e) => e);
+      expect(error).toBeInstanceOf(ProviderUnavailableError);
+      expect(error.message).toBe("Database error (PROVIDER_UNAVAILABLE): Could not find provider");
+      expect(fakeAdb.getAllCommands()).not.toContain(sql);
+
+      expect((await read(watcher())).rows).toEqual([[1]]);
+      expect(fakeAdb.getAllCommands().filter((c) => c === probe)).toHaveLength(2);
+    });
+
+    test("SDK refusal preserves its original cause without changing resource or wire fields", () => {
+      const cause = new ActionableError("Unknown method: getReadOnlyCapability");
+      const error = new SdkTooOldError(appId, device.deviceId, "0.0.85", cause);
+      expect(error.cause).toBe(cause);
+      expect(resourceErrorFields(error)).toEqual({ errorCode: "sdk_too_old" });
+      expect(error.toPayload()).toEqual({
+        code: "sdk_too_old",
+        deviceId: device.deviceId,
+        minimumSdkVersion: "0.0.85",
+        retryable: false,
+      });
+    });
+
+    test("disabled inspection propagates without issuing SQL or caching the probe", async () => {
+      fakeAdb.setCommandResultSequence(probe, [
+        'Bundle[{success=false, result={"errorType":"DISABLED","error":"Database inspection is disabled"}}]',
+        capable,
+      ]);
+      fakeAdb.setCommandResult(sql, ok);
+      const reader = watcher();
+
+      const error = await read(reader).catch((e) => e);
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).not.toBeInstanceOf(SdkTooOldError);
+      expect(error.message).toBe("Database error (DISABLED): Database inspection is disabled");
+      expect(fakeAdb.getAllCommands().filter((c) => c === probe)).toHaveLength(1);
+      expect(fakeAdb.getAllCommands()).not.toContain(sql);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+
+      expect((await read(reader)).rows).toEqual([[1]]);
+      expect(fakeAdb.getAllCommands().filter((c) => c === probe)).toHaveLength(2);
+    });
+
+    test("owner on an old SDK skips the probe", async () => {
+      fakeAdb.setCommandResult(probe, old);
+      fakeAdb.setCommandResult(sql, ok);
+      expect((await read(inspector)).rows).toEqual([[1]]);
+      expect(fakeAdb.getAllCommands()).not.toContain(probe);
+    });
+
+    test("failed probe is not cached and an upgraded app recovers", async () => {
+      fakeAdb.setCommandResultSequence(probe, [old, capable]);
+      fakeAdb.setCommandResult(sql, ok);
+      const reader = watcher();
+      expect((await read(reader).catch((e) => e)).name).toBe("SdkTooOldError");
+      expect((await read(reader)).rows).toEqual([[1]]);
+      expect(fakeAdb.getAllCommands().filter((c) => c === probe)).toHaveLength(2);
+    });
+
+    for (const message of ["device offline", "adb timed out", "aborted"]) {
+      test(`probe transport failure propagates: ${message}`, async () => {
+        const failure = new Error(message);
+        fakeAdb.setCommandError(probe, failure);
+        expect(await read(watcher()).catch((e) => e)).toBe(failure);
+        expect(fakeAdb.getAllCommands()).not.toContain(sql);
+      });
+    }
+
+    test("old SDK also refuses resource reads", async () => {
+      fakeAdb.setCommandResult(probe, old);
+      const error = await watcher()
+        .listDatabases(appId)
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(SdkTooOldError);
+      expect(fakeAdb.getAllCommands().some((c) => c.includes("--method listDatabases"))).toBe(
+        false,
+      );
+    });
+
+    for (const reply of [
+      "Bundle[{success=true, result={}}]",
+      'Bundle[{success=true, result={"readOnlyEnforced":false}}]',
+      'Bundle[{success=true, result={"readOnlyEnforced":"true"}}]',
+      "Bundle[{success=true, result={bad}}]",
+      "malformed output",
+    ]) {
+      test(`unknown capability refuses: ${reply}`, async () => {
+        fakeAdb.setCommandResult(probe, reply);
+        expect((await read(watcher()).catch((e) => e)).name).toBe("SdkTooOldError");
+        expect(fakeAdb.getAllCommands()).not.toContain(sql);
+      });
+    }
   });
 
   describe("non-owner read of a held device with a dead app (#11350)", () => {
@@ -116,13 +258,17 @@ describe("DatabaseInspector", () => {
     });
 
     test("reads normally when the app is alive", async () => {
+      fakeAdb.setCommandResult(
+        `shell content call --uri 'content://${appId}.automobile.database' --method getReadOnlyCapability`,
+        'Bundle[{success=true, result={"readOnlyEnforced":true}}]',
+      );
       fakeAdb.setCommandResult(sqlCmd, ok);
       const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
 
       const result = await watcher.executeSQL(appId, databasePath, "select 1");
 
       expect(result.rows).toEqual([[1]]);
-      expect(providerCalls()).toHaveLength(1);
+      expect(providerCalls()).toHaveLength(2);
     });
 
     test("the owner's read of a dead app still cold-starts it", async () => {

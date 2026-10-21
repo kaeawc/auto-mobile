@@ -5,6 +5,17 @@ device with `getAndroid`, `getApple` or `startDevice` creates the session and
 returns its `sessionUuid`; the session holds the device until it is released
 (idle timeout, lost heartbeat, or an explicit release).
 
+## Session key on the MCP layer
+
+The daemon's MCP layer holds no transport session. A call is tied to its session by an
+explicit key, not by the connection it arrived on: the `sessionUuid` argument where a tool
+takes one, otherwise the `x-auto-mobile-mcp-session-id` header (or the in-band
+`__mcpSessionId` argument). The socket server sends the header for proxy and CLI
+connections, and the desktop app sends one generated id per app session. A client that calls
+the daemon's HTTP endpoint directly and sends neither gets no implicit binding and must name
+`sessionUuid`. Landed in #4678 (#13047, #13049, #13046); see
+[the design record](../design-docs/mcp/sdk-v2-stateless-migration.md).
+
 ## What is refused
 
 A call that acts on a held device is refused with the typed code
@@ -162,7 +173,24 @@ below are the defaults; the constants live in
   with `device_owned_by_other_session`. A successful restore moves ownership, so
   the previous connection no longer owns the session.
 
-A managed session released while slot ownership is unconfirmed holds device teardown for
+After a daemon restart, managed execution calls receive `binding_ownership_unconfirmed`
+while the daemon reclaims the binding. Its `retryAfterMs` starts at 1,000 ms, increases
+by 1,000 ms per complete second since the first claim attempt, and caps at 5,000 ms
+(without jitter). Retries stop once both 60 s on the daemon's timer since the first
+attempt and at least three attempts have elapsed; recovery and waiting for the first
+shared registry turn do not consume that budget. The existing ownership-loss path
+then releases the session and calls receive
+`session_ownership_lost`, `retryable: false`, `nextAction: "acquire_new_session"`.
+`scope_not_valid`, `binding_missing`, and `binding_in_use` claim refusals lose
+ownership immediately. The shared registry result type also includes the commit-only
+`device_assigned_elsewhere` refusal, which is defensively treated as loss.
+`binding_not_ready`, `stale_binding`, and registry contention/deadline failures retry
+within the same bound. A confirmed claim wins even when it completes at or after
+the bound: the bound stops retries and never overrides proof of ownership.
+A retained session that is no longer live stops retrying, except during an active
+release hold. A synchronous registry write can delay deadline delivery until it returns.
+
+A managed session released while binding ownership is unconfirmed holds device teardown for
 up to 1.9 s on the daemon’s timer: two shared turns at their worst case
 (700 ms attempt bound + the registry’s 250 ms busy timeout each), covering the turn
 in flight when the hold is created and the hold’s own expedited attempt. Creating
@@ -196,7 +224,8 @@ liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 | `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                                                                                                                                                          |
 | `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                                                                                                                                                          |
 | `owner-disconnected`                                                                                    | Yes        | `session_ownership_lost`: the owning connection closed and no other client owns the session.                                                                                                                                                                        |
-| `managed-slot-ownership-lost`                                                                           | Yes        | `session_ownership_lost`: another execution took the managed slot and its device; acquire a new session.                                                                                                                                                            |
+| `binding-ownership-lost`                                                                                | Yes        | `session_ownership_lost`: another execution took the broker binding and its device; acquire a new session.                                                                                                                                                          |
+| `managed-slot-ownership-lost`                                                                           | Yes        | Persisted legacy spelling of `binding-ownership-lost`; existing rows remain terminal.                                                                                                                                                                               |
 | `device-killed` (also a sessionless stop of the device a handed-off session was waiting for)            | Yes        | `session_terminal_release_in_progress` while the kill runs, then `session_ownership_lost`.                                                                                                                                                                          |
 | `device-disconnected:<device>`                                                                          | Yes        | `session_ownership_lost`: the device was lost.                                                                                                                                                                                                                      |
 | `identity-recovery-<reason>`                                                                            | Yes        | `session_ownership_lost` with `recoveryReason` and `deviceId` (and `ownerPid` when another daemon holds the device): restart recovery could not prove the device's identity (#11414).                                                                               |
@@ -210,10 +239,9 @@ liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 | `expired`                                                                                               | No         | A non-terminal row past its idle deadline: a control call naming it is refused with `session_ownership_lost`, reason `expired` and `idle: true`; heartbeat and `daemon/sessionInfo` answer `daemon_session_not_found`, `releaseReason: "expired"` and `idle: true`. |
 
 `idle` sits beside the reason it qualifies: `error.reason`/`error.idle` in an MCP envelope
-(including `no_active_device_session` and `managed_execution_ended`),
+(including `no_active_device_session`),
 `details.reason`/`details.idle` in a typed failure frame, or top-level `releaseReason`/`idle`
-on a not-found answer. It also sits beside `executionEnded.reason` as `executionEnded.idle`
-in the managed-slots resource, beside `boundSessionLoss.reason` as `boundSessionLoss.idle`
+on a not-found answer. It also sits beside `boundSessionLoss.reason` as `boundSessionLoss.idle`
 in a failed daemon-socket response, and beside `reason` as `idle` in the
 `notifications/session/released` push. It is only ever `true` and is absent otherwise; a heartbeat lapse
 (`heartbeat-timeout`, `missing-first-heartbeat`) never carries `idle`. For `expired`, `idle: true`
@@ -357,15 +385,12 @@ acquisitions as anonymous (#11096):
   `src/models/deviceSessionRecovery.ts`, #11098), with `idle: true` beside the
   release reason after an idle release. Acquire a new session with
   `getAndroid` or `getApple`; retrying the same UUID cannot succeed.
-- A managed connection (a proxy launched with `--managed-slot-config`) never
-  acquires devices, so after its execution's session is released it answers
-  `managed_execution_ended` instead: `retryable: false`,
-  `nextAction: "relaunch_execution"`, the release `reason`, `idle: true` after an idle release,
-  and the slot's `slotIndex` and `assignmentGeneration`. It names no recovery tools; the
-  runner decides whether to relaunch the execution (#11341).
-- Booted-device discovery that did not complete (adb or simctl failed, or a
-  running emulator's AVD identity has not resolved) is refused with the retryable
-  code `discovery_incomplete` instead of booting or adopting a device blind. Retry
+- Booted-device discovery that did not complete (adb or simctl failed, or an
+  unresolved running emulator could be the requested AVD) is refused with the
+  retryable code `discovery_incomplete` instead of booting or adopting a device
+  blind. `provisionDevice` skips the unresolved-sibling guard for an AVD it just
+  created; otherwise it retries identity discovery within the caller's deadline
+  before refusing with the unresolved serials. Retry
   the acquisition. `setActiveDevice` answers it for a device it cannot find only
   when the discovery that could have listed that device failed, and names that
   platform: an iOS UDID while simctl failed is iOS discovery, and an id whose
@@ -391,7 +416,7 @@ an Android transport the pool cannot identify (`isAndroidTransportAssignable` is
 while a held Android device could be its alias. Held devices are every
 Android device still in the session holder map, including expired sessions and
 releases in progress until their ownership is removed, plus one unknown hold if
-the fresh managed-slot snapshot contains Android stable ids not represented by
+the fresh broker binding snapshot contains Android stable ids not represented by
 those sessions. Control frames and tools reuse that snapshot for at most one second.
 
 The pool can positively distinguish the target from a held device only when its
@@ -401,24 +426,24 @@ loopback adb port identifies a different emulator console. An emulator proven by
 its current connection's probe is also told apart from a held physical phone
 (a USB serial or physical alias group), without becoming assignable. Matching physical
 serials or alias-group keys still could alias. A loopback port cannot distinguish
-a phone or an unknown device; an unknown managed-slot hold could alias unless
+a phone or an unknown device; an unknown broker binding hold could alias unless
 the target's current folded group identifies another device.
 
 If no held device could alias the transport, control is allowed. If every
 possible alias belongs to the requester's own session (including derived label
 sessions), control keeps the untyped “no proven identity” refusal. Otherwise
 it fails with `device_owned_by_other_session` and `retryable: false`, naming the
-transport the caller targeted; an unknown managed-slot hold uses
-`device_assigned_to_managed_slot` when its registry entry is available. Address
+transport the caller targeted; an unknown broker binding hold uses
+`device_assigned_to_binding` when its registry entry is available. Address
 the device by its USB serial or `emulator-NNNN` id. Refusal sends nothing and does
 not restart a holder's idle window. A target already held under its very id goes
 through the normal holder check. Identifiable Android targets and iOS targets
 keep their existing behavior; screenshot, hierarchy and observe reads never
-pass this control check. A managed connection still controls only its own slot
+pass this control check. A broker connection still controls only its granted
 devices; the existing connection and ownership checks still apply.
 
 A tool call may name such a device by either endpoint (#11618). The `deviceId` is
-resolved to the pool's one id for the device before any ownership, managed-slot
+resolved to the pool's one id for the device before any ownership, broker binding
 or routing check, so a call naming the Wi-Fi id of a held handset is refused or
 admitted exactly as one naming its USB serial, runs on the same per-device queue,
 and the tool sees the pool's id. The same holds for an emulator's loopback adb
@@ -457,7 +482,7 @@ past its deadline at restart is not rehydrated. At the start of recovery the
 device of every persisted session is reserved, so no other caller takes it while
 rows are recovered one by one. A reservation is released when its row fails to
 recover, or when the 15 s recovery deadline passes with the row unstarted (#11372).
-A managed slot wins over a reservation: a reservation never blocks a slot that
+A broker binding wins over a reservation: a reservation never blocks a binding that
 takes the device. A session lost to identity loss at restart is answered as
 `session_ownership_lost` (see the reasons table). A release whose database write had not landed is
 recorded first in a crash-safe sidecar (`terminal-release-intents.jsonl` in the
@@ -513,7 +538,7 @@ Failed, cancelled or unconfirmed stops retain the hold, timer, deadline and pers
 
 An owner's stop ends only the device-restart source; the daemon-restart batch releases its
 own source independently. A terminal release, including a sessionless confirmed stop or
-`restart-recovery-timeout`, ends both sources. Managed slots still
+`restart-recovery-timeout`, ends both sources. Broker bindings still
 win, and the reservation does not extend the owner's heartbeat lease. A wiped or
 re-imaged device returning under the same AVD name or UDID remains an identity gap.
 
@@ -594,10 +619,10 @@ refused `killDevice` (`code`, `retryable` and the rest of the refusal's evidence
 | Held by another live session       | n/a                                                                                                                                                               | refused `device_owned_by_other_session`, `retryable: false`; `force: true` stops and releases the holder `device-killed`. Naming the holder from a non-owning connection is refused with or without force. | refused `device_owned_by_other_session`, `retryable: false`; `force: true` stops and releases the holder `device-killed`                                                   |
 | Reserved for me (restart recovery) | stops; confirmed stop drops the hold and keeps the session resumable. Naming R from a connection that did not own it at handoff is refused with or without force. | n/a                                                                                                                                                                                                        | n/a                                                                                                                                                                        |
 | Reserved for another session R     | n/a                                                                                                                                                               | refused `device_owned_by_other_session`, message names R, `retryable: true`, `retryAfterMs` = remaining hold; force never overrides. Device, hold, timer and row stay untouched.                           | stops with or without force; confirmed stop or destroy drops R's reservation and ends R terminally `device-killed`. Failed, cancelled or unconfirmed stops change nothing. |
-| Managed slot's device              | the slot's execution only                                                                                                                                         | refused `device_assigned_to_managed_slot`; force never overrides                                                                                                                                           | same refusal                                                                                                                                                               |
+| Broker binding's device            | the binding's execution only                                                                                                                                      | refused `device_assigned_to_binding`; force never overrides                                                                                                                                                | same refusal                                                                                                                                                               |
 
 `force: true` overrides another live holder's refusal, but never the connection fence
-on naming a holder, another session's restart reservation, or a managed slot assignment.
+on naming a holder, another session's restart reservation, or a broker binding.
 An unheld device and an owner's or sessionless caller's reserved-device stop need no force;
 their outcomes are the same with or without it. Its separate Android identity escape
 still skips the AVD-name comparison while retaining shutdown confirmation.
@@ -630,12 +655,24 @@ Owner decisions 2026-10-09 (#10982):
 - A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
   A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
   install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
-  simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+  simulator it may install and launch the runner. The exception never applies to a device held, broker-bound or
   reserved by another session: those reads use what is already installed and never run readiness.
   (Owner decision 2026-10-12, #11964.) It skips appearance sync, preference writes,
   and selecting or pinning the current device. The only settings it may write are
   the accessibility settings that enable CtrlProxy. A later control call still
   performs appearance sync and current-device selection or pinning.
+- A device held by a shared allocation claim or forwarding lease, a broker binding,
+  or an unrecorded CtrlProxy forward with a live foreign client PID is held for
+  this readiness decision (#12220). The forward's PID stays evidence while that
+  PID is alive and its forwarded port remains listed, even if its connection
+  disappears; an idle lease relinquish does not erase it. A known forwarded port
+  whose client probe fails is also held. Reads of such a running device use the
+  installed read-only path without CtrlProxy setup or settings writes. Foreign
+  claims and forwards refuse control with retryable `device_owned_by_other_daemon`
+  (`ownerPid` omitted when unknown); broker bindings use their own typed refusal.
+  An unnamed control call never selects a foreign-held device automatically.
+  Pass the `deviceId` of a device this daemon may drive, or acquire one with
+  `getAndroid`/`getApple` and pass its `sessionUuid`.
 - A sessionless read boots a stopped device only when the call explicitly passes
   its `deviceId` (owner decision 2026-10-11, follow-up to #11641). Every device-aware
   read tool, including `observe`, accepts a running device's serial or iOS UDID,
@@ -683,6 +720,33 @@ by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 18 of 21 tools on each p
 The handlers are stubbed in that test; platform-specific feature support is separate
 from target resolution and readiness.
 
+This readiness exception applies only when ownership by another daemon is ruled out. A shared
+claim or forwarding lease, a broker binding, or an unrecorded CtrlProxy forward
+with a live or remembered-live foreign client PID keeps the device on the
+installed read-only path, regardless of a **Yes** entry. If a listed forward's
+client ownership is unknown, reads still use that path and control gets a typed
+refusal without an `ownerPid`. Explicit-device control refusals advise retrying after
+the owning daemon releases the device, or choosing another device. A call naming no
+device advises passing the `deviceId` of a device this daemon may drive, or acquiring
+one with `getAndroid`/`getApple` and passing its `sessionUuid`. A daemon removes forwards its coordination directory recorded when no foreign client
+is connected. An unrecorded forward with no client connected on either probe,
+whose owner this daemon never saw connected, is treated as a leftover and reclaimed
+(the existing #10690 rule). A remembered PID protects its forward while that PID
+is alive; PID reuse cannot be distinguished by this liveness-only check. The existing
+process-incarnation probe launches `ps` on macOS and is not used on this hot path.
+An unreadable forward list with no known port warns and leaves the pool's ordinary
+claim decision in place; a readiness guard performs no writes, skips readiness for
+a read, and fails control with a distinct, non-coded adb failure asking for a retry.
+Cancellation propagates as cancellation. A peer using a different coordination
+directory with **no forward**, or an unrecorded forward whose disconnected owner
+was never observed, leaves no live forward evidence for this check to detect.
+Once this daemon's own CtrlProxy client is connected and responsive, it does not
+re-read forward ownership on each call. An older-release daemon that later connects
+through its own forward to the same device is therefore not detected by that fast
+path. The pool gate still refuses sessionless control in daemon mode on its next
+ownership read. Pool-level forward evidence is supplied by the daemon process
+entry point. Direct (non-daemon) mode is protected by the CtrlProxy manager guard alone.
+
 | Tool                    | Android                                     | iOS simulator                               |
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |
 | `accessibility`         | Yes                                         | Yes                                         |
@@ -729,7 +793,7 @@ force-stop the process. On an iOS simulator, both registry readiness and
 `observe`'s service start use `RunnerReadinessService` and `IOSCtrlProxyManager`
 to install and launch the runner as needed via `xcodebuild test-without-building`.
 
-Held, slot-assigned and restart-reserved running targets run neither registry
+Held, broker-bound and restart-reserved running targets run neither registry
 readiness nor observer service setup.
 
 A physical iPhone is never readied by a sessionless read: automation readiness
@@ -803,7 +867,15 @@ refusal fails at once with each device's reason. Healthy candidates remain
 eligible; reads remain allowed on marked devices. Skipped recovery ticks re-arm
 the same attempt, and only a dispatched restore consumes one of the three
 attempts.
-Recorder teardown composes all unconfirmed retries for the device incarnation; new or replaced retries get a fresh attempt budget, and a later mark also retries work left unconfirmed after exhaustion. Recorder rows from a successful startup read remain tracked when discovery pools a device later or assigns it a new incarnation: quarantine is synchronous before binding, and late redrive rechecks local and peer ownership before device commands; a descriptor with no pid and no finite expiry quarantines one incarnation only. A failed startup read leaves the descriptors for the next daemon start.
+Recorder teardown composes all unconfirmed retries for the device incarnation; new or replaced retries get a fresh attempt budget, and a later mark also retries work left unconfirmed after exhaustion. Recorder rows from a successful startup read remain tracked when discovery pools a device later or assigns it a new incarnation: quarantine is synchronous before binding, and late redrive rechecks local and peer ownership before device commands; a descriptor with no pid and no finite expiry quarantines one incarnation only. A held device keeps its startup orphan until the owner stops it by recording id, the next recording start stops it before starting another capture, or the session releases the device. Stop-by-id and start return retryable `orphan_recorder_active` if the recorder cannot be confirmed stopped; retry or stop it by id. For a pid-less orphan with a valid `startedAt`, `orphan_recorder_active` clears by itself once the 185-second hard limit has passed. A pid-less orphan with an unparsable `startedAt` is no longer listed, found or stopped after its first marked incarnation. Confirmed teardown clears its descriptor and immediately clears a startup quarantine whose whole retry batch is confirmed. A failed startup read keeps the descriptors but creates no orphan handle: a recording start cannot see a pre-restart recorder until the next daemon start.
+
+Recorder teardown consumes an attempt only after reaching the device: an unanswered pid identity probe or missing pooled device re-arms the same attempt and delay when every failing entry is unreachable. A reached failure consumes it, even alongside unreachable entries. Timed-out work settles before another dispatch and follows the same rule. Unreachable re-arms keep reporting recovering with a retry deadline; marker/incarnation retirement ends recovery, and shutdown ends it on a skipped tick or after an unreachable dispatch. Reached failures keep their existing shutdown behaviour.
+
+After three reached failures, recording teardown schedules one re-check 185 seconds after exhaustion (screenrecord's 180-second hard limit plus a 5-second margin). While waiting, recovering remains true with a retry deadline. The same outstanding retry set then gets three fresh attempts; a second exhaustion holds the marker with recovering false and no further timer. A new mark starts recovery immediately. Retired markers/incarnations and shutdown cancel or ignore this unreferenced timer. App cleanup gets no hard-limit re-check.
+
+When this daemon tracks the spawned emulator process serving a device, it awaits the orphan handle's confirmation for startup-retained rows and deferred work, bounded by 5 seconds. Android quick-boot snapshots can restore a recorder with the same pid and cmdline, so process start alone is not proof: the device must confirm the pid is absent, belongs to another process, or was killed with exit confirmed. Descriptors are cleared only on confirmation, and a fully confirmed retry batch is withdrawn before the bind health check. An unreachable device, a pid-less row before its hard limit, or a deadline leaves descriptors and quarantine intact for normal recovery; independent release cleanup and locally owned recordings remain protected. An adb reconnect or externally started emulator has no such signal and keeps the usual incarnation redrive.
+
+A refusal whose every listed device is recovering with reason recording-teardown leaves an unowned, unprovisioned Android cold boot running for a retry, unless the request was aborted. Non-recovering markers and other health reasons still cancel that cold boot.
 
 In a plan failure result, top-level `deviceId` and `platform` identify the plan's device, while `devices[]` identifies the refused devices and top-level `reason`, `recovering`, `code`, `retryable`, and any `retryAfterMs` retain the refusal evidence.
 
@@ -888,7 +960,7 @@ held device without releasing or refreshing the session.
 (`--daemon available-devices`) and the pool stats report one status per device
 (#11317, #11401). A device that allocation cannot lend is `assigned`, not
 `idle`: that covers a device with a session, a reserved device (shutting down or
-still becoming ready), a device held by a managed slot or by another daemon, and
+still becoming ready), a device held by a broker binding or by another daemon, and
 an idle device carrying an unhealthy marker. A device in error stays `error`.
 Every device is in exactly one bucket, so `idle + assigned + error` equals the
 total. A per-platform booted resource (`automobile:devices/booted/ios`) counts
@@ -908,13 +980,42 @@ failed `ps` read no longer lowers the iOS limit: the limit still derives from ho
 RAM and cores (#11396). A boot that would go over the limit is not queued: it fails at once
 with the retryable code `capacity_exhausted`, which carries `retryAfterMs`,
 `limit`, `booted`, `platform` and, when emulators AutoMobile did not start occupy
-slots, `externalDevices` (the message names them and the
+boot capacity, `externalDevices` (the message names them and the
 `AUTOMOBILE_<PLATFORM>_MAX_BOOTED` / `AUTOMOBILE_BOOT_CAPACITY_GATE=0` escape
 hatches). Adopting an emulator or simulator that is already running never fails
 this way. `listDevices` reports `capacity` per gated platform as
 `{ limit, booted, inFlight }`. See
 [environment variables](environment-variables.md#boot-capacity) for the opt-out
 and the per-platform overrides.
+
+For iOS `capacity_exhausted` refusals, `externalDevices` lists occupying simulator
+UDIDs with no known AutoMobile owner. `heldDevices` separately lists occupying
+UDIDs owned by AutoMobile admissions, live sessions or persisted broker bindings
+and journals, including after a daemon restart. Each field is an array of strings
+and is omitted when empty. Both groups count toward the same limit. A held device
+is not a stray simulator to shut down; release its session or binding first. Warm
+simulator hints exclude live-session and broker-held devices. Ownership only affects
+these labels and hints, never the capacity decision. If the broker registry cannot
+be read, AutoMobile logs a warning and uses its last good snapshot plus current
+in-memory ownership (or just in-memory ownership if there is no snapshot). A boot
+below the limit still proceeds. At the limit, the refusal still reports
+`capacity_exhausted`: unclassifiable occupying UDIDs appear in `externalDevices`,
+and the message states that ownership could not be read and those devices may
+also be held by AutoMobile. A failed simulator listing still returns
+`discovery_incomplete` because the occupying count is unknown. The `listDevices`
+capacity block does not read ownership.
+
+The reader covers this daemon's live sessions and the host-wide broker registry.
+Simulators held by another daemon on the same host (for example, a private daemon
+without bindings), and pool assignments still being set up, are not covered and
+still appear as external.
+
+The same classification applies to a binding's pre-create capacity check and to
+the boot-slot reservation made before replacing its device. A replacement's old
+device is excluded from the reservation's count; other held simulators still
+count and appear in `heldDevices`. Both arrays survive binding reconciliation,
+acquisition results and provisioning error payloads, including socket and MCP
+responses.
 
 ## Per-session settings
 
@@ -943,11 +1044,34 @@ device (owner decision 2026-10-09, #11145):
   another session tries again. A failed reset does not quarantine the device.
 - Records are stored in the daemon database, so they survive a daemon restart.
 
+## Transient Android transport failures
+
+For a session-owned Android device whose loss is not confirmed, an ADB transport
+failure returns `code: "device_transport_unavailable"`, `retryable: true`,
+`retryAfterMs` (currently 1000), `deviceId`, and `dispatched` in the tool error.
+The wire dispatch state is `false | "unknown" | true`; `true` is reserved for a
+positively confirmed dispatch and is not currently emitted for this error.
+
+- `false`: ADB refused the command before dispatch (the selected device was
+  missing or offline). AutoMobile retries briefly for up to 3750 ms, bounded by
+  the command timeout, before returning the error. Retrying the command is safe.
+- `"unknown"`: ADB lost its transport after dispatch (`connection terminated`,
+  `error: closed`, `protocol fault`, or exit 255 with empty or transport-only
+  stderr). The command may already have run. Observe before reissuing a
+  non-idempotent action, especially an `openLink` with a single-use sign-in link.
+  `retryable: true` means the transport may recover; it does not authorize blind
+  replay. AutoMobile does not replay non-safe commands on this path. Safe read
+  commands retain their normal retry policy; exhaustion also reports
+  `dispatched: "unknown"` for the final transport failure.
+
+Confirmed device loss remains terminal (`DeviceLostError`). This retryable
+transport error does not establish that a session or its device has been lost.
+
 ## Related
 
 - [Environment variables](environment-variables.md#session-heartbeat-timeout):
   session release and idle windows.
 - [FAQ](../faq.md#what-if-i-have-more-than-one-device).
 
-For assignment-based ownership (scoped device slots that outlive a session), see
-[Managed device slots](managed-slots.md).
+For broker-managed device bindings, see the
+[session broker](../design-docs/session-broker-experiment.md).

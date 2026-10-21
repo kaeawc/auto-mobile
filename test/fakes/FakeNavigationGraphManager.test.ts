@@ -20,7 +20,7 @@ describe("FakeNavigationGraphManager graph-update listeners", () => {
     });
 
     expect(fake.getCurrentScreen()).toBe("Home");
-    expect(fake.exportGraph().nodes).toEqual([
+    expect((await fake.exportGraph()).nodes).toEqual([
       { screenName: "Home", firstSeenAt: 123, lastSeenAt: 123, visitCount: 1 },
     ]);
     expect(write).toBeDefined();
@@ -31,8 +31,12 @@ describe("FakeNavigationGraphManager graph-update listeners", () => {
   test("notifies every registered listener on a graph update", () => {
     const fake = new FakeNavigationGraphManager();
     const calls: string[] = [];
-    fake.setGraphUpdateListener(() => calls.push("first"));
-    fake.setGraphUpdateListener(() => calls.push("second"));
+    fake.setGraphUpdateListener(() => {
+      calls.push("first");
+    });
+    fake.setGraphUpdateListener(() => {
+      calls.push("second");
+    });
 
     fake.setCurrentApp("com.test.app");
 
@@ -42,7 +46,9 @@ describe("FakeNavigationGraphManager graph-update listeners", () => {
   test("clears all listeners when set to null", () => {
     const fake = new FakeNavigationGraphManager();
     const calls: string[] = [];
-    fake.setGraphUpdateListener(() => calls.push("first"));
+    fake.setGraphUpdateListener(() => {
+      calls.push("first");
+    });
     fake.setGraphUpdateListener(null);
 
     fake.setCurrentApp("com.test.app");

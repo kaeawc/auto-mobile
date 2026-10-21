@@ -73,6 +73,16 @@ final class PrototypeSpecDecodingTests: XCTestCase {
         let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
         XCTAssertGreaterThan(files.count, 20)
+        let names = Set(files.map(\.lastPathComponent))
+        for name in [
+            "text-spans",
+            "text-spans-max",
+            "text-spans-tappable",
+            "text-spans-placeholders",
+            "text-spans-plain-text",
+        ] {
+            XCTAssertTrue(names.contains("\(name).json"))
+        }
         for file in files {
             XCTAssertNoThrow(
                 try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: file)),
@@ -128,7 +138,7 @@ final class PrototypeSpecDecodingTests: XCTestCase {
         XCTAssertEqual(children.map(\.type), ["switch", "checkbox", "button", "text", "bottomSheet"])
         XCTAssertEqual(children[0].label, "Wi-Fi")
         XCTAssertEqual(children[2].variant, "outlined")
-        XCTAssertEqual(children[2].onTap?.last?.by, 2)
+        XCTAssertEqual(children[2].onTap?.last?.incrementAmount, 2)
         XCTAssertEqual(children[3].visibleWhen, .notEquals(key: "n", value: .number(0)))
         XCTAssertEqual(children[4].detents, [.half, .points(120), .full])
     }

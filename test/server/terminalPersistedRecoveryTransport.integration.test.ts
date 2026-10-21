@@ -1,14 +1,19 @@
+import { toolText } from "../helpers/toolResponse";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
-import type { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool } from "../../src/daemon/devicePool";
+import type { Platform } from "../../src/models";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
   SessionManager,
   SessionRecoveryIdentityLossError,
-  type SessionDeviceAssigner,
+  type SessionRecoveryTarget,
 } from "../../src/daemon/sessionManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -19,6 +24,41 @@ const SESSION_UUID = "persisted-target-busy-session";
 const TERMINAL_DIAGNOSTIC =
   `Session ${SESSION_UUID} is terminal after identity-recovery-target-busy and cannot be reused. ` +
   "Acquire a new device with getAndroid or getApple.";
+
+/** A real pool whose recovery assignment is always refused as target-busy. */
+class TargetBusyDevicePool extends DevicePool {
+  assignments = 0;
+
+  override async assignDeviceToSession(
+    sessionUuid: string,
+    _platform?: Platform,
+    target?: SessionRecoveryTarget,
+  ): Promise<string> {
+    this.assignments += 1;
+    if (!target) {
+      throw new Error("persisted recovery target was not supplied");
+    }
+    throw new SessionRecoveryIdentityLossError(sessionUuid, target, "target-busy");
+  }
+
+  override assertSessionReadyForAutomation(): void {}
+
+  override resolveAutolockSessionForMcpSession(): string | undefined {
+    return undefined;
+  }
+
+  override isSessionOwnedByOtherConnection(): boolean {
+    return false;
+  }
+
+  override getDeviceIncarnation(): number | undefined {
+    return 0;
+  }
+
+  override bumpDeviceIncarnation(): boolean {
+    return false;
+  }
+}
 
 describe("terminal persisted recovery MCP transport", () => {
   let fixture: McpTestFixture | undefined;
@@ -41,6 +81,7 @@ describe("terminal persisted recovery MCP transport", () => {
       session_uuid: SESSION_UUID,
       device_id: "emulator-5554",
       stable_device_id: "Pixel_8_API_35",
+      stable_identity_generation: 0,
       platform: "android",
       status: "expired",
       source: "session-manager",
@@ -55,50 +96,44 @@ describe("terminal persisted recovery MCP transport", () => {
       session_timeout_ms: 10,
       heartbeat_timeout_ms: 5,
       has_received_heartbeat: 1,
+      activity_seq: 0,
+      heartbeat_timeout_source: null,
+      liveness_contract_generation: 0,
+      liveness_owner_token: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
       created_at: "2026-09-15T00:00:00.000Z",
       updated_at: "2026-09-15T00:00:00.000Z",
     };
-    const persistence: DeviceSessionPersistence = {
-      async getSession() {
-        return persisted;
-      },
-      async upsertActiveSession() {
-        throw new Error("target-busy recovery must not assign a sibling");
-      },
-      async recordActivity() {},
-      async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
-        persisted.status = status;
-        persisted.released_at_ms = releasedAtMs;
-        persisted.release_reason = releaseReason;
-      },
-    };
+    const persistence: DeviceSessionPersistence = Object.assign(
+      new FakeDeviceSessionPersistence(),
+      {
+        recordLivenessOwnership: async () => {},
+        replaceLivenessOwnership: async () => {},
+        claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {
+          throw new Error("target-busy recovery must not assign a sibling");
+        },
+        async recordActivity() {},
+        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          persisted.status = status;
+          persisted.released_at_ms = releasedAtMs;
+          persisted.release_reason = releaseReason;
+        },
+      } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+    );
     sessionManager = new SessionManager(timer, persistence);
-    let assignments = 0;
-    const assigner: SessionDeviceAssigner = {
-      async assignDeviceToSession(sessionUuid, _platform, target): Promise<string> {
-        assignments += 1;
-        if (!target) {
-          throw new Error("persisted recovery target was not supplied");
-        }
-        throw new SessionRecoveryIdentityLossError(sessionUuid, target, "target-busy");
-      },
-    };
-    const devicePool = {
-      ...assigner,
-      assertSessionReadyForAutomation() {},
-      resolveAutolockSessionForMcpSession() {
-        return undefined;
-      },
-      isSessionOwnedByOtherConnection() {
-        return false;
-      },
-      getDeviceIncarnation() {
-        return 0;
-      },
-      bumpDeviceIncarnation() {
-        return 0;
-      },
-    } as unknown as DevicePool;
+    const devicePool = new TargetBusyDevicePool(
+      createDevicePoolDependencies(sessionManager, "terminal-persisted-recovery", {
+        timer,
+        deviceManager: new FakeDeviceUtils(),
+      }),
+    );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
     ToolRegistry.registerDeviceAware(
       TOOL,
@@ -119,10 +154,8 @@ describe("terminal persisted recovery MCP transport", () => {
       arguments: { sessionUuid: SESSION_UUID, platform: "android" },
     });
     expect(blockedRecovery).toMatchObject({ isError: true });
-    expect(blockedRecovery.content[0].text).toContain(
-      `Cannot safely recover session ${SESSION_UUID}`,
-    );
-    expect(assignments).toBe(1);
+    expect(toolText(blockedRecovery)).toContain(`Cannot safely recover session ${SESSION_UUID}`);
+    expect(devicePool.assignments).toBe(1);
     expect(persisted.release_reason).toBe("identity-recovery-target-busy");
 
     const second: any = await fixture.client.callTool({
@@ -141,7 +174,7 @@ describe("terminal persisted recovery MCP transport", () => {
         nextAction: "acquire_new_session",
       },
     });
-    expect(assignments).toBe(1);
+    expect(devicePool.assignments).toBe(1);
   });
 });
 

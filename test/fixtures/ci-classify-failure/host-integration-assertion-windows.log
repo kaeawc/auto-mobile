@@ -1,0 +1,35 @@
+2026-10-15T14:33:53.3808441Z 243 |             key: "global",
+2026-10-15T14:33:53.3808508Z 244 |             config_json: json,
+2026-10-15T14:33:53.3808603Z 245 |             updated_at: new Date().toISOString(),
+2026-10-15T14:33:53.3808663Z 246 |           })
+2026-10-15T14:33:53.3808726Z 247 |           .execute();
+2026-10-15T14:33:53.3808831Z 248 |         expect(await repo.getConfig()).toBeNull();
+2026-10-15T14:33:53.3808894Z                                              ^
+2026-10-15T14:33:53.3808971Z error: expect(received).toBeNull()
+2026-10-15T14:33:53.3808975Z 
+2026-10-15T14:33:53.3809035Z Received: {
+2026-10-15T14:33:53.3809101Z   includeAppData: true,
+2026-10-15T14:33:53.3809174Z   includeSettings: true,
+2026-10-15T14:33:53.3809240Z   useVmSnapshot: true,
+2026-10-15T14:33:53.3809309Z   strictBackupMode: false,
+2026-10-15T14:33:53.3809383Z   vmSnapshotTimeoutMs: 30000,
+2026-10-15T14:33:53.3809451Z   maxVmSnapshotsPerAvd: 3,
+2026-10-15T14:33:53.3809527Z   maxArchiveSizeMb: 100,
+2026-10-15T14:33:53.3809594Z }
+2026-10-15T14:33:53.3809597Z 
+2026-10-15T14:33:53.3809868Z       at <anonymous> (D:\a\auto-mobile\auto-mobile\test\db\keyedJsonConfigRepository.integration.test.ts:248:40)
+2026-10-15T14:33:53.3809871Z 
+2026-10-15T14:33:53.3829646Z ##[error]Received: {
+  includeAppData: true,
+  includeSettings: true,
+  useVmSnapshot: true,
+  strictBackupMode: false,
+  vmSnapshotTimeoutMs: 30000,
+  maxVmSnapshotsPerAvd: 3,
+  maxArchiveSizeMb: 100,
+}
+
+      at <anonymous> (D:\a\auto-mobile\auto-mobile\test\db\keyedJsonConfigRepository.integration.test.ts:248:40)
+2026-10-15T14:33:53.3835366Z (fail) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config {"defaultMode":42} [1.62ms]
+2026-10-15T14:33:53.3835602Z (pass) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config 42 [1.25ms]
+2026-10-15T14:33:53.3835811Z (pass) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config [] [1.25ms]

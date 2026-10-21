@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
 import {
   DevicePoolStats,
   handleDaemonRequest,
+  type DaemonMethodResult,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import {
@@ -26,9 +27,13 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import type { DeviceLeaseActivitySources } from "../../src/daemon/deviceLeaseActivity";
 import type { DeviceLeaseRelinquishPort } from "../../src/daemon/deviceLeaseActivitySources";
+
+afterEach(() => {
+  mock.restore();
+});
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -217,9 +222,10 @@ describe("handleDaemonRequest", () => {
             claimLivenessOwnership: true,
           }),
           {
-            ...state,
             isInitialized: () => true,
             getSessionManager: () => sessionManager,
+            getDevicePool: () => state.getDevicePool(),
+            getDeviceSessionRegistry: () => state.getDeviceSessionRegistry(),
             getDaemonInstance: () => "daemon-race",
           },
         );
@@ -262,11 +268,32 @@ describe("handleDaemonRequest", () => {
           "input/typeText.mode:append",
           "input/gestureStream",
           "daemon/registerSession",
-          // Advertised once the proxy acquires managed slots (#11173).
-          "managed-slots/v1",
-          "managed-slots/v1.deviceFamily",
         ],
       },
+    });
+  });
+
+  test("session broker mode advertises its contract and rejects legacy allocation before dispatch", async () => {
+    const state = Object.assign(
+      new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({
+          total: 0,
+          idle: 0,
+          assigned: 0,
+          error: 0,
+        }),
+      ),
+      { isSessionBrokerMode: () => true },
+    );
+    const capabilities = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+    expect(capabilities?.result?.capabilities).toContain("session-broker/v1");
+    expect(capabilities?.result?.capabilities).toContain("session-broker-export/v1");
+    expect(capabilities?.result?.capabilities).not.toContain("managed-slots/v1"); // Legacy capability is absent after upgrade.
+    // A provider that has not completed broker startup cannot grant a session.
+    expect(await handleDaemonRequest(buildRequest("daemon/prepareSession"), state)).toMatchObject({
+      success: false,
+      code: "session_broker_unavailable",
     });
   });
 
@@ -439,7 +466,9 @@ describe("handleDaemonRequest", () => {
       const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
       const state = new FakeDaemonState(sessionManager, devicePool);
       const sessionId = "liveness-owner-session";
-      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       const lastToolActivity = fakeTimer.now();
 
       await handleDaemonRequest(
@@ -560,7 +589,9 @@ describe("handleDaemonRequest", () => {
       });
 
     async function stateWithSession(): Promise<FakeDaemonState> {
-      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       return new FakeDaemonState(
         sessionManager,
         new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
@@ -708,7 +739,9 @@ describe("handleDaemonRequest", () => {
       });
 
     async function stateWithSession(): Promise<FakeDaemonState> {
-      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       return new FakeDaemonState(
         sessionManager,
         new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
@@ -849,12 +882,9 @@ describe("handleDaemonRequest", () => {
       sessionManager,
       new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
     );
-    const session = await sessionManager.createSession(
-      sessionId,
-      "emulator-5554",
-      "android",
-      60_000,
-    );
+    const session = await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     for (const [token, policy] of [
       ["keeper", "cli"],
       ["proxy", "heartbeat"],
@@ -926,34 +956,44 @@ describe("handleDaemonRequest", () => {
       daemon_session_id: "old-daemon",
       created_at_ms: 1,
       last_used_at_ms: 20,
+      activity_seq: 0,
       expires_at_ms: 30,
       released_at_ms: 25,
       release_reason: "daemon-restart",
       session_timeout_ms: 10_000,
       heartbeat_timeout_ms: 5_000,
       has_received_heartbeat: 1,
+      stable_identity_generation: 0,
+      liveness_contract_generation: 0,
+      heartbeat_timeout_source: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
+      liveness_owner_token: null,
       created_at: "2026-09-14T00:00:00.000Z",
       updated_at: "2026-09-14T00:00:00.000Z",
     };
-    const persistence: DeviceSessionPersistence = {
-      async getSession() {
-        return persisted;
-      },
-      async upsertActiveSession() {},
-      async recordActivity() {},
-      async markReleased() {},
-    };
+    const persistence: DeviceSessionPersistence = Object.assign(
+      new FakeDeviceSessionPersistence(),
+      {
+        recordLivenessOwnership: async () => {},
+        replaceLivenessOwnership: async () => {},
+        claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+    );
     const restartedManager = new SessionManager(fakeTimer, persistence);
     const recoverer: SessionDeviceAssigner = {
       async assignDeviceToSession(recoveredSessionId, _platform, target): Promise<string> {
-        await restartedManager.createSession(
-          recoveredSessionId,
-          "emulator-5560",
-          "android",
-          undefined,
-          undefined,
-          target?.stableDeviceId,
-        );
+        await restartedManager.createSession(recoveredSessionId, "emulator-5560", "android", {
+          stableDeviceId: target?.stableDeviceId,
+        });
         return "emulator-5560";
       },
     };
@@ -1052,7 +1092,7 @@ describe("handleDaemonRequest", () => {
         getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getDaemonInstance: () => "daemon-not-found",
       };
-      const legacy = {
+      const legacy: DaemonMethodResult = {
         success: false,
         error: `Session not found: ${sessionId}`,
         code: DAEMON_SESSION_NOT_FOUND_CODE,
@@ -1444,7 +1484,7 @@ describe("handleDaemonRequest", () => {
       name: "emulator-5600",
       platform: "android",
       sessionId: "session-unpublished",
-      status: "assigned",
+      status: "busy",
       lastUsedAt: 0,
       assignmentCount: 1,
       errorCount: 0,

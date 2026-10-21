@@ -1,10 +1,8 @@
 import { z } from "zod/v4";
-import { withJsonSchemaOverride } from "./toolSchemaHelpers";
+import { withJsonSchemaOverride } from "../utils/schemaHelpers";
 import {
   normalizeSharedStorageNamespace,
   sharedStorageFileSchema,
-  type SharedStorageFileInput,
-  type SharedStorageIndexingResult,
   type StagedSharedStorageFile,
 } from "./sharedStorageContract";
 
@@ -15,13 +13,7 @@ import {
  * access when that session is missing or no longer owns a device, exactly like
  * the session-log family (#7006).
  */
-export interface StageSessionDownloadsArgs {
-  sessionUuid: string;
-  directory: string;
-  reset?: boolean;
-  indexMedia?: boolean;
-  files: SharedStorageFileInput[];
-}
+export type StageSessionDownloadsArgs = z.output<typeof stageSessionDownloadsSchema>;
 
 /** A refusal the client sees before any device is touched. */
 export type StageSessionDownloadsRefusalCode = "SESSION_NOT_BOUND" | "SESSION_NOT_ACTIVE";
@@ -52,7 +44,7 @@ export type StageSessionDownloadsResult =
   | StageSessionDownloadsSuccess
   | StageSessionDownloadsUnavailable;
 
-export type { SharedStorageIndexingResult, StagedSharedStorageFile };
+export type { StagedSharedStorageFile };
 
 // JSON-Schema patterns that advertise the runtime path/source refinements to
 // clients generating calls from `tools/list`. Without them the served schema

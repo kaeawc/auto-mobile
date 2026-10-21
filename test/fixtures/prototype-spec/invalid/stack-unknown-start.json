@@ -1,0 +1,73 @@
+{
+  "spec": {
+    "id": "stack-demo",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "missing",
+      "screens": {
+        "home": {
+          "type": "column",
+          "children": [
+            {
+              "type": "button",
+              "label": "push",
+              "onTap": [
+                {
+                  "type": "push",
+                  "stack": "nav",
+                  "screen": "detail"
+                }
+              ]
+            },
+            {
+              "type": "button",
+              "label": "pop",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            },
+            {
+              "type": "button",
+              "label": "popToRoot",
+              "onTap": [
+                {
+                  "type": "popToRoot",
+                  "stack": "nav"
+                }
+              ]
+            },
+            {
+              "type": "button",
+              "label": "replace",
+              "onTap": [
+                {
+                  "type": "replace",
+                  "stack": "nav",
+                  "screen": "detail"
+                }
+              ]
+            }
+          ]
+        },
+        "detail": {
+          "type": "text",
+          "text": "Screen"
+        },
+        "third": {
+          "type": "text",
+          "text": "Third"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.start"
+}

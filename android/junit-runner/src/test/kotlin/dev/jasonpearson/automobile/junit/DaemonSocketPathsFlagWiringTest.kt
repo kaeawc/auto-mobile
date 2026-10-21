@@ -16,6 +16,9 @@ class DaemonSocketPathsFlagWiringTest {
       "automobile.daemon.no.ui.perf.mode",
       "automobile.daemon.no.navigation.screenshots",
       "automobile.daemon.no.waitfor.polling.overhead",
+      "automobile.daemon.no.include.not.important.views",
+      "automobile.daemon.no.report.view.ids",
+      "automobile.daemon.no.retrieve.interactive.windows",
       "automobile.daemon.package.version",
       "automobile.daemon.startup.timeout.ms",
     )
@@ -34,7 +37,7 @@ class DaemonSocketPathsFlagWiringTest {
 
   @Test
   fun `buildDaemonStartCommand omits flags when no properties set`() {
-    val command = DaemonSocketPaths.buildDaemonStartCommand()
+    val command = DaemonLaunchCommands.buildDaemonStartCommand()
 
     assertFalse(
       "should not contain --dismiss-keyboard-after-input",
@@ -61,9 +64,9 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.startup.timeout.ms", "not-a-number")
     SystemPropertyCache.clear()
 
-    assertEquals(30_000L, DaemonSocketPaths.daemonStartTimeoutMs())
-    assertEquals(140_000L, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = false))
-    assertEquals(152_000L, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true))
+    assertEquals(30_000L, DaemonLaunchTimeouts.daemonStartTimeoutMs())
+    assertEquals(140_000L, DaemonLaunchTimeouts.daemonLauncherTimeoutMs(isRestart = false))
+    assertEquals(152_000L, DaemonLaunchTimeouts.daemonLauncherTimeoutMs(isRestart = true))
   }
 
   @Test
@@ -71,8 +74,8 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.startup.timeout.ms", "120000")
     SystemPropertyCache.clear()
 
-    assertEquals(410_000L, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = false))
-    assertEquals(422_000L, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true))
+    assertEquals(410_000L, DaemonLaunchTimeouts.daemonLauncherTimeoutMs(isRestart = false))
+    assertEquals(422_000L, DaemonLaunchTimeouts.daemonLauncherTimeoutMs(isRestart = true))
   }
 
   @Test
@@ -80,8 +83,8 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.startup.timeout.ms", Long.MAX_VALUE.toString())
     SystemPropertyCache.clear()
 
-    assertEquals(Long.MAX_VALUE, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = false))
-    assertEquals(Long.MAX_VALUE, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true))
+    assertEquals(Long.MAX_VALUE, DaemonLaunchTimeouts.daemonLauncherTimeoutMs(isRestart = false))
+    assertEquals(Long.MAX_VALUE, DaemonLaunchTimeouts.daemonLauncherTimeoutMs(isRestart = true))
   }
 
   @Test
@@ -89,7 +92,7 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.dismiss.keyboard.after.input", "true")
     SystemPropertyCache.clear()
 
-    val command = DaemonSocketPaths.buildDaemonStartCommand()
+    val command = DaemonLaunchCommands.buildDaemonStartCommand()
 
     assertTrue(
       "should contain --dismiss-keyboard-after-input",
@@ -102,7 +105,7 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.no.ui.perf.mode", "true")
     SystemPropertyCache.clear()
 
-    val command = DaemonSocketPaths.buildDaemonStartCommand()
+    val command = DaemonLaunchCommands.buildDaemonStartCommand()
 
     assertTrue(
       "should contain --no-ui-perf-mode",
@@ -115,7 +118,7 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.no.navigation.screenshots", "true")
     SystemPropertyCache.clear()
 
-    val command = DaemonSocketPaths.buildDaemonStartCommand()
+    val command = DaemonLaunchCommands.buildDaemonStartCommand()
 
     assertTrue(
       "should contain --no-navigation-screenshots",
@@ -128,12 +131,91 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.no.waitfor.polling.overhead", "true")
     SystemPropertyCache.clear()
 
-    val command = DaemonSocketPaths.buildDaemonStartCommand()
+    val command = DaemonLaunchCommands.buildDaemonStartCommand()
 
     assertTrue(
       "should contain --no-waitfor-polling-overhead",
       command.contains("--no-waitfor-polling-overhead"),
     )
+  }
+
+  @Test
+  fun `buildDaemonStartCommand forwards each enabled flag independently`() {
+    val flagPairs =
+      listOf(
+        "automobile.daemon.dismiss.keyboard.after.input" to "--dismiss-keyboard-after-input",
+        "automobile.daemon.no.ui.perf.mode" to "--no-ui-perf-mode",
+        "automobile.daemon.no.navigation.screenshots" to "--no-navigation-screenshots",
+        "automobile.daemon.no.waitfor.polling.overhead" to "--no-waitfor-polling-overhead",
+        "automobile.daemon.no.include.not.important.views" to "--no-include-not-important-views",
+        "automobile.daemon.no.report.view.ids" to "--no-report-view-ids",
+        "automobile.daemon.no.retrieve.interactive.windows" to "--no-retrieve-interactive-windows",
+      )
+    val allFlags = flagPairs.map { it.second }
+
+    flagPairs.forEach { (property, flag) ->
+      flagProperties.forEach { System.clearProperty(it) }
+      SystemPropertyCache.clear()
+      System.setProperty(property, "true")
+      SystemPropertyCache.clear()
+
+      val command = DaemonLaunchCommands.buildDaemonStartCommand()
+
+      assertEquals(listOf(flag), command.filter { it in allFlags })
+    }
+  }
+
+  @Test
+  fun `boolean flag property parses false and uppercase TRUE`() {
+    val property = "automobile.daemon.no.ui.perf.mode"
+    System.setProperty(property, "false")
+    SystemPropertyCache.clear()
+    assertFalse(DaemonLaunchCommands.buildDaemonStartCommand().contains("--no-ui-perf-mode"))
+
+    System.setProperty(property, "TRUE")
+    SystemPropertyCache.clear()
+    assertTrue(DaemonLaunchCommands.buildDaemonStartCommand().contains("--no-ui-perf-mode"))
+  }
+
+  @Test
+  fun `buildDaemonStartCommand appends all seven flags in order`() {
+    val expectedFlags =
+      listOf(
+        "--dismiss-keyboard-after-input",
+        "--no-ui-perf-mode",
+        "--no-navigation-screenshots",
+        "--no-waitfor-polling-overhead",
+        "--no-include-not-important-views",
+        "--no-report-view-ids",
+        "--no-retrieve-interactive-windows",
+      )
+    flagProperties.take(7).forEach { System.setProperty(it, "true") }
+    SystemPropertyCache.clear()
+
+    val command = DaemonLaunchCommands.buildDaemonStartCommand()
+
+    assertEquals(expectedFlags, command.takeLast(7))
+  }
+
+  @Test
+  fun `buildDaemonRestartCommand forwards all seven flags`() {
+    val expectedFlags =
+      listOf(
+        "--dismiss-keyboard-after-input",
+        "--no-ui-perf-mode",
+        "--no-navigation-screenshots",
+        "--no-waitfor-polling-overhead",
+        "--no-include-not-important-views",
+        "--no-report-view-ids",
+        "--no-retrieve-interactive-windows",
+      )
+    flagProperties.take(7).forEach { System.setProperty(it, "true") }
+    SystemPropertyCache.clear()
+
+    val command = DaemonLaunchCommands.buildDaemonRestartCommand()
+
+    assertEquals(expectedFlags, command.takeLast(7))
+    assertTrue(command.contains("restart"))
   }
 
   @Test
@@ -144,7 +226,7 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.no.waitfor.polling.overhead", "true")
     SystemPropertyCache.clear()
 
-    val command = DaemonSocketPaths.buildDaemonStartCommand()
+    val command = DaemonLaunchCommands.buildDaemonStartCommand()
 
     assertTrue(command.contains("--dismiss-keyboard-after-input"))
     assertTrue(command.contains("--no-ui-perf-mode"))
@@ -160,7 +242,7 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.no.waitfor.polling.overhead", "false")
     SystemPropertyCache.clear()
 
-    val command = DaemonSocketPaths.buildDaemonStartCommand()
+    val command = DaemonLaunchCommands.buildDaemonStartCommand()
 
     assertFalse(command.contains("--dismiss-keyboard-after-input"))
     assertFalse(command.contains("--no-ui-perf-mode"))
@@ -173,7 +255,7 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.dismiss.keyboard.after.input", "true")
     SystemPropertyCache.clear()
 
-    val command = DaemonSocketPaths.buildDaemonRestartCommand()
+    val command = DaemonLaunchCommands.buildDaemonRestartCommand()
 
     assertTrue(command.contains("--dismiss-keyboard-after-input"))
     assertTrue(
@@ -184,7 +266,7 @@ class DaemonSocketPathsFlagWiringTest {
 
   @Test
   fun `bunx package command pins configured AutoMobile version`() {
-    val command = DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "0.0.32")
+    val command = DaemonLaunchCommands.buildPackageDaemonCommand("bunx", "start", "0.0.32")
 
     assertEquals(
       listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
@@ -194,7 +276,7 @@ class DaemonSocketPathsFlagWiringTest {
 
   @Test
   fun `npx package command pins configured AutoMobile version with yes flag`() {
-    val command = DaemonSocketPaths.buildPackageDaemonCommand("npx", "restart", "0.0.32")
+    val command = DaemonLaunchCommands.buildPackageDaemonCommand("npx", "restart", "0.0.32")
 
     assertEquals(
       listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "restart"),
@@ -205,7 +287,7 @@ class DaemonSocketPathsFlagWiringTest {
   @Test
   fun `npx command detection handles resolved executable paths`() {
     val command =
-      DaemonSocketPaths.buildPackageDaemonCommand("/usr/local/bin/npx", "start", "0.0.32")
+      DaemonLaunchCommands.buildPackageDaemonCommand("/usr/local/bin/npx", "start", "0.0.32")
 
     assertEquals(
       listOf("/usr/local/bin/npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
@@ -218,7 +300,7 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.package.version", " 0.0.32 ")
     SystemPropertyCache.clear()
 
-    val command = DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start")
+    val command = DaemonLaunchCommands.buildPackageDaemonCommand("bunx", "start")
 
     assertEquals(
       listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
@@ -230,15 +312,15 @@ class DaemonSocketPathsFlagWiringTest {
   fun `package command does not fall back to latest when version is absent`() {
     assertNull(
       "blank versions should not produce a package command",
-      DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", " "),
+      DaemonLaunchCommands.buildPackageDaemonCommand("bunx", "start", " "),
     )
     assertNull(
       "unknown versions should not produce a package command",
-      DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "unknown"),
+      DaemonLaunchCommands.buildPackageDaemonCommand("bunx", "start", "unknown"),
     )
     assertNull(
       "latest should not be used as a daemon package version",
-      DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "latest"),
+      DaemonLaunchCommands.buildPackageDaemonCommand("bunx", "start", "latest"),
     )
   }
 }

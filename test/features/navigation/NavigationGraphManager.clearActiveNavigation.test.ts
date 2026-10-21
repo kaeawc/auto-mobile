@@ -26,7 +26,7 @@ describe("NavigationGraphManager.clearCurrentGraph active navigation", () => {
     db = await createTestDatabase({ foreignKeys: true });
     manager = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
     );
     TelemetryRecorder.resetInstance();
     telemetrySpy = spyOn(

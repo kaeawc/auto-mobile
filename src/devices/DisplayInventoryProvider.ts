@@ -1,6 +1,6 @@
 import type { BootedDevice } from "../models";
 import { displayInventoryOutcome, type DisplayInventoryOutcome } from "../models/DeviceInfo";
-import type { DeviceDisplays } from "../models/DisplayPanel";
+import type { DeviceDisplays, DisplayPanel } from "../models/DisplayPanel";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { readAndroidDeviceDisplaysChecked } from "../utils/android-cmdline-tools/AndroidDisplayInventory";
@@ -98,6 +98,12 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
     return entry;
   }
 
+  /** Settled Android inventory only; never starts or waits for a read. */
+  cachedPanels(deviceId: string): readonly DisplayPanel[] | undefined {
+    const entry = this.entries.get(`android:${deviceId}`);
+    return entry && !entry.pending ? entry.displays?.panels : undefined;
+  }
+
   invalidate(deviceId: string): void {
     for (const key of this.entries.keys()) {
       if (key.endsWith(`:${deviceId}`)) {
@@ -156,7 +162,7 @@ export function createDisplayInventoryProvider(
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
   simctl: Pick<SimCtlClient, "readDeviceDisplays"> = new SimCtlClient(null),
   timer: Pick<Timer, "now"> = defaultTimer,
-): DisplayInventoryProvider {
+): CachingDisplayInventoryProvider {
   return new CachingDisplayInventoryProvider(
     {
       read: (device) => readAndroidDeviceDisplaysChecked(adbFactory.create(device)),

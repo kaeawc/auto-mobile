@@ -1,13 +1,12 @@
+import { makePool } from "../helpers/makePool";
+import { statusOf } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
@@ -28,14 +27,7 @@ for (const criteria of [false, true]) {
         platform: iosIds.includes(deviceId) ? ("ios" as const) : ("android" as const),
       }));
       manager.bootedDevices = devices;
-      pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "allocation-deadlock-test", {
-          timer,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-        }),
-      );
+      pool = makePool(sessions, "allocation-deadlock-test", { timer, deviceManager: manager });
       await pool.initializeWithDevices(devices);
     };
 
@@ -86,8 +78,8 @@ for (const criteria of [false, true]) {
 
     test("issue repro: the later of two cross-held two-device plans fails fast naming the devices", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
 
       const first = observe(["s1", "s1:B"]);
       await drainUntilQuiescent(timer);
@@ -121,8 +113,12 @@ for (const criteria of [false, true]) {
 
     test("a plan waiting on a device held by a session with no waiting request keeps waiting", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("other-client", "d2", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "other-client",
+        deviceId: "d2",
+        platform: "android",
+      });
 
       const plan = observe(["s1", "s1:B"], 8_000);
       await drainUntilQuiescent(timer);
@@ -137,9 +133,13 @@ for (const criteria of [false, true]) {
 
     test("a would-be cycle with a releasable device is not reported as a deadlock", async () => {
       await setUp(["d1", "d2", "d3"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
-      await pool.bindOrReuseDeviceSession("other-client", "d3", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "other-client",
+        deviceId: "d3",
+        platform: "android",
+      });
 
       const first = observe(["s1", "s1:B"], 8_000);
       await drainUntilQuiescent(timer);
@@ -161,8 +161,8 @@ for (const criteria of [false, true]) {
 
     test("claims of one plan counting on a single idle device deadlock with a plan queued behind it", async () => {
       await setUp(["d1", "d2", "d3"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
 
       // The first plan needs two of d2/d3 but only d3 is idle; the second is
       // queued behind it while holding d2.
@@ -193,8 +193,8 @@ for (const criteria of [false, true]) {
 
     test("a session with two waiting plans pins its device for both, naming each in the cycle", async () => {
       await setUp(["d1", "d2"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
 
       const first = observe(["s1", "s1:B"]);
       await drainUntilQuiescent(timer);
@@ -216,9 +216,9 @@ for (const criteria of [false, true]) {
 
     test("a cycle across three sessions fails only its most recently queued plan", async () => {
       await setUp(["d1", "d2", "d3"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
-      await pool.bindOrReuseDeviceSession("s3", "d3", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s3", deviceId: "d3", platform: "android" });
 
       const first = observe(["s1", "s1:B"]);
       await drainUntilQuiescent(timer);
@@ -249,8 +249,8 @@ for (const criteria of [false, true]) {
 
     test("two plans that each need two devices but share one idle device deadlock", async () => {
       await setUp(["d1", "d2", "d3"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
 
       const first = observe(["s1", "s1:B", "s1:C"]);
       await drainUntilQuiescent(timer);
@@ -272,9 +272,9 @@ for (const criteria of [false, true]) {
 
     test("an errored matching device is not supply that could break a cycle", async () => {
       await setUp(["d1", "d2", "d3"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
-      while (pool.getDevice("d3")?.status !== "error") {
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
+      while (statusOf(pool.getDevice("d3")!) !== "error") {
         pool.recordDeviceError("d3");
       }
 
@@ -298,9 +298,9 @@ for (const criteria of [false, true]) {
 
     test("a session that gains a device after its plan queued pins it for the cycle", async () => {
       await setUp(["d1", "d2", "d3"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("x", "d2", "android");
-      await pool.bindOrReuseDeviceSession("y", "d3", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "x", deviceId: "d2", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "y", deviceId: "d3", platform: "android" });
 
       // The first plan needs both d2 and d3; the second queues before s2 holds d2.
       const first = observe(["s1", "s1:B", "s1:C"], 8_000);
@@ -308,7 +308,7 @@ for (const criteria of [false, true]) {
       const second = observe(["s2", "s2:B"], 8_000);
       await drainUntilQuiescent(timer);
       await release("x", "d2");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
       await drainUntilQuiescent(timer);
       expect(first.isSettled()).toBe(false);
 
@@ -330,8 +330,8 @@ for (const criteria of [false, true]) {
 
     test("a claim whose only candidate is pinned deadlocks despite an idle device of another platform", async () => {
       await setUp(["d1", "d2", "ios-1"], ["ios-1"]);
-      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
-      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+      await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: "d1", platform: "android" });
+      await pool.bindOrReuseDeviceSession({ sessionId: "s2", deviceId: "d2", platform: "android" });
 
       const first = observe(["s1", "s1:B"]);
       await drainUntilQuiescent(timer);

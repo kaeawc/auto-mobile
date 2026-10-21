@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { nestedElementContainerSchema } from "../../../../src/server/elementSelectorSchemas";
+import { nestedElementContainerSchema } from "../../../../src/models/elementSelectorSchemas";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";
@@ -38,13 +38,13 @@ const snapshot = {
   id: "widgets-capture",
   nodes: new SearchableHierarchy().project(observation.viewHierarchy!),
 };
-function scope(query = focus) {
+function scope(query: Parameters<ElementResolver["resolve"]>[1] = focus) {
   return applyObserveScopeExperiments(
     observation,
     buildObserveScopeConfig(flags, { focus: query }),
   );
 }
-function resolve(query = focus) {
+function resolve(query: Parameters<ElementResolver["resolve"]>[1] = focus) {
   return new ElementResolver().resolve(snapshot, query, { action: "inspect" });
 }
 
@@ -89,7 +89,7 @@ describe("nested observe subtree scope", () => {
   test("selects the indexed repeated row's child and reports outer-to-leaf counts", () => {
     const result = scope();
     const chosen = resolve().chosen!;
-    expect(result.viewHierarchy?.hierarchy.node).toEqual([chosen.source]);
+    expect<unknown>(result.viewHierarchy?.hierarchy.node).toEqual([chosen.source]);
     expect(snapshot.nodes[chosen.parentIndex!].label).toBe("Battery");
     expect(
       result.observeScope?.focus?.chain?.map(({ selector, matchCount }) => ({
@@ -155,7 +155,7 @@ describe("nested observe subtree scope", () => {
       matched: false,
       error: "Target not found within container",
     });
-    expect(scope(query).viewHierarchy?.hierarchy.node).toEqual([]);
+    expect<unknown>(scope(query).viewHierarchy?.hierarchy.node).toEqual([]);
   });
 
   test("unique rejects an ambiguous inner level without changing its message", () => {
@@ -171,7 +171,7 @@ describe("nested observe subtree scope", () => {
   });
 
   test("scope chain and structured failure survive observe wire serialization", () => {
-    const render = (query: typeof focus) =>
+    const render = (query: Parameters<ElementResolver["resolve"]>[1]) =>
       finalizeToolResponse(createStructuredToolResponse(observation), {
         name: "observe",
         args: { project: "full", scope: { focus: query } },
@@ -236,11 +236,7 @@ describe("nested observe subtree scope", () => {
         timeoutMs: 300,
         settled: { quietPeriodMs: 500 },
       },
-      undefined,
-      true,
-      timer,
-      "android",
-      "none",
+      { skipBackStack: true, timer, platform: "android", screenshot: "none" },
     );
     expect(outcome.matched).toBe(false);
     expect(outcome.containerFailure).toMatchObject({
@@ -258,11 +254,7 @@ describe("nested observe subtree scope", () => {
     const outcome = await waitForObservation(
       screen,
       { elementId: focus.elementId, container: { elementId: "missing" }, timeoutMs: 0 },
-      undefined,
-      true,
-      timer,
-      "android",
-      "none",
+      { skipBackStack: true, timer, platform: "android", screenshot: "none" },
     );
     expect(outcome.containerFailure).toMatchObject({ level: 1, reason: "not-found" });
   });
@@ -276,17 +268,13 @@ describe("nested observe subtree scope", () => {
       const outcome = await waitForObservation(
         screen,
         {
-          ...(dsl ? { for: "appear" as const } : {}),
+          ...(dsl ? { for: "appear" as const } : { for: undefined }),
           elementId: focus.elementId,
           container: { elementId: "missing" },
           selectionStrategy: "unique",
           timeoutMs: 0,
         },
-        undefined,
-        true,
-        timer,
-        "android",
-        "none",
+        { skipBackStack: true, timer, platform: "android", screenshot: "none" },
       );
       expect(outcome.timedOut).toBe(true);
       expect(JSON.parse(JSON.stringify(outcome.containerFailure))).toEqual({
@@ -301,6 +289,7 @@ describe("nested observe subtree scope", () => {
 
 // Captured by restoring origin/main's schema, scope transform, and model. Hashes
 // pin the complete serialized observation, including absence of new metadata.
+// Layout-warning portions regenerated from the captured hierarchy (#13955).
 const mainTables = {
   legacy: [
     {
@@ -311,7 +300,7 @@ const mainTables = {
         resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -333,7 +322,7 @@ const mainTables = {
         text: "Battery",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -344,7 +333,7 @@ const mainTables = {
         resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -355,7 +344,7 @@ const mainTables = {
         resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -387,25 +376,25 @@ const mainTables = {
         text: " x ",
       },
       path: "anchor",
-      hash: "92fd88aecd19b4c2b646b52bcf73b72396c102aec05107df01bb8817610aa42d",
+      hash: "1331ac5e0f1e9622474928539abb75925096fd18b8a1f395922d84738bb546f3",
     },
     {
       input: {},
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: true,
       parsed: true,
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: false,
       parsed: false,
       path: "off",
-      hash: "cca9a79b558cf28a2efb1a89994893791c60cbd11234e2d47f8de27dca5000d1",
+      hash: "6dc2d715c8cf7dad64a9dc0115c360b37ce15abda9465a897cacf851951f8b3a",
     },
     {
       input: {
@@ -422,7 +411,7 @@ const mainTables = {
         text: "Battery",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -432,7 +421,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -455,7 +444,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -493,7 +482,7 @@ const mainTables = {
         resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -505,7 +494,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -515,7 +504,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -523,7 +512,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -534,7 +523,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -546,7 +535,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
   ],
 };

@@ -1,6 +1,11 @@
+import { wireHierarchyFrom } from "../../helpers/androidHierarchyConverter";
+import { createAndroidHierarchyConverter } from "../../helpers/androidHierarchyConverter";
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
+import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
+import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
 import {
-  AndroidDisplayReadError,
   ObservedAndroidDisplayCache,
   observedAndroidDisplay,
   observedIosDisplay,
@@ -11,13 +16,9 @@ import {
 } from "../../../src/features/observe/DisplayTransition";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
-import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../src/features/observe/android/types";
-import type { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+
+import type { AccessibilityHierarchy } from "../../../src/features/observe/android/types";
+import { makeViewHierarchyCtrlProxy } from "../../helpers/androidViewHierarchyClient";
 import type { XCTestHierarchy } from "../../../src/features/observe/ios/types";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
@@ -30,6 +31,8 @@ import { PinnedDisplayUnavailableError } from "../../../src/models/PinnedDisplay
 import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { createExecResult } from "../../../src/utils/execResult";
+import type { AdbCommandRunner } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
@@ -42,6 +45,7 @@ import {
   parseSimulatorDisplays,
   simulatorDeviceDisplays,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const ios: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "simulator" };
@@ -81,7 +85,7 @@ describe("Android observe disconnected fold panels", () => {
   async function observe(posture: keyof typeof captures, display: string) {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: captures[posture], stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(captures[posture], ""));
     const screen = new RealObserveScreen(
       device,
       new FakeAdbClientFactory(adb),
@@ -124,7 +128,7 @@ describe("Android observe disconnected fold panels", () => {
     "connected %s panel resolves to logical zero",
     async (posture) => {
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("cmd display get-displays", { stdout: captures[posture], stderr: "" });
+      adb.setCommandResponse("cmd display get-displays", createExecResult(captures[posture], ""));
       expect(
         await new ObservedAndroidDisplayCache(new FakeTimer()).logicalIdForPanel(
           device,
@@ -160,7 +164,7 @@ describe("Android display-list read failures", () => {
     const timer = new FakeTimer();
     const cache = new ObservedAndroidDisplayCache(timer);
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(coverDisplay, ""));
     const read = spyOn(adb, "executeCommand").mockImplementationOnce(() => {
       throw new Error("first read failed synchronously");
     });
@@ -200,7 +204,7 @@ describe("Android display-list read failures", () => {
       const timer = new FakeTimer();
       const cache = new ObservedAndroidDisplayCache(timer);
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+      adb.setCommandResponse("cmd display get-displays", createExecResult(coverDisplay, ""));
       const previous = await cache.resolve(device, adb);
       timer.advanceTime(mode === "expired" ? 5_000 : 1_000);
       const read = spyOn(adb, "executeCommand").mockRejectedValueOnce(new Error("timeout"));
@@ -209,7 +213,7 @@ describe("Android display-list read failures", () => {
         expect(failed).toEqual(previous);
         expect(failed).not.toBe(previous);
         expect(failed.display).not.toBe(previous.display);
-        adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+        adb.setCommandResponse("cmd display get-displays", createExecResult(innerDisplay, ""));
         expect((await cache.resolve(device, adb)).display.key).toBe("inner");
         expect(read).toHaveBeenCalledTimes(2);
       } finally {
@@ -222,9 +226,9 @@ describe("Android display-list read failures", () => {
     const timer = new FakeTimer();
     const cache = new ObservedAndroidDisplayCache(timer);
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(coverDisplay, ""));
     expect((await cache.resolve(device, adb)).display.key).toBe("cover");
-    adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(innerDisplay, ""));
     timer.advanceTime(4_999);
     expect((await cache.resolve(device, adb)).display.key).toBe("cover");
     expect(adb.getExecutedCommands()).toHaveLength(1);
@@ -238,13 +242,13 @@ describe("Android display-list read failures", () => {
     const owner = new ObservedAndroidDisplayCache(timer);
     const observer = new ObservedAndroidDisplayCache(timer, true);
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(coverDisplay, ""));
     const previous = await owner.resolve(device, adb);
     timer.advanceTime(1_000);
     const read = spyOn(adb, "executeCommand").mockRejectedValueOnce(new Error("timeout"));
     try {
       expect(await observer.resolve(device, adb, undefined, true)).toEqual(previous);
-      adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+      adb.setCommandResponse("cmd display get-displays", createExecResult(innerDisplay, ""));
       expect(await owner.resolve(device, adb)).toEqual(previous);
       expect(read).toHaveBeenCalledTimes(1);
       timer.advanceTime(4_000);
@@ -299,7 +303,7 @@ describe("Android display-list read failures", () => {
     "a successful display list lacking the requested panel still rejects with DisplaySelectionError: %s",
     async (stdout) => {
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("cmd display get-displays", { stdout, stderr: "" });
+      adb.setCommandResponse("cmd display get-displays", createExecResult(stdout, ""));
       const error = await new ObservedAndroidDisplayCache(new FakeTimer())
         .logicalIdForPanel(device, adb, "inner")
         .catch((error: unknown) => error);
@@ -349,7 +353,7 @@ describe("Android display-list read failures", () => {
 
   test("a genuinely absent panel is converted to PinnedDisplayUnavailableError", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(coverDisplay, ""));
     const error = await new ObservedAndroidDisplayCache(new FakeTimer())
       .logicalIdForPanel(device, adb, "inner")
       .catch((error: unknown) => error);
@@ -385,14 +389,14 @@ describe("observation display stamp", () => {
     const fixture = (name: string): string =>
       readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout: fixture("foldpf-print-states.txt"),
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state state", {
-      stdout: fixture("foldpf-6-fold-from-closed-base-while-override-state.txt"),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(fixture("foldpf-print-states.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(fixture("foldpf-6-fold-from-closed-base-while-override-state.txt"), ""),
+    );
     const device: BootedDevice = {
       ...android,
       deviceId: "foldpf-committed-posture",
@@ -422,10 +426,10 @@ describe("observation display stamp", () => {
       captureSequence: 23,
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
-    const converter = new CtrlProxyHierarchy({ timer } as HierarchyDelegateContext);
-    const client = {
+    const converter = createAndroidHierarchyConverter();
+    const client = makeViewHierarchyCtrlProxy({
       getAccessibilityHierarchy: async () => converter.convertToViewHierarchyResult(raw),
-    } as unknown as AndroidCtrlProxyClient;
+    });
     const hierarchy = new ViewHierarchy(
       device,
       new FakeAdbClientFactory(adb),
@@ -470,9 +474,10 @@ describe("observation display stamp", () => {
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
     const fakeClient = {
+      convertToViewHierarchyResult: convertIosHierarchy,
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
-    } as unknown as IOSCtrlProxyClient;
-    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
+    };
+    const getInstance = spyOnIosClientInstance(fakeClient);
     try {
       const hierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), undefined, timer);
       const screen = new RealObserveScreen(
@@ -499,10 +504,13 @@ describe("observation display stamp", () => {
   test("two Android multi-panel observations reuse the live display binding", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
+    );
     const device: BootedDevice = {
       ...android,
       deviceId: "foldable-cache",
@@ -573,9 +581,9 @@ describe("observation display stamp", () => {
         if (index === 1) {
           throw new Error("lookup failed");
         }
-        return { stdout: outputs[index] ?? "", stderr: "" };
+        return createExecResult(outputs[index] ?? "", "");
       },
-    } as unknown as FakeAdbExecutor;
+    } satisfies AdbCommandRunner;
     const cache = new ObservedAndroidDisplayCache(timer);
     try {
       const first = await cache.resolve(device, adb);
@@ -624,22 +632,28 @@ describe("observation display stamp", () => {
 
   test("Android foldable stamps display 0's physical panel and scopes its active window", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: [
-        'Display id 0: DisplayInfo{uniqueId "local:cover-physical" type INTERNAL, real 1080 x 2364}',
-        'Display id 3: DisplayInfo{uniqueId "local:inner-physical" type INTERNAL, real 2076 x 2152}',
-      ].join("\n"),
-      stderr: "",
-    });
-    adb.setCommandResponse("dumpsys activity activities", {
-      stdout: [
-        "Display #0 (activities from top to bottom):",
-        "  topResumedActivity=ActivityRecord{abc u0 com.cover/.Main t1}",
-        "Display #3 (activities from top to bottom):",
-        "  topResumedActivity=ActivityRecord{def u0 com.inner/.Main t2}",
-      ].join("\n"),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        [
+          'Display id 0: DisplayInfo{uniqueId "local:cover-physical" type INTERNAL, real 1080 x 2364}',
+          'Display id 3: DisplayInfo{uniqueId "local:inner-physical" type INTERNAL, real 2076 x 2152}',
+        ].join("\n"),
+        "",
+      ),
+    );
+    adb.setCommandResponse(
+      "dumpsys activity activities",
+      createExecResult(
+        [
+          "Display #0 (activities from top to bottom):",
+          "  topResumedActivity=ActivityRecord{abc u0 com.cover/.Main t1}",
+          "Display #3 (activities from top to bottom):",
+          "  topResumedActivity=ActivityRecord{def u0 com.inner/.Main t2}",
+        ].join("\n"),
+        "",
+      ),
+    );
     const device: BootedDevice = {
       ...android,
       displays: {
@@ -727,4 +741,210 @@ describe("observation display stamp", () => {
       posture: "opened",
     });
   });
+});
+
+const fingerprintInventory = parseAndroidDeviceDisplays(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-open-surfaceflinger.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-open-displays.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-print-states.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+)!;
+
+describe("panel fingerprint routing", () => {
+  const fold = { ...android, deviceId: "fingerprint-routing", displays: fingerprintInventory };
+  const coverSize = { width: 1080, height: 2364 };
+  test("resolves a native cover size without probing and gives unique id precedence", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    const adb = new FakeAdbExecutor();
+    const cover = await cache.panelForLogicalId(
+      fold,
+      adb,
+      0,
+      undefined,
+      { panelFingerprint: coverSize },
+      false,
+    );
+    expect(cover?.key).toBe("4619827551948147201");
+    const inner = await cache.panelForLogicalId(
+      fold,
+      adb,
+      0,
+      undefined,
+      { panelUniqueId: "local:4619827259835644672", panelFingerprint: coverSize },
+      false,
+    );
+    expect(inner?.key).toBe("4619827259835644672");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  const displayList = readFileSync(
+    new URL("../../fixtures/android-fold-displays/fold-open-get-displays.txt", import.meta.url),
+    "utf8",
+  );
+  test("unresolved fingerprints preserve both the cached map and probe fallback", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    let index = 0;
+    for (const panels of [
+      fingerprintInventory.panels,
+      [],
+      undefined,
+      fingerprintInventory.panels.map((p) => ({ ...p, sizePx: coverSize })),
+    ]) {
+      for (const size of [
+        coverSize,
+        { width: 2364, height: 1080 },
+        { width: 1920, height: 1080 },
+      ]) {
+        if (panels === fingerprintInventory.panels && size === coverSize) {
+          continue;
+        }
+        const candidate = {
+          ...fold,
+          deviceId: `fingerprint-fallback-${index++}`,
+          displays: panels ? { ...fingerprintInventory, panels } : undefined,
+        };
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse("cmd display get-displays", createExecResult(displayList, ""));
+        try {
+          expect(
+            await cache.panelForLogicalId(
+              candidate,
+              adb,
+              0,
+              undefined,
+              { panelFingerprint: size },
+              false,
+            ),
+          ).toBeUndefined();
+          expect(adb.getExecutedCommands()).toEqual([]);
+          const expected = panels?.find((p) => p.key === "4619827259835644672");
+          expect(
+            await cache.panelForLogicalId(candidate, adb, 0, undefined, { panelFingerprint: size }),
+          ).toEqual(expected);
+          expect(adb.getExecutedCommands()).toHaveLength(1);
+          await cache.resolve(candidate, adb);
+          const reads = adb.getExecutedCommands().length;
+          expect(
+            await cache.panelForLogicalId(
+              candidate,
+              adb,
+              0,
+              undefined,
+              { panelFingerprint: size },
+              false,
+            ),
+          ).toEqual(expected);
+          expect(adb.getExecutedCommands()).toHaveLength(reads);
+        } finally {
+          ObservedAndroidDisplayCache.release(candidate.deviceId);
+        }
+      }
+    }
+  });
+});
+
+const closedFingerprintInventory = parseAndroidDeviceDisplays(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-closed-surfaceflinger.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-closed-displays.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-print-states.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+)!;
+
+test("exact fingerprint matching rejects ambiguous, missing, swapped and external sizes", () => {
+  const size = { width: 1080, height: 2364 };
+  for (const inventory of [fingerprintInventory, closedFingerprintInventory]) {
+    expect(panelKeyForFingerprint(inventory.panels, size)).toBe("4619827551948147201");
+    expect(panelKeyForFingerprint(inventory.panels, { width: 2076, height: 2152 })).toBe(
+      "4619827259835644672",
+    );
+  }
+  for (const panels of [
+    undefined,
+    [],
+    fingerprintInventory.panels.map((p) => ({ ...p, sizePx: size })),
+  ]) {
+    expect(panelKeyForFingerprint(panels, size)).toBeUndefined();
+  }
+  expect(
+    panelKeyForFingerprint(fingerprintInventory.panels, { width: 2364, height: 1080 }),
+  ).toBeUndefined();
+  expect(
+    panelKeyForFingerprint(fingerprintInventory.panels, { width: 1920, height: 1080 }),
+  ).toBeUndefined();
+  expect(panelKeyForFingerprint(fingerprintInventory.panels, undefined)).toBeUndefined();
+});
+
+test("both CtrlProxy hierarchy conversion routes retain the top-level fingerprint", () => {
+  const converter = createAndroidHierarchyConverter();
+  for (const hierarchy of [undefined, { className: "android.view.View", children: [] }]) {
+    const wire = wireHierarchyFrom({
+      updatedAt: 1,
+      packageName: "example",
+      hierarchy,
+      displayId: 4,
+      panelFingerprint: { width: 1080, height: 2364 },
+    });
+    expect(converter.convertToViewHierarchyResult(wire).panelFingerprint).toEqual(
+      wire.panelFingerprint,
+    );
+  }
+});
+
+test("both CtrlProxy hierarchy conversion routes drop malformed fingerprints", () => {
+  const converter = createAndroidHierarchyConverter();
+  for (const hierarchy of [undefined, { className: "android.view.View", children: [] }]) {
+    for (const panelFingerprint of [
+      null,
+      "1080x2364",
+      { width: "1080", height: 2364 },
+      { width: 1080, height: "2364" },
+      { width: 0, height: 2364 },
+      { width: 1080, height: 0 },
+      { width: -1, height: 2364 },
+      { width: 1080, height: -1 },
+      { width: 1080.5, height: 2364 },
+      { width: 1080, height: 2364.5 },
+      { width: 1080 },
+      { height: 2364 },
+    ]) {
+      const wire = wireHierarchyFrom({ updatedAt: 1, packageName: "example", hierarchy });
+      // Object.assign models malformed wire data outside the typed producer contract.
+      Object.assign(wire, { panelFingerprint });
+      expect(converter.convertToViewHierarchyResult(wire).panelFingerprint).toBeUndefined();
+    }
+  }
 });

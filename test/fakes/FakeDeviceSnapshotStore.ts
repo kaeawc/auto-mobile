@@ -1,28 +1,20 @@
 import * as os from "os";
 import * as path from "path";
-import { DeviceSnapshotStore, type SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
-
-type DeviceSnapshotStoreContract = Pick<
+import {
   DeviceSnapshotStore,
-  | "getBasePath"
-  | "getSnapshotPath"
-  | "getSnapshotPathWithOptions"
-  | "recoverSnapshotData"
-  | "discardSnapshotArtifacts"
-  | "listLeftoverSnapshotJournals"
-  | "generateSnapshotName"
-  | "snapshotDirectoryExists"
-  | "getSnapshotSizeBytes"
-  | "getDirectorySize"
-  | "listSubdirectoryNames"
-  | "deleteSnapshotData"
-  | "replaceSnapshotData"
->;
+  type DeviceSnapshotStorePort,
+  type SnapshotPathOptions,
+} from "../../src/utils/DeviceSnapshotStore";
 
-export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
+export class FakeDeviceSnapshotStore implements DeviceSnapshotStorePort {
   private basePath: string;
   private sizes = new Map<string, number | null>();
+  /** Sizes scripted for one scope, keyed by the scoped path; they win over the name-keyed size. */
+  private readonly scopedSizes = new Map<string, number | null>();
+  /** Scripted by tests via {@link setSnapshotExists}: the name exists in every scope. */
   private existing = new Set<string>();
+  /** Snapshots created by {@link replaceSnapshotData}, keyed by their scoped path. */
+  private readonly existingPaths = new Set<string>();
   private deleted = new Set<string>();
   private generatedNames: string[] = [];
   private nameCounter = 0;
@@ -52,6 +44,25 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
 
   getSnapshotPathWithOptions(snapshotName: string, options?: SnapshotPathOptions): string {
     return new DeviceSnapshotStore(this.basePath).getSnapshotPathWithOptions(snapshotName, options);
+  }
+
+  async ensureSnapshotsDirectory(): Promise<void> {}
+
+  getSettingsPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getSettingsPath(snapshotName, options);
+  }
+
+  getMetadataPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getMetadataPath(snapshotName, options);
+  }
+
+  getAppDataPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getAppDataPath(snapshotName, options);
+  }
+
+  /** The fake has no real directories, so a directory listing is always "unknown". */
+  async listFileNames(): Promise<string[] | null> {
+    return null;
   }
 
   queueRecoveryFailure(error: Error): void {
@@ -93,7 +104,16 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     };
   }
 
-  setSnapshotSize(snapshotName: string, sizeBytes: number | null): void {
+  /** Script a size for the name in every scope, or for one scope when `options` is given. */
+  setSnapshotSize(
+    snapshotName: string,
+    sizeBytes: number | null,
+    options?: SnapshotPathOptions,
+  ): void {
+    if (options) {
+      this.scopedSizes.set(this.getSnapshotPathWithOptions(snapshotName, options), sizeBytes);
+      return;
+    }
     this.sizes.set(snapshotName, sizeBytes);
   }
 
@@ -113,19 +133,42 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     return Array.from(this.deleted);
   }
 
-  generateSnapshotName(_deviceName?: string): string {
+  generateSnapshotName(deviceName?: string): string {
     if (this.generatedNames.length > 0) {
       return this.generatedNames.shift() as string;
     }
     this.nameCounter += 1;
-    return `snapshot-${this.nameCounter}`;
+    // Like the real store, a device name is sanitized into a prefix of the generated name.
+    const prefix = deviceName ? `${deviceName.replace(/[^a-zA-Z0-9-_]/g, "_")}_` : "";
+    return `${prefix}snapshot-${this.nameCounter}`;
   }
 
-  async snapshotDirectoryExists(snapshotName: string): Promise<boolean> {
-    return this.existing.has(snapshotName);
+  async snapshotDirectoryExists(
+    snapshotName: string,
+    options?: SnapshotPathOptions,
+  ): Promise<boolean> {
+    return (
+      this.existing.has(snapshotName) ||
+      this.existingPaths.has(this.getSnapshotPathWithOptions(snapshotName, options))
+    );
   }
 
-  async getSnapshotSizeBytes(snapshotName: string): Promise<number | null> {
+  /** Test helper: whether the name exists in any scope (scripted or captured). */
+  hasSnapshotInAnyScope(snapshotName: string): boolean {
+    return (
+      this.existing.has(snapshotName) ||
+      [...this.existingPaths].some((candidate) => path.basename(candidate) === snapshotName)
+    );
+  }
+
+  async getSnapshotSizeBytes(
+    snapshotName: string,
+    options?: SnapshotPathOptions,
+  ): Promise<number | null> {
+    const scopedPath = this.getSnapshotPathWithOptions(snapshotName, options);
+    if (this.scopedSizes.has(scopedPath)) {
+      return this.scopedSizes.get(scopedPath)!;
+    }
     return this.sizes.has(snapshotName) ? this.sizes.get(snapshotName)! : 0;
   }
 
@@ -147,19 +190,20 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     options: SnapshotPathOptions | undefined,
     capture: () => Promise<T>,
   ): Promise<T> {
-    // The fresh capture replaces any prior on-disk data for this name. On
-    // failure the prior "exists" flag is left intact (the real store restores
-    // the set-aside copy), mirroring the atomic-overwrite contract.
-    const priorExists = this.existing.has(snapshotName);
-    this.existing.delete(snapshotName);
+    // The fresh capture replaces any prior on-disk data for this name in this scope. On
+    // failure the prior "exists" state is left intact (the real store restores the
+    // set-aside copy), mirroring the atomic-overwrite contract.
+    const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
+    const priorExists = this.existingPaths.has(snapshotPath);
+    this.existingPaths.delete(snapshotPath);
     try {
       const result = await capture();
-      this.existing.add(snapshotName);
-      this.activePaths.set(snapshotName, this.getSnapshotPathWithOptions(snapshotName, options));
+      this.existingPaths.add(snapshotPath);
+      this.activePaths.set(snapshotName, snapshotPath);
       return result;
     } catch (error) {
       if (priorExists) {
-        this.existing.add(snapshotName);
+        this.existingPaths.add(snapshotPath);
       }
       throw error;
     }
@@ -168,8 +212,11 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
   async deleteSnapshotData(snapshotName: string, options?: SnapshotPathOptions): Promise<void> {
     this.deleteCalls.push({ snapshotName, options });
     this.deleted.add(snapshotName);
+    const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
+    this.existingPaths.delete(snapshotPath);
+    this.scopedSizes.delete(snapshotPath);
     const activePath = this.activePaths.get(snapshotName);
-    if (activePath && activePath !== this.getSnapshotPathWithOptions(snapshotName, options)) {
+    if (activePath && activePath !== snapshotPath) {
       return;
     }
     this.activePaths.delete(snapshotName);

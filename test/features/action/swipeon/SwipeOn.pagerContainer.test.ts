@@ -1,14 +1,10 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { createAndroidHierarchyConverter } from "../../../helpers/androidHierarchyConverter";
+import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
-import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../../src/features/observe/android/types";
+import type { AccessibilityHierarchy } from "../../../../src/features/observe/android/types";
 import type { ObserveResult, SwipeOnOptions } from "../../../../src/models";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import launcherHome from "../../../fixtures/android-launcher/launcher-home-emulator-5602.json";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
@@ -33,9 +29,7 @@ const WORKSPACE = "com.google.android.apps.nexuslauncher:id/workspace";
 const SCREEN = { width: 2076, height: 2152 };
 
 function launcherHierarchy(): ViewHierarchyResult {
-  return new CtrlProxyHierarchy({
-    timer: new FakeTimer(),
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(
+  return createAndroidHierarchyConverter().convertToViewHierarchyResult(
     JSON.parse(launcherHome.rawViewHierarchy.json) as AccessibilityHierarchy,
   );
 }
@@ -46,12 +40,12 @@ function harness(
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    new FakeCtrlProxy(timer) as unknown as AndroidCtrlProxyClient,
-  );
+  clientSpy.mockReturnValue(new FakeCtrlProxy(timer));
   const observation: ObserveResult = {
     ...observationOf(viewHierarchy),
-    timestamp: 0,
+    updatedAt: 0,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     freshness: { isFresh: true },
     screenSize,
   };
@@ -60,16 +54,16 @@ function harness(
   const gesture = new FakeGestureExecutor();
   const action = new SwipeOn(
     { name: "fake", platform: "android", deviceId: "pager-swipe" },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       timer,
+      awaitIdle: new FakeAwaitIdle(),
+      window: new FakeWindow(),
       observeScreen: observe,
       executeGesture: gesture,
       accessibilityDetector: new FakeAccessibilityDetector(),
     },
   );
-  action.awaitIdle = new FakeAwaitIdle() as unknown as typeof action.awaitIdle;
-  action.window = new FakeWindow() as unknown as typeof action.window;
   return { action, gesture };
 }
 
@@ -134,4 +128,9 @@ describe("swipeOn container that is a pager page (#10752)", () => {
     expect(result.error).toBeUndefined();
     expect(result.element?.["resource-id"]).toBe("coverBox");
   });
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 });

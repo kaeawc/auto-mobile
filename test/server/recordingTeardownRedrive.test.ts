@@ -12,7 +12,7 @@ import type {
 } from "../../src/features/video/VideoRecorderService";
 import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
-import * as videoManager from "../../src/server/videoRecordingManager";
+import * as videoManager from "../../src/daemon/videoRecordingManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
@@ -47,7 +47,7 @@ const row = {
   config: DEFAULT_VIDEO_RECORDING_CONFIG,
   captureTeardown: descriptor,
 };
-const redriveModule = () => import("../../src/server/recordingTeardownRedrive");
+const redriveModule = () => import("../../src/daemon/recordingTeardownRedrive");
 class DescribingBackend extends FakeVideoCaptureBackend {
   descriptor: VideoCaptureTeardownDescriptor | undefined = { ...descriptor, devicePid: undefined };
   describeCaptureTeardown(_handle: RecordingHandle) {
@@ -64,11 +64,9 @@ describe("restart recorder teardown redrive", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     repo = new FakeVideoRecordingRepository();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     markers = new InMemoryDeviceHealthMarkers(timer);
     manager.setDeviceHealthMarkers(
       markers,
@@ -90,7 +88,7 @@ describe("restart recorder teardown redrive", () => {
       getDevice: () => device,
       getDeviceIncarnation: () => 1 as number | undefined,
       forceStopOrphanedCapture: async (
-        _device: typeof device,
+        _device: typeof device | undefined,
         _descriptor: VideoCaptureTeardownDescriptor,
       ) => {},
       now: () => timer.now(),
@@ -183,8 +181,15 @@ describe("restart recorder teardown redrive", () => {
         }
         await settled;
         await step(1_000);
+        if (mode === "deadline") {
+          // The health retry joins the outstanding PID confirmation instead of issuing another command.
+          expect(kill).toHaveBeenCalledTimes(1);
+          expect(markers.get(device.deviceId, 1)?.reason).toBe("recording-teardown");
+          expect((await repo.getRecording("rec"))?.captureTeardown).toEqual(row.captureTeardown);
+        }
         gate.resolve();
-        expect(kill).toHaveBeenCalledTimes(2);
+        await drainUntilQuiescent(timer);
+        expect(kill).toHaveBeenCalledTimes(mode === "deadline" ? 1 : 2);
         expect(markers.get(device.deviceId, 1)).toBeUndefined();
         expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
       } finally {
@@ -208,6 +213,29 @@ describe("restart recorder teardown redrive", () => {
       expect(kill).not.toHaveBeenCalled();
       expect(held.pending).not.toHaveBeenCalled();
       expect(held.mark).not.toHaveBeenCalled();
+    } finally {
+      held.restore();
+    }
+  });
+  test.each([true, false])("held unbound forwards identity replacement=%s", async (replaced) => {
+    await repo.insertRecording(row);
+    const held = heldDevice();
+    const d = deps();
+    const kill = spyOn(d, "forceStopOrphanedCapture");
+    try {
+      await (await redriveModule()).redriveUnconfirmedCaptureTeardowns(manager, d);
+      held.unbound.mock.calls[0]?.[0]("holder", device.deviceId, {
+        deviceIdentityReplaced: replaced,
+      });
+      await drainUntilQuiescent(timer);
+      expect(kill).toHaveBeenCalledTimes(replaced ? 0 : 1);
+      expect(held.pending).toHaveBeenCalledTimes(replaced ? 0 : 1);
+      expect(held.mark).not.toHaveBeenCalled();
+      expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+      held.fire();
+      held.unbound.mock.calls[0]?.[0]("holder", device.deviceId);
+      expect(kill).toHaveBeenCalledTimes(replaced ? 0 : 1);
+      expect(held.pending).toHaveBeenCalledTimes(replaced ? 0 : 1);
     } finally {
       held.restore();
     }
@@ -400,6 +428,16 @@ describe("durable capture ownership", () => {
     warn.mockRestore();
   });
   const start = () => videoManager.startVideoRecording({ device, ownerSessionUuid: "owner" });
+  test.each([undefined, "this-daemon"])(
+    "start stamps the recording daemon (%s)",
+    async (daemonSessionId) => {
+      await videoManager.setVideoRecordingManagerDependencies({ daemonSessionId });
+      const active = await start();
+      expect((await repo.getRecording(active.recordingId))?.recorderDaemonSessionId).toBe(
+        daemonSessionId,
+      );
+    },
+  );
   test("start persists descriptor and service reflects asynchronously learned pid", async () => {
     const active = await start();
     expect((await repo.getRecording(active.recordingId))?.captureTeardown).toEqual(

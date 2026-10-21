@@ -1,7 +1,7 @@
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import type { Element } from "../../models/Element";
-import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
+import type { TalkBackElementSelector } from "./TalkBackElementSelector";
 
 interface TextMatchOptions {
   partialMatch?: boolean;
@@ -17,7 +17,7 @@ export class FocusElementMatcher {
 
   findTargetIndex(
     elements: Element[],
-    selector: FocusElementSelector,
+    selector: TalkBackElementSelector,
     options: TextMatchOptions = {},
   ): number | null {
     return this.resolveTargetCandidate(elements, selector, options)?.index ?? null;
@@ -93,7 +93,7 @@ export class FocusElementMatcher {
 
   matchesSelector(
     element: Element,
-    selector: FocusElementSelector,
+    selector: TalkBackElementSelector,
     options: TextMatchOptions = {},
   ): boolean {
     const resourceId = this.getResourceId(element);
@@ -130,7 +130,7 @@ export class FocusElementMatcher {
   matchesFocusedTarget(
     focused: Element,
     elements: Element[],
-    selector: FocusElementSelector,
+    selector: TalkBackElementSelector,
   ): boolean {
     const candidate = this.resolveTargetCandidate(elements, selector);
     if (!candidate) {
@@ -161,7 +161,7 @@ export class FocusElementMatcher {
 
   private findMatches(
     elements: Element[],
-    selector: FocusElementSelector,
+    selector: TalkBackElementSelector,
     options: TextMatchOptions,
   ): { element: Element; index: number }[] {
     return elements.flatMap((element, index) =>
@@ -171,7 +171,7 @@ export class FocusElementMatcher {
 
   private resolveTargetCandidate(
     elements: Element[],
-    selector: FocusElementSelector,
+    selector: TalkBackElementSelector,
     options: TextMatchOptions = {},
   ): { element: Element; index: number; matchCount: number; partialMatch: boolean } | null {
     const exactMatches = this.findMatches(elements, selector, { ...options, partialMatch: false });
@@ -191,7 +191,7 @@ export class FocusElementMatcher {
 
   private selectTargetCandidate(
     matches: { element: Element; index: number }[],
-    selector: FocusElementSelector,
+    selector: TalkBackElementSelector,
   ): { element: Element; index: number } {
     if (matches.length === 1) {
       return matches[0];
@@ -215,7 +215,7 @@ export class FocusElementMatcher {
 
   private nearestBoundsMatch(
     matches: { element: Element; index: number }[],
-    bounds: NonNullable<FocusElementSelector["bounds"]>,
+    bounds: NonNullable<TalkBackElementSelector["bounds"]>,
   ): { element: Element; index: number } {
     let closest: { element: Element; index: number } | undefined;
     let closestDistance = Number.POSITIVE_INFINITY;

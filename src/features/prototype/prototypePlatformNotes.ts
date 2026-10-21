@@ -1,18 +1,30 @@
+import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
+  PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY,
   PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY,
   PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY,
+  PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY,
   PROTOTYPE_ICON_VARIANT_CAPABILITY,
   PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
+  | "rich-text-links"
+  | "stack"
+  | "carousel"
   | "node.id"
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
   | "icon.name"
-  | "icon.variant";
+  | "icon.variant"
+  | "textField.variant"
+  | "textField.label"
+  | "searchBar"
+  | "searchBar.icons"
+  | "menu"
+  | "select";
 export type PrototypePlatformNoteEffect = "ignored" | "substituted";
 export interface PrototypePlatformNote {
   platform: "ios";
@@ -28,7 +40,7 @@ export interface PrototypePlatformNote {
   detail: string;
 }
 
-/** Mirrors PrototypeRenderer.swift's sfSymbols table; the source equality test pins this set. */
+/** Frozen legacy set for agents without prototype_icon_sf_symbols_v1; no longer mirrored from Swift. */
 export const IOS_PROTOTYPE_MAPPED_ICON_NAMES: ReadonlySet<string> = new Set([
   "home",
   "search",
@@ -91,25 +103,49 @@ interface Occurrence {
   path: string;
   node?: Record<string, unknown>;
   icon?: string;
+  nodeType?: string;
 }
 interface PlatformDifference {
   construct: PrototypePlatformNoteConstruct;
   platform: "ios";
   effect: PrototypePlatformNoteEffect;
-  capability: string;
+  capability?: string;
   detail: string;
   occurrencePath: (site: Occurrence) => string | undefined;
 }
 
+/** Permanent renderer differences, independent of advertised capabilities. */
+export const PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
+  {
+    construct: "searchBar",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS draws the search field inside the prototype window instead of using SwiftUI .searchable, which requires a NavigationStack; results remain ordinary observable child nodes.",
+    occurrencePath: ({ node, path }) => (node?.type === "searchBar" ? path : undefined),
+  },
+  {
+    construct: "searchBar.icons",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS maps searchBar leading and trailing icons to SF Symbols; it never draws Android Material glyphs.",
+    occurrencePath: ({ icon, path, nodeType }) =>
+      icon !== undefined && nodeType === "searchBar" ? path : undefined,
+  },
+];
+
 /** One table drives both show notes and the generated guide. */
-export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
+export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
+  capability?: string;
+})[] = [
   {
     construct: "node.id",
     platform: "ios",
     effect: "substituted",
     capability: PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY,
     detail:
-      "iOS uses id as the accessibility identifier (and <id>.<part> for composite parts) when testTag is absent; Android gives such a node no identifier, so set testTag for an identifier on both.",
+      "An iOS agent without prototype_identifier_test_tag_only_v1 uses id as the accessibility identifier (and <id>.<part> for composite parts) when testTag is absent; Android gives such a node no identifier, so set testTag for an identifier on both.",
     occurrencePath: ({ node, path }) =>
       node?.id !== undefined && node.testTag === undefined ? `${path}.id` : undefined,
   },
@@ -119,7 +155,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
     effect: "ignored",
     capability: PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY,
     detail:
-      "iOS has no swipe-to-dismiss and the sheet closes only through its openWhen key or a scrim tap; Android supports swipe-to-dismiss by default.",
+      "An iOS agent without prototype_bottom_sheet_drag_v1 has no swipe-to-dismiss and the sheet closes only through its openWhen key or a scrim tap; Android supports swipe-to-dismiss by default.",
     occurrencePath: ({ node, path }) =>
       node?.type === "bottomSheet" && node.dismissOnSwipe !== false
         ? `${path}.dismissOnSwipe`
@@ -131,7 +167,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
     effect: "ignored",
     capability: PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY,
     detail:
-      "iOS opens the sheet at its first detent and cannot drag to the others; Android supports dragging between detents.",
+      "An iOS agent without prototype_bottom_sheet_drag_v1 opens the sheet at its first detent and cannot drag to the others; Android supports dragging between detents.",
     occurrencePath: ({ node, path }) =>
       node?.type === "bottomSheet" && Array.isArray(node.detents) && node.detents.length > 1
         ? `${path}.detents`
@@ -143,7 +179,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
     effect: "substituted",
     capability: PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY,
     detail:
-      "iOS draws a placeholder symbol for unmapped built-in icon names; Android draws the Material icon.",
+      "This iOS agent lacks prototype_icon_sf_symbols_v1 and draws a placeholder for names outside its legacy mapping; relaunch with a current agent. Android draws the Material icon.",
     occurrencePath: ({ icon, path }) =>
       icon !== undefined && !IOS_PROTOTYPE_MAPPED_ICON_NAMES.has(icon) ? path : undefined,
   },
@@ -153,18 +189,98 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
     effect: "ignored",
     capability: PROTOTYPE_ICON_VARIANT_CAPABILITY,
     detail:
-      "iOS draws its one SF Symbol for the name regardless of variant; Android draws the requested Material style.",
+      "This iOS agent lacks prototype_icon_sf_symbols_v1 and ignores icon variants; relaunch with a current agent. Android draws the requested Material style.",
     occurrencePath: ({ node, path }) =>
       node?.type === "icon" && node.variant !== undefined ? `${path}.variant` : undefined,
   },
+  {
+    construct: "textField.variant",
+    platform: "ios",
+    effect: "substituted",
+    capability: PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY,
+    detail:
+      "An iOS agent without prototype_text_field_material_style_v1 has no native outlined text field; the agent draws a rounded outline around a standard SwiftUI TextField. Android draws the Material outlined field.",
+    occurrencePath: ({ node, path }) =>
+      node?.type === "textField" && node.variant === "outlined" ? `${path}.variant` : undefined,
+  },
+  {
+    construct: "textField.label",
+    platform: "ios",
+    effect: "substituted",
+    capability: PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY,
+    detail:
+      "An iOS agent without prototype_text_field_material_style_v1 has no native floating label; the agent draws the label as a caption above the field that does not animate. Android draws the Material floating label.",
+    occurrencePath: ({ node, path }) =>
+      node?.type === "textField" && node.label !== undefined ? `${path}.label` : undefined,
+  },
+  {
+    construct: "stack",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1.",
+    occurrencePath: ({ node, path }) => (node?.type === "stack" ? path : undefined),
+  },
+  {
+    construct: "carousel",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS has no Material carousel: every variant draws fixed-width items (itemWidth) in a snapping horizontal scroll, without the multiBrowse or hero size changes, and all items stay in the hierarchy. Android composes only the visible items.",
+    occurrencePath: ({ node, path }) => (node?.type === "carousel" ? path : undefined),
+  },
 ];
+
+const mappedSymbols: Readonly<
+  Record<string, { symbol: string; filled?: string; outlined?: string }>
+> = iconSymbols.mapped;
+
+function sfSymbolDifference(difference: PlatformDifference): PlatformDifference {
+  if (difference.construct === "icon.name") {
+    return {
+      ...difference,
+      detail:
+        "iOS draws SF Symbols; these names have no SF Symbol equivalent, so a placeholder symbol is drawn.",
+      occurrencePath: ({ icon, path }) =>
+        icon !== undefined && !Object.hasOwn(mappedSymbols, icon) ? path : undefined,
+    };
+  }
+  if (difference.construct === "icon.variant") {
+    return {
+      ...difference,
+      effect: "substituted",
+      detail:
+        "SF Symbols have no rounded, sharp or twoTone style; filled/outlined require a table form. For these variants iOS draws the name's default symbol.",
+      occurrencePath: ({ node, path }) => {
+        if (
+          node?.type !== "icon" ||
+          typeof node.name !== "string" ||
+          !Object.hasOwn(mappedSymbols, node.name)
+        ) {
+          return undefined;
+        }
+        const entry = mappedSymbols[node.name];
+        const variant = node.variant;
+        return variant === "rounded" ||
+          variant === "sharp" ||
+          variant === "twoTone" ||
+          (variant === "filled" && entry.filled === undefined) ||
+          (variant === "outlined" && entry.outlined === undefined)
+          ? `${path}.variant`
+          : undefined;
+      },
+    };
+  }
+  return difference;
+}
 
 interface Rule {
   kind: string;
   name?: string;
   item?: Rule;
-  fields?: Record<string, { rule: Rule }>;
+  fields?: Record<string, { rule: Rule } | undefined>;
   variants?: Record<string, Rule>;
+  options?: Rule[];
 }
 const definitions: Record<string, Rule> = contract.definitions;
 
@@ -172,34 +288,54 @@ const definitions: Record<string, Rule> = contract.definitions;
  * The validator and anchor walkers are private and cannot be reused; this uses their dot/index
  * notation and walks depth first in contract field order. Validated device specs only.
  */
-function occurrences(value: unknown, rule: Rule, path: string, found: Occurrence[]): void {
+function occurrences(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  found: Occurrence[],
+  nodeType?: string,
+): void {
   if (value === undefined || value === null) {
     return;
   }
   switch (rule.kind) {
     case "ref":
-      referenceOccurrences(value, rule.name!, path, found);
+      referenceOccurrences(value, rule.name!, path, found, nodeType);
+      break;
+    case "screenMap":
+      Object.entries(value as Record<string, unknown>).forEach(([name, child]) =>
+        occurrences(child, rule.item!, `${path}[${JSON.stringify(name)}]`, found),
+      );
       break;
     case "array":
       (value as unknown[]).forEach((entry, index) =>
-        occurrences(entry, rule.item!, `${path}[${index}]`, found),
+        occurrences(entry, rule.item!, `${path}[${index}]`, found, nodeType),
       );
       break;
-    case "object": {
-      const data = value as Record<string, unknown>;
-      for (const [key, field] of Object.entries(rule.fields ?? {})) {
-        occurrences(data[key], field.rule, path ? `${path}.${key}` : key, found);
-      }
+    case "object":
+      objectOccurrences(value as Record<string, unknown>, rule, path, found, nodeType);
       break;
-    }
     case "tagged": {
       const data = value as Record<string, unknown>;
       const variant = rule.variants?.[String(data.type)];
       if (variant) {
-        occurrences(value, variant, path, found);
+        occurrences(value, variant, path, found, nodeType);
       }
       break;
     }
+  }
+}
+
+function objectOccurrences(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+  found: Occurrence[],
+  nodeType?: string,
+): void {
+  for (const [key, field] of Object.entries(rule.fields ?? {})) {
+    // Imported JSON has no undefined entries; only union inference makes fields optional.
+    occurrences(data[key], field!.rule, path ? `${path}.${key}` : key, found, nodeType);
   }
 }
 
@@ -208,14 +344,22 @@ function referenceOccurrences(
   name: string,
   path: string,
   found: Occurrence[],
+  nodeType?: string,
 ): void {
   if (name === "iconName" && typeof value === "string") {
-    found.push({ path, icon: value });
+    found.push({ path, icon: value, nodeType });
   }
   if (name === "node") {
     found.push({ path, node: value as Record<string, unknown> });
+    nodeType = String((value as Record<string, unknown>).type);
   }
-  occurrences(value, definitions[name]!, path, found);
+  occurrences(
+    value,
+    name === "menuItem" ? definitions.menuItem!.options![0]! : definitions[name]!,
+    path,
+    found,
+    nodeType,
+  );
 }
 
 /** Reports the supplied (normally host-expanded device) spec without I/O or mutation. */
@@ -229,8 +373,14 @@ export function prototypePlatformNotes(
   }
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
-  return PROTOTYPE_PLATFORM_DIFFERENCES.flatMap((difference) => {
-    if (supports(difference.capability)) {
+  const sfSymbols = supports(PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY);
+  const differences = [
+    ...PROTOTYPE_PLATFORM_DIFFERENCES,
+    ...PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES,
+  ];
+  const notes = differences.flatMap((legacyDifference) => {
+    const difference = sfSymbols ? sfSymbolDifference(legacyDifference) : legacyDifference;
+    if (difference.capability && supports(difference.capability)) {
       return [];
     }
     const affected = found.flatMap((site) => {
@@ -254,4 +404,41 @@ export function prototypePlatformNotes(
       },
     ];
   });
+  const links = found.flatMap(({ node, path }) =>
+    node?.type === "text" && Array.isArray(node.spans)
+      ? node.spans.flatMap((span: unknown, index: number) =>
+          typeof span === "object" && span !== null && "onTap" in span
+            ? [`${path}.spans[${index}].onTap`]
+            : [],
+        )
+      : [],
+  );
+  if (links.length > 0) {
+    notes.push({
+      platform: "ios",
+      construct: "rich-text-links",
+      effect: "substituted",
+      paths: links.slice(0, 20),
+      ...(links.length > 20 ? { total: links.length } : {}),
+      detail:
+        "Tappable text spans render as links; the agent does not expose them as separate accessibility elements or semantic links. Use tapAt on the span.",
+    });
+  }
+  const menus = (["menu", "select"] as const).flatMap((type): PrototypePlatformNote[] => {
+    const paths = found.filter(({ node }) => node?.type === type).map(({ path }) => path);
+    return paths.length === 0
+      ? []
+      : [
+          {
+            platform: "ios",
+            construct: type,
+            effect: "substituted",
+            paths: paths.slice(0, 20),
+            ...(paths.length > 20 ? { total: paths.length } : {}),
+            detail:
+              "iOS draws menu/select in the prototype window rather than the system Menu/Picker popup so observe and tapOn can reach the items.",
+          },
+        ];
+  });
+  return [...notes, ...menus];
 }

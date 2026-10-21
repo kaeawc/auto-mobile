@@ -1,0 +1,5 @@
+scripts/unit-test-host-spawn-allowlist.txt
+test/features/observe/audits/SafeAreaAuditor.test.ts
+test/lint/relativeImportCasing.test.ts
+test/server/toolRegistration.integration.test.ts
+test/shared-process-allowlist.txt

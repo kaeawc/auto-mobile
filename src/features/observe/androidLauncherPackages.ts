@@ -1,3 +1,9 @@
+import type { BootedDevice, GfxMetrics } from "../../models";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
+import { ViewHierarchy } from "./ViewHierarchy";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -227,13 +233,11 @@ export async function resolveConfiguredHomePackage(
       ? RESOLVE_HOME_TIMEOUT_MS
       : Math.max(1, Math.min(RESOLVE_HOME_TIMEOUT_MS, timeoutMs));
   try {
-    const result = await adb.executeCommand(
-      RESOLVE_HOME_COMMAND,
-      resolveTimeoutMs,
-      undefined,
-      true,
-      combinedSignal,
-    );
+    const result = await adb.executeCommand(RESOLVE_HOME_COMMAND, {
+      timeoutMs: resolveTimeoutMs,
+      noRetry: true,
+      signal: combinedSignal,
+    });
     const packageName = parseResolvedHomePackage(result.stdout);
     if (packageName) {
       resolvedHomePackageCache.set(deviceId, {
@@ -299,13 +303,12 @@ export async function isForegroundLauncher(
   adb: AdbExecutor,
   deviceId: string,
   timer: Timer = defaultTimer,
-  incarnationToken?: string,
-  signal?: AbortSignal,
-  timeoutMs?: number,
+  options: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<boolean> {
   if (!appId) {
     return false;
   }
+  const { incarnationToken, signal, timeoutMs } = options;
   const configuredHome = await resolveConfiguredHomePackage(
     adb,
     deviceId,
@@ -318,4 +321,96 @@ export async function isForegroundLauncher(
     return appId === configuredHome;
   }
   return isFallbackLauncherPackage(appId);
+}
+
+/** Best-effort stability signal for surfaces whose gfxinfo is empty. */
+export class QuietTreeStability {
+  private reader?: ViewHierarchyRequestReader;
+
+  constructor(
+    private readonly device: BootedDevice,
+    private readonly adbFactory: AdbClientFactory,
+    private readonly timer: Timer,
+    reader?: ViewHierarchyRequestReader,
+  ) {
+    this.reader = reader;
+  }
+
+  async wait(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    const deadline = this.timer.now() + Math.max(0, timeoutMs);
+    let previous: string | null = null;
+    while (this.timer.now() < deadline && !signal?.aborted) {
+      const remainingMs = deadline - this.timer.now();
+      try {
+        const fingerprint = await this.readFingerprint(remainingMs, signal);
+        if (fingerprint !== null && fingerprint === previous) {
+          return;
+        }
+        previous = fingerprint;
+      } catch (error) {
+        previous = null;
+        if (signal?.aborted || this.timer.now() >= deadline) {
+          // The tree is an optional signal; cancellation/deadline ends the bounded fallback.
+          logger.debug(`Quiet-tree stability read ended: ${errorMessage(error)}`);
+          return;
+        }
+        logger.warn(`Quiet-tree stability read failed: ${errorMessage(error)}`);
+      }
+      if (signal?.aborted) {
+        return;
+      }
+      await this.timer.sleep(Math.min(17, Math.max(0, deadline - this.timer.now())));
+    }
+  }
+
+  private async readFingerprint(remainingMs: number, signal?: AbortSignal): Promise<string | null> {
+    const controller = new AbortController();
+    const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    // Lazy construction avoids starting a hierarchy service for ordinary gfxinfo callers.
+    const reader = (this.reader ??= new ViewHierarchy(
+      this.device,
+      this.adbFactory,
+      null,
+      this.timer,
+    ));
+    const tree = await raceWithDeadline(
+      () =>
+        reader.getViewHierarchy(undefined, {
+          timeoutMs: remainingMs,
+          requireFreshExtraction: true,
+          skipWaitForFresh: true,
+          signal: readSignal,
+        }),
+      {
+        timer: this.timer,
+        timeoutMs: remainingMs,
+        signal,
+        label: "Quiet-tree stability read",
+        onTimeout: () => controller.abort(),
+      },
+    );
+    return tree.fresh === true && !tree.hierarchy.error ? hierarchyFingerprint(tree) : null;
+  }
+
+  async metrics(
+    packageName: string,
+    startTime: number,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<GfxMetrics> {
+    await this.wait(startTime + timeoutMs - this.timer.now(), signal);
+    return {
+      packageName,
+      percentile50thMs: null,
+      percentile90thMs: null,
+      percentile95thMs: null,
+      percentile99thMs: null,
+      missedVsyncCount: null,
+      slowUiThreadCount: null,
+      frameDeadlineMissedCount: null,
+      pollCount: 0,
+      stabilityWaitMs: this.timer.now() - startTime,
+      isStable: true,
+    };
+  }
 }

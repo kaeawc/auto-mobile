@@ -14,7 +14,7 @@ setup() {
 
   # Each fake records its argv plus the tool restriction it saw, and exits with
   # the status named by FAIL_<NAME> (default 0).
-  for name in gradle reset permission navgraph; do
+  for name in gradle reset permission navgraph smoke; do
     cat > "${TEST_DIR}/${name}" <<EOF
 #!/usr/bin/env bash
 printf '%s %s tools=%s\n' "${name}" "\$*" "\${AUTOMOBILE_ENABLED_TOOLS:-unset}" >> "\$CALLS"
@@ -28,6 +28,23 @@ exit 0
 EOF
     chmod +x "${TEST_DIR}/${name}"
   done
+  cat > "${TEST_DIR}/smoke" <<'EOF'
+#!/usr/bin/env bash
+printf 'smoke %s tools=%s\n' "$*" "${AUTOMOBILE_ENABLED_TOOLS:-unset}" >> "$CALLS"
+exit "${FAIL_SMOKE:-0}"
+EOF
+  chmod +x "${TEST_DIR}/smoke"
+  cat > "${TEST_DIR}/reset" <<'EOF'
+#!/usr/bin/env bash
+count=0
+[[ -f "$RESET_COUNT_FILE" ]] && count="$(cat "$RESET_COUNT_FILE")"
+count=$((count + 1))
+printf '%s' "$count" > "$RESET_COUNT_FILE"
+printf 'reset %s tools=%s\n' "$count" "${AUTOMOBILE_ENABLED_TOOLS:-unset}" >> "$CALLS"
+if [[ "$count" -eq 2 && "${FAIL_SECOND_RESET:-0}" -eq 1 ]]; then exit 9; fi
+EOF
+  chmod +x "${TEST_DIR}/reset"
+  export RESET_COUNT_FILE="$TEST_DIR/reset-count"
 }
 
 teardown() {
@@ -40,6 +57,8 @@ run_suites() {
     RESET_DAEMON_CMD="${TEST_DIR}/reset" \
     PERMISSION_CMD="${TEST_DIR}/permission" \
     NAV_GRAPH_CMD="${TEST_DIR}/navgraph" \
+    SAVED_PROTOTYPE_SMOKE_CMD="${TEST_DIR}/smoke" \
+    RESET_COUNT_FILE="$RESET_COUNT_FILE" \
     "$@" bash "$SCRIPT_ABS" control-proxy.apk
 }
 
@@ -47,10 +66,12 @@ run_suites() {
   run_suites
   [ "$status" -eq 0 ]
   expected="gradle :junit-runner:test --rerun --stacktrace --info tools=unset
-reset  tools=unset
+reset 1 tools=unset
 permission control-proxy.apk tools=navigateTo,getNavigationGraph,explore
 navgraph  tools=navigateTo,getNavigationGraph,explore
-gradle :playground:app:test --stacktrace --info tools=navigateTo,getNavigationGraph,explore"
+gradle :playground:app:test --stacktrace --info tools=navigateTo,getNavigationGraph,explore
+reset 2 tools=unset
+smoke  tools=unset"
   [ "$(cat "$CALLS")" = "$expected" ]
 }
 
@@ -107,4 +128,38 @@ gradle :playground:app:test --stacktrace --info tools=navigateTo,getNavigationGr
   run_suites JUNIT_OUTPUT="> Task :junit-runner:test"
   [ "$status" -eq 0 ]
   [[ "$output" == *"> Task :junit-runner:test"* ]]
+}
+
+@test "smoke failure is advisory and does not fail passing suites" {
+  run_suites FAIL_SMOKE=7
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Saved prototype smoke exit status: 7 (advisory; does not fail the job)'* ]]
+  [[ "$output" == *'::warning title=Saved prototype smoke::saved prototype smoke failed (advisory)'* ]]
+}
+
+@test "second daemon reset failure is advisory when suites passed" {
+  run_suites FAIL_SECOND_RESET=1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'::warning title=Saved prototype smoke::daemon reset failed (advisory)'* ]]
+  grep -q '^smoke ' "$CALLS"
+}
+
+@test "smoke timeout is advisory" {
+  mkdir -p "$TEST_DIR/timeout-bin"
+  cat > "$TEST_DIR/timeout-bin/timeout" <<'EOF'
+#!/usr/bin/env bash
+exit 124
+EOF
+  chmod +x "$TEST_DIR/timeout-bin/timeout"
+  run_suites PATH="$TEST_DIR/timeout-bin:$PATH" SAVED_PROTOTYPE_SMOKE_TIMEOUT_SECONDS=1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Saved prototype smoke exit status: 124 (advisory; does not fail the job)'* ]]
+  [[ "$output" == *'::warning title=Saved prototype smoke::saved prototype smoke timed out (advisory)'* ]]
+}
+
+@test "smoke runs after a failing suite and preserves suite failure" {
+  run_suites FAIL_PLAYGROUND=5 FAIL_SMOKE=7
+  [ "$status" -eq 1 ]
+  grep -q '^smoke ' "$CALLS"
+  [[ "$output" == *'Playground Automobile emulator suite exit status: 5'* ]]
 }

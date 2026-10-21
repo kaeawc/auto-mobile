@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
   SessionHeartbeatMonitor,
@@ -26,6 +27,10 @@ describe("terminal source releases", () => {
     for (const cleanup of cleanups.splice(0).reverse()) {
       cleanup();
     }
+  });
+
+  beforeEach(() => {
+    spyOn(logger, "warn").mockImplementation(() => {});
   });
 
   function harness() {
@@ -85,12 +90,10 @@ describe("terminal source releases", () => {
         },
       },
     );
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
     cleanups.push(() => {
       gate.resolve();
       void monitor.stop();
       timer.reset();
-      warn.mockRestore();
     });
     monitor.start();
     return { timer, session, state, forcedAt, reapedAt };
@@ -169,8 +172,11 @@ describe("a release that never settles (#10704)", () => {
       ["LIVE", "emulator-5558"],
       ["CLI", "emulator-5560"],
     ] as const) {
-      await manager.createSession(id, device, "android", 600_000, LEASE_MS);
-      manager.recordHeartbeat(id);
+      await manager.createSession(id, device, "android", {
+        timeoutMs: 600_000,
+        heartbeatTimeoutMs: LEASE_MS,
+      });
+      await deliverDaemonHeartbeat(manager, id);
     }
     expect(manager.adoptCliLivenessPolicy("CLI", CLI_IDLE_MS)).toBe(true);
     monitor = new SessionHeartbeatMonitor(
@@ -201,7 +207,7 @@ describe("a release that never settles (#10704)", () => {
     while (timer.now() < until) {
       for (const id of heartbeating) {
         if (manager.getSession(id)) {
-          manager.recordHeartbeat(id);
+          await deliverDaemonHeartbeat(manager, id);
         }
       }
       await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(10));
@@ -262,8 +268,11 @@ describe("monitor reap timestamps", () => {
   beforeEach(async () => {
     timer = new FakeTimer();
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    session = await manager.createSession("same-id", "emulator-5554", "android", 600_000, LEASE_MS);
-    manager.recordHeartbeat(session.sessionId);
+    session = await manager.createSession("same-id", "emulator-5554", "android", {
+      timeoutMs: 600_000,
+      heartbeatTimeoutMs: LEASE_MS,
+    });
+    await deliverDaemonHeartbeat(manager, session.sessionId);
     timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
     sourceStartedAt = undefined;
     visible = true;
@@ -383,4 +392,8 @@ describe("monitor reap timestamps", () => {
       expect(forcedAt).toEqual([secondStartedAt + STUCK_REAP_WARN_MS]);
     });
   }
+});
+
+afterEach(() => {
+  mock.restore();
 });

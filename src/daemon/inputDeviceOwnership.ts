@@ -1,77 +1,15 @@
-import { ActionableError } from "../models/ActionableError";
+import { getAbortSignal } from "../utils/AbortContext";
 import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
-import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
+import {
+  DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+  InputDeviceOwnedError,
+  TOOL_CALL_REMEDY,
+} from "../models/InputDeviceOwnedError";
+import { SessionNoLongerOwnsDeviceError } from "../models/sessionNoLongerOwnsDevice";
 import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
-
-/**
- * Typed response `code` for an `input/*` frame refused because another live session holds the
- * target device (#10698). Clients match the code, never the message.
- */
-export const DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session";
-
-const INPUT_REMEDY =
-  "acquire the device (setActiveDevice) and send input with that session's sessionUuid.";
-
-/** Remedy text for a refused device-mutating `tools/call` (see toolRegistry.ts). */
-export const TOOL_CALL_REMEDY =
-  "acquire the device (setActiveDevice) and call the tool with that session's sessionUuid, or wait for the holder to release it.";
-
-/**
- * `input/*` drives a device directly, so it follows device ownership (#10698): a device a session
- * holds takes input only from that session. A frame names its session with the optional
- * `sessionUuid` param; a derived `${base}:${label}` session counts as its base, as it does for
- * stream authentication. Devices no session holds stay open to any local client, so a passive
- * viewer (or a desktop whose session was idle-released) can still drive an unowned device.
- */
-export class InputDeviceOwnedError extends ActionableError {
-  readonly code = DEVICE_OWNED_BY_OTHER_SESSION_CODE;
-  /**
-   * False when a session holds the device: the holder keeps it until it releases it, so the same
-   * call cannot succeed as-is. True, with `retryAfterMs`, only for a device another request is
-   * still preparing (#11651), held for bounded restart recovery (#11902), or whose
-   * holder is already on its way out (#11920).
-   */
-  readonly retryable: boolean;
-  declare readonly retryAfterMs?: number;
-
-  constructor(
-    action: string,
-    readonly deviceId: string,
-    requesterSessionUuid: string | undefined,
-    remedy = INPUT_REMEDY,
-    /** Replaces the composed message where a caller's existing wording must stay stable. */
-    message?: string,
-    /** Set only when the refusal ends without the caller or a holder doing anything. */
-    retryAfterMs?: number,
-  ) {
-    super(
-      message ??
-        `${action} refused: device '${deviceId}' is held by another session. ` +
-          (requesterSessionUuid
-            ? `Session ${requesterSessionUuid} does not hold it; `
-            : "The request carried no sessionUuid; ") +
-          remedy,
-    );
-    this.name = "InputDeviceOwnedError";
-    this.retryable = retryAfterMs !== undefined;
-    if (retryAfterMs !== undefined) {
-      this.retryAfterMs = retryAfterMs;
-    }
-  }
-
-  /** The wire evidence: the held device, never the holder's session. */
-  toPayload(): Record<string, unknown> {
-    return {
-      code: this.code,
-      deviceId: this.deviceId,
-      retryable: this.retryable,
-      ...(this.retryAfterMs === undefined ? {} : { retryAfterMs: this.retryAfterMs }),
-    };
-  }
-}
 
 /** Retry hint for a device another request is preparing: a poll interval, not a bound. */
 export const DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS = 2_000;
@@ -234,7 +172,7 @@ interface InputSessionAdmission {
   admitIssuedSessionForAutomation(
     sessionId: string,
     execution?: SessionExecutionMetadata,
-    options?: { access?: SessionAccess },
+    options?: { access?: SessionAccess; signal?: AbortSignal },
   ): Promise<{ assignedDevice: string } | undefined>;
 }
 
@@ -268,7 +206,7 @@ export async function admitInputOnHolderSession(input: {
   const admitted = await sessionManager.admitIssuedSessionForAutomation(
     holderSessionUuid,
     input.execution,
-    { access: "non-owner-control" },
+    { access: "non-owner-control", signal: getAbortSignal() },
   );
   if (admitted?.assignedDevice !== deviceId) {
     // Typed session_no_longer_owns_device (#11351): clients branch on the code, not this wording.
@@ -301,9 +239,9 @@ export function parseInputRequesterSessionUuid(
   return value.trim();
 }
 
-/** The pool's managed-slot gate, optional so older daemon-state fakes keep compiling. */
-export interface ManagedSlotInputGate {
-  assertNotAssignedToManagedSlot?(input: {
+/** The pool's broker binding gate, optional so older daemon-state fakes keep compiling. */
+export interface BindingInputGate {
+  assertNotAssignedToBinding?(input: {
     action: string;
     deviceId: string;
     platform: "android" | "ios";
@@ -313,26 +251,26 @@ export interface ManagedSlotInputGate {
 }
 
 /**
- * How stale the managed-slot snapshot may be for a device-driving frame. Input is frequent, and a
- * slot assignment is a rare host-wide event, so frames share one registry read per second.
+ * How stale the broker binding snapshot may be for a device-driving frame. Input is frequent, and a
+ * binding assignment is a rare host-wide event, so frames share one registry read per second.
  */
-export const MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS = 1_000;
+export const BINDING_INPUT_SNAPSHOT_MAX_AGE_MS = 1_000;
 
 /**
- * A device a managed slot holds takes input only from that slot's live execution (#11178), even
+ * A device a broker binding holds takes input only from that binding's live execution (#11178), even
  * while idle: no session holds it, so the holder check above would otherwise let any local client
- * drive it. Refuses with `device_assigned_to_managed_slot`; `force` never overrides it.
+ * drive it. Refuses with `device_assigned_to_binding`; `force` never overrides it.
  */
-export async function assertInputNotOnForeignManagedSlotDevice(input: {
+export async function assertInputNotOnForeignBindingDevice(input: {
   action: string;
   deviceId: string;
   platform: "android" | "ios";
   requesterSessionUuid: string | undefined;
   sessionManager: ToolSelectionSessionManager | undefined;
-  gate: ManagedSlotInputGate;
+  gate: BindingInputGate;
 }): Promise<void> {
   const { requesterSessionUuid, sessionManager } = input;
-  await input.gate.assertNotAssignedToManagedSlot?.({
+  await input.gate.assertNotAssignedToBinding?.({
     action: input.action,
     deviceId: input.deviceId,
     platform: input.platform,
@@ -340,7 +278,7 @@ export async function assertInputNotOnForeignManagedSlotDevice(input: {
       ? (resolveToolSelectionBaseSessionUuid(requesterSessionUuid, sessionManager) ??
         requesterSessionUuid)
       : undefined,
-    maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+    maxAgeMs: BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
   });
 }
 
@@ -356,7 +294,7 @@ export interface ForeignDaemonClaimGate {
 
 /**
  * How stale the foreign-claim read may be for a sessionless control call. Like
- * {@link MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS}: such calls are frequent and each fresh read may
+ * {@link BINDING_INPUT_SNAPSHOT_MAX_AGE_MS}: such calls are frequent and each fresh read may
  * cost a status query and a relinquish round trip to a peer daemon, so calls share one per second.
  */
 export const FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS = 1_000;
@@ -371,11 +309,14 @@ export async function assertControlNotOnForeignDaemonDevice(input: {
   deviceId: string;
   platform: "android" | "ios";
   gate: ForeignDaemonClaimGate;
+  remedy?: string;
 }): Promise<void> {
   await input.gate.assertNotClaimedByForeignDaemon?.(
     input.deviceId,
     input.platform,
-    undefined,
+    input.remedy,
     FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS,
   );
 }
+
+export { DEVICE_OWNED_BY_OTHER_SESSION_CODE, InputDeviceOwnedError, TOOL_CALL_REMEDY };

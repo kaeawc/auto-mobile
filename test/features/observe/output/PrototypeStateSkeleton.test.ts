@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
 import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
@@ -7,6 +7,7 @@ import {
   capturedAppLayerPrototypeHierarchy,
   observationOf,
 } from "../../../helpers/prototypeWindowCapture";
+import { snapshotPlatformDeviceManagerFactory } from "../../../helpers/platformDeviceManagerSnapshot";
 
 // The captured prototype (test/fixtures/android-overlay-window/, window 174) carries no
 // selected tab or pager yet, so each test stamps `selected` / `state-description` onto captured
@@ -49,9 +50,13 @@ function firstAppResourceId(hierarchy: ViewHierarchyResult): string {
 }
 
 let captured: ViewHierarchyResult;
+const restoreFactory = snapshotPlatformDeviceManagerFactory();
 beforeAll(() => {
   captured = capturedAppLayerPrototypeHierarchy();
   project(captured); // warm the projection path outside the per-test budget
+});
+afterAll(() => {
+  restoreFactory();
 });
 
 /** A fresh copy of the converted capture, safe to stamp. */

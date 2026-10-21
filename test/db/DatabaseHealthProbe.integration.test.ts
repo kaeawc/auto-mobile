@@ -2,8 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DefaultDatabaseHealthProbe } from "../../src/db/DatabaseHealthProbe";
+import {
+  DefaultDatabaseHealthProbe,
+  type ProbeWorkerMessage,
+} from "../../src/db/DatabaseHealthProbe";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 interface SqliteSetupConnection {
   exec(sql: string): unknown;
@@ -23,24 +27,27 @@ function createSqliteFile(dbPath: string): void {
 }
 
 class FakeProbeWorker {
-  private messageListener: ((message: { id: number; ok: boolean }) => void) | undefined;
+  private messageListener: ((message: ProbeWorkerMessage) => void) | undefined;
   private errorListener: ((error: Error) => void) | undefined;
   private exitListener: ((code: number) => void) | undefined;
   terminateCalls = 0;
+  postMessageCalls = 0;
 
   postMessage(message: { id: number }): void {
+    this.postMessageCalls++;
     queueMicrotask(() => this.messageListener?.({ id: message.id, ok: true }));
   }
 
   on(
     event: "message" | "error" | "exit",
     listener:
-      | ((message: { id: number; ok: boolean }) => void)
+      | ((message: ProbeWorkerMessage) => void)
       | ((error: Error) => void)
       | ((code: number) => void),
   ): this {
     if (event === "message") {
-      this.messageListener = listener as (message: { id: number; ok: boolean }) => void;
+      this.messageListener = listener as (message: ProbeWorkerMessage) => void;
+      queueMicrotask(() => this.messageListener?.({ type: "ready" }));
     } else if (event === "error") {
       this.errorListener = listener as (error: Error) => void;
     } else if (event === "exit") {
@@ -65,20 +72,10 @@ class FakeProbeWorker {
  * round-trip that wedges mid-flight so only `check()`'s own timeout can
  * bound the wait (issue #6655).
  */
-class WedgedProbeWorker {
-  terminateCalls = 0;
-
-  postMessage(_message: { id: number }): void {
+class WedgedProbeWorker extends FakeProbeWorker {
+  override postMessage(_message: { id: number }): void {
+    this.postMessageCalls++;
     // Intentionally never posts a response.
-  }
-
-  on(): this {
-    return this;
-  }
-
-  async terminate(): Promise<number> {
-    this.terminateCalls++;
-    return 0;
   }
 }
 
@@ -219,6 +216,9 @@ describe("DefaultDatabaseHealthProbe", () => {
     });
 
     const firstCheck = probe.check();
+    await drainUntil(() => wedgedWorker.postMessageCalls === 1, {
+      description: "ready worker's SELECT 1 request",
+    });
     // Force whichever timer was registered LAST to fire first, simulating a
     // Timer/runtime that does not guarantee FIFO-among-equal-delay firing
     // (the fragility #6655 calls out: two independently-armed same-duration

@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
@@ -9,13 +10,10 @@ import type {
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Capture each observation before parking, so later discovery can proceed independently.
 class ParkingDiscovery extends FakeDeviceUtils {
@@ -106,21 +104,17 @@ async function setup(devices: BootedDevice[]) {
       devices.filter((d) => d.platform === platform),
     );
   }
-  pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "bind-discovery", {
-      timer,
-      deviceManager: manager,
-      missingDeviceLivenessFactory: (port) => {
-        liveness = new RecordingLiveness(port);
-        return liveness;
-      },
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      retryExecutor: new DefaultRetryExecutor(timer),
-      idGenerator: new FakeIdGenerator(),
-      deviceSessionRepository: { markAutolockSession: async () => {} },
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  pool = makePool(sessions, "bind-discovery", {
+    timer,
+    deviceManager: manager,
+    missingDeviceLivenessFactory: (port) => {
+      liveness = new RecordingLiveness(port);
+      return liveness;
+    },
+    idGenerator: new FakeIdGenerator(),
+    deviceSessionRepository: { markAutolockSession: async () => {} },
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   await pool.initializeWithDevices(devices);
 }
 afterEach(() => {
@@ -138,19 +132,13 @@ function acquire(path: "bind" | "autolock", device: BootedDevice, owner = "a") {
   let settled = false;
   const result = runWithAbortSignal(controller.signal, () =>
     path === "bind"
-      ? pool.bindOrReuseDeviceSession(
-          owner,
-          device.deviceId,
-          device.platform,
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          owner,
-        )
+      ? pool.bindOrReuseDeviceSession({
+          sessionId: owner,
+          deviceId: device.deviceId,
+          platform: device.platform,
+          allowSessionRebind: false,
+          mcpSessionId: owner,
+        })
       : pool.autolockDevice(device.deviceId, device.platform, owner),
   ).then(
     (value) => {
@@ -194,7 +182,7 @@ for (const path of ["bind", "autolock"] as const) {
       gate.release.resolve();
       expect(typeof (await acquisition.result)).toBe("string");
       expect(pool.getDevice(device.deviceId)?.name).toBe("Pixel new");
-      expect(pool.getDevice(device.deviceId)?.sessionId).toBe(await acquisition.result);
+      expect(await acquisition.result).toBe(pool.getDevice(device.deviceId)?.sessionId);
     });
 
     test("unpooled emulator refuses ownership if its fresh confirmation source fails", async () => {
@@ -270,7 +258,7 @@ for (const path of ["bind", "autolock"] as const) {
       manager.setBootedDevices("android", []);
       gate.release.resolve();
       expect(typeof (await acquisition.result)).toBe("string");
-      expect(pool.getDevice(android[0].deviceId)?.sessionId).toBe(await acquisition.result);
+      expect(await acquisition.result).toBe(pool.getDevice(android[0].deviceId)?.sessionId);
     });
 
     test("failed same-owner acquisition leaves the dead-device session for the disconnect monitor", async () => {
@@ -279,7 +267,7 @@ for (const path of ["bind", "autolock"] as const) {
       expect(typeof first).toBe("string");
       manager.setBootedDevices("android", []);
       expect(String(await acquire(path, android[0]).result)).toContain("not available");
-      expect(pool.getDevice(android[0].deviceId)?.sessionId).toBe(first);
+      expect(first).toBe(pool.getDevice(android[0].deviceId)?.sessionId);
       expect(sessions.getSession(String(first))).not.toBeNull();
     });
 
@@ -297,7 +285,7 @@ for (const path of ["bind", "autolock"] as const) {
         manager.failedSources.add(device === ios ? "ios-physical" : "ios-simulator");
         const acquisition = acquire(path, device);
         expect(typeof (await acquisition.result)).toBe("string");
-        expect(pool.getDevice(device.deviceId)?.sessionId).toBe(await acquisition.result);
+        expect(await acquisition.result).toBe(pool.getDevice(device.deviceId)?.sessionId);
       });
     }
 
@@ -384,7 +372,7 @@ for (const path of ["bind", "autolock"] as const) {
         }
         if (mutation === "claim") {
           expect(String(await a.result)).toContain("already assigned");
-          expect(pool.getDevice(android[0].deviceId)?.sessionId).toBe(await competitor!.result);
+          expect(await competitor!.result).toBe(pool.getDevice(android[0].deviceId)?.sessionId);
         } else {
           expect(manager.calls).toEqual(["android", "android"]);
           expect(old?.sessionId ?? null).toBeNull();
@@ -511,7 +499,7 @@ for (const path of ["bind", "autolock"] as const) {
         expect(notifications).toHaveBeenCalledTimes(1);
         notifications.mockRestore();
         expect(pool.getDevice(device.deviceId)?.identityUnresolved ?? false).toBe(false);
-        expect(pool.getDevice(device.deviceId)?.sessionId).toBe(await a.result);
+        expect(await a.result).toBe(pool.getDevice(device.deviceId)?.sessionId);
       });
 
       test(`ambient abort during hung ${kind} discovery preserves original reason`, async () => {

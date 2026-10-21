@@ -114,18 +114,28 @@ class HierarchyWriteSerializationWiringTest {
     // frame must not complete the collector (it is launchIn'd once and never relaunched), so the
     // onEach body must be wrapped in try/catch.
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val flowStart = source.indexOf("hierarchyDebouncer.hierarchyFlow")
-    assertTrue("hierarchyFlow collector not found in CtrlProxy.kt", flowStart >= 0)
+    val flowStart = source.indexOf("debouncer.hierarchyFlow")
+    assertTrue("hierarchyFlow collector not found", flowStart >= 0)
     val onEachOpen = source.indexOf('{', source.indexOf(".onEach", flowStart))
     assertTrue("hierarchyFlow .onEach body not found", onEachOpen >= 0)
     val onEachBody = source.substring(onEachOpen, KotlinSourceScan.matchBrace(source, onEachOpen))
+    assertTrue(
+      "the .onEach body must hand every result to deliverResult",
+      "deliverResult(result)" in onEachBody,
+    )
 
-    val tryIdx = onEachBody.indexOf("try {")
-    val whenIdx = onEachBody.indexOf("when (result)")
+    // The guarded body lives in deliverResult (moved verbatim out of the onEach lambda).
+    val deliverStart = source.indexOf("suspend fun deliverResult(")
+    assertTrue("deliverResult not found", deliverStart >= 0)
+    val deliverOpen = source.indexOf('{', deliverStart)
+    val deliverBody =
+      source.substring(deliverOpen, KotlinSourceScan.matchBrace(source, deliverOpen))
+    val tryIdx = deliverBody.indexOf("try {")
+    val whenIdx = deliverBody.indexOf("when (result)")
     assertTrue("the hierarchy collector body must open a try block", tryIdx in 0 until whenIdx)
     assertTrue(
       "the hierarchy collector must catch exceptions so one bad frame cannot complete the flow",
-      Regex("""catch\s*\(\s*\w+\s*:\s*Exception\s*\)""").containsMatchIn(onEachBody),
+      Regex("""catch\s*\(\s*\w+\s*:\s*Exception\s*\)""").containsMatchIn(deliverBody),
     )
   }
 
@@ -151,14 +161,19 @@ class HierarchyWriteSerializationWiringTest {
   }
 
   private fun writeHierarchyToFileBody(source: String): String {
-    val start = source.indexOf("private fun writeHierarchyToFile(")
+    val start = source.indexOf("internal fun writeHierarchyToFile(")
     assertTrue("writeHierarchyToFile not found in CtrlProxy.kt", start >= 0)
     val braceOpen = source.indexOf('{', source.indexOf(')', start))
     assertTrue("writeHierarchyToFile body not found", braceOpen >= 0)
     return source.substring(braceOpen, KotlinSourceScan.matchBrace(source, braceOpen))
   }
 
-  private fun readCtrlProxySource(): String = locateCtrlProxySource().readText()
+  // Hierarchy delivery lives in HierarchyController (#11876); the leak-safe seam and the ADB
+  // delivery site remain in CtrlProxy.kt, so scan both files together.
+  private fun readCtrlProxySource(): String {
+    val service = locateCtrlProxySource()
+    return service.readText() + "\n" + File(service.parentFile, "HierarchyController.kt").readText()
+  }
 
   private fun locateCtrlProxySource(): File {
     val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"

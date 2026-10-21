@@ -1,0 +1,93 @@
+name: "Android API 37 Emulator Tests"
+
+# Advisory API 37 emulator coverage for issue #12273. Runs nightly, on dispatch, and
+# on pull requests only when opted in with the `run-api37` label; it must never run
+# on every PR because emulator capacity is limited. This is not a required check and
+# nothing depends on it. ORCHESTRATOR-CHOSEN google_apis target: if the API 37 image
+# is unavailable, the job fails but remains advisory.
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  schedule:
+    - cron: "15 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  # Unrelated label events get unique groups, and event_name keeps dispatch separate from nightly runs.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'run-api37') && github.run_id || 'run' }}
+  cancel-in-progress: true
+
+jobs:
+  android-api37-emulator-tests:
+    name: "Run Android Emulator Tests (API 37, Advisory)"
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-api37') && (github.event.action != 'labeled' || github.event.label.name == 'run-api37'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      # Run the same combined JUnit Runner and Playground suites as the PR workflow.
+      - uses: ./.github/actions/android-emulator
+        with:
+          api_level: "37"
+          target: google_apis
+          avd-name: api37
+          # Prebuild during boot also produces the CtrlProxy debug APK installed
+          # here, without a Build CtrlProxy APK artifact (#11578).
+          prebuild-script: "../scripts/android/run-emulator-suites.sh --prebuild"
+          script: "../scripts/android/run-emulator-suites.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
+          working-directory: "./android/"
+          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
+          release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      - name: "Upload Heap Dumps"
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: junit-runner-api37-heap-dumps-emulator
+          path: heap-dump
+          if-no-files-found: ignore
+
+      - name: "Upload JUnit Runner Test Results"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: junit-runner-api37-emulator-test-results
+          path: android/junit-runner/build/reports/tests/test/
+
+      - name: "Upload Playground Test Results"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playground-api37-emulator-test-results
+          path: android/playground/app/build/reports/tests/test/
+
+      - name: "Publish JUnit Runner Test Report"
+        uses: mikepenz/action-junit-report@v6
+        if: always()
+        with:
+          check_name: "JUnit Runner API 37 Emulator Test Report (Advisory)"
+          report_paths: "android/junit-runner/build/test-results/**/*.xml"
+
+      - name: "Publish Playground Test Report"
+        uses: mikepenz/action-junit-report@v6
+        if: always()
+        with:
+          check_name: "Playground API 37 Emulator Test Report (Advisory)"
+          report_paths: "android/playground/**/build/test-results/**/*.xml"

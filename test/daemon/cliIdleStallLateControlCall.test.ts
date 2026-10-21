@@ -45,7 +45,7 @@ describe("a control call on a cli-idle session inside its stall-forgiven idle wi
       },
       timer,
     );
-    await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     expect(sessionManager.adoptCliLivenessPolicy(SESSION, CLI_IDLE_MS)).toBe(true);
     monitor.start();
     // 90 s idle with every scan on time, then the daemon's event loop is blocked for 40 s: both

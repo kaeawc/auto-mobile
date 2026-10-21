@@ -2,26 +2,10 @@ import { join, dirname } from "path";
 import { logger } from "../logger";
 import { SystemDetection, DefaultSystemDetection } from "../system/SystemDetection";
 import { resolveAndroidSdkRoot, resolveAndroidSdkRootAsync } from "./androidSdkRoot";
-
-/**
- * Signals that a caller-owned deadline expired while this module was probing
- * the host. Discovery normally treats missing commands as a negative result;
- * a deadline expiry must instead reach that caller unchanged.
- */
-export class AndroidToolsDetectionTimeoutError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AndroidToolsDetectionTimeoutError";
-  }
-}
-
-/** Preserves caller cancellation through discovery's normal miss handling. */
-export class AndroidToolsDetectionAbortError extends Error {
-  constructor(readonly abortError: Error) {
-    super(abortError.message);
-    this.name = "AndroidToolsDetectionAbortError";
-  }
-}
+import { AndroidToolsDetectionTimeoutError } from "./AndroidToolsDetectionTimeoutError";
+import { AndroidToolsDetectionAbortError } from "./AndroidToolsDetectionAbortError";
+export { AndroidToolsDetectionTimeoutError } from "./AndroidToolsDetectionTimeoutError";
+export { AndroidToolsDetectionAbortError } from "./AndroidToolsDetectionAbortError";
 
 function isAndroidToolsDetectionControlError(
   error: unknown,

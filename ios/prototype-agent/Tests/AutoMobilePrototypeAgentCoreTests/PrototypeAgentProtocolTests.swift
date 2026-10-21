@@ -9,6 +9,42 @@ private func line(_ object: [String: Any]) throws -> Data {
 }
 
 final class PrototypeAgentConfigurationTests: XCTestCase {
+    func testRichTextCapabilityIsAdvertised() {
+        XCTAssertEqual(PrototypeAgentProtocol.richTextCapability, "prototype_rich_text_v1")
+        XCTAssertEqual(
+            PrototypeAgentProtocol.capabilities.filter { $0 == PrototypeAgentProtocol.richTextCapability }.count,
+            1
+        )
+    }
+
+    func testDataActionsCapability() {
+        XCTAssertEqual(PrototypeAgentProtocol.dataActionsCapability, "prototype_data_actions_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.dataActionsCapability))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.dataModelCapability))
+    }
+
+    func testChecksCapability() {
+        XCTAssertEqual(PrototypeAgentProtocol.checksCapability, "prototype_checks_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.checksCapability))
+    }
+
+    func testAndroidIdentifierAndSheetParityCapabilities() {
+        XCTAssertEqual(PrototypeAgentProtocol.identifierTestTagOnlyCapability, "prototype_identifier_test_tag_only_v1")
+        XCTAssertEqual(PrototypeAgentProtocol.bottomSheetDragCapability, "prototype_bottom_sheet_drag_v1")
+        XCTAssertTrue(
+            PrototypeAgentProtocol.capabilities
+                .contains(PrototypeAgentProtocol.identifierTestTagOnlyCapability)
+        )
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.bottomSheetDragCapability))
+    }
+
+    func testTheAgentAdvertisesSfSymbolsWithoutMaterialParity() {
+        XCTAssertEqual(PrototypeAgentProtocol.iconSfSymbolsCapability, "prototype_icon_sf_symbols_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.iconSfSymbolsCapability))
+        XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains("prototype_icon_set_material_v1"))
+        XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains("prototype_icon_variant_v1"))
+    }
+
     func testWindowChromeCapability() {
         XCTAssertEqual(PrototypeAgentProtocol.windowChromeCapability, "prototype_window_chrome_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.windowChromeCapability))
@@ -120,6 +156,11 @@ final class PrototypeConnectionGateTests: XCTestCase {
     func testCapabilitiesDoNotAdvertiseTheRemovedUpdatePath() {
         XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains("update_prototype"))
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("show_prototype"))
+    }
+
+    func testAdvertisesFlowGrid() {
+        XCTAssertEqual(PrototypeAgentProtocol.flowGridCapability, "prototype_flow_grid_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.flowGridCapability))
     }
 
     func testAdvertisesInPlaceShowWithReset() {

@@ -15,10 +15,13 @@ class HighlightAnimatorTest {
   fun `startFadeOut configures duration and interpolator`() {
     val animator =
       HighlightAnimator(
-        onAlphaUpdate = { _, _ -> },
-        onDrawProgressUpdate = { _, _ -> },
-        onAnimationComplete = {},
-        onAnimationActiveChanged = {},
+        dependencies =
+          HighlightAnimatorDependencies(
+            onAlphaUpdate = { _, _ -> },
+            onDrawProgressUpdate = { _, _ -> },
+            onAnimationComplete = {},
+            onAnimationActiveChanged = {},
+          ),
       )
 
     animator.startFadeOut("highlight")
@@ -40,10 +43,13 @@ class HighlightAnimatorTest {
     val activity = mutableListOf<Boolean>()
     val animator =
       HighlightAnimator(
-        onAlphaUpdate = { _, alpha -> updates.add(alpha) },
-        onDrawProgressUpdate = { _, _ -> },
-        onAnimationComplete = { id -> completions.add(id) },
-        onAnimationActiveChanged = { active -> activity.add(active) },
+        dependencies =
+          HighlightAnimatorDependencies(
+            onAlphaUpdate = { _, alpha -> updates.add(alpha) },
+            onDrawProgressUpdate = { _, _ -> },
+            onAnimationComplete = { id -> completions.add(id) },
+            onAnimationActiveChanged = { active -> activity.add(active) },
+          ),
       )
 
     animator.startFadeOut("highlight")
@@ -71,10 +77,13 @@ class HighlightAnimatorTest {
     val activity = mutableListOf<Boolean>()
     val animator =
       HighlightAnimator(
-        onAlphaUpdate = { _, _ -> },
-        onDrawProgressUpdate = { _, _ -> },
-        onAnimationComplete = { id -> completions.add(id) },
-        onAnimationActiveChanged = { active -> activity.add(active) },
+        dependencies =
+          HighlightAnimatorDependencies(
+            onAlphaUpdate = { _, _ -> },
+            onDrawProgressUpdate = { _, _ -> },
+            onAnimationComplete = { id -> completions.add(id) },
+            onAnimationActiveChanged = { active -> activity.add(active) },
+          ),
       )
 
     animator.startFadeOut("highlight")

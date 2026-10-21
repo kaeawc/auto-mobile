@@ -1,15 +1,26 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { registerStorageTools, type StorageToolsDependencies } from "../../src/server/storageTools";
 import {
-  registerStorageTools,
   preferenceSetWarning,
-  resetStorageToolsDependencies,
-  setStorageToolsDependenciesForTesting,
   validateTypeForPlatform,
-} from "../../src/server/storageTools";
+} from "../../src/features/storage/storageChecks";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { ActionableError } from "../../src/models";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { schemaPropertyDescription, toolJson } from "../helpers/toolResponse";
+
+isolateToolRegistry();
+
+let deps: Partial<StorageToolsDependencies> = {};
+function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {
+  deps = { ...deps, ...value };
+  registerStorageTools(deps);
+}
+function clearStorageToolsDependencies(): void {
+  deps = {};
+}
 
 describe("Storage Tools Registration", () => {
   beforeEach(() => {
@@ -20,11 +31,11 @@ describe("Storage Tools Registration", () => {
   afterEach(() => {
     ToolRegistry.clearTools();
     serverConfig.setEmbeddedSdkEnabled(false);
-    resetStorageToolsDependencies();
+    clearStorageToolsDependencies();
   });
 
   test("registers all three storage write tools", () => {
-    registerStorageTools();
+    registerStorageTools(deps);
 
     const toolNames = ToolRegistry.getToolDefinitions().map((t) => t.name);
     expect(toolNames).toContain("setKeyValue");
@@ -33,7 +44,7 @@ describe("Storage Tools Registration", () => {
   });
 
   test("registers the DataStore read tools", () => {
-    registerStorageTools();
+    registerStorageTools(deps);
 
     const toolNames = ToolRegistry.getToolDefinitions().map((t) => t.name);
     expect(toolNames).toContain("listDataStores");
@@ -42,7 +53,7 @@ describe("Storage Tools Registration", () => {
 
   describe("listDataStores schema", () => {
     test("accepts appId + adapterName", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("listDataStores");
       expect(tool).toBeDefined();
 
@@ -56,7 +67,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("requires adapterName", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("listDataStores");
 
       expect(() =>
@@ -70,7 +81,7 @@ describe("Storage Tools Registration", () => {
 
   describe("getDataStore schema", () => {
     test("accepts appId + adapterName + name", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("getDataStore");
       expect(tool).toBeDefined();
 
@@ -85,7 +96,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("requires name (store name)", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("getDataStore");
 
       expect(() =>
@@ -100,7 +111,7 @@ describe("Storage Tools Registration", () => {
 
   describe("setKeyValue schema", () => {
     test("accepts valid arguments with name parameter", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
       expect(tool).toBeDefined();
 
@@ -117,7 +128,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("accepts legacy fileName alias", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
 
       expect(
@@ -135,7 +146,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("accepts null value", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
 
       expect(() =>
@@ -151,7 +162,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("accepts numeric and boolean values for typed storage", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
       const base = { platform: "ios", appId: "com.example.app", name: "Standard", key: "count" };
       expect(tool!.schema.parse({ ...base, value: 42, type: "INT" }).value).toBe(42);
@@ -159,7 +170,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("coerces a numeric value before sending it to the iOS client", async () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const calls: Array<{
         appId: string;
         suite: string;
@@ -167,7 +178,7 @@ describe("Storage Tools Registration", () => {
         value: string;
         type: string;
       }> = [];
-      setStorageToolsDependenciesForTesting({
+      useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
           setPreference: async (appId, suite, key, value, type) => {
             calls.push({ appId, suite, key, value, type });
@@ -194,9 +205,9 @@ describe("Storage Tools Registration", () => {
     });
 
     test("surfaces unavailable iOS SDK storage as an ActionableError", async () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       let sdkCalls = 0;
-      setStorageToolsDependenciesForTesting({
+      useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
           setPreference: async () => {
             sdkCalls += 1;
@@ -225,8 +236,8 @@ describe("Storage Tools Registration", () => {
     });
 
     test("explains how an iOS app can authorize key-value mutations", async () => {
-      registerStorageTools();
-      setStorageToolsDependenciesForTesting({
+      registerStorageTools(deps);
+      useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
           setPreference: async () => {
             throw new Error("mutation_not_authorized");
@@ -251,7 +262,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("rejects missing required fields", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
 
       // Missing key
@@ -289,7 +300,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("rejects invalid type", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
 
       expect(() =>
@@ -305,7 +316,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("accepts all valid Android KeyValueType values", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
 
       const validTypes = ["STRING", "INT", "LONG", "FLOAT", "BOOLEAN", "STRING_SET"];
@@ -324,7 +335,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("accepts all valid iOS KeyValueType values", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
 
       const validTypes = [
@@ -352,7 +363,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("accepts UNKNOWN type in schema (validation happens at runtime)", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("setKeyValue");
 
       expect(() =>
@@ -370,7 +381,7 @@ describe("Storage Tools Registration", () => {
 
   describe("removeKeyValue schema", () => {
     test("accepts valid arguments", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("removeKeyValue");
       expect(tool).toBeDefined();
 
@@ -385,7 +396,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("accepts legacy fileName alias", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("removeKeyValue");
 
       expect(
@@ -401,7 +412,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("rejects missing required fields", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("removeKeyValue");
 
       // Missing key
@@ -417,7 +428,7 @@ describe("Storage Tools Registration", () => {
 
   describe("clearKeyValueFile schema", () => {
     test("accepts valid arguments", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("clearKeyValueFile");
       expect(tool).toBeDefined();
 
@@ -431,7 +442,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("accepts legacy fileName alias", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("clearKeyValueFile");
 
       expect(
@@ -446,7 +457,7 @@ describe("Storage Tools Registration", () => {
     });
 
     test("rejects missing required fields", () => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const tool = ToolRegistry.getTool("clearKeyValueFile");
 
       // Missing name
@@ -460,7 +471,7 @@ describe("Storage Tools Registration", () => {
   });
 
   test("key-value schemas require either name or fileName with clear guidance", () => {
-    registerStorageTools();
+    registerStorageTools(deps);
 
     const cases: Array<{ name: string; input: Record<string, unknown> }> = [
       {
@@ -503,11 +514,11 @@ describe("Storage Tools Registration", () => {
   });
 
   test("iOS write tools include resolution only when the client provides it", async () => {
-    registerStorageTools();
+    registerStorageTools(deps);
     const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
     for (const resolvedStore of ["standard", undefined]) {
       const result = resolvedStore ? { resolvedStore } : undefined;
-      setStorageToolsDependenciesForTesting({
+      useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
           setPreference: async () => result,
           removePreference: async () => result,
@@ -525,11 +536,7 @@ describe("Storage Tools Registration", () => {
         )!;
         const args = tool.schema.parse({ appId: "com.example.app", name: "", ...fields });
         const response = await tool.deviceAwareHandler!(device, args);
-        const content = response.content[0];
-        if (content.type !== "text") {
-          throw new Error("Expected JSON response");
-        }
-        const payload = JSON.parse(content.text);
+        const payload = toolJson(response);
         expect(payload.name).toBe("");
         expect(payload.success).toBe(true);
         if (resolvedStore) {
@@ -555,9 +562,9 @@ describe("Storage Tools Registration", () => {
   test.each([true, false, undefined])(
     "only non-null iOS set warns for an effective override: %s",
     async (effectiveValueDiffers) => {
-      registerStorageTools();
+      registerStorageTools(deps);
       const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
-      setStorageToolsDependenciesForTesting({
+      useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
           setPreference: async () => ({ resolvedStore: "standard", effectiveValueDiffers }),
           removePreference: async () => ({
@@ -583,11 +590,7 @@ describe("Storage Tools Registration", () => {
           device,
           tool.schema.parse({ appId: "com.example.app", name: "", ...fields }),
         );
-        const content = response.content[0];
-        if (content.type !== "text") {
-          throw new Error("Expected JSON response");
-        }
-        const payload = JSON.parse(content.text);
+        const payload = toolJson(response);
         expect(payload.success).toBe(true);
         if (isSet && effectiveValueDiffers === true) {
           expect(payload.effectiveValueDiffers).toBe(true);
@@ -604,10 +607,10 @@ describe("Storage Tools Registration", () => {
   );
 
   test("name descriptions document accepted iOS and Android names", () => {
-    registerStorageTools();
+    registerStorageTools(deps);
     for (const name of ["setKeyValue", "removeKeyValue", "clearKeyValueFile"]) {
       const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name)!;
-      const description = definition.inputSchema.properties?.name?.description;
+      const description = schemaPropertyDescription(definition.inputSchema.properties, "name");
       expect(description).toContain('"standard"');
       expect(description).toContain("bundle id");
       expect(description).toContain("no leading or trailing whitespace");
@@ -616,7 +619,7 @@ describe("Storage Tools Registration", () => {
   });
 
   test("key-value schemas accept name-only and fileName-only inputs", () => {
-    registerStorageTools();
+    registerStorageTools(deps);
 
     const cases: Array<{ name: string; input: Record<string, unknown> }> = [
       {

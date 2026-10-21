@@ -1,9 +1,9 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, spyOn, test } from "bun:test";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { InputKey } from "../../../src/features/action/InputKey";
 import { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import { RecentApps } from "../../../src/features/action/RecentApps";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { CtrlProxyNavigation } from "../../../src/features/observe/ios/CtrlProxyNavigation";
 import { CtrlProxyKeyboard } from "../../../src/features/observe/ios/CtrlProxyKeyboard";
 import { CtrlProxyGestures } from "../../../src/features/observe/ios/CtrlProxyGestures";
@@ -13,6 +13,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const device: BootedDevice = { deviceId: "physical-iphone", platform: "ios", name: "iPhone" };
 const fingers = [
@@ -45,20 +46,28 @@ test("recentApps execute preserves indeterminate cancellation before post-action
   const client = Object.assign(new FakeIOSCtrlProxy(h.timer), {
     requestRecentApps: navigation.requestRecentApps.bind(navigation),
   });
-  const clientSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    client as unknown as IOSCtrlProxyClient,
-  );
+  const clientSpy = spyOnIosClientInstance(client);
   const observe = new FakeObserveScreen();
-  observe.setObserveResult({ timestamp: h.timer.now() });
+  observe.setObserveResult(
+    buildObserveResult({
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: h.timer.now(),
+    }),
+  );
   const observeSpy = spyOn(observe, "execute").mockImplementation(async (options) => {
     options?.signal?.throwIfAborted();
-    return { timestamp: h.timer.now() };
+    return buildObserveResult({
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: h.timer.now(),
+    });
   });
   const recentApps = new RecentApps(device, null, h.timer);
   recentApps.observeScreen = observe;
   recentApps.window = new FakeWindow();
   try {
-    const outcome = recentApps.execute(undefined, controller.signal).then(
+    const outcome = recentApps.execute({ signal: controller.signal }).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );
@@ -119,9 +128,7 @@ for (const action of [
         requestPressKey: keyboard.requestPressKey.bind(keyboard),
         requestMultiFingerSwipe: gestures.requestMultiFingerSwipe.bind(gestures),
       });
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        client as unknown as IOSCtrlProxyClient,
-      );
+      const spy = spyOnIosClientInstance(client);
       const controller = new AbortController();
       const cancellation = new ActionableError("caller cancelled");
       let dispatchCount = 0;
@@ -152,7 +159,10 @@ for (const action of [
                   onDispatch: () => dispatchCount++,
                 })
               : action === "multi-finger swipe"
-                ? new ExecuteGesture(device, null, h.timer).execute(fingers, 300, controller.signal)
+                ? new ExecuteGesture(device, null, h.timer).execute(fingers, {
+                    durationMs: 300,
+                    signal: controller.signal,
+                  })
                 : new PressButton(device, null, h.timer).press(
                     action,
                     50,

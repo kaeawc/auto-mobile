@@ -7,7 +7,9 @@ import android.graphics.RectF
 import android.os.Handler
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.RequestDrag
 import java.time.Duration
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
@@ -46,15 +48,17 @@ class CtrlProxyDragDispatchTest {
           override fun currentTimeMillis() = 0L
         },
       )
-    ReflectionHelpers.setField(fixture.service, "perfProvider", perf)
-    fixture.service.dragResultReporter = { id, outcome ->
+    fixture.usePerfProvider(perf)
+    fixture.gestureController.dragResultReporter = { id, outcome ->
       frames.add(
         dragResultFrame(
-          id,
-          outcome.completed,
-          outcome.error,
-          outcome.totalTimeMs,
-          outcome.gestureTimeMs,
+          GestureFrameResult(
+            requestId = id,
+            success = outcome.completed,
+            error = outcome.error,
+            totalTimeMs = outcome.totalTimeMs,
+            gestureTimeMs = outcome.gestureTimeMs,
+          ),
           null,
         ),
       )
@@ -64,7 +68,7 @@ class CtrlProxyDragDispatchTest {
   @After fun tearDown() = fixture.close()
 
   @Test
-  fun `default drag dispatches one stroke per phase and reports only final completion`() {
+  fun `default drag dispatches one stroke per phase and reports only final completion`() = runTest {
     drag()
     repeat(2) { index ->
       assertTrue(frames.isEmpty())
@@ -104,12 +108,12 @@ class CtrlProxyDragDispatchTest {
   }
 
   @Test
-  fun `instant press completion waits before travel and then succeeds`() {
+  fun `instant press completion waits before travel and then succeeds`() = runTest {
     drag()
     shadow.complete(0L)
     assertTrue(frames.isEmpty())
     assertEquals(1, shadow.attempts.size)
-    val timer = fixture.service.dragDeadline as FakeGestureDeadline
+    val timer = fixture.gestureController.dragDeadline as FakeGestureDeadline
     assertEquals(600L, timer.tasks.last().delayMs)
     ShadowSystemClock.advanceBy(Duration.ofMillis(600L))
     timer.expire()
@@ -122,7 +126,7 @@ class CtrlProxyDragDispatchTest {
   }
 
   @Test
-  fun `no hold and zero press variants finish with one lifted pointer`() {
+  fun `no hold and zero press variants finish with one lifted pointer`() = runTest {
     for ((press, hold) in listOf(500L to 0L, 0L to 100L, 0L to 0L)) {
       shadow.attempts.clear()
       frames.clear()
@@ -142,63 +146,79 @@ class CtrlProxyDragDispatchTest {
   }
 
   @Test
-  fun `mid chain cancellation dispatches terminating continuation and failed drag result`() {
+  fun `mid chain cancellation dispatches terminating continuation and failed drag result`() =
+    runTest {
+      drag()
+      shadow.complete()
+      fixture.advanceDragWait()
+      shadow.cancel()
+      assertReleaseThenFailure()
+    }
+
+  @Test
+  fun `mid chain rejected dispatch sends terminating continuation and failed drag result`() =
+    runTest {
+      drag()
+      shadow.failureOnAttempt = 2
+      shadow.complete()
+      fixture.advanceDragWait()
+      assertReleaseThenFailure(rejected = true)
+    }
+
+  @Test
+  fun `mid chain dispatch exception sends terminating continuation and failed drag result`() =
+    runTest {
+      drag()
+      shadow.failureOnAttempt = 2
+      shadow.throwOnFailure = true
+      shadow.complete()
+      fixture.advanceDragWait()
+      assertReleaseThenFailure(rejected = true)
+    }
+
+  @Test
+  fun `mid chain timeout sends terminating continuation and failed drag result`() = runTest {
     drag()
     shadow.complete()
     fixture.advanceDragWait()
-    shadow.cancel()
+    (fixture.gestureController.dragDeadline as FakeGestureDeadline).expire()
     assertReleaseThenFailure()
   }
 
   @Test
-  fun `mid chain rejected dispatch sends terminating continuation and failed drag result`() {
-    drag()
-    shadow.failureOnAttempt = 2
-    shadow.complete()
-    fixture.advanceDragWait()
-    assertReleaseThenFailure(rejected = true)
-  }
-
-  @Test
-  fun `mid chain dispatch exception sends terminating continuation and failed drag result`() {
-    drag()
-    shadow.failureOnAttempt = 2
-    shadow.throwOnFailure = true
-    shadow.complete()
-    fixture.advanceDragWait()
-    assertReleaseThenFailure(rejected = true)
-  }
-
-  @Test
-  fun `mid chain timeout sends terminating continuation and failed drag result`() {
-    drag()
-    shadow.complete()
-    fixture.advanceDragWait()
-    (fixture.service.dragDeadline as FakeGestureDeadline).expire()
-    assertReleaseThenFailure()
-  }
-
-  @Test
-  fun `stale frame context rejects before injecting a pointer`() {
+  fun `stale frame context rejects before injecting a pointer`() = runTest {
     fixture.actions.requestDrag(
-      "stale",
-      10.0,
-      20.0,
-      100.0,
-      200.0,
-      500L,
-      1_000L,
-      100L,
-      fixture.freshFrameContext() + ":stale",
-      7,
+      RequestDrag(
+        requestId = "stale",
+        x1 = 10.0,
+        y1 = 20.0,
+        x2 = 100.0,
+        y2 = 200.0,
+        pressDurationMs = 500L,
+        dragDurationMs = 1_000L,
+        holdDurationMs = 100L,
+        frameContext = fixture.freshFrameContext() + ":stale",
+        displayId = 7,
+      ),
     )
     assertTrue(shadow.attempts.isEmpty())
   }
 
   @Test
   @Config(sdk = [25])
-  fun `pre API 26 keeps a single legacy stroke`() {
-    fixture.actions.requestDrag("legacy", 10.0, 20.0, 100.0, 200.0, 500L, 1_000L, 100L)
+  fun `pre API 26 keeps a single legacy stroke`() = runTest {
+    fixture.actions.requestDrag(
+      RequestDrag(
+        requestId = "legacy",
+        x1 = 10.0,
+        y1 = 20.0,
+        x2 = 100.0,
+        y2 = 200.0,
+        pressDurationMs = 500L,
+        dragDurationMs = 1_000L,
+        holdDurationMs = 100L,
+      ),
+    )
     val description = shadow.attempts.single().gesture
     assertEquals(1, description.strokeCount)
     assertEquals(1_600L, description.getStroke(0).duration)
@@ -208,18 +228,20 @@ class CtrlProxyDragDispatchTest {
     )
   }
 
-  private fun drag(press: Long = 600L, hold: Long = 100L) {
+  private suspend fun drag(press: Long = 600L, hold: Long = 100L) {
     fixture.actions.requestDrag(
-      "drag",
-      10.0,
-      20.0,
-      100.0,
-      200.0,
-      press,
-      300L,
-      hold,
-      fixture.freshFrameContext(),
-      7,
+      RequestDrag(
+        requestId = "drag",
+        x1 = 10.0,
+        y1 = 20.0,
+        x2 = 100.0,
+        y2 = 200.0,
+        pressDurationMs = press,
+        dragDurationMs = 300L,
+        holdDurationMs = hold,
+        frameContext = fixture.freshFrameContext(),
+        displayId = 7,
+      ),
     )
   }
 

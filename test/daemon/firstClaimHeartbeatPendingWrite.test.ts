@@ -32,6 +32,7 @@ const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 
@@ -105,16 +106,10 @@ async function setUpRig(ownership?: "awaiting-owner"): Promise<Rig> {
     getDevicePool: () => DEVICE_POOL,
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
-  await manager.createSession(
-    SESSION,
-    DEVICE,
-    "android",
-    120_000,
-    undefined,
-    undefined,
-    undefined,
-    ownership,
-  );
+  await manager.createSession(SESSION, DEVICE, "android", {
+    timeoutMs: 120_000,
+    initialOwnership: ownership,
+  });
   monitor.start();
   const advance = (ms: number) => timer.setCurrentTime(timer.getCurrentTime() + ms);
   return {
@@ -342,8 +337,8 @@ describe("a second heartbeat for the session while the first claim's write is pe
   });
 });
 
-describe("a claim the daemon makes for its owner (managed slot hand-off)", () => {
-  // `ManagedSlotAcquisition.handOff` claims for the proxy's token and adopts the managed policy
+describe("a claim the daemon makes for its owner (binding hand-off)", () => {
+  // `BrokerDeviceAcquisition.handOff` claims for the proxy's token and adopts the managed policy
   // before the acquisition reply reaches the proxy; the proxy's first heartbeat follows the reply.
   async function handOff(r: Rig): Promise<void> {
     expect(await r.manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");

@@ -22,7 +22,7 @@ Use the smallest test command that answers the user’s question.
 
 - TypeScript all tests: `bun test`
 - Single TypeScript file: `bun test <file>`
-- Timing budget check: `bash scripts/validate-bun-test-timings.sh`
+- Timing budget check: `bash scripts/validate-bun-test-timings.sh --run-unit-lane`, or pass an existing focused JUnit XML report to measure it directly
 - Android: `(cd android && ./gradlew test)` or a narrower task
 - iOS Swift package tests: `bash scripts/ios/swift-test.sh`
 - Local component or integration flows: prefer a purpose-built script in `scripts/`

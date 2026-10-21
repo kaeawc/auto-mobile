@@ -9,7 +9,7 @@
       "code": "cleanup_failed",
       "message": "provisioning timed out Cleanup of the newly created device also failed: platform delete failed",
       "retryable": false,
-      "daemonBuild": "0.0.84+fixture-build"
+      "daemonBuild": "0.0.0+fixture-build"
     },
     "lifecycle": {
       "state": "retained",
@@ -23,7 +23,7 @@
         "code": "timeout",
         "message": "provisioning timed out",
         "retryable": true,
-        "daemonBuild": "0.0.84+fixture-build"
+        "daemonBuild": "0.0.0+fixture-build"
       },
       "cleanup": {
         "status": "failed",
@@ -58,7 +58,7 @@
       },
       "freshness": {
         "observedAtMs": 0,
-        "daemonBuild": "0.0.84+fixture-build",
+        "daemonBuild": "0.0.0+fixture-build",
         "source": "snapshot"
       }
     },

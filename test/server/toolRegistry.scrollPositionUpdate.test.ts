@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
@@ -32,7 +32,9 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
+  let originalDeviceSessionManager: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["deviceSessionManager"];
   let daemonSessionManager: SessionManager | undefined;
   let restorePipelineOverrides: (() => void) | undefined;
   let spiedSessionIds: string[];
@@ -74,17 +76,17 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     spiedSessionIds.push(sessionId);
     const manager = NavigationGraphManager.getInstanceForSession(sessionId);
     const captured: ScrollPosition[] = [];
-    (manager as any).updateScrollPosition = (scrollPosition: ScrollPosition) => {
+    spyOn(manager, "updateScrollPosition").mockImplementation((scrollPosition: ScrollPosition) => {
       captured.push(scrollPosition);
-    };
+    });
     return captured;
   }
 
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -101,7 +103,7 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

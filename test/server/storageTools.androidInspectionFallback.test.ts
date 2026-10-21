@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerStorageTools,
-  resetStorageToolsDependencies,
-  setStorageToolsDependenciesForTesting,
   type AndroidKeyValueClient,
+  type StorageToolsDependencies,
 } from "../../src/server/storageTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -12,6 +11,19 @@ import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { schemaProperty, toolJson } from "../helpers/toolResponse";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
+let deps: Partial<StorageToolsDependencies> = {};
+function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {
+  deps = { ...deps, ...value };
+  registerStorageTools(deps);
+}
+function clearStorageToolsDependencies(): void {
+  deps = {};
+}
 
 // Issue #6292: setPreference always writes the on-device SharedPreferences XML file
 // directly and never needs the SDK's SharedPreferencesInspector capability.
@@ -82,20 +94,20 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
   beforeEach(() => {
     ToolRegistry.clearTools();
     serverConfig.setEmbeddedSdkEnabled(true);
-    registerStorageTools();
+    registerStorageTools(deps);
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
     serverConfig.setEmbeddedSdkEnabled(false);
-    resetStorageToolsDependencies();
+    clearStorageToolsDependencies();
   });
 
   test("setKeyValue falls back to the direct-file path and succeeds when the SDK reports inspection disabled", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(`cat shared_prefs/${FILE_NAME}.xml`, createExecResult("<map/>", ""));
 
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => inspectionDisabledClient(),
       adbClientFactory: singleAdbFactory(adb),
     });
@@ -108,7 +120,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       type: "STRING",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
     // Issue #6292: a direct-XML fallback edit on a possibly-running app warns that the
     // change may be overwritten from the app's in-memory cache until it is relaunched.
@@ -123,7 +135,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
 
   test("no relaunch warning on the happy path when the SDK inspection capability is enabled", async () => {
     const adb = new FakeAdbExecutor();
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       // A client whose setPreference SUCCEEDS never trips the fallback, so no warning.
       androidClientFactory: () => inspectionDisabledClient({ setPreference: async () => {} }),
       adbClientFactory: singleAdbFactory(adb),
@@ -137,7 +149,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       type: "STRING",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
     expect(parsed.warning).toBeUndefined();
     // The SDK path handled it; no direct-file write was attempted.
@@ -150,7 +162,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       createExecResult('<map><string name="probeA">1</string></map>', ""),
     ]);
 
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => inspectionDisabledClient(),
       adbClientFactory: singleAdbFactory(adb),
     });
@@ -161,7 +173,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       key: "probeA",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
 
     const writeCommand = adb
@@ -176,7 +188,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
   test("clearKeyValueFile falls back and succeeds when the SDK reports inspection disabled", async () => {
     const adb = new FakeAdbExecutor();
 
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => inspectionDisabledClient(),
       adbClientFactory: singleAdbFactory(adb),
     });
@@ -186,13 +198,13 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       name: FILE_NAME,
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
   });
 
   test("does not fall back on an unrelated SDK failure — the real cause is surfaced", async () => {
     const adb = new FakeAdbExecutor();
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () =>
         inspectionDisabledClient({
           removePreference: async () => {
@@ -221,7 +233,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       new Error("run-as: package not debuggable"),
     );
 
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => inspectionDisabledClient(),
       adbClientFactory: singleAdbFactory(adb),
     });
@@ -246,7 +258,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(`cat shared_prefs/${FILE_NAME}.xml`, createExecResult("<map/>", ""));
 
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => disabledClient(MUTATION_DISABLED_ERROR),
       adbClientFactory: singleAdbFactory(adb),
     });
@@ -259,7 +271,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       type: "STRING",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
     expect(parsed.warning).toMatch(/relaunch/i);
     expect(parsed.warning).toContain(APP_ID);
@@ -276,7 +288,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       createExecResult('<map><string name="probeA">1</string></map>', ""),
     ]);
 
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => disabledClient(MUTATION_DISABLED_ERROR),
       adbClientFactory: singleAdbFactory(adb),
     });
@@ -287,7 +299,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       key: "probeA",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
 
     const writeCommand = adb
@@ -302,7 +314,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
   test("clearKeyValueFile falls back when the SDK reports mutations disabled by policy (#6347)", async () => {
     const adb = new FakeAdbExecutor();
 
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => disabledClient(MUTATION_DISABLED_ERROR),
       adbClientFactory: singleAdbFactory(adb),
     });
@@ -312,12 +324,12 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       name: FILE_NAME,
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
   });
 
   test("listDataStores rewrites the disabled-inspection error with actionable guidance (no filesystem fallback exists for DataStore)", async () => {
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => inspectionDisabledClient(),
     });
 
@@ -354,17 +366,17 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
   beforeEach(() => {
     ToolRegistry.clearTools();
     serverConfig.setEmbeddedSdkEnabled(true);
-    registerStorageTools();
+    registerStorageTools(deps);
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
     serverConfig.setEmbeddedSdkEnabled(false);
-    resetStorageToolsDependencies();
+    clearStorageToolsDependencies();
   });
 
   function useFallback(adb: FakeAdbExecutor): void {
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       androidClientFactory: () => inspectionDisabledClient(),
       adbClientFactory: singleAdbFactory(adb),
     });
@@ -423,14 +435,14 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
     });
   const warningOf = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
     const response = await toolHandler(name)(ANDROID_DEVICE, args);
-    return JSON.parse((response.content[0] as { text: string }).text).warning;
+    return toolJson(response).warning;
   };
 
   test.each(toolCalls)(
     "%s says a userId was not applied when the SDK route handled the call",
     async (name, extra) => {
       const adb = WORK_PROFILE_ADB();
-      setStorageToolsDependenciesForTesting({
+      useStorageToolsDependenciesForTesting({
         androidClientFactory: sdkRouteClient,
         adbClientFactory: singleAdbFactory(adb),
       });
@@ -451,7 +463,7 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
   test.each(toolCalls)(
     "%s adds no userId warning when no userId was given and the SDK route handled the call",
     async (name, extra) => {
-      setStorageToolsDependenciesForTesting({
+      useStorageToolsDependenciesForTesting({
         androidClientFactory: sdkRouteClient,
         adbClientFactory: singleAdbFactory(WORK_PROFILE_ADB()),
       });
@@ -478,7 +490,7 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
   );
 
   test.each(toolCalls)("%s rejects userId on an iOS device", async (name, extra) => {
-    setStorageToolsDependenciesForTesting({
+    useStorageToolsDependenciesForTesting({
       iosClientFactory: () => {
         throw new Error("iOS client must not be created");
       },
@@ -491,7 +503,7 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
 
   test.each(toolCalls)("%s advertises an optional non-negative integer userId", (name) => {
     const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name);
-    expect(definition?.inputSchema.properties?.userId).toMatchObject({
+    expect(schemaProperty(definition?.inputSchema.properties, "userId")).toMatchObject({
       type: "integer",
       minimum: 0,
     });

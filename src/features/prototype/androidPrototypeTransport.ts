@@ -1,3 +1,4 @@
+import type { PrototypePatchReply, PrototypePatchRequest } from "./prototypePatchWire";
 import type { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import type { PrototypeAssetRequestOptions } from "../observe/android/CtrlProxyPrototypes";
 import type {
@@ -6,7 +7,9 @@ import type {
   PrototypeEvent,
   PrototypeResult,
 } from "../observe/android/ctrlProxyProtocol";
+import { ActionableError } from "../../models/ActionableError";
 import { withParsedAppearance } from "./prototypeAppearance";
+import { prototypeClearStorageUnsupportedMessage } from "./prototypeStorage";
 import type { PrototypeAssetUpload } from "./prototypeAssets";
 import type { PrototypeSpec } from "./prototypeSpec";
 import type {
@@ -18,14 +21,22 @@ import type {
 /** The CtrlProxy calls the Android prototype transport forwards to. */
 export type AndroidPrototypeClient = Pick<
   AndroidCtrlProxyClient,
+  | "requestSavePrototype"
+  | "requestListSavedPrototypes"
+  | "requestPinSavedPrototype"
+  | "requestDeleteSavedPrototype"
   | "requestShowPrototype"
   | "requestInspectPrototypes"
+  | "requestPatchPrototype"
   | "requestDismissPrototype"
   | "requestPutPrototypeAsset"
   | "requestRemovePrototypeAsset"
   | "onPrototypeEvent"
   | "supportsCommand"
->;
+> &
+  Partial<
+    Pick<AndroidCtrlProxyClient, "attachPrototypeRequestHost" | "requestClearPrototypeStorage">
+  >;
 
 /**
  * Forwards every call to CtrlProxy unchanged. `inspect` and `supportsCommand` are Android-only extras outside
@@ -42,17 +53,49 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
         undefined,
         options.displayId,
         options.reset,
-        options.appearance,
+        { appearance: options.appearance, replaceOthers: options.replaceOthers },
       ),
     );
+  }
+
+  patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply> {
+    return this.client.requestPatchPrototype(patch, timeoutMs);
   }
 
   inspect(timeoutMs?: number): Promise<PrototypeResult> {
     return this.client.requestInspectPrototypes(timeoutMs);
   }
 
+  /** Saved prototypes are Android-only extras outside PrototypeTransport. */
+  save(
+    save: { spec: PrototypeSpec; label: string; icon?: string },
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    return this.client.requestSavePrototype(save, timeoutMs);
+  }
+
+  listSaved(timeoutMs?: number): Promise<PrototypeResult> {
+    return this.client.requestListSavedPrototypes(timeoutMs);
+  }
+
+  pinSaved(id: string, icon?: string, timeoutMs?: number): Promise<PrototypeResult> {
+    return this.client.requestPinSavedPrototype(id, icon, timeoutMs);
+  }
+
+  deleteSaved(id: string, timeoutMs?: number): Promise<PrototypeResult> {
+    return this.client.requestDeleteSavedPrototype(id, timeoutMs);
+  }
+
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {
     return this.client.requestDismissPrototype(target, timeoutMs);
+  }
+
+  /** Wipes the values CtrlProxy stored for `id` (#12522); needs prototype_storage_v1. */
+  clearStorage(id: string, timeoutMs?: number): Promise<PrototypeResult> {
+    if (!this.client.requestClearPrototypeStorage) {
+      throw new ActionableError(prototypeClearStorageUnsupportedMessage("android"));
+    }
+    return this.client.requestClearPrototypeStorage(id, timeoutMs);
   }
 
   putAsset(

@@ -1,21 +1,18 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import { DaemonState, type DaemonStateLike } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   getBootedDevicesForPlatforms,
   resetBootedDevicesResourceCache,
   setDeviceManager,
 } from "../../src/server/bootedDeviceResources";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract: an unknown never reads as "0 devices". When every discovery source failed
 // and the pool has no entries, the booted resource reports observationComplete=false with a
@@ -48,14 +45,7 @@ describe("available-devices CLI over an incomplete booted resource", () => {
     manager.setAndroidDiscoveryIncomplete();
     manager.failedPlatforms.add("ios");
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "hunt-unknown-zero", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    const pool = makePool(sessions, "hunt-unknown-zero", { timer, deviceManager: manager });
     DaemonState.getInstance().initialize(sessions, pool);
     setDeviceManager(manager);
     const resource = await getBootedDevicesForPlatforms(["android", "ios"], timer);

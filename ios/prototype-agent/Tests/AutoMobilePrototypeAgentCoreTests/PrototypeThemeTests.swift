@@ -162,6 +162,22 @@ final class PrototypeThemeTests: XCTestCase {
         XCTAssertNil(plain.lineHeight)
     }
 
+    func testFontAssetAndNodeFamilyKeywords() throws {
+        let typography = PrototypeTypography.standard
+        for (
+            family,
+            design
+        ) in [("serif", PrototypeFontDesign.serif), ("monospace", .monospaced), ("sans", .standard)] {
+            let style = try JSONDecoder().decode(Style.self, from: Data("{\"fontFamily\":\"\(family)\"}".utf8))
+            XCTAssertEqual(typography.resolve(style).design, design)
+            XCTAssertNil(typography.resolve(style).fontAsset)
+        }
+        let style = try JSONDecoder().decode(Style.self, from: Data(#"{"fontFamily":{"asset":"brand"}}"#.utf8))
+        XCTAssertEqual(typography.resolve(style).fontAsset, "brand")
+        XCTAssertEqual(typography.resolve(style).design, .standard)
+        XCTAssertNil(typography.resolve(nil).fontAsset)
+    }
+
     func testThemeFamilyKeywords() {
         XCTAssertEqual(PrototypeTypography(theme: .init(scale: nil, fontFamily: "mono")).design, .monospaced)
         XCTAssertEqual(PrototypeTypography(theme: .init(scale: nil, fontFamily: "sans")).design, .standard)

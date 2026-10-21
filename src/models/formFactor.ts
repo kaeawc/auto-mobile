@@ -1,6 +1,6 @@
 import type { FormFactor } from "./DeviceMatchCriteria";
 
-/** Android profile hints and geometry, shared by inventory enrichment and managed-slot matching. */
+/** Android profile hints and geometry, shared by inventory enrichment and broker binding matching. */
 export function androidProfileFormFactor(input: {
   profileId?: string | null;
   width?: number | null;

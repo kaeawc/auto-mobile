@@ -1,103 +1,126 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerAppTools,
-  resetCrashAppToolDependencies,
-  resetInstallAppToolDependencies,
   resetInstalledAppResourceRefresh,
-  resetLaunchAppToolDependencies,
-  resetTerminateAppToolDependencies,
-  resetUninstallAppToolDependencies,
-  setCrashAppToolDependencies,
-  setInstallAppToolDependencies,
   setInstalledAppResourceRefresh,
-  setLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
-  setUninstallAppToolDependencies,
 } from "../../src/server/appTools";
-import type { BootedDevice } from "../../src/models";
+import type {
+  BootedDevice,
+  CrashAppResult,
+  InstallAppResult,
+  LaunchAppResult,
+  TerminateAppResult,
+  UninstallAppResult,
+} from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
+const appTools = createAppToolsHarness();
 
 const device: BootedDevice = { deviceId: "test-device", name: "Test", platform: "android" };
 const appId = "com.example.app";
 
 type Outcome = "success" | "failure" | "aborted-before" | "aborted-after";
 
-const resultFor = (tool: string, success: boolean): Record<string, unknown> => {
-  switch (tool) {
-    case "launchApp":
-      return { success, packageName: appId, ...(success ? {} : { error: "failed" }) };
-    case "terminateApp":
-      return {
-        success,
-        packageName: appId,
-        wasForeground: false,
-        ...(success ? {} : { error: "failed" }),
-      };
-    case "crashApp":
-      return {
-        success,
-        supported: true,
-        platform: "android",
-        appId,
-        mechanism: "android_am_crash",
-        timestamp: 1,
-        confirmed: success,
-      };
-    case "installApp":
-      return { success, ...(success ? {} : { error: "failed" }) };
-    default:
-      return {
-        success,
-        packageName: appId,
-        keepData: false,
-        wasInstalled: true,
-        ...(success ? {} : { error: "failed" }),
-      };
-  }
+const successResults = {
+  launchApp: (): LaunchAppResult => ({ success: true, packageName: appId }),
+  terminateApp: (): TerminateAppResult => ({
+    success: true,
+    packageName: appId,
+    wasForeground: false,
+  }),
+  crashApp: (): CrashAppResult => ({
+    success: true,
+    supported: true,
+    platform: "android",
+    appId,
+    mechanism: "android_am_crash",
+    timestamp: 1,
+    confirmed: true,
+  }),
+  installApp: (): InstallAppResult => ({ success: true }),
+  uninstallApp: (): UninstallAppResult => ({
+    success: true,
+    packageName: appId,
+    keepData: false,
+    wasInstalled: true,
+  }),
 };
+
+type ToolName = keyof typeof successResults;
 
 describe("app tool installed-app cache invalidation", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
-    resetCrashAppToolDependencies();
-    resetInstallAppToolDependencies();
-    resetUninstallAppToolDependencies();
     resetInstalledAppResourceRefresh();
     registerAppTools();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
-    resetCrashAppToolDependencies();
-    resetInstallAppToolDependencies();
-    resetUninstallAppToolDependencies();
+    appTools.clear();
     resetInstalledAppResourceRefresh();
   });
 
-  const configure = (tool: string, execute: () => Promise<Record<string, unknown>>): void => {
-    const executor = { execute: async (..._args: unknown[]) => await execute() };
-    if (tool === "launchApp") {
-      setLaunchAppToolDependencies({ createLaunchApp: () => executor });
-    }
-    if (tool === "terminateApp") {
-      setTerminateAppToolDependencies({ createTerminateApp: () => executor });
-    }
-    if (tool === "crashApp") {
-      setCrashAppToolDependencies({ createCrashApp: () => executor });
-    }
-    if (tool === "installApp") {
-      setInstallAppToolDependencies({ createInstallApp: () => executor });
-    }
-    if (tool === "uninstallApp") {
-      setUninstallAppToolDependencies({ createUninstallApp: () => executor });
+  /** Configures `tool` so its executor runs `before`, then resolves with a successful result. */
+  const configure = (tool: ToolName, before: () => Promise<void>): void => {
+    switch (tool) {
+      case "launchApp":
+        appTools.configure("launchApp", {
+          createLaunchApp: () => ({
+            execute: async () => {
+              await before();
+              return successResults.launchApp();
+            },
+          }),
+        });
+        return;
+      case "terminateApp":
+        appTools.configure("terminateApp", {
+          createTerminateApp: () => ({
+            execute: async () => {
+              await before();
+              return successResults.terminateApp();
+            },
+          }),
+        });
+        return;
+      case "crashApp":
+        appTools.configure("crashApp", {
+          createCrashApp: () => ({
+            execute: async () => {
+              await before();
+              return successResults.crashApp();
+            },
+          }),
+        });
+        return;
+      case "installApp":
+        appTools.configure("installApp", {
+          createInstallApp: () => ({
+            execute: async () => {
+              await before();
+              return successResults.installApp();
+            },
+          }),
+        });
+        return;
+      case "uninstallApp":
+        appTools.configure("uninstallApp", {
+          createUninstallApp: () => ({
+            execute: async () => {
+              await before();
+              return successResults.uninstallApp();
+            },
+          }),
+        });
+        return;
     }
   };
 
-  const cases: Array<{ tool: string; args: Record<string, string> }> = [
+  const cases: Array<{ tool: ToolName; args: Record<string, string> }> = [
     { tool: "launchApp", args: { appId } },
     { tool: "terminateApp", args: { appId } },
     { tool: "crashApp", args: { appId } },
@@ -124,7 +147,6 @@ describe("app tool installed-app cache invalidation", () => {
           if (outcome === "failure") {
             throw new Error("failed");
           }
-          return resultFor(tool, outcome !== "failure");
         });
         if (outcome === "aborted-before") {
           controller.abort();

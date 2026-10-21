@@ -202,7 +202,7 @@ describe("assertFrameTargetIdentityProven", () => {
   });
 
   test("unknown managed hold refuses even its execution requester without identity proof", async () => {
-    const pool = { ...unassignable, androidManagedSlotHold: async () => ({}) };
+    const pool = { ...unassignable, androidBindingHold: async () => ({}) };
     await expect(check(pool, android(WIRELESS), [], "holder")).rejects.toBeInstanceOf(
       InputDeviceOwnedError,
     );
@@ -214,7 +214,7 @@ describe("assertFrameTargetIdentityProven", () => {
   test("passes proven rows, ids already held, iOS, and pools without the gate without reading slots", async () => {
     const pool = {
       ...unassignable,
-      androidManagedSlotHold: async () => {
+      androidBindingHold: async () => {
         throw new Error("unexpected slot read");
       },
     };
@@ -257,7 +257,7 @@ describe("shared non-throwing held-alias verdict", () => {
     const seen: string[][] = [];
     const managedPool = {
       ...pool,
-      androidManagedSlotHold: async (ids: readonly string[]) => {
+      androidBindingHold: async (ids: readonly string[]) => {
         seen.push([...ids]);
         return {};
       },
@@ -281,7 +281,7 @@ describe("shared non-throwing held-alias verdict", () => {
     async (gate, device, heldBySession) => {
       const guarded = gate && {
         ...gate,
-        androidManagedSlotHold: async () => {
+        androidBindingHold: async () => {
           throw new Error("unexpected snapshot");
         },
       };

@@ -222,7 +222,7 @@ export class GrantAndroidPermissions {
       const cmd = `shell pm ${action} --user ${userId} ${shellQuote(packageName)} ${shellQuote(item.permission!)}`;
       const result = await perf.track(
         `pm${action[0].toUpperCase()}${action.slice(1)}:${item.permission}`,
-        () => this.adb.executeCommand(cmd, undefined, undefined, true),
+        () => this.adb.executeCommand(cmd, { noRetry: true }),
       );
       const output = `${result.stdout}\n${result.stderr ?? ""}`.trim();
       if (outputLooksLikeShellFailure(result.stdout, result.stderr ?? "")) {
@@ -300,9 +300,7 @@ export class GrantAndroidPermissions {
     try {
       const result = await this.adb.executeCommand(
         `shell dumpsys package ${shellQuote(packageName)}`,
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-        true,
+        { maxBuffer: DUMPSYS_MAX_BUFFER, noRetry: true },
       );
       if (outputLooksLikeShellFailure(result.stdout, result.stderr ?? "")) {
         throw new ActionableError(
@@ -367,12 +365,9 @@ export class GrantAndroidPermissions {
 
     try {
       await perf.track("pmResetPermissions", async () => {
-        const execResult = await this.adb.executeCommand(
-          "shell pm reset-permissions",
-          undefined,
-          undefined,
-          true,
-        );
+        const execResult = await this.adb.executeCommand("shell pm reset-permissions", {
+          noRetry: true,
+        });
         const stdout = execResult.stdout;
         const stderr = execResult.stderr ?? "";
 

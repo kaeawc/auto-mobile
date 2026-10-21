@@ -1,10 +1,10 @@
 import { type Kysely, sql } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("custom_events").ifExists().execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createTable("custom_events")
     .ifNotExists()

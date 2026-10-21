@@ -5,16 +5,16 @@ import {
   type DeviceGestureRecordingDeviceResolution,
 } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import {
   ActionableError,
   type AppearanceConfig,
   type AppearanceMode,
   type BootedDevice,
 } from "../../src/models";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -59,8 +59,9 @@ function harness() {
   window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
   const configKeys: Array<string | undefined> = [];
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl() as unknown as SimCtlClient, {
+    new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), {
       window,
+      ctrlProxyManager: new FakeCtrlProxyManager(),
     }),
     { create: () => adb },
     {

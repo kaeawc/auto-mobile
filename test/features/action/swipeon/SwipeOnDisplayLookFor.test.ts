@@ -1,5 +1,5 @@
 import { DispatchedObservationError } from "../../../../src/models/DispatchedObservationError";
-import { StaleDisplayError } from "../../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../../src/features/observe/StaleDisplayError";
 import { SwipeSearchCancelledError } from "../../../../src/features/action/swipeon/searchCancellation";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { SwipeOnOptions } from "../../../../src/models";
@@ -222,7 +222,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
         controller.abort();
         return interaction(run, options);
       };
-      const error = await h.action.execute(search, undefined, controller.signal).then(
+      const error = await h.action.execute(search, { signal: controller.signal }).then(
         () => undefined,
         (reason: unknown) => reason,
       );
@@ -234,7 +234,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       const h = harness({ route, foundAfter: Infinity });
       const controller = new AbortController();
       h.afterSwipe(() => controller.abort());
-      const error = await h.action.execute(search, undefined, controller.signal).then(
+      const error = await h.action.execute(search, { signal: controller.signal }).then(
         () => undefined,
         (reason: unknown) => reason,
       );

@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -8,18 +9,18 @@ class InsertTextSettleTest {
     InsertTextSnapshot(text, hint, start, end)
 
   @Test
-  fun `null baseline retains legacy suffix behavior`() {
+  fun `null baseline retains legacy suffix behavior`() = runTest {
     var polls = 0
     var pauses = 0
     assertTrue(
       awaitPrecedingInput(
-        "x",
-        {
+        PrecedingInputExpectation("x"),
+        readSnapshot = {
           polls++
           snapshot("éx")
         },
-        { 0L },
-        { pauses++ },
+        nowMs = { 0L },
+        pause = { pauses++ },
       ),
     )
     assertEquals(1, polls)
@@ -27,17 +28,17 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `waits until snapshot ends with suffix`() {
+  fun `waits until snapshot ends with suffix`() = runTest {
     var now = 0L
     var polls = 0
     val pauses = mutableListOf<Long>()
     val snapshots = listOf(snapshot("é"), snapshot("é"), snapshot("éx"))
     assertTrue(
       awaitPrecedingInput(
-        "x",
-        { snapshots[polls++] },
-        { now },
-        {
+        PrecedingInputExpectation("x"),
+        readSnapshot = { snapshots[polls++] },
+        nowMs = { now },
+        pause = {
           pauses.add(it)
           now += it
         },
@@ -48,15 +49,15 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `deadline passes without suffix`() {
+  fun `deadline passes without suffix`() = runTest {
     var now = 0L
     var totalPause = 0L
     assertFalse(
       awaitPrecedingInput(
-        "x",
-        { snapshot("é") },
-        { now },
-        {
+        PrecedingInputExpectation("x"),
+        readSnapshot = { snapshot("é") },
+        nowMs = { now },
+        pause = {
           now += it
           totalPause += it
         },
@@ -67,8 +68,15 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `null snapshot node gone returns false`() {
-    assertFalse(awaitPrecedingInput("x", { null }, { 0L }, { error("must not pause") }))
+  fun `null snapshot node gone returns false`() = runTest {
+    assertFalse(
+      awaitPrecedingInput(
+        PrecedingInputExpectation("x"),
+        readSnapshot = { null },
+        nowMs = { 0L },
+        pause = { error("must not pause") },
+      ),
+    )
   }
 
   @Test
@@ -85,16 +93,15 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `stale previous-insert text is refreshed until exact remembered content appears`() {
+  fun `stale previous-insert text is refreshed until exact remembered content appears`() = runTest {
     var now = 0L
     var reads = 0
     assertTrue(
       awaitPrecedingInput(
-        "",
-        { if (++reads < 3) snapshot("é", 1) else snapshot("éx👍🏽", 1) },
-        { now },
-        { now += it },
-        matches = { it.text == "éx👍🏽" },
+        PrecedingInputExpectation("", matches = { it.text == "éx👍🏽" }),
+        readSnapshot = { if (++reads < 3) snapshot("é", 1) else snapshot("éx👍🏽", 1) },
+        nowMs = { now },
+        pause = { now += it },
       ),
     )
     assertEquals(50L, now)
@@ -102,33 +109,31 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `changed field never equals remembered content and waiting is bounded`() {
+  fun `changed field never equals remembered content and waiting is bounded`() = runTest {
     var now = 0L
     assertFalse(
       awaitPrecedingInput(
-        "",
-        { snapshot("unrelated", 9) },
-        { now },
-        { now += it },
-        matches = { it.text == "éx👍🏽" },
+        PrecedingInputExpectation("", matches = { it.text == "éx👍🏽" }),
+        readSnapshot = { snapshot("unrelated", 9) },
+        nowMs = { now },
+        pause = { now += it },
       ),
     )
     assertEquals(300L, now)
   }
 
   @Test
-  fun `pre-existing suffix waits for repeated key event to land`() {
+  fun `pre-existing suffix waits for repeated key event to land`() = runTest {
     var now = 0L
     var reads = 0
     val baseline = snapshot("éx", 2)
     assertFalse(isPrecedingInputReflected(baseline, "x", baseline))
     assertTrue(
       awaitPrecedingInput(
-        "x",
-        { if (++reads < 3) baseline else snapshot("éxx", 3) },
-        { now },
-        { now += it },
-        baseline = baseline,
+        PrecedingInputExpectation("x", baseline = baseline),
+        readSnapshot = { if (++reads < 3) baseline else snapshot("éxx", 3) },
+        nowMs = { now },
+        pause = { now += it },
       ),
     )
     assertEquals(50L, now)
@@ -136,10 +141,17 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `pre-existing suffix with no change times out`() {
+  fun `pre-existing suffix with no change times out`() = runTest {
     var now = 0L
     val baseline = snapshot("éx", 2)
-    assertFalse(awaitPrecedingInput("x", { baseline }, { now }, { now += it }, baseline = baseline))
+    assertFalse(
+      awaitPrecedingInput(
+        PrecedingInputExpectation("x", baseline = baseline),
+        readSnapshot = { baseline },
+        nowMs = { now },
+        pause = { now += it },
+      ),
+    )
     assertEquals(300L, now)
   }
 
@@ -160,19 +172,18 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `transformed input takes bounded warning path`() {
+  fun `transformed input takes bounded warning path`() = runTest {
     var now = 0L
     var reads = 0
     assertFalse(
       awaitPrecedingInput(
-        "x",
-        {
+        PrecedingInputExpectation("x", baseline = snapshot("é", 1)),
+        readSnapshot = {
           reads++
           snapshot("éX", 2)
         },
-        { now },
-        { now += it },
-        baseline = snapshot("é", 1),
+        nowMs = { now },
+        pause = { now += it },
       ),
     )
     assertEquals(300L, now)

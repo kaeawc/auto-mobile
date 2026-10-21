@@ -28,8 +28,11 @@ import {
   resolveRunnerChecksum,
   resolveRunnerChecksumTarget,
   PROTOTYPE_AGENT_DYLIB_FILENAME,
+  PROTOTYPE_VIEWER_ARCHIVE_FILENAME,
   resolvePrototypeAgentChecksum,
+  resolvePrototypeViewerChecksum,
   resolvePrototypeAgentUrl,
+  resolvePrototypeViewerUrl,
   resolveNetworkFilterChecksum,
   resolveNetworkFilterUrl,
   resolveScreenCaptureHelperChecksum,
@@ -764,5 +767,44 @@ describe("NIGHTLY_CHECKSUM_ENTRY (dedicated mutable nightly slot)", function () 
     // No published nightly asset exists to download/verify, so the pin must not
     // be treated as a known, integrity-verifiable version.
     expect(isPinnedVersionKnown({ AUTOMOBILE_VERSION: "nightly" })).toBe(false);
+  });
+});
+
+describe("prototype-viewer release delivery (#12255)", function () {
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "0.0.46",
+      apkSha256: "apk46",
+      ipaSha256: "ipa46",
+      runnerSha256: "runner46",
+      prototypeViewerSha256: "prototype46",
+    },
+    { version: "0.0.45", apkSha256: "apk45", ipaSha256: "ipa45", runnerSha256: "runner45" },
+  ];
+
+  test("uses the fixed universal simulator archive asset name", function () {
+    expect(PROTOTYPE_VIEWER_ARCHIVE_FILENAME).toBe("AutoMobilePrototypeViewer.zip");
+  });
+
+  test("builds a version-pinned release URL", function () {
+    expect(resolvePrototypeViewerUrl({}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.46/${PROTOTYPE_VIEWER_ARCHIVE_FILENAME}`,
+    );
+    expect(resolvePrototypeViewerUrl({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.45/${PROTOTYPE_VIEWER_ARCHIVE_FILENAME}`,
+    );
+  });
+
+  test("resolves the matching checksum and leaves pre-delivery releases unverifiable", function () {
+    expect(resolvePrototypeViewerChecksum({}, registry)).toBe("prototype46");
+    expect(resolvePrototypeViewerChecksum({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe("");
+    expect(resolvePrototypeViewerChecksum({ AUTOMOBILE_VERSION: "9.9.9" }, registry)).toBe("");
+  });
+
+  test("registry prototype-viewer checksums are empty or SHA-256 values", function () {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      const checksum = entry.prototypeViewerSha256 ?? "";
+      expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
+    }
   });
 });

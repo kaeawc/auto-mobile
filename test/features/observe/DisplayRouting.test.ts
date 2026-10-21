@@ -1,14 +1,14 @@
+import { createHierarchyForTest } from "./observeScreenTestBuilders";
+import { createExecResult } from "../../../src/utils/execResult";
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
-import {
-  AndroidDisplayReadError,
-  ObservedAndroidDisplayCache,
-} from "../../../src/features/observe/ObservationDisplay";
+import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
+import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice, ObservationInsets, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -28,6 +28,7 @@ import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { ScreenshotJobTracker } from "../../../src/utils/ScreenshotJobTracker";
 import { getScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const deviceStateFixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
@@ -102,7 +103,7 @@ describe("display read routing", () => {
     ObservedAndroidDisplayCache.release(target.deviceId);
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: logicalDisplays, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(logicalDisplays, ""));
     const capture = new FakeHierarchyCapture(() => {
       adb.setCommandError("cmd display get-displays", new Error("display source timeout"));
       return { hierarchy: {}, displayId: 2, screenWidth: 200, screenHeight: 200 };
@@ -176,12 +177,12 @@ describe("display read routing", () => {
 
   test("fresh Android hierarchy passes selected displayId to the sync client", async () => {
     let requestedDisplayId: number | undefined;
-    const hierarchy: ViewHierarchyResult = {
+    const hierarchy: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: { node: { bounds: { left: 0, top: 0, right: 20, bottom: 20 } } },
       screenWidth: 200,
       screenHeight: 200,
       displayId: 2,
-    };
+    });
     const capture = createDeviceHierarchyCapture(device, {
       syncClientFactory: () => ({
         requestHierarchySync: async (_perf, _raw, _signal, _timeout, _diagnostics, displayId) => {
@@ -199,11 +200,13 @@ describe("display read routing", () => {
   test("cached-ok selected-display observation uses owner sync and preserves its failure", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     let syncReads = 0;
     const signal = new AbortController().signal;
     const capture = createDeviceHierarchyCapture(device, {
@@ -268,11 +271,13 @@ describe("display read routing", () => {
     async (scenario) => {
       const timer = new FakeTimer();
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("cmd display get-displays", {
-        stdout:
+      adb.setCommandResponse(
+        "cmd display get-displays",
+        createExecResult(
           'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-        stderr: "",
-      });
+          "",
+        ),
+      );
       const isDefault = scenario === "default";
       const systemInsets = isDefault
         ? { top: 8, bottom: 12, left: 2, right: 2 }
@@ -300,14 +305,14 @@ describe("display read routing", () => {
                 right: systemInsets.right,
               },
             };
-      const hierarchy: ViewHierarchyResult = {
+      const hierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: { node: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } } },
         displayId: isDefault ? 0 : 2,
         screenWidth: isDefault ? 100 : 200,
         screenHeight: isDefault ? 100 : 200,
         insets,
         ...(scenario === "unavailable" ? {} : { systemInsets }),
-      };
+      });
       const defaultHierarchy = new FakeViewHierarchy();
       defaultHierarchy.configureHierarchy(hierarchy);
       const requestedDisplayIds: Array<number | undefined> = [];
@@ -359,19 +364,21 @@ describe("display read routing", () => {
   test("default Android observation stamps the focused window panel", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state state", {
-      stdout: deviceStateFixture("foldpf-5-after-reset-state.txt"),
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout: deviceStateFixture("foldpf-print-states.txt"),
-      stderr: "",
-    });
+        "",
+      ),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(deviceStateFixture("foldpf-5-after-reset-state.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(deviceStateFixture("foldpf-print-states.txt"), ""),
+    );
     const hierarchy = new FakeViewHierarchy();
     // ToolRegistry receives this bare production shape and hydrates it before observation.
     const source = new FakeDisplayInventorySource({
@@ -463,18 +470,20 @@ describe("display read routing", () => {
     displayTransitions.reset(device.deviceId);
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-      stderr: "",
-    });
-    const hierarchy: ViewHierarchyResult = {
+        "",
+      ),
+    );
+    const hierarchy: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: { node: { bounds: { left: 0, top: 0, right: 200, bottom: 200 } } },
       displayId: 2,
       screenWidth: 200,
       screenHeight: 200,
       captureSequence: 9,
-    };
+    });
     let hierarchyDisplayId: number | undefined;
     let hierarchyCaptures = 0;
     let screenshotDisplayId: number | undefined;
@@ -539,11 +548,13 @@ describe("display read routing", () => {
   test("default settled capture on a multi-panel device keeps PNG and no display routing", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     const hierarchy = new FakeViewHierarchy();
     hierarchy.configureHierarchy({
       hierarchy: { node: {} },
@@ -595,10 +606,7 @@ describe("display read routing", () => {
     const timer = new FakeTimer();
     const cache = new FakeObserveCacheStore(timer);
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: logicalDisplays,
-      stderr: "",
-    });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(logicalDisplays, ""));
     const hierarchy = new FakeViewHierarchy();
     hierarchy.configureHierarchy({
       hierarchy: { node: {} },
@@ -653,6 +661,7 @@ describe("display read routing", () => {
       expect(displayTransitions.revision(device.deviceId)).toBe(revision);
       displayTransitions.notifyAndroidTransition(device.deviceId, {
         change: "device_state",
+        displayId: 0,
         deviceState: 1,
       });
       const fencedRevision = displayTransitions.revision(device.deviceId);
@@ -674,11 +683,13 @@ describe("display read routing", () => {
   test("routed reads fail closed when the APK omits display identity", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     const capture: HierarchyCapture = {
       capture: async (request) => ({
         captureId: "old-apk",
@@ -712,12 +723,11 @@ describe("display read routing", () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("cmd display get-displays", [
-      {
-        stdout:
-          'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-        stderr: "",
-      },
-      { stdout: "", stderr: "" },
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+        "",
+      ),
+      createExecResult("", ""),
     ]);
     const hierarchy = new FakeViewHierarchy();
     hierarchy.configureHierarchy({
@@ -752,13 +762,13 @@ describe("display read routing", () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell cmd device_state state", [
-      { stdout: deviceStateFixture("foldpf-5-after-reset-state.txt"), stderr: "" },
-      { stdout: deviceStateFixture("foldpf-1-default-state.txt"), stderr: "" },
+      createExecResult(deviceStateFixture("foldpf-5-after-reset-state.txt"), ""),
+      createExecResult(deviceStateFixture("foldpf-1-default-state.txt"), ""),
     ]);
-    adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout: deviceStateFixture("foldpf-print-states.txt"),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(deviceStateFixture("foldpf-print-states.txt"), ""),
+    );
     const cache = new ObservedAndroidDisplayCache(timer);
     expect(await cache.posture(device, adb)).toBe("closed");
     expect(await cache.posture(device, adb)).toBe("closed");
@@ -828,9 +838,10 @@ describe("display read routing", () => {
       pixelHeight: 100,
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
-    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstance = spyOnIosClientInstance({
+      convertToViewHierarchyResult: convertIosHierarchy,
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const iosDevice: BootedDevice = { ...device, platform: "ios", deviceId: "ios-panel-test" };
     try {
       const screen = new RealObserveScreen(
@@ -893,13 +904,15 @@ describe("display read routing", () => {
     const raw = {
       updatedAt: 1,
       packageName: "com.test.app",
+      nativeScale: 1,
       pixelWidth: 2007,
       pixelHeight: 2853,
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 2007, bottom: 2853 } },
     };
-    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstance = spyOnIosClientInstance({
+      convertToViewHierarchyResult: convertIosHierarchy,
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
-    } as unknown as IOSCtrlProxyClient);
+    });
     try {
       const screen = new RealObserveScreen(
         iosDevice,
@@ -946,7 +959,7 @@ describe("all-display captures", () => {
   function harness(displays: BootedDevice["displays"] | null = device.displays, observer = false) {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: logicalDisplays, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(logicalDisplays, ""));
     const hierarchy = new FakeViewHierarchy();
     const source = loadAndroidHomeObserve().observe.viewHierarchy!;
     hierarchy.configureHierarchy({ ...source, displayId: 0 });
@@ -1171,13 +1184,14 @@ describe("all-display captures", () => {
     scriptPanelApps(h);
     const collect = h.screen.collectAllData.bind(h.screen);
     h.screen.collectAllData = async (...args) => {
-      if (args[10] === 0) {
+      if (args[1]?.displayId === 0) {
         throw error;
       }
       return collect(...args);
     };
     displayTransitions.notifyAndroidTransition(device.deviceId, {
       change: "device_state",
+      displayId: 0,
       deviceState: 1,
     });
     const revision = displayTransitions.revision(device.deviceId);

@@ -1,3 +1,4 @@
+import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -25,6 +26,8 @@ import type { ObserveResult } from "../../models";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
+import { resolveSignalCall, type ActionCall } from "./ActionCall";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
 const FOREGROUND_CHANGE_TIMEOUT_MS = 5_000;
@@ -167,7 +170,7 @@ export interface OpenURLOptions {
 }
 
 export class OpenURL extends BaseVisualChange {
-  private readonly simctl: SimCtlClient | null;
+  private readonly simctl: Pick<SimCtlClient, "executeCommandArgs"> | null;
   private readonly devicectl: DeviceUrlLauncher | null;
   private readonly iosOpenUrlBackend?: IosOpenUrlBackend;
 
@@ -180,7 +183,7 @@ export class OpenURL extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
-    simctl: SimCtlClient | null = null,
+    simctl: Pick<SimCtlClient, "executeCommandArgs"> | null = null,
     devicectl: DeviceUrlLauncher | null = null,
     timerOrOptions: Timer | OpenURLOptions = defaultTimer,
   ) {
@@ -192,7 +195,23 @@ export class OpenURL extends BaseVisualChange {
     this.devicectl = devicectl;
   }
 
-  async execute(url: string, signal?: AbortSignal): Promise<OpenURLResult> {
+  /** @internal Typed view of the per-platform dispatch paths for unit tests; not part of the public API. */
+  get testHooks(): {
+    executeAndroidOpenURL: OpenURL["executeAndroidOpenURL"];
+    executeiOSOpenURL: OpenURL["executeiOSOpenURL"];
+  } {
+    return {
+      executeAndroidOpenURL: (url, signal) => this.executeAndroidOpenURL(url, signal),
+      executeiOSOpenURL: (url, previousObservation, signal) =>
+        this.executeiOSOpenURL(url, previousObservation, signal),
+    };
+  }
+
+  async execute(url: string, call?: ActionCall): Promise<OpenURLResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(url: string, signal?: AbortSignal): Promise<OpenURLResult>;
+  async execute(url: string, signalOrCall?: AbortSignal | ActionCall): Promise<OpenURLResult> {
+    const { signal } = resolveSignalCall(signalOrCall);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("openURL");
@@ -236,7 +255,7 @@ export class OpenURL extends BaseVisualChange {
         throwIfAborted(signal);
         const launchResult = await awaitWhileRequestIsLive(
           perf.track("launchApp", () =>
-            launchApp.execute(packageName, false, true, undefined, undefined, undefined, signal),
+            launchApp.execute(packageName, { clearAppData: false, coldBoot: true, signal }),
           ),
           signal,
         );
@@ -259,6 +278,7 @@ export class OpenURL extends BaseVisualChange {
         }
       } catch (error) {
         throwIfAborted(signal);
+        rethrowDeviceTransportUnavailable(error);
         logger.warn(
           `[OpenURL] Exception while launching app ${packageName}: ${errorMessage(error)}`,
           error,
@@ -294,10 +314,9 @@ export class OpenURL extends BaseVisualChange {
       },
       {
         signal,
-        changeExpected: false,
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
         foregroundAppMayChange: true,
-        usesObservationForResolution: false,
-        timeoutMs: 12000,
+        timeoutMs: SETTLE_BUDGET_MS.urlDispatch,
         perf,
       },
     );

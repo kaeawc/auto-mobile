@@ -1,20 +1,12 @@
 import crypto from "crypto";
 
 /**
- * Interface for crypto service
- */
-export interface CryptoService {
-  generateCacheKey(data: string | Buffer): string;
-  verifyChecksum(buffer: Buffer, expectedChecksum: string): boolean;
-}
-
-/**
  * Node.js crypto implementation for AutoMobile MCP
  *
  * SECURITY NOTE: MD5 is only used for cache key generation and non-security purposes.
  * For all security-sensitive operations, use SHA-256 or stronger algorithms.
  */
-export class NodeCryptoService implements CryptoService {
+export class NodeCryptoService {
   /**
    * Generate MD5 hash for cache key purposes only
    * WARNING: MD5 is cryptographically broken and should NEVER be used for:

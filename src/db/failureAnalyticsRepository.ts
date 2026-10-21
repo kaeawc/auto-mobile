@@ -1,16 +1,37 @@
-import { errorMessage } from "../utils/describeUnknownError";
 import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
-import { getDatabase } from "./database";
 import type {
-  Database,
-  NewFailureOccurrence,
-  NewFailureOccurrenceScreen,
-  NewFailureCapture,
-  NewFailureNotification,
-} from "./types";
+  AggregatedToolCallInfo,
+  DeviceBreakdown,
+  FailureCapture,
+  FailureGroup,
+  FailureOccurrence,
+  FailureSeverity,
+  FailureType,
+  PeriodTotals,
+  ScreenBreakdown,
+  TimelineDataPoint,
+  VersionBreakdown,
+} from "../models/failureAnalytics";
+import { errorMessage } from "../utils/describeUnknownError";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { getDatabase } from "./database";
+import { getDbWriteBarrier, type DbWriteBarrier } from "./dbWriteBarrier";
+import { decodeStackTrace, decodeToolCallInfo } from "./failureAggregateJson";
+import {
+  type FailureNotificationEntry,
+  type FailureScreenCountRow,
+  type FailuresQuery,
+  type FailuresStreamQuery,
+  type FailuresStreamResponse,
+  mergeScreenBreakdownRows,
+  type RecordFailureInput,
+  type TimelineQuery,
+  type VisitScreenCountRow,
+} from "./failureAnalyticsQueries";
+import { deleteOrphanFailureGroups } from "./failureGroupRetention";
 import {
   formatTimelineBucketLabel,
   timelineBucketMs,
@@ -18,179 +39,51 @@ import {
   timelineBucketStart,
   timelineBucketStartFromIndex,
 } from "./failureTimelineBuckets";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
-import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
+import { nowIso } from "./nowIso";
 import {
   createRowCapRetentionState,
   pruneTableByRowCap,
   runAmortizedRetention,
 } from "./rowCapRetention";
+import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
 import type {
-  FailureType,
-  FailureSeverity,
-  StackTraceElement,
-  AggregatedToolCallInfo,
-  DeviceBreakdown,
-  VersionBreakdown,
-  ScreenBreakdown,
-  FailureGroup,
-  FailureOccurrence,
-  FailureCapture,
-  TimelineDataPoint,
-  PeriodTotals,
-} from "../server/failuresResources";
+  Database,
+  NewFailureCapture,
+  NewFailureNotification,
+  NewFailureOccurrence,
+  NewFailureOccurrenceScreen,
+} from "./types";
+export { mergeScreenBreakdownRows, type RecordFailureInput } from "./failureAnalyticsQueries";
 
 const RETENTION_MAX_ROWS = 10_000;
 const retentionState = createRowCapRetentionState();
 
-interface FailureScreenCountRow {
-  screenName: string;
-  failureCount: number;
-}
-
-interface VisitScreenCountRow {
-  screenName: string;
-  visitCount: number;
-}
-
-export function mergeScreenBreakdownRows(
-  failureScreens: readonly FailureScreenCountRow[],
-  visitedScreens: readonly VisitScreenCountRow[],
-): ScreenBreakdown[] {
-  const visitMap = new Map(visitedScreens.map((screen) => [screen.screenName, screen.visitCount]));
-  const totalVisits = visitedScreens.reduce((sum, screen) => sum + screen.visitCount, 0);
-
-  const result: ScreenBreakdown[] = [];
-  const processedScreens = new Set<string>();
-
-  for (const row of failureScreens) {
-    const visitCount = visitMap.get(row.screenName) ?? 0;
-    result.push({
-      screenName: row.screenName,
-      visitCount,
-      failureCount: row.failureCount,
-      visitPercentage: totalVisits > 0 ? (visitCount / totalVisits) * 100 : 0,
-    });
-    processedScreens.add(row.screenName);
-  }
-
-  const visitOnlyScreens = visitedScreens
-    .filter((screen) => !processedScreens.has(screen.screenName))
-    .sort((a, b) => b.visitCount - a.visitCount || a.screenName.localeCompare(b.screenName))
-    .slice(0, 5);
-
-  for (const screen of visitOnlyScreens) {
-    result.push({
-      screenName: screen.screenName,
-      visitCount: screen.visitCount,
-      failureCount: 0,
-      visitPercentage: totalVisits > 0 ? (screen.visitCount / totalVisits) * 100 : 0,
-    });
-  }
-
-  return result
-    .map((screen, index) => ({ screen, index }))
-    .sort((a, b) => b.screen.visitCount - a.screen.visitCount || a.index - b.index)
-    .map(({ screen }) => screen);
-}
-
-// Types for recording failures
-
-export interface RecordFailureInput {
-  type: FailureType;
-  signature: string;
-  title: string;
-  message: string;
-  severity: FailureSeverity;
-  stackTrace?: StackTraceElement[];
-  toolCallInfo?: AggregatedToolCallInfo;
-  occurrence: {
-    deviceId?: string;
-    deviceModel: string;
-    os: string;
-    appVersion: string;
-    sessionId: string;
-    screenAtFailure?: string;
-    screensVisited?: string[];
-    testName?: string;
-    testExecutionId?: number;
-    errorCode?: string;
-    durationMs?: number;
-    toolArgs?: Record<string, unknown>;
-  };
-  capture?: {
-    type: "screenshot" | "video";
-    path: string;
-  };
-}
-
-// Types for querying failures
-
-interface FailuresQuery {
-  type?: FailureType;
-  severity?: FailureSeverity;
-  startTime?: number;
-  endTime?: number;
-  limit?: number;
-  offset?: number;
-}
-
-interface TimelineQuery {
-  startTime: number;
-  endTime: number;
-  aggregation: "minute" | "hour" | "day" | "week";
-}
-
-interface FailuresStreamQuery {
-  sinceTimestamp?: number;
-  sinceId?: number;
-  startTime?: number;
-  endTime?: number;
-  limit?: number;
-  type?: FailureType;
-  severity?: FailureSeverity;
-  acknowledged?: boolean;
-}
-
-interface FailureNotificationEntry {
-  id: number;
-  occurrenceId: string;
-  groupId: string;
-  type: FailureType;
-  severity: FailureSeverity;
-  title: string;
-  timestamp: number;
-  acknowledged: boolean;
-}
-
-interface FailuresStreamResponse {
-  notifications: FailureNotificationEntry[];
-  lastTimestamp?: number;
-  lastId?: number;
-}
-
 const STREAM_LIMIT_MAX = 500;
 
 export class FailureAnalyticsRepository {
-  private timer: Timer;
   private db: Kysely<Database> | null;
+  private timer: Timer;
   private getBarrier: () => DbWriteBarrier;
   private idGenerator: IdGenerator;
 
   constructor(
-    timer: Timer = defaultTimer,
     db?: Kysely<Database>,
+    timer: Timer = defaultTimer,
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912).
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
     idGenerator: IdGenerator = defaultIdGenerator,
   ) {
-    this.timer = timer;
     this.db = db ?? null;
+    this.timer = timer;
     this.getBarrier = getBarrier;
     this.idGenerator = idGenerator;
+  }
+
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return { pruneToRowCap: (maxRows?: number) => this.pruneToRowCap(maxRows) };
   }
 
   private getDb(): Kysely<Database> {
@@ -242,7 +135,7 @@ export class FailureAnalyticsRepository {
         // (lost increments). A single INSERT ... ON CONFLICT DO UPDATE makes the
         // count bump atomic. The candidate id is used only on the first-seen path.
         const candidateGroupId = this.idGenerator.next();
-        const nowIso = new Date().toISOString();
+        const stampedAt = nowIso(this.timer);
 
         const upserted = await trx
           .insertInto("failure_groups")
@@ -259,13 +152,13 @@ export class FailureAnalyticsRepository {
             unique_sessions: 1,
             stack_trace_json: input.stackTrace ? JSON.stringify(input.stackTrace) : null,
             tool_call_info_json: input.toolCallInfo ? JSON.stringify(input.toolCallInfo) : null,
-            updated_at: nowIso,
+            updated_at: stampedAt,
           })
           .onConflict((oc) =>
             oc.column("signature").doUpdateSet((eb) => ({
               last_occurrence: now,
               total_count: eb("failure_groups.total_count", "+", 1),
-              updated_at: nowIso,
+              updated_at: stampedAt,
             })),
           )
           .returning("id")
@@ -313,21 +206,16 @@ export class FailureAnalyticsRepository {
             .where("id", "=", groupId)
             .executeTakeFirst();
 
-          let mergedToolCallInfo = input.toolCallInfo;
-          if (current?.tool_call_info_json) {
-            const existing = JSON.parse(current.tool_call_info_json) as AggregatedToolCallInfo;
-            mergedToolCallInfo = this.mergeToolCallInfo(
-              existing,
-              input.toolCallInfo,
-              input.occurrence,
-            );
-          }
+          const existing = decodeToolCallInfo(current?.tool_call_info_json);
+          const mergedToolCallInfo = existing
+            ? this.mergeToolCallInfo(existing, input.toolCallInfo, input.occurrence)
+            : input.toolCallInfo;
 
           await trx
             .updateTable("failure_groups")
             .set({
               tool_call_info_json: mergedToolCallInfo ? JSON.stringify(mergedToolCallInfo) : null,
-              updated_at: new Date().toISOString(),
+              updated_at: nowIso(this.timer),
             })
             .where("id", "=", groupId)
             .execute();
@@ -453,12 +341,8 @@ export class FailureAnalyticsRepository {
         versionBreakdown: versionBreakdowns.get(group.id) ?? [],
         screenBreakdown,
         failureScreens: this.computeFailureScreens(screenBreakdown),
-        stackTraceElements: group.stack_trace_json
-          ? (JSON.parse(group.stack_trace_json) as StackTraceElement[])
-          : [],
-        toolCallInfo: group.tool_call_info_json
-          ? (JSON.parse(group.tool_call_info_json) as AggregatedToolCallInfo)
-          : null,
+        stackTraceElements: decodeStackTrace(group.stack_trace_json),
+        toolCallInfo: decodeToolCallInfo(group.tool_call_info_json),
         affectedTests: affectedTestsByGroup.get(group.id) ?? {},
         recentCaptures: recentCapturesByGroup.get(group.id) ?? [],
         sampleOccurrences: sampleOccurrencesByGroup.get(group.id) ?? [],
@@ -1186,19 +1070,7 @@ export class FailureAnalyticsRepository {
       // use a correlated NOT EXISTS (index-served, early-exit) rather than
       // materializing the full DISTINCT set for a NOT IN scan.
       if (deleted > 0) {
-        await db
-          .deleteFrom("failure_groups")
-          .where((eb) =>
-            eb.not(
-              eb.exists(
-                eb
-                  .selectFrom("failure_occurrences")
-                  .select(sql`1`.as("one"))
-                  .whereRef("failure_occurrences.group_id", "=", "failure_groups.id"),
-              ),
-            ),
-          )
-          .execute();
+        await deleteOrphanFailureGroups(db);
       }
     } catch (error) {
       logger.warn(`[FailureAnalyticsRepository] Retention cleanup failed: ${error}`);

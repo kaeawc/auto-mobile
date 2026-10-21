@@ -7,13 +7,16 @@ import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
-import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../features/navigation/NavigationGraphManager";
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { throwIfAborted, createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
@@ -96,107 +99,106 @@ export interface ExploreArgs extends ExploreOptions {
   sessionUuid?: string;
 }
 
-function getNavigationManager(sessionUuid?: string): NavigationGraphManager {
+/** Resolves the navigation graph for an optional session; injectable so tests pass a fake directly. */
+export type NavigationManagerFactory = (sessionUuid?: string) => NavigationGraphService;
+
+const getNavigationManager: NavigationManagerFactory = (sessionUuid) => {
   return sessionUuid
     ? NavigationGraphManager.getInstanceForSession(sessionUuid)
     : NavigationGraphManager.getInstance();
-}
-
-// Injection seam for the navigateTo handler (mirrors the tapAny factory seam
-// in interactionTools.ts). Lets a unit test exercise the registered handler
-// wiring with a fake NavigateTo whose execute() returns a chosen
-// success/failure result, instead of spying on the class prototype (#6251
-// review — a prototype spy is a process-global patch that can leak into
-// unrelated tests running in the same process).
-export type NavigateToLike = Pick<NavigateTo, "execute">;
-
-function createDefaultNavigateTo(device: BootedDevice, args: NavigateToArgs): NavigateToLike {
-  const navigationManager = getNavigationManager(args.sessionUuid);
-  return new NavigateTo(
-    device,
-    undefined,
-    null,
-    null,
-    navigationManager,
-    undefined,
-    new DefaultPathOptimizer(navigationManager),
-    args.sessionUuid,
-  );
-}
-
-let navigateToFactory: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike =
-  createDefaultNavigateTo;
-
-export function setNavigateToFactory(
-  factory: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike,
-): void {
-  navigateToFactory = factory;
-}
-
-export function resetNavigateToFactory(): void {
-  navigateToFactory = createDefaultNavigateTo;
-}
-
-export const navigateToHandler = async (
-  device: BootedDevice,
-  args: NavigateToArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-) => {
-  try {
-    throwIfAborted(signal);
-    const navigateTo = navigateToFactory(device, args);
-    const options: NavigateToOptions = {
-      ...(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
-        ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
-        : {}),
-      ...(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
-        ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
-        : {}),
-      targetScreen: args.targetScreen,
-      platform: args.platform || device.platform,
-      sessionUuid: args.sessionUuid,
-    };
-    const result = await navigateTo.execute(options, progress, signal);
-    throwIfAborted(signal);
-
-    if (result.success) {
-      return createJSONToolResponse({
-        message: result.message || `Navigated to ${args.targetScreen}`,
-        ...result,
-      });
-    } else {
-      // A failed navigation must not read as a completed one: mark the MCP
-      // envelope `isError`, exactly as tapOn/sendKeys do (#6200, #6251).
-      return {
-        ...createJSONToolResponse({
-          error: result.error || "Navigation failed",
-          ...result,
-        }),
-        isError: true as const,
-      };
-    }
-  } catch (error) {
-    throwIfAborted(signal);
-    throw toActionableError(error, `Failed to navigate`);
-  }
 };
 
+// Narrow executor interface for per-handler dependency injection.
+export type NavigateToLike = Pick<NavigateTo, "execute">;
+
+function createDefaultNavigateTo(
+  device: BootedDevice,
+  args: NavigateToArgs,
+  navigationManagerFactory: NavigationManagerFactory = getNavigationManager,
+): NavigateToLike {
+  const navigationManager = navigationManagerFactory(args.sessionUuid);
+  return new NavigateTo(device, undefined, {
+    navigationManager,
+    pathOptimizer: new DefaultPathOptimizer(navigationManager),
+    sessionUuid: args.sessionUuid,
+  });
+}
+
+export interface NavigateToHandlerDependencies {
+  navigateToFactory?: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike;
+  navigationManagerFactory?: NavigationManagerFactory;
+}
+
+export function createNavigateToHandler({
+  navigationManagerFactory = getNavigationManager,
+  navigateToFactory = (device, args) =>
+    createDefaultNavigateTo(device, args, navigationManagerFactory),
+}: NavigateToHandlerDependencies = {}) {
+  return async (
+    device: BootedDevice,
+    args: NavigateToArgs,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    try {
+      throwIfAborted(signal);
+      const navigateTo = navigateToFactory(device, args);
+      const options: NavigateToOptions = {
+        ...(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
+          ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
+          : {}),
+        ...(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
+          ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
+          : {}),
+        targetScreen: args.targetScreen,
+        platform: args.platform || device.platform,
+        sessionUuid: args.sessionUuid,
+      };
+      const result = await navigateTo.execute(options, progress, signal);
+      throwIfAborted(signal);
+
+      if (result.success) {
+        return createJSONToolResponse({
+          message: result.message || `Navigated to ${args.targetScreen}`,
+          ...result,
+        });
+      } else {
+        // A failed navigation must not read as a completed one: mark the MCP
+        // envelope `isError`, exactly as tapOn/sendKeys do (#6200, #6251).
+        return {
+          ...createJSONToolResponse({
+            error: result.error || "Navigation failed",
+            ...result,
+          }),
+          isError: true as const,
+        };
+      }
+    } catch (error) {
+      throwIfAborted(signal);
+      throw toActionableError(error, `Failed to navigate`);
+    }
+  };
+}
+
+export const navigateToHandler = createNavigateToHandler();
+
 // Register navigation tools
-interface NavigationToolDependencies {
+export interface NavigationToolDependencies extends NavigateToHandlerDependencies {
   installedAppsFactory?: (
     device: BootedDevice,
   ) => Pick<ListInstalledApps, "executeDetailedResult" | "executeIosDetailedResult">;
 }
 
 export function registerNavigationTools({
+  navigateToFactory,
+  navigationManagerFactory = getNavigationManager,
   installedAppsFactory = (device) =>
     new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
 }: NavigationToolDependencies = {}) {
   // Get navigation graph handler (for debugging)
   const getNavigationGraphHandler = async (device: BootedDevice, args: GetNavigationGraphArgs) => {
     try {
-      const manager = getNavigationManager(args.sessionUuid);
+      const manager = navigationManagerFactory(args.sessionUuid);
       const observation = RealObserveScreen.getRecentCachedResultForDevice(device.deviceId);
       const observedAppId =
         observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId ?? null;
@@ -242,7 +244,7 @@ export function registerNavigationTools({
     "navigateTo",
     "Navigate to screen using navigation graph",
     navigateToSchema,
-    navigateToHandler,
+    createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
     { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
   );
 
@@ -294,7 +296,7 @@ export function registerNavigationTools({
         device,
         null,
         undefined,
-        getNavigationManager(args.sessionUuid),
+        navigationManagerFactory(args.sessionUuid),
         args.sessionUuid,
       );
       const options: ExploreOptions = {

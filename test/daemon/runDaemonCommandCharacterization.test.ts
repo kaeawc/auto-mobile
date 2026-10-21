@@ -11,17 +11,20 @@ import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DAEMON_LIVENESS_OWNER_IS_PROXY_CODE, type DaemonStatus } from "../../src/daemon/types";
 import * as debugTools from "../../src/daemon/debugTools";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
+import type { DaemonRestartResult, DaemonStartResult } from "../../src/daemon/manager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { CodedError } from "../helpers/CodedError";
+import { parseJsonUnknown } from "../helpers/parseJsonUnknown";
+import {
+  buildPooledDevice,
+  buildSession,
+  remoteDaemonState,
+  ScriptedDevicePool,
+  ScriptedSessionManager,
+  unexpected,
+} from "./helpers/cliDaemonState";
 
-const unexpected = (): never => {
-  throw new Error("Unexpected daemon operation");
-};
-const remoteState: DaemonStateLike = {
-  isInitialized: () => false,
-  getSessionManager: unexpected,
-  getDevicePool: unexpected,
-  getDeviceSessionRegistry: unexpected,
-};
+const remoteState = remoteDaemonState;
 
 describe("daemon command characterization with fake I/O", () => {
   test.each(["unknown", "toString"])(
@@ -47,6 +50,7 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  start                 Start the daemon"],
           ["stdout", "  stop                  Stop the daemon"],
           ["stdout", "  status                Check daemon status"],
+          ["stdout", "  capabilities --json   Query the existing daemon's capability contract"],
           ["stdout", "  restart               Restart the daemon"],
           ["stdout", "  health                Check daemon health"],
           ["stdout", "  diagnose              Run full diagnostics"],
@@ -54,9 +58,18 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  active-sessions       List held sessions and why each holds its device"],
           ["stdout", "  session-info <id>     Get information about a session"],
           ["stdout", "  release-session <id>  Release a session and free its device"],
+          ["stdout", "  session-request-status <request-id> --liveness-owner-token <token> --json"],
           [
             "stdout",
-            "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
+            "  abandon-session-request <request-id> --liveness-owner-token <token> --json",
+          ],
+          [
+            "stdout",
+            "  release-broker-session <session-uuid> --liveness-owner-token <token> --json",
+          ],
+          [
+            "stdout",
+            "  (capabilities requires --json; status, available-devices, active-sessions, session-info and release-session accept --json)",
           ],
           [
             "stdout",
@@ -65,10 +78,6 @@ describe("daemon command characterization with fake I/O", () => {
           [
             "stdout",
             "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
-          ],
-          [
-            "stdout",
-            "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
           ],
           ["stdout", "\nOptions:"],
           [
@@ -89,38 +98,41 @@ describe("daemon command characterization with fake I/O", () => {
 
   test("available-devices keeps local pool reads and eligibility queries in order", async () => {
     const events: unknown[] = [];
-    const state = {
+    const pool = new ScriptedDevicePool(new ScriptedSessionManager({}), {
+      // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
+      getRefreshedInventory: async () => {
+        events.push("stats");
+        return {
+          stats: { idle: 1, assigned: 0, error: 0, total: 1, avgAssignments: 0 },
+          deviceIds: new Set(["fake"]),
+        };
+      },
+      getRecoveryPolicy: () => {
+        events.push("policy");
+        return { onLoss: false, maxAttempts: 0 };
+      },
+      getAllDevices: () => {
+        events.push("devices");
+        return [buildPooledDevice({ id: "fake", platform: "ios" })];
+      },
+      getRecoveryEligibility: (id) => {
+        events.push(["eligibility", id]);
+        return { eligible: true, action: "restart" };
+      },
+    });
+    const state: DaemonStateLike = {
       isInitialized: () => true,
-      getDevicePool: () => ({
-        // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
-        getRefreshedInventory: async () => {
-          events.push("stats");
-          return {
-            stats: { idle: 1, assigned: 0, error: 0, total: 1 },
-            deviceIds: new Set(["fake"]),
-          };
-        },
-        getRecoveryPolicy: () => {
-          events.push("policy");
-          return { onLoss: false, maxAttempts: 0 };
-        },
-        getAllDevices: () => {
-          events.push("devices");
-          return [{ id: "fake", platform: "ios" }];
-        },
-        getRecoveryEligibility: (id: string) => {
-          events.push(["eligibility", id]);
-          return "eligible";
-        },
-      }),
-    } as unknown as DaemonStateLike;
+      getSessionManager: unexpected,
+      getDevicePool: () => pool,
+      getDeviceSessionRegistry: unexpected,
+    };
     class Manager extends SafeDaemonManager {
       override getDaemonState() {
         return state;
       }
     }
     const log = spyOn(console, "log").mockImplementation((text) => {
-      events.push(JSON.parse(text));
+      events.push(parseJsonUnknown(text));
     });
     try {
       await runDaemonCommand("available-devices", [], {}, Manager);
@@ -135,7 +147,13 @@ describe("daemon command characterization with fake I/O", () => {
           assignedDevices: 0,
           errorDevices: 0,
           recoveryPolicy: { onLoss: false, maxAttempts: 0 },
-          devices: [{ deviceId: "fake", platform: "ios", recoveryEligibility: "eligible" }],
+          devices: [
+            {
+              deviceId: "fake",
+              platform: "ios",
+              recoveryEligibility: { eligible: true, action: "restart" },
+            },
+          ],
         },
       ]);
     } finally {
@@ -211,20 +229,24 @@ describe("daemon command characterization with fake I/O", () => {
   ])("%s dispatches only to the injected fake manager", async (command, args) => {
     const events: string[] = [];
     class Manager extends SafeDaemonManager {
-      override async start() {
+      override async start(): Promise<DaemonStartResult> {
         events.push("start");
+        return "started";
       }
       override async stop() {
         events.push("stop");
       }
-      override async restart() {
+      override async restart(): Promise<DaemonRestartResult> {
         events.push("restart");
+        return "restarted";
       }
-      override async restartAdmitted() {
+      override async restartAdmitted(): Promise<DaemonRestartResult> {
         events.push("restart-admitted");
+        return "restarted";
       }
-      override async restartAcceptanceSession() {
+      override async restartAcceptanceSession(): Promise<DaemonRestartResult> {
         events.push("restart-acceptance-session");
+        return "restarted";
       }
     }
     await runDaemonCommand(command, args, {}, Manager);
@@ -286,25 +308,26 @@ describe("daemon command characterization with fake I/O", () => {
     "%s rejects an unknown local session before any mutation",
     async (command) => {
       const events: unknown[] = [];
-      const state = {
+      const sessions = new ScriptedSessionManager({
+        getSession: () => {
+          events.push("get-session");
+          return null;
+        },
+        getReleasingSession: () => {
+          events.push("get-releasing");
+          return null;
+        },
+      });
+      const pool = new ScriptedDevicePool(sessions, {});
+      const state: DaemonStateLike = {
         isInitialized: () => true,
-        getSessionManager: () => ({
-          getSession: () => {
-            events.push("get-session");
-            return null;
-          },
-          getReleasingSession: () => {
-            events.push("get-releasing");
-            return null;
-          },
-          releaseSession: unexpected,
-          recordHeartbeat: unexpected,
-        }),
+        getSessionManager: () => sessions,
         getDevicePool: () => {
           events.push("get-pool");
-          return { releaseDevice: unexpected };
+          return pool;
         },
-      } as unknown as DaemonStateLike;
+        getDeviceSessionRegistry: unexpected,
+      };
       class Manager extends SafeDaemonManager {
         override getDaemonState() {
           return state;
@@ -337,34 +360,37 @@ describe("daemon command characterization with fake I/O", () => {
     "local session-info and heartbeat preserve field and mutation order (%s)",
     async (policy) => {
       const events: unknown[] = [];
-      const session = {
+      const session = buildSession({
         sessionId: "fake",
         assignedDevice: "device",
         createdAt: 1,
         lastUsedAt: 2,
         expiresAt: 3,
-        cacheData: { key: "value" },
+        cacheData: { lastObserveTime: 1 },
         livenessPolicy: policy,
-      };
-      const state = {
+      });
+      const sessions = new ScriptedSessionManager({
+        getSession: () => {
+          events.push("get-session");
+          return session;
+        },
+        getReleasingSession: () => {
+          events.push("get-releasing");
+          return null;
+        },
+        getIdleReleaseExecutionVeto: () => undefined,
+        getSessionLeaseState: () => ({ phase: "live", remainingMs: 4_000 }),
+        sessionClockToReportedWall: (ms) => ms + 1_000,
+        recordHeartbeat: (id) => {
+          events.push(["heartbeat", id]);
+        },
+      });
+      const state: DaemonStateLike = {
         isInitialized: () => true,
-        getSessionManager: () => ({
-          getSession: () => {
-            events.push("get-session");
-            return session;
-          },
-          getReleasingSession: () => {
-            events.push("get-releasing");
-            return null;
-          },
-          getIdleReleaseExecutionVeto: () => undefined,
-          getSessionLeaseState: () => ({ phase: "live", remainingMs: 4_000 }),
-          sessionClockToReportedWall: (ms: number) => ms + 1_000,
-          recordHeartbeat: (id: string) => {
-            events.push(["heartbeat", id]);
-          },
-        }),
-      } as unknown as DaemonStateLike;
+        getSessionManager: () => sessions,
+        getDevicePool: unexpected,
+        getDeviceSessionRegistry: unexpected,
+      };
       class Manager extends SafeDaemonManager {
         override getDaemonState() {
           return state;
@@ -384,7 +410,7 @@ describe("daemon command characterization with fake I/O", () => {
             createdAt: 1,
             lastUsedAt: 2,
             expiresAt: 3,
-            cacheSize: 15,
+            cacheSize: JSON.stringify(session.cacheData).length,
             idleReleaseAt: policy === "managed-execution" ? null : 1_003,
           }),
           "get-session",
@@ -544,7 +570,7 @@ describe("daemon command characterization with fake I/O", () => {
         }
       }
       const log = spyOn(console, "log").mockImplementation((text) => {
-        events.push(JSON.parse(text));
+        events.push(parseJsonUnknown(text));
       });
       try {
         await runDaemonCommand("available-devices", [], {}, Manager);
@@ -700,9 +726,10 @@ describe("heartbeat command against a proxy-owned session (#10054)", () => {
     override async connect() {}
     override async callDaemonMethod(method: string, params: Record<string, unknown>) {
       this.calls.push({ method, params });
-      throw Object.assign(new Error(`Session ${sessionId} is owned by an MCP proxy.`), {
-        code: DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
-      });
+      throw new CodedError(
+        `Session ${sessionId} is owned by an MCP proxy.`,
+        DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
+      );
     }
     override async close() {}
   }
@@ -724,17 +751,20 @@ describe("heartbeat command against a proxy-owned session (#10054)", () => {
     const error = spyOn(console, "error").mockImplementation((text) => {
       output.push(["stderr", text]);
     });
+    const exited = new Error("fake exit");
     const exit = spyOn(process, "exit").mockImplementation((code) => {
       output.push(["exit", code]);
-      return undefined as never;
+      throw exited;
     });
     try {
-      await runDaemonCommand(
-        "heartbeat",
-        [sessionId, "--liveness-owner-token", "keeper", "--claim-liveness-ownership"],
-        {},
-        Manager,
-      );
+      await expect(
+        runDaemonCommand(
+          "heartbeat",
+          [sessionId, "--liveness-owner-token", "keeper", "--claim-liveness-ownership"],
+          {},
+          Manager,
+        ),
+      ).rejects.toBe(exited);
     } finally {
       log.mockRestore();
       error.mockRestore();
@@ -790,7 +820,7 @@ describe("heartbeat command against a one-shot CLI session (#11096)", () => {
     });
     const exit = spyOn(process, "exit").mockImplementation((code) => {
       events.push(["exit", code]);
-      return undefined as never;
+      throw new Error("Unexpected exit");
     });
     try {
       await runDaemonCommand(

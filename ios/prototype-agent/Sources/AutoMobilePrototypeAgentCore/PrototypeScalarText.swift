@@ -7,6 +7,26 @@ import Foundation
 /// `1e-7 < |x| < 1e21`, else `d.ddde-x` / `d.ddde+x`. Swift's `description` already yields the
 /// shortest round-trip digits, so only the decimal-point placement is redone here.
 enum PrototypeScalarText {
+    /// Finite compact JSON number spelling, unlike interpolation's exact integral digits at any magnitude.
+    /// Reuse Swift's shortest round-trip digits and JavaScript's decimal/exponent placement.
+    static func jsonNumber(_ value: Double) -> String {
+        if value == 0 { return "0" }
+        if abs(value) <= 9_007_199_254_740_992, value.rounded() == value {
+            return String(format: "%.0f", value)
+        }
+        return (value < 0 ? "-" : "") + javascriptDecimal(abs(value))
+    }
+
+    /// JavaScript's `String(number)` exactly, for request header and query values: `1e21` is `1e+21`,
+    /// `1.5e-7` stays exponential, `-0` is `0`, and an integer keeps its shortest digits padded with
+    /// zeros (`123456789012345680000`). Unlike `render`, large integers are not spelled out exactly.
+    static func javascriptString(_ value: Double) -> String {
+        if value.isNaN { return "NaN" }
+        if value.isInfinite { return value < 0 ? "-Infinity" : "Infinity" }
+        if value == 0 { return "0" }
+        return (value < 0 ? "-" : "") + javascriptDecimal(abs(value))
+    }
+
     static func render(_ value: Double) -> String {
         // The host would print these as JavaScript does; spec state is JSON, so they cannot occur.
         if value.isNaN { return "NaN" }
@@ -17,7 +37,7 @@ enum PrototypeScalarText {
         return (value < 0 ? "-" : "") + javascriptDecimal(abs(value))
     }
 
-    /// JavaScript Number::toString for a positive, finite, non-integral value.
+    /// JavaScript Number::toString for a positive, finite, nonzero value.
     private static func javascriptDecimal(_ value: Double) -> String {
         let (digits, pointPosition) = shortestDigits(value)
         let count = digits.count
@@ -25,11 +45,11 @@ enum PrototypeScalarText {
         if count <= pointPosition, pointPosition <= 21 {
             return digits + String(repeating: "0", count: pointPosition - count)
         }
-        if 0 < pointPosition, pointPosition <= 21 {
+        if pointPosition > 0, pointPosition <= 21 {
             let split = digits.index(digits.startIndex, offsetBy: pointPosition)
             return digits[..<split] + "." + digits[split...]
         }
-        if -6 < pointPosition, pointPosition <= 0 {
+        if pointPosition > -6, pointPosition <= 0 {
             return "0." + String(repeating: "0", count: -pointPosition) + digits
         }
         let exponent = pointPosition - 1

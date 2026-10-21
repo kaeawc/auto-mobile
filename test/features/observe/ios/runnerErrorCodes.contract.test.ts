@@ -16,33 +16,31 @@ import {
   isRunnerHierarchyCaptureFailed,
 } from "../../../../src/features/observe/ios/runnerErrorCodes";
 
-// The one place the Swift runner's deadline error and the host's reading of it are pinned together
-// (the wire fixture decodes in decodeCtrlProxyMessage.test.ts; this reads the Swift source the same
-// way that file's ResponseType parity test does). A change to either side fails here.
-const swift = readFileSync(
-  join(
-    import.meta.dir,
-    "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/CommandError.swift",
+// Captured from production Swift encoders; Swift also checks this oracle without regeneration.
+const fixture = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "../../../fixtures/ios-contract/runner-responses.json"),
+    "utf8",
   ),
-  "utf8",
-);
+) as { commandErrors: { name: string; error: string; errorCode: string | null }[] };
 
-/** The two `outcome` strings of `case .deadlineExceeded`: [completed, notStarted]. */
-function swiftDeadlineOutcomes(): [string, string] {
-  const match = /let outcome = gestureCompleted\s*\?\s*"([^"]+)"\s*:\s*"([^"]+)"/.exec(swift);
-  if (!match) {
-    throw new Error("Could not locate the deadlineExceeded outcome strings in CommandError.swift");
+function runnerError(name: string) {
+  const error = fixture.commandErrors.find((entry) => entry.name === name);
+  if (!error) {
+    throw new Error(`Missing Swift error fixture: ${name}`);
   }
-  return [match[1], match[2]];
+  return error;
 }
 
-/** The `wireCode` returned for `gestureCompleted` true / false. */
-function swiftDeadlineCodes(): [string, string] {
-  const match = /return gestureCompleted\s*\?\s*"([^"]+)"\s*:\s*"([^"]+)"/.exec(swift);
-  if (!match) {
-    throw new Error("Could not locate the deadlineExceeded wireCode strings in CommandError.swift");
-  }
-  return [match[1], match[2]];
+function swiftDeadlineDescriptions(): [string, string] {
+  return [runnerError("deadline_completed_late").error, runnerError("deadline_not_started").error];
+}
+
+function swiftDeadlineCodes(): [string | null, string | null] {
+  return [
+    runnerError("deadline_completed_late").errorCode,
+    runnerError("deadline_not_started").errorCode,
+  ];
 }
 
 describe("runner deadline error: Swift CommandError <-> host contract (#10161)", () => {
@@ -54,16 +52,14 @@ describe("runner deadline error: Swift CommandError <-> host contract (#10161)",
   });
 
   test("the wording fallback matches only the completed-late text the Swift runner produces", () => {
-    const [completed, notStarted] = swiftDeadlineOutcomes();
+    const [completed, notStarted] = swiftDeadlineDescriptions();
 
     expect(RUNNER_DEADLINE_COMPLETED_LATE_WORDING.test(completed)).toBe(true);
     expect(RUNNER_DEADLINE_COMPLETED_LATE_WORDING.test(notStarted)).toBe(false);
   });
 
   test("the code decides when present; the wording decides only for a runner without one", () => {
-    const [completed, notStarted] = swiftDeadlineOutcomes();
-    const text = (outcome: string) =>
-      `Command request_swipe exceeded deadline at 5000ms (${outcome})`;
+    const [completed, notStarted] = swiftDeadlineDescriptions();
 
     expect(isRunnerDeadlineCompletedLate({ errorCode: RUNNER_DEADLINE_COMPLETED_LATE_CODE })).toBe(
       true,
@@ -75,39 +71,23 @@ describe("runner deadline error: Swift CommandError <-> host contract (#10161)",
     expect(
       isRunnerDeadlineCompletedLate({
         errorCode: RUNNER_DEADLINE_NOT_STARTED_CODE,
-        error: text(completed),
+        error: completed,
       }),
     ).toBe(false);
-    expect(isRunnerDeadlineCompletedLate({ error: text(completed) })).toBe(true);
-    expect(isRunnerDeadlineCompletedLate({ error: text(notStarted) })).toBe(false);
+    expect(isRunnerDeadlineCompletedLate({ error: completed })).toBe(true);
+    expect(isRunnerDeadlineCompletedLate({ error: notStarted })).toBe(false);
     expect(isRunnerDeadlineCompletedLate({})).toBe(false);
   });
 });
 
-/** The `wireCode` returned for `.gestureBoundExceeded`. */
-function swiftGestureBoundCode(): string {
-  const match = /case \.gestureBoundExceeded:[\s\S]*?return "([^"]+)"/.exec(swift);
-  if (!match) {
-    throw new Error("Could not locate the gestureBoundExceeded wireCode in CommandError.swift");
-  }
-  return match[1];
+function swiftGestureBoundCode(): string | null {
+  return runnerError("gesture_bound_exceeded").errorCode;
 }
 
-/** `errorDescription` for a bound case, with its interpolations filled in like the runner does. */
 function swiftBoundDescription(caseName: "gestureBoundExceeded" | "queryBoundExceeded"): string {
-  const match = new RegExp(
-    `case let \\.${caseName}\\([^)]*\\):\\s*(?://[^\\n]*\\s*)*return "([^"]+)"`,
-  ).exec(swift);
-  if (!match) {
-    throw new Error(`Could not locate the ${caseName} description in CommandError.swift`);
-  }
-  const values: Record<string, string> = {
-    command: "request_swipe",
-    phase: "xcuitestGesture",
-    boundMs: "4500",
-    elapsedMs: "4502",
-  };
-  return match[1].replace(/\\\((\w+)\)/g, (_whole, name: string) => values[name] ?? name);
+  return runnerError(
+    caseName === "gestureBoundExceeded" ? "gesture_bound_exceeded" : "query_bound_exceeded",
+  ).error;
 }
 
 describe("runner gesture-bound error: Swift CommandError <-> host contract (#10016)", () => {
@@ -150,27 +130,15 @@ describe("runner gesture-bound error: Swift CommandError <-> host contract (#100
   });
 });
 
-// GestureError lives in GesturePerformer.swift; WireError.code(for:) puts its wireCode on the wire.
-const gesturePerformerSwift = readFileSync(
-  join(
-    import.meta.dir,
-    "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift",
-  ),
-  "utf8",
-);
-
 describe("arrow focus-query failure: Swift GestureError <-> host contract (#10924)", () => {
   test("the Swift wire code is the TypeScript constant", () => {
-    const match = /case \.focusQueryFailed:[\s\S]*?return "([^"]+)"/.exec(gesturePerformerSwift);
-    expect(match?.[1]).toBe(RUNNER_FOCUS_QUERY_FAILED_CODE);
+    expect(runnerError("focus_query_failed").errorCode).toBe(RUNNER_FOCUS_QUERY_FAILED_CODE);
   });
 
   test("the Swift description says the key was not sent and is not a raw NSException string", () => {
-    const match = /case let \.focusQueryFailed\(phase, detail\):\s*return "([^"]+)"/.exec(
-      gesturePerformerSwift,
-    );
-    expect(match?.[1]).toStartWith("arrow key was not sent: ");
-    expect(match?.[1]).not.toContain("NSException(");
+    const description = runnerError("focus_query_failed").error;
+    expect(description).toStartWith("arrow key was not sent: ");
+    expect(description).not.toContain("NSException(");
   });
 
   test("only the code identifies the failure", () => {
@@ -182,18 +150,17 @@ describe("arrow focus-query failure: Swift GestureError <-> host contract (#1092
 
 describe("hierarchy capture failure: Swift CommandError <-> host contract (#11886)", () => {
   test("the Swift wire code is the TypeScript constant", () => {
-    const match = /case \.hierarchyCaptureFailed:[\s\S]*?return "([^"]+)"/.exec(swift);
-    expect(match?.[1]).toBe("hierarchy_capture_failed");
-    expect(match?.[1]).toBe(RUNNER_HIERARCHY_CAPTURE_FAILED_CODE);
+    expect(runnerError("hierarchy_capture_failed").errorCode).toBe("hierarchy_capture_failed");
+    expect(runnerError("hierarchy_capture_failed").errorCode).toBe(
+      RUNNER_HIERARCHY_CAPTURE_FAILED_CODE,
+    );
   });
 
   test("the Swift description says the gesture was not sent and cannot imply stale or unknown outcome", () => {
-    const match = /case let \.hierarchyCaptureFailed\(reason\):\s*return "([^"]+)"/.exec(swift);
-    expect(match).not.toBeNull();
-    const description = match?.[1] ?? "";
+    const description = runnerError("hierarchy_capture_failed").error;
     expect(description).toContain("validate the frame context");
     expect(description).toContain("the gesture was not sent");
-    expect(description).toContain("\\(reason)");
+    expect(description).toContain("fixture reason");
     expect(description).not.toMatch(/stale/i);
     expect(description).not.toMatch(/stale frame context/i);
     expect(description).not.toMatch(RUNNER_DEADLINE_COMPLETED_LATE_WORDING);

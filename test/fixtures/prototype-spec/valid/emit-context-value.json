@@ -1,0 +1,27 @@
+{
+  "id": "emit-context",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Emit",
+    "onTap": [
+      {
+        "type": "emit",
+        "name": "pick",
+        "context": {
+          "literal": {
+            "value": {
+              "n": 3,
+              "flags": [true, null],
+              "text": "a"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "pager-options",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "scroll",
+      "child": {
+        "type": "column",
+        "children": [
+          {
+            "type": "scroll",
+            "axis": "horizontal",
+            "child": {
+              "type": "pager",
+              "id": "pages",
+              "children": [
+                {
+                  "type": "text",
+                  "text": "One"
+                },
+                {
+                  "type": "text",
+                  "text": "Two"
+                }
+              ],
+              "axis": "vertical"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.child.children[0].child.axis",
+  "expectedMessage": "A vertical pager cannot appear inside a vertical scroll"
+}

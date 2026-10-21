@@ -14,7 +14,7 @@ import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExha
 import type { CapacityDecision } from "../../../src/features/iosSimFleet/CapacityGate";
 import { deviceResourceProfileFingerprint } from "../../../src/utils/deviceResourceDrift";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeSimulatorCapacityGate } from "../../fakes/FakeSimulatorCapacityGate";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -40,7 +40,7 @@ function setup(gateDecision?: CapacityDecision) {
 describe("FleetBootInstrumentation", () => {
   test("records the boot duration under the requested profile fingerprint", async () => {
     const { timer, history, instrumentation } = setup();
-    const profile = { resources: { location: "disabled" as const } };
+    const profile = { resources: { findMy: "disabled" as const } };
     await instrumentation.run({ udid: UDID, profile, timeoutMs: 60_000 }, async () => {
       timer.advanceTime(4_200);
     });
@@ -132,7 +132,7 @@ describe("FleetBootInstrumentation", () => {
 
 describe("createIosSimCapacityGate", () => {
   function gateFor(env: NodeJS.ProcessEnv) {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(["list", "devices", "--json"], '{"devices":{}}');
     const gate = createIosSimCapacityGate({
       simctl,

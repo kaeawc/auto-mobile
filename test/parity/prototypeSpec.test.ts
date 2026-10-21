@@ -26,6 +26,7 @@ const invalid = files("invalid").map((name) => ({
   data: JSON.parse(readFileSync(join(fixtures, "invalid", name), "utf8")) as {
     spec: unknown;
     expectedPath: string;
+    expectedMessage?: string;
   },
 }));
 function tags(value: unknown, found: Set<string>): void {
@@ -103,7 +104,13 @@ describe("shared prototype contract", () => {
       if (result.success) {
         throw new Error(`Accepted ${name}`);
       }
+      if (name.endsWith("-over-max.json") || name.endsWith("-below-min.json")) {
+        expect(prototypeSpecSchema.safeParse(data.spec).success).toBe(false);
+      }
       expect(result.error.path).toBe(data.expectedPath);
+      if (data.expectedMessage !== undefined) {
+        expect(result.error.message).toBe(data.expectedMessage);
+      }
     });
   }
   test("raw UTF-8 byte limit includes whitespace and accepts its exact boundary", () => {
@@ -173,8 +180,8 @@ test("JSON keys are preserved in state and opaque emit payloads", () => {
     throw new Error(JSON.stringify(result.error));
   }
   const source = JSON.parse(input.json) as { state: unknown; root: { onTap: unknown } };
-  expect(result.data.state).toEqual(source.state);
-  expect(result.data.root.onTap).toEqual(source.root.onTap);
+  expect(source.state).toEqual(result.data.state);
+  expect(source.root.onTap).toEqual(result.data.root.onTap);
 });
 test("undefined object properties are rejected before JSON serialization can drop them", () => {
   const result = validatePrototypeSpec({
@@ -222,4 +229,24 @@ test("non JSON numeric tokens and literal string controls are rejected", () => {
       expect(result.error.path).toBe("$");
     }
   }
+});
+
+test("menu/select fixtures cover the new capability's two nodes", () => {
+  expect(valid.map(({ name }) => name)).toEqual(
+    expect.arrayContaining(["menu-overflow.json", "select-dropdown.json"]),
+  );
+  expect(invalid.map(({ name }) => name)).toEqual(
+    expect.arrayContaining([
+      "menu-no-items.json",
+      "menu-too-many-items.json",
+      "menu-item-unknown-field.json",
+      "menu-divider-with-label.json",
+      "menu-open-state-type.json",
+      "menu-empty-label.json",
+      "select-one-option.json",
+      "select-33-options.json",
+      "select-duplicate-values.json",
+      "select-state-type.json",
+    ]),
+  );
 });

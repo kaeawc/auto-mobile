@@ -1,12 +1,9 @@
-import { beforeAll, expect, spyOn, test } from "bun:test";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import {
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  McpError,
-  ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { readToolResponse, toolJson } from "../helpers/toolResponse";
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { Server } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/daemon/mcpError";
+import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ActionableError } from "../../src/models";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -17,12 +14,10 @@ import {
   DaemonConnectionSessionReleasedError,
   DaemonRestartDeferredError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonShuttingDownError } from "../../src/daemon/client";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 
 function createHarness() {
-  const registration = spyOn(Server.prototype, "setRequestHandler");
   const harness = createProxyMcpServer({
     proxyConfig: {
       timer: new FakeTimer(),
@@ -32,50 +27,52 @@ function createHarness() {
       autoStartDaemon: false,
     },
   });
-  const registrations = [...registration.mock.calls];
-  registration.mockRestore();
+  // The SDK has two overloads; mock.calls exposes only the final three-argument one.
+  // Keep the captured slot unknown and check callability before invoking two-argument handlers.
+  const registrations: ReadonlyArray<readonly [string, unknown, ...unknown[]]> = [
+    ...registration.mock.calls,
+  ];
   return { ...harness, registrations };
 }
 
-beforeAll(async () => {
+let registration: ReturnType<typeof spyOn<typeof Server.prototype, "setRequestHandler">>;
+let warmed = false;
+beforeEach(async () => {
+  registration = spyOn(Server.prototype, "setRequestHandler");
+  if (warmed) {
+    return;
+  }
+  warmed = true;
   // Warm the SDK's one-off handler/schema initialization with a disposable server.
   const { server, proxy } = createHarness();
   try {
     await server.close();
   } finally {
     await proxy.close();
+    registration.mockClear();
   }
+});
+afterEach(() => {
+  registration.mockRestore();
 });
 
 const requests = [
   [
-    ListResourcesRequestSchema,
+    "resources/list",
     "resources/list",
     "listAdvertisedResources",
     "Failed to list resources from daemon",
   ],
   [
-    ListResourceTemplatesRequestSchema,
+    "resources/templates/list",
     "resources/templates/list",
     "listAdvertisedResourceTemplates",
     "Failed to list resource templates from daemon",
   ],
-  [
-    ReadResourceRequestSchema,
-    "resources/read",
-    "readResource",
-    "Failed to read resource from daemon",
-  ],
+  ["resources/read", "resources/read", "readResource", "Failed to read resource from daemon"],
 ] as const;
 
-const extra = {
-  signal: new AbortController().signal,
-  requestId: 1,
-  sendNotification: async () => {},
-  sendRequest: async () => {
-    throw new Error("Unexpected request");
-  },
-};
+const extra = fakeServerContext({ signal: new AbortController().signal, id: 1 });
 
 test.each([
   [new DaemonBoundSessionExpiredError("session-a", "released"), "session_ownership_lost"],
@@ -113,14 +110,14 @@ test.each([
   const { server, proxy, registrations } = createHarness();
   const call = spyOn(proxy, "callTool").mockRejectedValue(failure);
   try {
-    const handler = registrations.find(([schema]) => schema === CallToolRequestSchema)?.[1];
-    if (!handler) {
+    const handler = registrations.findLast(([schema]) => schema === "tools/call")?.[1];
+    if (typeof handler !== "function") {
       throw new Error("Missing handler");
     }
     const result = await handler({ method: "tools/call", params: { name: "observe" } }, extra);
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain(expected);
-    expect(call).toHaveBeenCalledWith("observe", {}, undefined, undefined, extra.signal);
+    expect(readToolResponse(result).isError).toBe(true);
+    expect(JSON.stringify(readToolResponse(result).content)).toContain(expected);
+    expect(call).toHaveBeenCalledWith("observe", {}, undefined, undefined, extra.mcpReq.signal);
   } finally {
     call.mockRestore();
     await server.close();
@@ -132,13 +129,13 @@ test("a control call the daemon answered daemon_shutting_down is told typed, ret
   const { server, proxy, registrations } = createHarness();
   const call = spyOn(proxy, "callTool").mockRejectedValue(new DaemonShuttingDownError(true));
   try {
-    const handler = registrations.find(([schema]) => schema === CallToolRequestSchema)?.[1];
-    if (!handler) {
+    const handler = registrations.findLast(([schema]) => schema === "tools/call")?.[1];
+    if (typeof handler !== "function") {
       throw new Error("Missing handler");
     }
     const result = await handler({ method: "tools/call", params: { name: "tapOn" } }, extra);
-    expect(result.isError).toBe(true);
-    const told = JSON.parse(result.content[0].text) as { error: Record<string, unknown> };
+    expect(readToolResponse(result).isError).toBe(true);
+    const told = toolJson(result);
     expect(told.error).toMatchObject({
       code: "daemon_shutting_down",
       retryable: true,
@@ -158,8 +155,8 @@ test.each(requests)(
     const failure = new Error("unavailable");
     const forwarding = spyOn(proxy, delegate).mockRejectedValue(failure);
     try {
-      const handler = registrations.find(([registered]) => registered === schema)?.[1];
-      if (!handler) {
+      const handler = registrations.findLast(([registered]) => registered === schema)?.[1];
+      if (typeof handler !== "function") {
         throw new Error("Missing handler");
       }
       const result = Promise.resolve(
@@ -191,8 +188,8 @@ test("a daemon invalid-params rejection stays -32602 through the proxy", async (
   );
   const read = spyOn(proxy, "readResource").mockRejectedValue(daemonError);
   try {
-    const handler = registrations.find(([schema]) => schema === ReadResourceRequestSchema)?.[1];
-    if (!handler) {
+    const handler = registrations.findLast(([schema]) => schema === "resources/read")?.[1];
+    if (typeof handler !== "function") {
       throw new Error("Missing handler");
     }
     const error = await Promise.resolve(
@@ -226,15 +223,15 @@ test("resource handlers preserve response envelopes and forward the read signal"
   try {
     const expected = [{ resources }, { resourceTemplates: templates }, contents];
     for (const [index, [schema, method]] of requests.entries()) {
-      const handler = registrations.find(([registered]) => registered === schema)?.[1];
-      if (!handler) {
+      const handler = registrations.findLast(([registered]) => registered === schema)?.[1];
+      if (typeof handler !== "function") {
         throw new Error("Missing handler");
       }
       expect(await handler({ method, params: { uri: "automobile:test" } }, extra)).toEqual(
         expected[index],
       );
     }
-    expect(read).toHaveBeenCalledWith("automobile:test", { signal: extra.signal });
+    expect(read).toHaveBeenCalledWith("automobile:test", { signal: extra.mcpReq.signal });
   } finally {
     list.mockRestore();
     listTemplates.mockRestore();
@@ -254,8 +251,8 @@ test.each([
     const { server, proxy, registrations } = createHarness();
     const read = spyOn(proxy, "readResource").mockRejectedValue(failure);
     try {
-      const handler = registrations.find(([schema]) => schema === ReadResourceRequestSchema)?.[1];
-      if (!handler) {
+      const handler = registrations.findLast(([schema]) => schema === "resources/read")?.[1];
+      if (typeof handler !== "function") {
         throw new Error("Missing handler");
       }
       const error = await Promise.resolve(
@@ -283,8 +280,8 @@ test("missing resource URI rejects before forwarding", async () => {
   const { server, proxy, registrations } = createHarness();
   const read = spyOn(proxy, "readResource");
   try {
-    const handler = registrations.find(([schema]) => schema === ReadResourceRequestSchema)?.[1];
-    if (!handler) {
+    const handler = registrations.findLast(([schema]) => schema === "resources/read")?.[1];
+    if (typeof handler !== "function") {
       throw new Error("Missing handler");
     }
     await expect(

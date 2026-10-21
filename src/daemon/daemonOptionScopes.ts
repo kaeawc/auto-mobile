@@ -1,5 +1,5 @@
-import { MANAGED_SLOT_CONFIG_ENV } from "../models/managedSlotConfig";
 import type { DaemonOptions } from "./types";
+import { ENV } from "../config/env";
 
 /**
  * Options scoped to one proxy connection when relayed to a spawned daemon.
@@ -20,8 +20,8 @@ const DAEMON_CHILD_EXCLUDED_OPTION_KEYS = [
 
 /** Environment equivalents that belong to the spawning MCP connection, not its child daemon. */
 export const CONNECTION_PRESENTATION_ENV_KEYS = [
-  "AUTOMOBILE_ENABLED_TOOLS",
-  "AUTOMOBILE_DISABLED_TOOLS",
+  ENV.ENABLED_TOOLS.name,
+  ENV.DISABLED_TOOLS.name,
   "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
   "AUTOMOBILE_ACTIONS_COMPACT_METADATA",
 ] as const;
@@ -50,7 +50,5 @@ export function daemonProcessEnvironment(environment: NodeJS.ProcessEnv): NodeJS
   for (const key of CONNECTION_PRESENTATION_ENV_KEYS) {
     delete processEnvironment[key];
   }
-  // Per-proxy launch state; the daemon must never re-parse it from its own cwd (#11286).
-  delete processEnvironment[MANAGED_SLOT_CONFIG_ENV];
   return processEnvironment;
 }

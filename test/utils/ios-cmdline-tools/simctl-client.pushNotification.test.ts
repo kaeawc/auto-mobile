@@ -68,7 +68,7 @@ describe("SimCtlClient pushNotification", () => {
     };
 
     const fileSystem = createFakeSimCtlFileSystem();
-    const simctl = new SimCtlClient(device, execAsync, undefined, undefined, undefined, fileSystem);
+    const simctl = new SimCtlClient(device, execAsync, { fileSystem });
     const result = await simctl.pushNotification(
       "ios-device-push",
       "com.example.app",
@@ -114,14 +114,7 @@ describe("SimCtlClient pushNotification", () => {
     };
 
     const fileSystem = createFakeSimCtlFileSystem();
-    const simctl = new SimCtlClient(
-      device,
-      execAsync,
-      new FakeTimer(),
-      undefined,
-      undefined,
-      fileSystem,
-    );
+    const simctl = new SimCtlClient(device, execAsync, { timer: new FakeTimer(), fileSystem });
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const result = await simctl.pushNotification(
@@ -147,14 +140,10 @@ describe("SimCtlClient pushNotification", () => {
     fileSystem.rm = async () => {
       throw new Error("permission denied");
     };
-    const simctl = new SimCtlClient(
-      device,
-      async () => createExecResult("", ""),
-      new FakeTimer(),
-      undefined,
-      undefined,
+    const simctl = new SimCtlClient(device, async () => createExecResult("", ""), {
+      timer: new FakeTimer(),
       fileSystem,
-    );
+    });
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       expect(await simctl.pushNotification("ios-device-push", "com.example.app", "{}")).toEqual({

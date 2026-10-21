@@ -12,7 +12,8 @@ import { DEFAULT_DAEMON_PORT, resolveDaemonStatePath } from "../../src/daemon/co
 import { isDaemonNamespaceIsolated } from "../../src/daemon/sharedNamespaceGuard";
 import { resolveAuxSocketDir } from "../../src/daemon/socketServer/SocketServerTypes";
 import { resolveDatabasePathFromEnvironment } from "../../src/db/database";
-import { MANAGED_SLOT_CONFIG_ENV } from "../../src/models/managedSlotConfig";
+import { SESSION_BROKER_HOST_CONFIG_ENV } from "../../src/daemon/sessionBroker/hostConfig";
+import { SESSION_CONFIG_ENV } from "../../src/devices/sessionConfig";
 import { shellQuote } from "../../src/utils/shellQuote";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import {
@@ -29,6 +30,7 @@ export interface PrivateDaemonBatchOptions {
   auxRoot?: string;
   serverPath: string;
   splitAdbCoordination?: boolean;
+  protectedDevices?: string[];
   orphanIdleMs?: number;
   extraEnv?: Record<string, string>;
   daemonEnv?: Record<string, Record<string, string>>;
@@ -65,19 +67,31 @@ export const DERIVED_PATH_VARIABLES: readonly string[] = [
   "AUTOMOBILE_DAEMON_SOCKET_PATH",
   "AUTOMOBILE_DAEMON_PID_FILE_PATH",
   "AUTOMOBILE_DAEMON_LOCK_FILE_PATH",
+  "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH",
   "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH",
 ];
 const INHERITED_PATH_OVERRIDES = ["AUTOMOBILE_DB_PATH", "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH"];
+// Retain only the names so removed product configuration never leaks into a harness child.
+const LEGACY_SLOT_ENV_NAMES = [
+  "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+  "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
+];
+const HARNESS_CONFIG_ENV_NAMES = [
+  SESSION_BROKER_HOST_CONFIG_ENV,
+  SESSION_CONFIG_ENV,
+  ...LEGACY_SLOT_ENV_NAMES,
+];
 export const INHERITED_ENV_VARIABLES: readonly string[] = [
   ...OPT_IN_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
   ...STATE_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
   ...INHERITED_PATH_OVERRIDES,
   ...INHERITED_PATH_OVERRIDES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
-  MANAGED_SLOT_CONFIG_ENV,
+  ...HARNESS_CONFIG_ENV_NAMES,
 ];
 const OWNED_ENV_VARIABLES = [
   ...DERIVED_PATH_VARIABLES,
   ...INHERITED_PATH_OVERRIDES,
+  ...HARNESS_CONFIG_ENV_NAMES,
   "MT_BATCH",
   "MT_DAEMON",
   "MT_SERVER",
@@ -86,7 +100,7 @@ const OWNED_ENV_VARIABLES = [
 export function isInheritedPathOverride(key: string): boolean {
   return (
     key.startsWith("AUTO_MOBILE_") ||
-    (key !== MANAGED_SLOT_CONFIG_ENV && INHERITED_ENV_VARIABLES.includes(key))
+    (!HARNESS_CONFIG_ENV_NAMES.includes(key) && INHERITED_ENV_VARIABLES.includes(key))
   );
 }
 export function privateClientEnvironment(
@@ -97,7 +111,7 @@ export function privateClientEnvironment(
   for (const [key, value] of Object.entries(inherited)) {
     if (
       value !== undefined &&
-      key !== MANAGED_SLOT_CONFIG_ENV &&
+      !HARNESS_CONFIG_ENV_NAMES.includes(key) &&
       !isInheritedPathOverride(key) &&
       !OPT_IN_PATH_VARIABLES.includes(key)
     ) {
@@ -169,11 +183,7 @@ export function extraEnvRefusal(env: Record<string, string>): string | undefined
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || value.includes("\0")) {
       return `Invalid --env assignment for ${key}; use a shell variable name and a value without NUL.`;
     }
-    if (
-      OWNED_ENV_VARIABLES.includes(key) ||
-      isInheritedPathOverride(key) ||
-      key === MANAGED_SLOT_CONFIG_ENV
-    ) {
+    if (OWNED_ENV_VARIABLES.includes(key) || isInheritedPathOverride(key)) {
       return `--env may not override ${key}; the harness owns its private namespace.`;
     }
     if (
@@ -250,6 +260,7 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
       AUTOMOBILE_DAEMON_SOCKET_PATH: join(auxSocketDir, "d.sock"),
       AUTOMOBILE_DAEMON_PID_FILE_PATH: join(dir, "daemon.pid"),
       AUTOMOBILE_DAEMON_LOCK_FILE_PATH: join(dir, "daemon.lock"),
+      AUTOMOBILE_DAEMON_TOKEN_FILE_PATH: join(dir, "daemon.token"),
       AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH: join(dir, "launch.log"),
       AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: String(options.orphanIdleMs ?? 0),
       AUTOMOBILE_APPEARANCE_SYNC: "off",

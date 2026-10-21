@@ -117,14 +117,16 @@ hint. A live owner/cleanup, identity fence, or timed-out in-flight command makes
 the bound unknown; clock restoration's pending registry is unbounded. No running
 recovery means a non-retryable held marker. No `nextAction` is invented. Skipped
 `canRecover` ticks sleep the same attempt's backoff and recheck all exit conditions;
-only dispatch consumes an attempt. Shutdown's existing session-creation fence
-ends this loop only on a skipped tick. Running-recovery bookkeeping is deleted when the recovery settles; unconfirmed recorder retry entries remain until their marker or incarnation is gone.
+only dispatch consumes an attempt. Shutdown's session-creation fence
+ends this loop on a skipped tick or after an unreachable dispatch; reached failures keep their existing shutdown behaviour. Running-recovery bookkeeping is deleted when the recovery settles; unconfirmed recorder retry entries remain until their marker or incarnation is gone.
+
+App-cleanup retries are keyed by app id and cleanup step and compose per device incarnation; the marker clears only when every owed app cleanup resolved.
 
 The `app-cleanup` reason is set by `executePlan` when a plan's `cleanupAppId` cleanup (terminate / clear data / physical-iOS reinstall) did not complete on a device (`markDeviceNeedsAppCleanup`). Recovery re-runs the cleanup three times (1s/2s/4s backoff) once the device is idle; each retry gets its own deadline (`PLAN_APP_CLEANUP_RETRY_DEADLINE_MS`, the cleanup's 20s cap plus a margin), not the 1s a settings restore gets. Every background recovery scales its deadline by the attempt number (1x, 2x, 3x). A cleanup that can never succeed (for example `pm clear` always refused) has no automatic exit: after the third attempt the marker is held for the device's incarnation, by design. The allocation error then names `app-cleanup` and the exact recovery: `killDevice` with the device's `{ name, deviceId, platform }`, then `startDevice`. A timed-out retry is never overlapped by another: recovery waits for it to settle, clears the marker if it completes late, and otherwise continues with the remaining attempts (#11145).
 
-The `recording-teardown` reason is set by recording-session cleanup at teardown give-up, or by startup redrive of a persisted Android recorder descriptor (`markDeviceNeedsRecorderTeardown`). Startup excludes live peer-daemon owners and this recorder service's owned captures. Rows from a successful startup read are retained for this daemon's lifetime: a newly pooled incarnation is synchronously redriven before binding, with current local ownership checked at the hook and a peer-safe row re-read before any hook-driven device command; a descriptor with no pid and no finite expiry quarantines one incarnation only. A failed startup read leaves the descriptors for the next daemon start. An idle device is marked immediately; a session-held device defers redrive until release/unbind, then registers one 5s pending cleanup synchronously. Unconfirmed release-time cleanup sets the marker before settling. Upgrade-only releases do nothing; identity replacement clears the deferred descriptors on the host without device commands.
+The `recording-teardown` reason is set by recording-session cleanup at teardown give-up, or by startup redrive of a persisted Android recorder descriptor (`markDeviceNeedsRecorderTeardown`). Startup excludes captures whose recording daemon is live (stamped on the row), rows with no recorded daemon while any other daemon is live, and this recorder service's owned captures. Rows from a successful startup read are retained until confirmed. When this daemon tracks a newly spawned emulator process, it awaits the orphan handle's teardown confirmation for retained rows, including deferred work, bounded by 5s. Android quick-boot snapshots can restore a recorder with the same pid and cmdline, so process start alone is not proof: the device must confirm the pid is absent, not ours, or killed with exit confirmed. Confirmed descriptors are cleared and fully confirmed retry batches withdrawn before the bind health check; an unreachable device, a pid-less row before its hard limit, or a deadline leaves the descriptors and quarantine intact for normal recovery. Independent release give-ups and locally owned captures remain untouched. Without that process-start signal, a newly pooled incarnation is synchronously redriven before binding, with current local ownership checked at the hook and a peer-safe row re-read before any hook-driven device command; a descriptor with no pid and no finite expiry quarantines one incarnation only. A failed startup read keeps the descriptors but creates no orphan handle: a recording start cannot see a pre-restart recorder until the next daemon start. An idle device is marked immediately; a session-held device retains its startup orphan for the owner to stop by recording id or for the next recording start to stop before starting another capture; otherwise it defers redrive until release/unbind, then registers one 5s pending cleanup synchronously. Stop-by-id and start refuse with retryable `orphan_recorder_active` when teardown cannot be confirmed. For a pid-less orphan with a valid `startedAt`, that refusal clears by itself once the 185s hard limit has passed. An unparsable pid-less row is no longer listed, found or stopped by the orphan handle after its first marked incarnation. Confirmed caller teardown clears the descriptor and withdraws a fully confirmed startup retry batch immediately. Unconfirmed release-time cleanup sets the marker before settling. Upgrade-only releases do nothing; identity replacement clears the deferred descriptors on the host without device commands.
 
-Recorder retries compose per device incarnation: every unconfirmed retry must resolve before the marker clears; keyed release give-ups replace their prior closure, while orphan batches stay independent. Added or replaced retries restart the next dispatch at attempt one, and exhausted entries remain available to a later mark. PID recovery uses three attempts with 1s/2s/4s backoff and 5s/10s/15s deadlines: at most ~37s for an unchanged set of PID retries, plus settlement of any timed-out attempts, which are never overlapped. A pid-less descriptor waits until `startedAt + 185s` (screenrecord's 180s hard limit plus a 5s margin); its first health deadline covers the remaining wait plus 5s. Release-time cleanup never waits for that expiry: it hands the work to health recovery. An unparsable `startedAt` cannot establish a safe expiry and keeps the descriptor and marker. After the third failed attempt the device stays unhealthy for its pool incarnation, visible in `listDevices` as `unhealthy.reason = "recording-teardown"`; it is never silently released. Confirmed teardown clears its descriptor; the marker clears only after every registered recorder retry confirms. A device still unhealthy after retries requires `killDevice` with `{ name, deviceId, platform }`, then `startDevice`. Identity-replaced host-only teardowns always clear their descriptors, including when host reaping fails; retained host-only rollback captures keep host-only safety retries.
+Recorder retries compose per device incarnation: every unconfirmed retry must resolve before the marker clears; keyed release give-ups replace their prior closure, while orphan batches stay independent. Added or replaced retries restart the next dispatch at attempt one, and exhausted entries remain available to a later mark. PID recovery uses three reached attempts with 1s/2s/4s backoff and 5s/10s/15s deadlines: at most ~37s for an unchanged set of reachable PID retries, plus settlement of any timed-out attempts, which are never overlapped. An unanswered pid identity probe or missing pooled device is unreachable; a batch whose every failing entry is unreachable re-arms the same attempt and delay, including after late timeout settlement. Any reached failure consumes the attempt. Unreachable re-arms keep reporting recovering with a retry deadline until the marker/incarnation disappears or shutdown stops recovery. A pid-less descriptor waits until `startedAt + 185s` (screenrecord's 180s hard limit plus a 5s margin); its first health deadline covers the remaining wait plus 5s. Release-time cleanup never waits for that expiry: it hands the work to health recovery. An unparsable `startedAt` cannot establish a safe expiry and keeps the descriptor and marker. After the third reached failure, one re-check is scheduled 185s from exhaustion for the same retry set, marker and incarnation, with recovering true and a deadline covering the wait. It runs a fresh three-attempt recovery; if that also exhausts, no further re-check is scheduled and recovering becomes false. A new mark starts recovery immediately. Re-check timers are unreferenced and cancelled/ignored on marker/incarnation retirement or shutdown. App-cleanup has no re-check. A refusal whose every device is recovering with reason recording-teardown leaves an unowned, unprovisioned Android cold boot running for a retry unless the request is aborted. Otherwise the device stays unhealthy for its pool incarnation, visible in `listDevices` as `unhealthy.reason = "recording-teardown"`; it is never silently released. Confirmed teardown clears its descriptor; the marker clears only after every registered recorder retry confirms. A device still unhealthy after retries requires `killDevice` with `{ name, deviceId, platform }`, then `startDevice`. Identity-replaced host-only teardowns always clear their descriptors, including when host reaping fails; retained host-only rollback captures keep host-only safety retries.
 
 ## Registration-only sessions
 
@@ -165,6 +167,14 @@ Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` i
 `src/server/toolRegistry.ts`): on a held device, a call from another session or
 with no session is refused with the same code before admission or device work,
 unless the tool is registered `deviceReadOnly` (watching).
+
+Tool metadata advertises wholly read-only tools with `automobile/deviceReadOnly: true`.
+Mixed tools can advertise `automobile/deviceReadOnlyArgs`, an array of conservative read
+shapes: `{ argument, values }` matches a string argument in the listed values, and
+`{ absentArguments }` matches when every listed argument is undefined (null is present).
+The proxy uses these shapes for per-call read routing; the daemon's per-arguments
+classifier remains authoritative, and SQL reads are not advertised as shapes.
+
 `recordDeviceGestures` also refuses an unheld device (`no_active_device_session`) before readiness;
 a live session holding no device is refused before context creation can auto-acquire one (#11716).
 A call without a deviceId is checked against the device readiness would select (the
@@ -226,21 +236,24 @@ allocation claim under its shutdown reservation (reported as an active execution
 Acquisition (`getAndroid`, `getApple`, `startDevice` on a running device) is
 guarded by the pool's own owner check instead.
 
-Managed slots (#11174, #11178): a device a valid managed slot holds, or one parked in
-the managed free pool, is never generic capacity, idle or not. `DevicePool` reads a
-host-wide registry snapshot through the injected `ManagedSlotExclusion`
-(`src/daemon/managedSlots/managedSlotExclusion.ts`) and skips such devices in idle
+Android's default foreign-owner gate also refuses control when an unrecorded CtrlProxy forward has a live or remembered-live foreign client PID, or a known forwarded port has an unknown owner; reads remain on the installed watch path (#12220). A failed forward listing with no known port is not cross-daemon evidence: the pool warns and keeps its claim decision, while readiness skips writes for reads and returns a distinct, non-coded retry error for control. Cancellation propagates. An unrecorded forward with no client on either probe, whose owner this daemon never saw connected, is treated as a leftover and reclaimed (#10690); PID memory uses liveness only and cannot distinguish PID reuse.
+Pool-level forward evidence is supplied by the daemon process entry point; direct (non-daemon) mode is protected by the CtrlProxy manager guard alone.
+
+Broker bindings: a device held by a valid broker binding is never generic
+capacity, idle or not. `DevicePool` reads a
+host-wide registry snapshot through the injected `BindingExclusion`
+(`src/daemon/sessionBroker/provisioning/exclusion.ts`) and skips such devices in idle
 selection, multi-device allocation and auto-start; explicit binds, autolock,
 `provisionDevice` adoption, `getAndroid`/`getApple`/`startDevice` targets,
 `killDevice`/`deleteDevice` (stopped targets included) and `input/*`/`ide/*` mutations
-refuse them with non-retryable `device_assigned_to_managed_slot` unless the caller is
-the slot's recorded execution session; `force` never overrides. Reads stay open. A
+refuse them with non-retryable `device_assigned_to_binding` unless the caller is
+the binding's recorded execution session; `force` never overrides. Reads stay open. A
 registry never read refuses callers taking an unheld device with retryable
 `discovery_incomplete`, while a session already holding a device in this pool retains
-control of it (an absent registry means no managed slots); an unreadable one keeps
+control of it (an absent registry means no broker bindings); an unreadable one keeps
 the last good snapshot for reads and
 inventory. Taking a device requires a current snapshot; existing holders and a known
-slot's own execution or reconciler retain control during an unreadable registry.
+binding's own execution or reconciler retain control during an unreadable registry.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.
@@ -314,6 +327,12 @@ Lifecycle ownership requires positive evidence for the configured namespace: a l
 Tests must stub process discovery through the `DaemonProcessFinder` constructor seam, never by spying on `findAllDaemonProcesses`/`findLiveDaemonProcesses`; lifecycle discovery does not route through those methods.
 
 ## Session lifetime summary
+
+Broker native-resource admission uses `BindingResourceBudgetPolicy.limit()` wired
+to the same host configuration `limits.totalDeviceCap` as broker admission.
+Each ledger enforces the cap independently; never sum broker reservations and
+native charges for the same device. Omitted means unlimited; zero refuses new
+devices. The native ledger also charges orphaned inventory and unresolved journals.
 
 User-facing statement of the release model (lease and grace, exact idle release,
 `idleReleaseAt` wall clock, one-shot CLI anonymity, terminal-session refusals,

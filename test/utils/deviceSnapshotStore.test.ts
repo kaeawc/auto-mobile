@@ -1,15 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import {
   DeviceSnapshotStore,
   findReservedSnapshotNameReason,
   isReservedSnapshotName,
+  type ReservedSnapshotNameReason,
   SNAPSHOT_REPLACING_SUFFIX,
   SNAPSHOT_IOS_SCOPE_ROOT,
   SNAPSHOT_ANDROID_SCOPE_ROOT,
 } from "../../src/utils/DeviceSnapshotStore";
-import { promises as fs } from "fs";
+import { promises as fs, type PathLike, type Dirent } from "fs";
 import * as path from "path";
-import * as os from "os";
 import { logger } from "../../src/utils/logger";
 import {
   noOpSnapshotDirectorySync,
@@ -30,11 +31,12 @@ describe("reserved snapshot names", () => {
   ]) {
     it(`reserves ${snapshotName} case-insensitively`, () => {
       expect(isReservedSnapshotName(snapshotName)).toBe(true);
-      expect(findReservedSnapshotNameReason(snapshotName)).toEqual(
-        snapshotName.toLowerCase().endsWith(SNAPSHOT_REPLACING_SUFFIX)
-          ? { kind: "suffix", suffix: SNAPSHOT_REPLACING_SUFFIX }
-          : { kind: "scope-root", name: snapshotName.toLowerCase() },
-      );
+      const expected: ReservedSnapshotNameReason = snapshotName
+        .toLowerCase()
+        .endsWith(SNAPSHOT_REPLACING_SUFFIX)
+        ? { kind: "suffix", suffix: SNAPSHOT_REPLACING_SUFFIX }
+        : { kind: "scope-root", name: snapshotName.toLowerCase() === "ios" ? "ios" : "android" };
+      expect(findReservedSnapshotNameReason(snapshotName)).toEqual(expected);
     });
   }
 
@@ -57,18 +59,11 @@ describe("DeviceSnapshotStore", () => {
   let store: DeviceSnapshotStore;
   let testBasePath: string;
 
+  const scratch = useScratchRoot("snapshot-store-test-");
   beforeEach(async () => {
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-store-test-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
     await store.ensureSnapshotsDirectory();
-  });
-
-  afterEach(async () => {
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch (error) {
-      // Ignore cleanup errors
-    }
   });
 
   for (const envKey of ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"]) {
@@ -132,7 +127,7 @@ describe("DeviceSnapshotStore", () => {
   });
 
   it("should return iOS snapshot paths scoped by device", () => {
-    const options = { platform: "ios", deviceId: "SIM-UDID" };
+    const options = { platform: "ios" as const, deviceId: "SIM-UDID" };
     expect(store.getSnapshotPathWithOptions("test-snapshot", options)).toBe(
       path.join(testBasePath, "ios", "SIM-UDID", "test-snapshot"),
     );
@@ -583,9 +578,12 @@ describe("DeviceSnapshotStore", () => {
     await fs.mkdir(nestedDir, { recursive: true });
     await fs.writeFile(path.join(nestedDir, "payload.bin"), "large payload");
 
-    const readdir = fs.readdir.bind(fs);
+    const directoryReader: {
+      readdir(path: PathLike, options: { withFileTypes: true }): Promise<Dirent[]>;
+    } = fs;
+    const readdir = directoryReader.readdir.bind(fs);
     let removedNestedDirectory = false;
-    const readdirSpy = spyOn(fs, "readdir").mockImplementation(async (...args) => {
+    const readdirSpy = spyOn(directoryReader, "readdir").mockImplementation(async (...args) => {
       const entries = await readdir(...args);
       if (args[0] === snapshotDir && !removedNestedDirectory) {
         removedNestedDirectory = true;
@@ -627,9 +625,12 @@ describe("DeviceSnapshotStore", () => {
       await fs.writeFile(path.join(snapshotDir, "ram.bin"), "0123456789");
       await fs.writeFile(path.join(nestedDir, "textures.bin"), "abc");
 
-      const readdir = fs.readdir.bind(fs);
+      const directoryReader: {
+        readdir(path: PathLike, options: { withFileTypes: true }): Promise<Dirent[]>;
+      } = fs;
+      const readdir = directoryReader.readdir.bind(fs);
       let removedNestedDirectory = false;
-      const readdirSpy = spyOn(fs, "readdir").mockImplementation(async (...args) => {
+      const readdirSpy = spyOn(directoryReader, "readdir").mockImplementation(async (...args) => {
         const entries = await readdir(...args);
         if (args[0] === snapshotDir && !removedNestedDirectory) {
           removedNestedDirectory = true;

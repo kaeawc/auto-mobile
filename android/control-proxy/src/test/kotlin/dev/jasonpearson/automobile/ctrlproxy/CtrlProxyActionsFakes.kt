@@ -3,249 +3,278 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.RequestCommitText
+import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+import dev.jasonpearson.automobile.protocol.RequestGlobalAction
+import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.RequestImeAction
+import dev.jasonpearson.automobile.protocol.RequestInsertText
+import dev.jasonpearson.automobile.protocol.RequestPinch
+import dev.jasonpearson.automobile.protocol.RequestScreenshot
+import dev.jasonpearson.automobile.protocol.RequestSetText
+import dev.jasonpearson.automobile.protocol.RequestSwipe
+import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
+import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
+import dev.jasonpearson.automobile.protocol.SetPreference
+import kotlinx.serialization.json.JsonArray
 
 /**
  * No-op [CtrlProxyActions] base for tests that only care about a couple of actions — subclass and
  * override just those. Keeps partial test doubles concise now that the interface is non-optional.
  */
 open class NoOpCtrlProxyActions : CtrlProxyActions {
-  override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) {}
+  val patches = mutableListOf<List<Any?>>()
 
-  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {}
+  override suspend fun requestHierarchy(request: RequestHierarchy) = Unit
 
-  override fun setHierarchyInterval(intervalMs: Long?) {}
+  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) = Unit
 
-  override fun requestScreenshot(requestId: String?) {}
+  override suspend fun setHierarchyInterval(intervalMs: Long?) = Unit
 
-  override fun requestSwipe(
+  override suspend fun requestScreenshot(request: RequestScreenshot) = Unit
+
+  override suspend fun requestSwipe(request: RequestSwipe) = Unit
+
+  override suspend fun requestTapCoordinates(request: RequestTapCoordinates) = Unit
+
+  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) = Unit
+
+  override suspend fun requestDrag(request: RequestDrag) = Unit
+
+  override suspend fun requestPinch(request: RequestPinch) = Unit
+
+  override suspend fun requestGestureStart(request: RequestGestureStart) = Unit
+
+  override suspend fun requestGestureMove(
     requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-  ) {}
+    gestureId: String,
+    x: Double,
+    y: Double,
+  ) = Unit
 
-  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) {}
-
-  override fun requestTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-  ) {}
-
-  override fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-  ) {}
-
-  override fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-  ) {}
-
-  override fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double) {}
-
-  override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {}
-
-  override fun requestGestureEnd(
+  override suspend fun requestGestureEnd(
     requestId: String?,
     gestureId: String,
     x: Double,
     y: Double,
     cancel: Boolean,
-  ) {}
+  ) = Unit
 
-  override suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-  ) {}
+  override suspend fun requestSetText(request: RequestSetText) = Unit
 
-  override fun requestInsertText(requestId: String?, text: String) {}
+  override suspend fun requestInsertText(request: RequestInsertText) = Unit
 
-  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {}
+  override suspend fun requestCommitText(request: RequestCommitText) = Unit
 
-  override fun requestSetKeyboardProfile(requestId: String?, profileId: String) {}
+  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) = Unit
 
-  override fun requestListKeyboardProfiles(
+  override suspend fun requestListKeyboardProfiles(
     requestId: String?,
     supportedCatalogVersions: List<Int>,
-  ) {}
+  ) = Unit
 
-  override fun requestImeAction(requestId: String?, action: String) {}
+  override suspend fun requestImeAction(request: RequestImeAction) = Unit
 
-  override fun requestSelectAll(requestId: String?) {}
+  override suspend fun requestSelectAll(requestId: String?) = Unit
 
-  override fun requestClickFocusedInput(requestId: String?) {}
+  override suspend fun requestClickFocusedInput(requestId: String?) = Unit
 
-  override fun requestAction(
+  override suspend fun requestAction(
     requestId: String?,
     action: String,
     resourceId: String?,
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
-  ) {}
+  ) = Unit
 
-  override fun requestActivateAccessibilityLink(
+  override suspend fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
     occurrence: Int,
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
-  ) {}
+  ) = Unit
 
-  override fun requestClipboard(requestId: String?, action: String, text: String?) {}
+  override suspend fun requestClipboard(requestId: String?, action: String, text: String?) = Unit
 
-  override fun installCaCert(requestId: String?, certificate: String) {}
+  override suspend fun installCaCert(requestId: String?, certificate: String) = Unit
 
-  override fun installCaCertFromPath(requestId: String?, devicePath: String) {}
+  override suspend fun installCaCertFromPath(requestId: String?, devicePath: String) = Unit
 
-  override fun removeCaCert(requestId: String?, alias: String?, certificate: String?) {}
+  override suspend fun removeCaCert(requestId: String?, alias: String?, certificate: String?) = Unit
 
-  override fun requestGlobalAction(requestId: String?, action: String) {}
+  override suspend fun requestGlobalAction(request: RequestGlobalAction) = Unit
 
-  override fun requestDeviceInfo(requestId: String?) {}
+  override suspend fun requestDeviceInfo(requestId: String?) = Unit
 
-  override fun getDeviceOwnerStatus(requestId: String?) {}
+  override suspend fun getDeviceOwnerStatus(requestId: String?) = Unit
 
-  override fun getPermission(
+  override suspend fun getPermission(
     requestId: String?,
     permission: String?,
     requestPermission: Boolean?,
-  ) {}
+  ) = Unit
 
-  override fun setRecompositionTracking(enabled: Boolean) {}
+  override suspend fun setRecompositionTracking(enabled: Boolean) = Unit
 
-  override fun setAccessibilityFlags(
+  override suspend fun setAccessibilityFlags(
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
     occlusionEnabled: Boolean,
-  ) {}
+  ) = Unit
 
-  override fun setNetworkMockRules(requestId: String?, rulesJson: String) {}
+  override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) = Unit
 
-  override fun setNetworkErrorSimulation(
+  override suspend fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
     remainingMs: Long?,
-  ) {}
+  ) = Unit
 
-  override fun getCurrentFocus(requestId: String?) {}
+  override suspend fun getCurrentFocus(requestId: String?) = Unit
 
-  override fun getTraversalOrder(requestId: String?) {}
+  override suspend fun getTraversalOrder(requestId: String?) = Unit
 
-  override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) {}
+  override suspend fun addHighlight(
+    requestId: String?,
+    highlightId: String?,
+    shape: HighlightShape?,
+  ) = Unit
 
-  override fun showPrototype(
+  override suspend fun showPrototype(
     requestId: String?,
     spec: PrototypeSpec,
     displayId: Int?,
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
-  ) {}
+    replaceOthers: Boolean,
+  ) = Unit
 
-  override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {}
+  override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) = Unit
 
-  override fun inspectPrototypes(requestId: String?) {}
+  override suspend fun patchPrototype(
+    requestId: String?,
+    id: String,
+    baseRevision: Long?,
+    ops: JsonArray,
+  ) {
+    patches += listOf(requestId, id, baseRevision, ops)
+  }
 
-  override fun putPrototypeAsset(
+  override suspend fun inspectPrototypes(requestId: String?) = Unit
+
+  override suspend fun putPrototypeAsset(
     requestId: String?,
     id: String,
     mimeType: String,
     dataBase64: String,
-  ) {}
+  ) = Unit
 
-  override fun removePrototypeAsset(requestId: String?, id: String) {}
+  override suspend fun savePrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    label: String,
+    icon: String?,
+  ) = Unit
 
-  override fun listPreferenceFiles(requestId: String?, packageName: String) {}
+  override suspend fun pinSavedPrototype(requestId: String?, id: String, icon: String?) = Unit
 
-  override fun getPreferences(requestId: String?, packageName: String, fileName: String) {}
+  override suspend fun listSavedPrototypes(requestId: String?) = Unit
 
-  override fun discoverKeystore(requestId: String?, packageName: String) {}
+  override suspend fun deleteSavedPrototype(requestId: String?, id: String) = Unit
 
-  override fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) {}
+  override suspend fun clearPrototypeStorage(requestId: String?, id: String) = Unit
 
-  override fun listDataStores(requestId: String?, packageName: String, adapterName: String) {}
+  override suspend fun removePrototypeAsset(requestId: String?, id: String) = Unit
 
-  override fun getDataStore(
+  override suspend fun listPreferenceFiles(requestId: String?, packageName: String) = Unit
+
+  override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
+    Unit
+
+  override suspend fun discoverKeystore(requestId: String?, packageName: String) = Unit
+
+  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
+    Unit
+
+  override suspend fun listDataStores(
+    requestId: String?,
+    packageName: String,
+    adapterName: String,
+  ) = Unit
+
+  override suspend fun getDataStore(
     requestId: String?,
     packageName: String,
     adapterName: String,
     storeName: String,
-  ) {}
+  ) = Unit
 
-  override fun subscribeStorage(requestId: String?, packageName: String, fileName: String) {}
+  override suspend fun subscribeStorage(
+    requestId: String?,
+    packageName: String,
+    fileName: String,
+  ) = Unit
 
-  override fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String) {}
+  override suspend fun unsubscribeStorage(
+    requestId: String?,
+    packageName: String,
+    fileName: String,
+  ) = Unit
 
-  override fun getPreference(
+  override suspend fun getPreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
-  ) {}
+  ) = Unit
 
-  override fun setPreference(
+  override suspend fun setPreference(request: SetPreference) = Unit
+
+  override suspend fun removePreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
-    value: String?,
-    type: String,
-  ) {}
+  ) = Unit
 
-  override fun removePreference(
+  override suspend fun clearPreferences(
     requestId: String?,
     packageName: String,
     fileName: String,
-    key: String,
-  ) {}
+  ) = Unit
 
-  override fun clearPreferences(requestId: String?, packageName: String, fileName: String) {}
+  override suspend fun startRecording() = Unit
 
-  override fun startRecording() {}
+  override suspend fun stopRecording() = Unit
 
-  override fun stopRecording() {}
+  override suspend fun requestSettingsGet(requestId: String?, namespace: String, key: String) = Unit
 
-  override fun requestSettingsGet(requestId: String?, namespace: String, key: String) {}
-
-  override fun requestSettingsPut(
+  override suspend fun requestSettingsPut(
     requestId: String?,
     namespace: String,
     key: String,
     value: String?,
     valueType: String,
-  ) {}
+  ) = Unit
 
-  override fun requestSettingsList(requestId: String?, namespace: String) {}
+  override suspend fun requestSettingsList(requestId: String?, namespace: String) = Unit
 
-  override fun requestInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?) {}
+  override suspend fun requestInstalledPackages(
+    requestId: String?,
+    includeSystem: Boolean,
+    userId: Int?,
+  ) = Unit
 
-  override fun requestPackageInfo(
+  override suspend fun requestPackageInfo(
     requestId: String?,
     packageName: String,
     includePermissions: Boolean,
-  ) {}
+  ) = Unit
 
-  override fun requestLaunchIntent(requestId: String?, packageName: String) {}
+  override suspend fun requestLaunchIntent(requestId: String?, packageName: String) = Unit
 }
 
 /**
@@ -259,29 +288,21 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     calls.add(name to args.toList())
   }
 
-  override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
-    record("requestHierarchy", disableAllFiltering, requestId)
+  override suspend fun requestHierarchy(request: RequestHierarchy) =
+    record("requestHierarchy", request)
 
-  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
+  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
     record("requestHierarchyIfStale", sinceTimestamp, requestId)
 
-  override fun setHierarchyInterval(intervalMs: Long?) = record("setHierarchyInterval", intervalMs)
+  override suspend fun setHierarchyInterval(intervalMs: Long?) =
+    record("setHierarchyInterval", intervalMs)
 
-  override fun requestScreenshot(requestId: String?) = record("requestScreenshot", requestId)
+  override suspend fun requestScreenshot(request: RequestScreenshot) =
+    record("requestScreenshot", request)
 
-  override fun requestScreenshot(requestId: String?, displayId: Int?, hidePrototypes: Boolean) =
-    record("requestScreenshot", requestId, displayId, hidePrototypes)
+  override suspend fun requestSwipe(request: RequestSwipe) = record("requestSwipe", request)
 
-  override fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-  ) = record("requestSwipe", requestId, x1, y1, x2, y2, duration)
-
-  override fun requestDoubleTapCoordinates(
+  override suspend fun requestDoubleTapCoordinates(
     requestId: String?,
     x: Double,
     y: Double,
@@ -289,68 +310,27 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     displayId: Int?,
   ) = record("requestDoubleTapCoordinates", requestId, x, y, frameContext, displayId)
 
-  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
-    record("requestTapCoordinates", requestId, x, y, duration)
+  override suspend fun requestTapCoordinates(request: RequestTapCoordinates) =
+    record("requestTapCoordinates", request)
 
-  override fun requestTwoFingerSwipe(
+  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) =
+    record("requestTwoFingerSwipe", request)
+
+  override suspend fun requestDrag(request: RequestDrag) = record("requestDrag", request)
+
+  override suspend fun requestPinch(request: RequestPinch) = record("requestPinch", request)
+
+  override suspend fun requestGestureStart(request: RequestGestureStart) =
+    record("requestGestureStart", request)
+
+  override suspend fun requestGestureMove(
     requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-  ) = record("requestTwoFingerSwipe", requestId, x1, y1, x2, y2, duration, offset)
+    gestureId: String,
+    x: Double,
+    y: Double,
+  ) = record("requestGestureMove", requestId, gestureId, x, y)
 
-  override fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-  ) =
-    record(
-      "requestDrag",
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-    )
-
-  override fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-  ) =
-    record(
-      "requestPinch",
-      requestId,
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-    )
-
-  override fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double) =
-    record("requestGestureStart", requestId, gestureId, x, y)
-
-  override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) =
-    record("requestGestureMove", requestId, gestureId, x, y)
-
-  override fun requestGestureEnd(
+  override suspend fun requestGestureEnd(
     requestId: String?,
     gestureId: String,
     x: Double,
@@ -358,135 +338,84 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     cancel: Boolean,
   ) = record("requestGestureEnd", requestId, gestureId, x, y, cancel)
 
-  override suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-  ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard)
+  override suspend fun requestSetText(request: RequestSetText) = record("requestSetText", request)
 
-  override suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-    frameContext: String?,
-  ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard, frameContext)
-
-  override fun requestInsertTextState(requestId: String?) =
+  override suspend fun requestInsertTextState(requestId: String?) =
     record("requestInsertTextState", requestId)
 
-  override fun requestInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-    precedingState: dev.jasonpearson.automobile.protocol.InsertTextState?,
-  ) =
-    record(
-      "requestInsertText",
-      requestId,
-      text,
-      expectedSuffix,
-      acceptsCaretNotPlaced,
-      precedingState,
-    )
+  override suspend fun requestInsertText(request: RequestInsertText) =
+    record("requestInsertText", request)
 
-  override fun requestInsertText(requestId: String?, text: String) =
-    record("requestInsertText", requestId, text)
+  override suspend fun requestCommitText(request: RequestCommitText) =
+    record("requestCommitText", request)
 
-  override fun requestInsertText(requestId: String?, text: String, expectedSuffix: String?) =
-    record("requestInsertText", requestId, text, expectedSuffix)
-
-  override fun requestInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-  ) = record("requestInsertText", requestId, text, expectedSuffix, acceptsCaretNotPlaced)
-
-  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
-    record("requestCommitText", requestId, text, priorImeId)
-
-  override fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: dev.jasonpearson.automobile.protocol.ImeTextDelivery,
-    timeoutMs: Long?,
-  ) = record("requestCommitText", requestId, text, priorImeId, delivery, timeoutMs)
-
-  override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
+  override suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
     record("requestCancelImeCommit", requestId, targetRequestId)
 
-  override fun requestSetKeyboardProfile(requestId: String?, profileId: String) =
+  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) =
     record("requestSetKeyboardProfile", requestId, profileId)
 
-  override fun requestListKeyboardProfiles(
+  override suspend fun requestListKeyboardProfiles(
     requestId: String?,
     supportedCatalogVersions: List<Int>,
   ) = record("requestListKeyboardProfiles", requestId, supportedCatalogVersions)
 
-  override fun requestImeAction(requestId: String?, action: String) =
-    record("requestImeAction", requestId, action)
+  override suspend fun requestImeAction(request: RequestImeAction) =
+    record("requestImeAction", request)
 
-  override fun requestImeAction(requestId: String?, action: String, frameContext: String?) =
-    record("requestImeAction", requestId, action, frameContext)
+  override suspend fun requestSelectAll(requestId: String?) = record("requestSelectAll", requestId)
 
-  override fun requestSelectAll(requestId: String?) = record("requestSelectAll", requestId)
-
-  override fun requestClickFocusedInput(requestId: String?) =
+  override suspend fun requestClickFocusedInput(requestId: String?) =
     record("requestClickFocusedInput", requestId)
 
-  override fun requestAction(
+  override suspend fun requestAction(
     requestId: String?,
     action: String,
     resourceId: String?,
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
   ) = record("requestAction", requestId, action, resourceId, selector)
 
-  override fun requestActivateAccessibilityLink(
+  override suspend fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
     occurrence: Int,
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
   ) = record("requestActivateAccessibilityLink", requestId, text, occurrence, selector)
 
-  override fun requestClipboard(requestId: String?, action: String, text: String?) =
+  override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
     record("requestClipboard", requestId, action, text)
 
-  override fun installCaCert(requestId: String?, certificate: String) =
+  override suspend fun installCaCert(requestId: String?, certificate: String) =
     record("installCaCert", requestId, certificate)
 
-  override fun installCaCertFromPath(requestId: String?, devicePath: String) =
+  override suspend fun installCaCertFromPath(requestId: String?, devicePath: String) =
     record("installCaCertFromPath", requestId, devicePath)
 
-  override fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
+  override suspend fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
     record("removeCaCert", requestId, alias, certificate)
 
-  override fun requestGlobalAction(requestId: String?, action: String) =
-    record("requestGlobalAction", requestId, action)
+  override suspend fun requestGlobalAction(request: RequestGlobalAction) =
+    record("requestGlobalAction", request)
 
-  override fun requestGlobalAction(requestId: String?, action: String, frameContext: String?) =
-    record("requestGlobalAction", requestId, action, frameContext)
-
-  override fun validateFrameContext(requestId: String?, frameContext: String) =
+  override suspend fun validateFrameContext(requestId: String?, frameContext: String) =
     record("validateFrameContext", requestId, frameContext)
 
-  override fun requestDeviceInfo(requestId: String?) = record("requestDeviceInfo", requestId)
+  override suspend fun requestDeviceInfo(requestId: String?) =
+    record("requestDeviceInfo", requestId)
 
-  override fun getDeviceOwnerStatus(requestId: String?) = record("getDeviceOwnerStatus", requestId)
+  override suspend fun getDeviceOwnerStatus(requestId: String?) =
+    record("getDeviceOwnerStatus", requestId)
 
-  override fun getPermission(
+  override suspend fun getPermission(
     requestId: String?,
     permission: String?,
     requestPermission: Boolean?,
   ) = record("getPermission", requestId, permission, requestPermission)
 
-  override fun setRecompositionTracking(enabled: Boolean) =
+  override suspend fun setRecompositionTracking(enabled: Boolean) =
     record("setRecompositionTracking", enabled)
 
-  override fun setAccessibilityFlags(
+  override suspend fun setAccessibilityFlags(
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
@@ -500,10 +429,10 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       occlusionEnabled,
     )
 
-  override fun setNetworkMockRules(requestId: String?, rulesJson: String) =
+  override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) =
     record("setNetworkMockRules", rulesJson, requestId)
 
-  override fun setNetworkErrorSimulation(
+  override suspend fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
@@ -511,98 +440,138 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     remainingMs: Long?,
   ) = record("setNetworkErrorSimulation", enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
-  override fun getCurrentFocus(requestId: String?) = record("getCurrentFocus", requestId)
+  override suspend fun getCurrentFocus(requestId: String?) = record("getCurrentFocus", requestId)
 
-  override fun getTraversalOrder(requestId: String?) = record("getTraversalOrder", requestId)
+  override suspend fun getTraversalOrder(requestId: String?) =
+    record("getTraversalOrder", requestId)
 
-  override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
-    record("addHighlight", requestId, highlightId, shape)
+  override suspend fun addHighlight(
+    requestId: String?,
+    highlightId: String?,
+    shape: HighlightShape?,
+  ) = record("addHighlight", requestId, highlightId, shape)
 
-  override fun showPrototype(
+  override suspend fun showPrototype(
     requestId: String?,
     spec: PrototypeSpec,
     displayId: Int?,
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
-  ) = record("showPrototype", requestId, spec, displayId, reset, appearance)
+    replaceOthers: Boolean,
+  ) = record("showPrototype", requestId, spec, displayId, reset, appearance, replaceOthers)
 
-  override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
+  override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
     record("dismissPrototype", requestId, id, all)
 
-  override fun inspectPrototypes(requestId: String?) = record("inspectPrototypes", requestId)
+  override suspend fun patchPrototype(
+    requestId: String?,
+    id: String,
+    baseRevision: Long?,
+    ops: JsonArray,
+  ) = record("patchPrototype", requestId, id, baseRevision, ops)
 
-  override fun putPrototypeAsset(
+  override suspend fun inspectPrototypes(requestId: String?) =
+    record("inspectPrototypes", requestId)
+
+  override suspend fun putPrototypeAsset(
     requestId: String?,
     id: String,
     mimeType: String,
     dataBase64: String,
   ) = record("putPrototypeAsset", requestId, id, mimeType, dataBase64)
 
-  override fun removePrototypeAsset(requestId: String?, id: String) =
+  override suspend fun savePrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    label: String,
+    icon: String?,
+  ) = record("savePrototype", requestId, spec, label, icon)
+
+  override suspend fun pinSavedPrototype(requestId: String?, id: String, icon: String?) =
+    record("pinSavedPrototype", requestId, id, icon)
+
+  override suspend fun listSavedPrototypes(requestId: String?) =
+    record("listSavedPrototypes", requestId)
+
+  override suspend fun deleteSavedPrototype(requestId: String?, id: String) =
+    record("deleteSavedPrototype", requestId, id)
+
+  override suspend fun clearPrototypeStorage(requestId: String?, id: String) =
+    record("clearPrototypeStorage", requestId, id)
+
+  override suspend fun removePrototypeAsset(requestId: String?, id: String) =
     record("removePrototypeAsset", requestId, id)
 
-  override fun listPreferenceFiles(requestId: String?, packageName: String) =
+  override suspend fun listPreferenceFiles(requestId: String?, packageName: String) =
     record("listPreferenceFiles", requestId, packageName)
 
-  override fun getPreferences(requestId: String?, packageName: String, fileName: String) =
+  override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     record("getPreferences", requestId, packageName, fileName)
 
-  override fun discoverKeystore(requestId: String?, packageName: String) =
+  override suspend fun discoverKeystore(requestId: String?, packageName: String) =
     record("discoverKeystore", requestId, packageName)
 
-  override fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
+  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
     record("getSdkCapabilities", requestId, packageName, userId)
 
-  override fun listDataStores(requestId: String?, packageName: String, adapterName: String) =
-    record("listDataStores", requestId, packageName, adapterName)
+  override suspend fun listDataStores(
+    requestId: String?,
+    packageName: String,
+    adapterName: String,
+  ) = record("listDataStores", requestId, packageName, adapterName)
 
-  override fun getDataStore(
+  override suspend fun getDataStore(
     requestId: String?,
     packageName: String,
     adapterName: String,
     storeName: String,
   ) = record("getDataStore", requestId, packageName, adapterName, storeName)
 
-  override fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
+  override suspend fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
     record("subscribeStorage", requestId, packageName, fileName)
 
-  override fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String) =
-    record("unsubscribeStorage", requestId, packageName, fileName)
+  override suspend fun unsubscribeStorage(
+    requestId: String?,
+    packageName: String,
+    fileName: String,
+  ) = record("unsubscribeStorage", requestId, packageName, fileName)
 
-  override fun getPreference(
+  override suspend fun getPreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
   ) = record("getPreference", requestId, packageName, fileName, key)
 
-  override fun setPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) = record("setPreference", requestId, packageName, fileName, key, value, type)
+  override suspend fun setPreference(request: SetPreference) =
+    record(
+      "setPreference",
+      request.requestId,
+      request.packageName,
+      request.fileName,
+      request.key,
+      request.value,
+      request.valueType,
+    )
 
-  override fun removePreference(
+  override suspend fun removePreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
   ) = record("removePreference", requestId, packageName, fileName, key)
 
-  override fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
+  override suspend fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
     record("clearPreferences", requestId, packageName, fileName)
 
-  override fun startRecording() = record("startRecording")
+  override suspend fun startRecording() = record("startRecording")
 
-  override fun stopRecording() = record("stopRecording")
+  override suspend fun stopRecording() = record("stopRecording")
 
-  override fun requestSettingsGet(requestId: String?, namespace: String, key: String) =
+  override suspend fun requestSettingsGet(requestId: String?, namespace: String, key: String) =
     record("requestSettingsGet", requestId, namespace, key)
 
-  override fun requestSettingsPut(
+  override suspend fun requestSettingsPut(
     requestId: String?,
     namespace: String,
     key: String,
@@ -610,18 +579,21 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     valueType: String,
   ) = record("requestSettingsPut", requestId, namespace, key, value, valueType)
 
-  override fun requestSettingsList(requestId: String?, namespace: String) =
+  override suspend fun requestSettingsList(requestId: String?, namespace: String) =
     record("requestSettingsList", requestId, namespace)
 
-  override fun requestInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?) =
-    record("requestInstalledPackages", requestId, includeSystem, userId)
+  override suspend fun requestInstalledPackages(
+    requestId: String?,
+    includeSystem: Boolean,
+    userId: Int?,
+  ) = record("requestInstalledPackages", requestId, includeSystem, userId)
 
-  override fun requestPackageInfo(
+  override suspend fun requestPackageInfo(
     requestId: String?,
     packageName: String,
     includePermissions: Boolean,
   ) = record("requestPackageInfo", requestId, packageName, includePermissions)
 
-  override fun requestLaunchIntent(requestId: String?, packageName: String) =
+  override suspend fun requestLaunchIntent(requestId: String?, packageName: String) =
     record("requestLaunchIntent", requestId, packageName)
 }

@@ -18,6 +18,7 @@ const fixedClasses = {
   keyboard: "inPlace",
   clipboard: "inPlace",
   swipeOn: "scroll",
+  swipeAt: "scroll",
   dragAndDrop: "scroll",
 } satisfies Record<string, ObservationActionClass>;
 
@@ -29,10 +30,13 @@ const advertisedClasses = {
   openLink: "navigation",
   selectAllText: "inPlace",
   swipeOn: "scroll",
+  swipeAt: "scroll",
   dragAndDrop: "scroll",
   biometricAuth: "unknown",
+  dragPath: "unknown", // Like tapAt: unclassified until coordinate gestures are classified together.
   launchApp: "unknown",
   observe: "unknown", // Top-level projection; included to cover every raw/project advertiser.
+  multiTouch: "unknown",
   pinchOn: "unknown",
   pressButton: "unknown", // Missing button; argument-dependent cases are pinned below.
   rotate: "unknown",

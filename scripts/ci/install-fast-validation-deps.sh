@@ -38,6 +38,10 @@ MAX_ATTEMPTS="${FAST_VALIDATION_DEPS_MAX_ATTEMPTS:-2}"
 RETRY_BASE_DELAY_SECONDS="${FAST_VALIDATION_DEPS_RETRY_BASE_DELAY_SECONDS:-5}"
 BATS_CLONE_DIR="${FAST_VALIDATION_DEPS_BATS_CLONE_DIR:-/tmp/bats-core}"
 BATS_INSTALL_PREFIX="${FAST_VALIDATION_DEPS_BATS_INSTALL_PREFIX:-/usr/local}"
+# bats-core is installed with sudo, so pin it to a release and verify the
+# commit (tags are mutable). Keep in step with the workflow installs.
+BATS_CORE_TAG="v1.14.0"
+BATS_CORE_COMMIT="eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
 XMLSTARLET_COMMAND="${FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND:-xmlstarlet}"
 FALLBACK_MIRROR="${FAST_VALIDATION_DEPS_FALLBACK_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 SELF="${BASH_SOURCE[0]}"
@@ -53,6 +57,16 @@ die() {
 
 is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
 }
 
 # Run "$@" under a wall-clock timeout, retrying with exponential backoff.
@@ -101,7 +115,10 @@ try_with_retry() {
 # Like try_with_retry, but a final failure is fatal.
 run_with_retry() {
   local description="$1"
-  try_with_retry "$@" || die "${description} failed after ${MAX_ATTEMPTS} attempts"
+  run_capture_status try_with_retry "$@"
+  if [[ "$RUN_STATUS" -ne 0 ]]; then
+    die "${description} failed after ${MAX_ATTEMPTS} attempts"
+  fi
 }
 
 # Re-run update+install of xmlstarlet against FALLBACK_MIRROR with a throwaway
@@ -110,7 +127,8 @@ run_with_retry() {
 install_xmlstarlet_from_fallback_mirror() {
   local codename="${FAST_VALIDATION_DEPS_UBUNTU_CODENAME:-}"
   if [[ -z "$codename" && -r /etc/os-release ]]; then
-    # shellcheck disable=SC1091 # system file, not part of the repo.
+    # Host OS metadata is unavailable on non-Linux analysis hosts.
+    # shellcheck source=/dev/null
     codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
   fi
   codename="${codename:-noble}"
@@ -127,7 +145,8 @@ install_xmlstarlet_from_fallback_mirror() {
 main() {
   local var
   for var in CMD_TIMEOUT_SECONDS KILL_GRACE_SECONDS MAX_ATTEMPTS RETRY_BASE_DELAY_SECONDS; do
-    if ! is_positive_integer "${!var}"; then
+    run_capture_status is_positive_integer "${!var}"
+    if [[ "$RUN_STATUS" -ne 0 ]]; then
       die "${var} must be a positive integer (got '${!var}')"
     fi
   done
@@ -136,7 +155,8 @@ main() {
     log "xmlstarlet already on PATH; skipping apt-get"
   else
     run_with_retry "apt-get update" sudo apt-get update
-    if ! try_with_retry "apt-get install xmlstarlet" sudo apt-get install -y xmlstarlet; then
+    run_capture_status try_with_retry "apt-get install xmlstarlet" sudo apt-get install -y xmlstarlet
+    if [[ "$RUN_STATUS" -ne 0 ]]; then
       log "Default mirror failed; falling back to ${FALLBACK_MIRROR}"
       run_with_retry "apt-get install xmlstarlet from fallback mirror" \
         sudo env \
@@ -154,10 +174,12 @@ main() {
     # per-attempt cleanup every subsequent retry would fail instantly on it.
     # `timeout` is an external binary and cannot run a shell function, so the
     # cleanup+clone pair is composed with `bash -c`.
-    # shellcheck disable=SC2016 # $1 is deliberately expanded by the inner bash, not here.
     run_with_retry "clone bats-core" \
-      bash -c 'rm -rf "$1" && git clone --depth 1 https://github.com/bats-core/bats-core.git "$1"' \
-      _ "$BATS_CLONE_DIR"
+      bash -c "rm -rf \"\$1\" && git clone --depth 1 --branch \"\$2\" https://github.com/bats-core/bats-core.git \"\$1\"" \
+      _ "$BATS_CLONE_DIR" "$BATS_CORE_TAG"
+    bats_commit="$(git -C "$BATS_CLONE_DIR" rev-parse HEAD)"
+    [[ "$bats_commit" == "$BATS_CORE_COMMIT" ]] ||
+      die "bats-core ${BATS_CORE_TAG} resolved to ${bats_commit}, expected ${BATS_CORE_COMMIT}"
     run_with_retry "install bats-core" \
       sudo "${BATS_CLONE_DIR}/install.sh" "$BATS_INSTALL_PREFIX"
   fi

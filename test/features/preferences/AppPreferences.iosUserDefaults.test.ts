@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,15 +11,13 @@ import {
 } from "../../../src/features/preferences/AppPreferences";
 import { IOS_SDK_REDACTED_VALUE } from "../../../src/features/preferences/IosPreferenceTypes";
 import { parseIosUserDefaultsPlist } from "../../../src/features/preferences/IosUserDefaultsPlist";
-import {
-  CtrlProxyServicePortChangedError,
-  IOSCtrlProxyClient,
-} from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { CtrlProxyServicePortChangedError } from "../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import type { KeyValueEntry, KeyValueType } from "../../../src/features/storage/storageTypes";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
-import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/server/storageSdkErrors";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/utils/storageSdkErrors";
 import { buildPlist, PlistReal } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
 
@@ -81,14 +80,23 @@ class FakeKeyValueClient implements IosPreferenceKeyValueClient {
     key: string,
     value: string | null,
     type: KeyValueType,
-    timeoutMs?: number,
-  ): Promise<void> {
-    this.calls.push({ operation: "set", appId, store, key, value, type, timeoutMs });
+    timeoutMs?: Parameters<IosPreferenceKeyValueClient["setPreference"]>[5],
+  ): ReturnType<IosPreferenceKeyValueClient["setPreference"]> {
+    this.calls.push({
+      operation: "set",
+      appId,
+      store,
+      key,
+      value,
+      type,
+      timeoutMs: typeof timeoutMs === "number" ? timeoutMs : timeoutMs?.timeoutMs,
+    });
     this.onWrite?.();
     if (this.writeError) {
       throw typeof this.writeError === "string" ? new Error(this.writeError) : this.writeError;
     }
     this.entry = { key, value, type };
+    return undefined;
   }
 }
 
@@ -131,13 +139,13 @@ class FakeContainerSimctl {
       if (this.processListError) {
         throw new Error(this.processListError);
       }
-      return { stdout: this.processList, stderr: "" };
+      return createExecResult(this.processList, "");
     }
     if (args[0] === "get_app_container") {
       if (this.containerError) {
         throw new Error(this.containerError);
       }
-      return { stdout: `${this.containerPath}\n`, stderr: "" };
+      return createExecResult(`${this.containerPath}\n`, "");
     }
     if (args[3] !== "write") {
       throw new Error("Unexpected defaults read");
@@ -145,7 +153,7 @@ class FakeContainerSimctl {
     if (this.writeError) {
       throw new Error(this.writeError);
     }
-    return { stdout: "", stderr: "" };
+    return createExecResult("", "");
   }
 }
 
@@ -657,6 +665,11 @@ describe("iOS app UserDefaults resolution", () => {
       createSuccessWebSocketFactory(timer),
       timer,
     );
+    // sendCommand now rejects the old silent drop when no socket is attached.
+    // Model the open connection this test advertises before resolving its replies.
+    const socket = createSuccessWebSocketFactory(timer)("ws://fake");
+    await Promise.resolve();
+    client["ws"] = socket;
     const connect = spyOn(client, "ensureConnected").mockImplementation(() => {
       throw new Error("Auto-start forbidden");
     });
@@ -678,6 +691,7 @@ describe("iOS app UserDefaults resolution", () => {
         await Promise.resolve();
         manager.resolve(manager.getPendingIds()[0]!, { success: true, totalTimeMs: 0 });
         await write;
+        client["ws"] = null;
         connection.mockReturnValue(false);
       } finally {
         connection.mockRestore();
@@ -901,7 +915,7 @@ describe("iOS app UserDefaults resolution", () => {
     expect(simctl.calls).toEqual([]);
   });
   test("missing global domain gives appId guidance and separate route", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandError(
       `spawn ${device.deviceId} defaults read globalSuite k`,
       new Error("Domain 'globalSuite' not found"),
@@ -960,7 +974,7 @@ describe("real plutil fixtures and route type consistency", () => {
       sdk.sdk.entry = { key, type: sdkType, value: serialized };
       const plist = harness("absent");
       plist.plist.xml = fixtureXml;
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setCommandResult(
         `spawn ${device.deviceId} defaults read globalSuite ${key}`,
         `${serialized}\n`,
@@ -1164,7 +1178,7 @@ describe("SDK redaction and collection encoding", () => {
     const result = await plist.preferences.getPreference(input);
     expect(result).toMatchObject({ value: IOS_SDK_REDACTED_VALUE, type: "string" });
     expect(result.redacted).toBeUndefined();
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `spawn ${device.deviceId} defaults read globalSuite ${input.key}`,
       `${IOS_SDK_REDACTED_VALUE}\n`,

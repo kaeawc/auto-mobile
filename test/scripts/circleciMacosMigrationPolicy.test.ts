@@ -274,6 +274,42 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     expect(prMapping().has("run-ios-integration")).toBe(false);
   });
 
+  test("saved prototype smoke is advisory and ordered after navigation in both CI systems", () => {
+    const name = "Run saved prototype smoke (advisory)";
+    const github = loadJobSteps(XCTESTRUNNER_WORKFLOW, "ios-xctest-runner-simulator-tests");
+    const githubNames = github.map((step) => step.name ?? "");
+    const githubIndex = githubNames.indexOf(name);
+    expect(githubNames.filter((stepName) => stepName === name)).toHaveLength(1);
+    expect(githubIndex).toBeGreaterThan(
+      githubNames.indexOf("Run iOS navigation graph Simulator workflow"),
+    );
+    expect(githubIndex).toBeLessThan(
+      githubNames.indexOf("Stop AutoMobile daemon before odd-width boot"),
+    );
+    const githubStep = stepNamed(github, name) as (typeof github)[number] & Record<string, unknown>;
+    expect(githubStep["continue-on-error"]).toBe(true);
+    expect(githubStep["timeout-minutes"]).toBe(12);
+    expect(githubStep.run).toContain("saved-prototype-smoke-advisory.sh");
+    const circle = loadCircle(CONTINUE).jobs?.["xctestrunner-simulator-tests"]?.steps ?? [];
+    const circleNames = circle.map((step) =>
+      typeof step === "string"
+        ? step
+        : String((step.run as { name?: string } | undefined)?.name ?? ""),
+    );
+    const circleIndex = circleNames.indexOf(name);
+    expect(circleNames.filter((stepName) => stepName === name)).toHaveLength(1);
+    expect(circleIndex).toBeGreaterThan(
+      circleNames.indexOf("Run iOS navigation graph Simulator workflow"),
+    );
+    expect(circleIndex).toBeLessThan(
+      circleNames.indexOf("Stop AutoMobile daemon before odd-width boot"),
+    );
+    expect(runStep("xctestrunner-simulator-tests", name)?.command).toContain(
+      "saved-prototype-smoke-advisory.sh",
+    );
+    expect(runStep("xctestrunner-simulator-tests", name)?.no_output_timeout).toBe("12m");
+  });
+
   test("nightly Thread Sanitizer stays simulator-free and bounded", () => {
     const steps = loadCircle(CONTINUE).jobs?.["xctestrunner-tsan"]?.steps ?? [];
     const run = runStep("xctestrunner-tsan", "Run XCTestRunner Thread Sanitizer");

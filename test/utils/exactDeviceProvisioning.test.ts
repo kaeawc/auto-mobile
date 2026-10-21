@@ -10,12 +10,12 @@ import type { DeviceInfo } from "../../src/models";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import {
-  managedSlotRefusal,
-  RegistryManagedSlotExclusion,
-} from "../../src/daemon/managedSlots/managedSlotExclusion";
+  bindingRefusal,
+  RegistryBindingExclusion,
+} from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
   DefaultExactDeviceProvisioner,
   FileAndroidAvdConfigWriter,
@@ -52,7 +52,7 @@ describe("ProvisionDeviceError retryability", () => {
       device_cleanup_in_progress: true,
       session_creation_timeout: true,
       device_shutting_down: true,
-      device_assigned_to_managed_slot: false,
+      device_assigned_to_binding: false,
       device_offline: true,
       discovery_incomplete: true,
       capacity_exhausted: true,
@@ -79,11 +79,11 @@ describe("ProvisionDeviceError retryability", () => {
 });
 
 describe("DefaultExactDeviceProvisioner", () => {
-  test("refuses to adopt an existing device a managed slot holds, before reading its config (#11174)", async () => {
+  test("refuses to adopt an existing device a binding holds, before reading its config (#11174)", async () => {
     const timer = new FakeTimer();
-    const registry = new FakeSlotRegistry(timer);
-    const slot = await assignManagedSlotDevice(registry, "android", "slot-avd");
-    const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+    const registry = new FakeBindingRegistry(timer);
+    const binding = await assignBindingDevice(registry, "android", "slot-avd");
+    const exclusion = new RegistryBindingExclusion(async () => registry, timer);
     const configReads: string[] = [];
     const guarded: string[] = [];
     const provisioner = new DefaultExactDeviceProvisioner({
@@ -101,7 +101,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       assertAdoptable: async (device) => {
         guarded.push(`${device.platform}:${device.stableId}`);
         await exclusion.refresh();
-        const refusal = managedSlotRefusal(exclusion, {
+        const refusal = bindingRefusal(exclusion, {
           action: "provisionDevice",
           deviceId: device.stableId,
           device: { platform: device.platform, stableIds: [device.stableId] },
@@ -118,11 +118,11 @@ describe("DefaultExactDeviceProvisioner", () => {
 
     expect(error).toBeInstanceOf(ProvisionDeviceError);
     expect(error).toMatchObject({
-      code: "device_assigned_to_managed_slot",
+      code: "device_assigned_to_binding",
       retryable: false,
       diagnostics: {
         deviceId: "slot-avd",
-        managedSlot: { scopeKey: slot.scopeKey, declaredSlot: 0, stableId: "slot-avd" },
+        binding: { scopeKey: binding.scopeKey, declaredBinding: 0, stableId: "slot-avd" },
       },
     });
     expect(guarded).toEqual(["android:slot-avd"]);

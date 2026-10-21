@@ -1,6 +1,14 @@
-import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { beforeAll, describe, expect, test } from "bun:test";
+
 import { join, relative, sep } from "node:path";
+import { type Expression } from "oxc-parser";
+import {
+  parseGuardSource,
+  unwrapCallee,
+  guardDirectoryEntries,
+  readGuardFile,
+  GuardVisitor as Visitor,
+} from "./astGuard";
 
 /**
  * Leak guard for the process-wide `DaemonState` singleton (issue #11614).
@@ -10,16 +18,61 @@ import { join, relative, sep } from "node:path";
  * that never resets it leaves every later file reading its fakes: `observationRequestHeldElsewhere`
  * left a fake-laden manager behind and `TapOnElement.toolDispatch` then failed with
  * "undefined is not an object (evaluating ... cacheData ...)" only when the seed ordered it after.
- * "Initialized here, reset in this file" is an ordering obligation no type can express, so it is a
- * source scan over test files.
+ * "Initialized here, reset in this file" is an ordering obligation no type can express, so it is an
+ * AST scan over test files (strings and comments that merely mention the calls do not count).
  */
 const ROOT = join(import.meta.dir, "..", "..");
 const TEST = join(ROOT, "test");
-const INITIALIZES = /new Daemon\(|DaemonState\.getInstance\(\)\.initialize\(/;
-const RESETS = /DaemonState\.getInstance\(\)\.reset\(\)/;
+
+function isDaemonStateInstance(expression: Expression): boolean {
+  const call = unwrapCallee(expression);
+  const callee = call.type === "CallExpression" ? unwrapCallee(call.callee) : undefined;
+  return (
+    callee?.type === "MemberExpression" &&
+    callee.object.type === "Identifier" &&
+    callee.object.name === "DaemonState" &&
+    !callee.computed &&
+    callee.property.name === "getInstance"
+  );
+}
+
+/** Whether a file publishes onto the singleton (`new Daemon(` or `.initialize(`) or resets it. */
+export function daemonStateUsage(
+  file: string,
+  source: string,
+): { initializes: boolean; resets: boolean } {
+  const usage = { initializes: false, resets: false };
+  // Cheap prefilter: only files that mention the singleton or the Daemon class are parsed.
+  if (!/Daemon/.test(source)) {
+    return usage;
+  }
+  new Visitor({
+    NewExpression(node) {
+      const callee = unwrapCallee(node.callee);
+      if (callee.type === "Identifier" && callee.name === "Daemon") {
+        usage.initializes = true;
+      }
+    },
+    CallExpression(node) {
+      const callee = unwrapCallee(node.callee);
+      if (
+        callee.type === "MemberExpression" &&
+        !callee.computed &&
+        isDaemonStateInstance(callee.object)
+      ) {
+        if (callee.property.name === "initialize") {
+          usage.initializes = true;
+        } else if (callee.property.name === "reset") {
+          usage.resets = true;
+        }
+      }
+    },
+  }).visit(parseGuardSource(file, source));
+  return usage;
+}
 
 function testFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(dir).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       return testFiles(path);
@@ -51,23 +104,49 @@ describe("test files that initialize DaemonState reset it (issue #11614)", () =>
     expect(new Set(buckets.flat()).size).toBe(files.length);
   });
 
-  test.each(buckets.map((bucket, index) => ({ bucket, index })))(
-    "every unit test file that publishes onto DaemonState also resets it (bucket $index)",
-    ({ bucket }) => {
-      const offenders = bucket
+  // Parsing is captured once, outside the per-test budget; each bucket test asserts its slice.
+  let offendersByBucket: string[][];
+  beforeAll(() => {
+    offendersByBucket = buckets.map((bucket) =>
+      bucket
         .filter((file) => {
-          const source = readFileSync(file, "utf8");
-          return INITIALIZES.test(source) && !RESETS.test(source);
+          const usage = daemonStateUsage(file, readGuardFile(file));
+          return usage.initializes && !usage.resets;
         })
-        .map((file) => relative(ROOT, file).split(sep).join("/"));
-      expect(offenders).toEqual([]);
+        .map((file) => relative(ROOT, file).split(sep).join("/")),
+    );
+  }, 30_000);
+
+  test.each(buckets.map((_, index) => ({ index })))(
+    "every unit test file that publishes onto DaemonState also resets it (bucket $index)",
+    ({ index }) => {
+      expect(offendersByBucket[index]).toEqual([]);
     },
   );
 
   test("the scan recognises the initializing and resetting spellings", () => {
-    expect(INITIALIZES.test("const d = new Daemon({}, undefined);")).toBe(true);
-    expect(INITIALIZES.test("DaemonState.getInstance().initialize(sm, pool);")).toBe(true);
-    expect(RESETS.test("afterEach(() => DaemonState.getInstance().reset());")).toBe(true);
-    expect(RESETS.test("manager.reset();")).toBe(false);
+    const usage = (source: string) => daemonStateUsage("fixture.test.ts", source);
+    expect(usage("const d = new Daemon({}, undefined);")).toEqual({
+      initializes: true,
+      resets: false,
+    });
+    expect(usage("DaemonState.getInstance().initialize(sm, pool);").initializes).toBe(true);
+    expect(usage("afterEach(() => DaemonState.getInstance().reset());").resets).toBe(true);
+    expect(usage("manager.reset();").resets).toBe(false);
+  });
+
+  test("a violating file is flagged: initialized but only mentions the reset", () => {
+    const violating = daemonStateUsage(
+      "fixture.test.ts",
+      `new Daemon({});
+      // DaemonState.getInstance().reset()
+      const note = "DaemonState.getInstance().reset()";`,
+    );
+    expect(violating.initializes && !violating.resets).toBe(true);
+    const compliant = daemonStateUsage(
+      "fixture.test.ts",
+      "DaemonState.getInstance().initialize(a, b); afterEach(() => { DaemonState.getInstance().reset(); });",
+    );
+    expect(compliant.initializes && !compliant.resets).toBe(false);
   });
 });

@@ -1,23 +1,25 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { makePool } from "../helpers/makePool";
+import { afterEach, describe, expect, spyOn, test, mock } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { logger } from "../../src/utils/logger";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+afterEach(() => mock.restore());
+
 /** Parks the next recovery cold boot on a deferred the test resolves. */
 class ParkingBootDeviceManager extends FakeDeviceManager {
   parkRecoveryStart = false;
   parkedRecoveryStarts: Array<{ resolve: () => void }> = [];
 
-  override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
+  override async startDevice(device: DeviceInfo): Promise<ChildProcess | null> {
     if (this.parkRecoveryStart) {
       this.parkRecoveryStart = false;
       await new Promise<void>((resolve) => this.parkedRecoveryStarts.push({ resolve }));
@@ -53,30 +55,38 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
   let deviceManager: ParkingBootDeviceManager;
   let pool: DevicePool;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new ParkingBootDeviceManager();
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "recovery-outside-mutex", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-      }),
-    );
+    pool = makePool(sessionManager, "recovery-outside-mutex", {
+      timer,
+      deviceManager: deviceManager,
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    });
     deviceManager.bootedDevices = [handset];
     await pool.initializeWithDevices([handset]);
     await pool.addDevice(emulator, image);
     expect(pool.getRecoveryEligibility(emulator.deviceId).eligible).toBe(true);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
   });
 
-  test("refresh prune does not block allocation while the emulator reboots", async () => {
+  arranged("refresh prune does not block allocation while the emulator reboots", async () => {
     // Discovery succeeds for Android but no longer lists the emulator.
     deviceManager.parkRecoveryStart = true;
     await pool.refreshDevices();
@@ -90,7 +100,11 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
 
     let bindSettled = false;
     const bind = pool
-      .bindOrReuseDeviceSession("unrelated", handset.deviceId, "android")
+      .bindOrReuseDeviceSession({
+        sessionId: "unrelated",
+        deviceId: handset.deviceId,
+        platform: "android",
+      })
       .then(async (sessionId) => {
         bindSettled = true;
         await pool.releaseDevice(handset.deviceId, sessionId);
@@ -110,7 +124,7 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
     expect(await bind).toBe("unrelated");
   });
 
-  test("the detached recovery still reboots the missing emulator", async () => {
+  arranged("the detached recovery still reboots the missing emulator", async () => {
     deviceManager.parkRecoveryStart = true;
     await pool.refreshDevices();
     await pool.refreshDevices();
@@ -144,14 +158,18 @@ describe("DevicePool disconnect of an assigned device", () => {
     });
     try {
       await pool.initializeWithDevices([handset]);
-      const sessionId = await pool.bindOrReuseDeviceSession("s1", handset.deviceId, "android");
+      const sessionId = await pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: handset.deviceId,
+        platform: "android",
+      });
 
       let finishCleanup!: () => void;
       const cleanup = new Promise<void>((resolve) => {
         finishCleanup = resolve;
       });
       const cleanupSpy = spyOn(sessionManager, "getPendingDeviceCleanup").mockImplementation(
-        (deviceId) => (deviceId === handset.deviceId ? cleanup : undefined),
+        (deviceId) => (deviceId === handset.deviceId ? cleanup : null),
       );
       const warnSpy = spyOn(logger, "warn");
       try {
@@ -167,7 +185,7 @@ describe("DevicePool disconnect of an assigned device", () => {
         expect(messages.some((m) => m.includes("Retaining disconnected device"))).toBe(true);
         expect(messages.some((m) => m.includes("Cannot remove device"))).toBe(false);
 
-        cleanupSpy.mockImplementation(() => undefined);
+        cleanupSpy.mockImplementation(() => null);
         finishCleanup();
         await flushMicrotasks();
         expect(pool.getDevice(handset.deviceId)?.sessionId).toBeNull();
@@ -193,15 +211,11 @@ describe("DevicePool exhausted session release ownership", () => {
       const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const manager = new FakeDeviceManager();
       manager.bootedDevices = [handset];
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "release-retry-ownership", {
-          timer,
-          deviceSessionRepository: new FakeDeviceSessionRepository(),
-          deviceManager: manager,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          retryExecutor: new DefaultRetryExecutor(timer),
-        }),
-      );
+      const pool = makePool(sessions, "release-retry-ownership", {
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+        deviceManager: manager,
+      });
       const failure = new Error("release failed");
       const poolFailure = new Error("pool release failed");
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -214,20 +228,12 @@ describe("DevicePool exhausted session release ownership", () => {
         await pool.initializeWithDevices([handset]);
         await pool.assignDeviceToSession("session", "android");
         const device = pool.getDevice(handset.deviceId)!;
-        const retry = (
-          pool as unknown as {
-            retrySessionRelease(
-              id: string,
-              deviceId: string,
-              attempt: () => Promise<void>,
-            ): Promise<void>;
-          }
-        ).retrySessionRelease("session", handset.deviceId, async () => {
+        const retry = pool.testHooks.retrySessionRelease("session", handset.deviceId, async () => {
           attempts++;
           if (attempts === 1 && scenario !== "present") {
             await sessions.releaseSession("session", "daemon-shutdown");
             if (scenario === "new-owner") {
-              device.sessionId = "other-session";
+              patchDeviceBinding(device, { sessionId: "other-session" });
             }
             if (scenario === "new-assignment") {
               device.assignmentCount++;

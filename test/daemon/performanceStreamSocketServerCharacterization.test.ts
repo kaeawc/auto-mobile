@@ -7,7 +7,10 @@ import type {
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse,
 } from "../../src/daemon/performanceStreamSocketTypes";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { performanceStreamResponseFrameSchema } from "../helpers/wireMessageSchemas";
+import type { PerformanceStreamResponseFrame } from "../helpers/wireMessageSchemas";
 
 type Query = Parameters<PerformanceStreamRepository["listResultsSince"]>[0];
 type Results = Awaited<ReturnType<PerformanceStreamRepository["listResultsSince"]>>;
@@ -29,6 +32,14 @@ class FakeRepository implements PerformanceStreamRepository {
 class TestableServer extends PerformanceStreamSocketServer {
   dispatch(request: PerformanceStreamSocketRequest): Promise<PerformanceStreamSocketResponse> {
     return this.handleRequest(request);
+  }
+
+  /** Send `wire` (any JSON-serializable frame) through the real line path and return the reply. */
+  async sendRawForTest(wire: unknown): Promise<PerformanceStreamResponseFrame | undefined> {
+    const socket = new FakeSocket<PerformanceStreamSocketResponse>();
+    await this.processLine(socket, JSON.stringify(wire));
+    await this.pendingBySocket.get(socket);
+    return socket.getWrittenMessages(performanceStreamResponseFrameSchema).at(-1);
   }
 }
 
@@ -106,9 +117,10 @@ describe("performance poll query and cursor characterization", () => {
 
   test("rejects unsupported commands and invalid cursors before querying", async () => {
     const { repository, server } = setup();
-    await expect(
-      server.dispatch({ command: "unknown" } as unknown as PerformanceStreamSocketRequest),
-    ).rejects.toThrow("Unsupported performance stream command: unknown");
+    expect(await server.sendRawForTest({ id: "bad", command: "unknown" })).toMatchObject({
+      success: false,
+      error: "Unsupported performance stream command: unknown",
+    });
     await expect(server.dispatch({ command: "poll", sinceId: -1 })).rejects.toThrow();
     expect(repository.queries).toEqual([]);
   });

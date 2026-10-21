@@ -8,6 +8,7 @@ export interface StartupMaintenanceDependencies {
   readonly platform: NodeJS.Platform;
   readonly startAndroidSweep: () => Promise<void>;
   readonly startIosReap: () => Promise<void>;
+  readonly startNativeHelperSweep: () => Promise<void>;
   readonly timer?: Timer;
   readonly logger?: Logger;
 }
@@ -26,6 +27,7 @@ export function startStartupMaintenance(dependencies: StartupMaintenanceDependen
     timer,
     log,
   );
+  startBackgroundCleanup("native helper cleanup", dependencies.startNativeHelperSweep, timer, log);
   if (dependencies.platform === "darwin") {
     startBackgroundCleanup("iOS CtrlProxy runner cleanup", dependencies.startIosReap, timer, log);
   }

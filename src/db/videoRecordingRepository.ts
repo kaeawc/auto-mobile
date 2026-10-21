@@ -2,19 +2,19 @@ import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
 import { z } from "zod";
 import { getDatabase } from "./database";
 import type {
+  VideoCaptureTeardownDescriptor,
   VideoContainerFormat,
   VideoRecordingConfig,
   VideoRecordingHighlightEntry,
   VideoRecordingMetadata,
 } from "../models";
-import { parseVideoRecordingConfig } from "../features/video";
+import { parseVideoRecordingConfig } from "../models/VideoRecordingConfigParsing";
 import type {
   Database,
   NewVideoRecording,
   VideoRecordingUpdate,
   VideoRecording as DbVideoRecording,
 } from "./types";
-import type { VideoCaptureTeardownDescriptor } from "../features/video/VideoRecorderService";
 import { logger } from "../utils/logger";
 
 /**
@@ -32,6 +32,7 @@ export const FINISHED_VIDEO_RECORDING_STATUSES: VideoRecordingStatus[] = [
 
 export interface VideoRecordingRecord extends VideoRecordingMetadata {
   captureTeardown?: VideoCaptureTeardownDescriptor;
+  recorderDaemonSessionId?: string;
   deviceId: string;
   platform: "android" | "ios";
   status: VideoRecordingStatus;
@@ -83,8 +84,11 @@ export function ownerVisibleInScope(
 
 export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
   hasCaptureTeardown?: boolean;
-  /** Restart maintenance must leave active sessions owned by live daemons alone. */
+  /** Maintenance excludes live recorders, unknown recorders while any peer is live,
+   * and active owners belonging to live daemons. */
   excludeLiveDaemonSessionIds?: ReadonlySet<string>;
+  /** The caller's own daemon id; it is not a peer for the unknown-recorder rule. */
+  ownDaemonSessionId?: string;
   status?: VideoRecordingStatus | VideoRecordingStatus[];
   deviceId?: string;
   platform?: "android" | "ios";
@@ -103,38 +107,92 @@ function parseConfig(configJson: string): VideoRecordingConfig {
   }
 }
 
+const highlightTimelineSchema = z.object({
+  appearedAtSeconds: z.number().finite(),
+  disappearedAtSeconds: z.number().finite().optional(),
+});
+
+// The shape payload is only rendered, never branched on here; require an object with a type tag.
+const highlightEntrySchema = z.custom<VideoRecordingHighlightEntry>((value) => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const { description, shape, timeline } = value as Record<string, unknown>;
+  return (
+    (description === undefined || typeof description === "string") &&
+    typeof shape === "object" &&
+    shape !== null &&
+    typeof (shape as { type?: unknown }).type === "string" &&
+    highlightTimelineSchema.safeParse(timeline).success
+  );
+});
+
+const panelSchema = z.object({
+  key: z.string(),
+  role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+});
+
+const transitionsSchema = z.array(
+  z.object({ atMs: z.number().finite(), from: panelSchema, to: panelSchema }),
+);
+
 function parseHighlights(
   highlightsJson: string | null,
 ): VideoRecordingHighlightEntry[] | undefined {
   if (!highlightsJson) {
     return undefined;
   }
+  let raw: unknown;
   try {
-    const parsed = JSON.parse(highlightsJson) as VideoRecordingHighlightEntry[];
-    return Array.isArray(parsed) ? parsed : undefined;
+    raw = JSON.parse(highlightsJson);
   } catch (error) {
     logger.warn(`[VideoRecordingRepository] Failed to parse highlights JSON: ${error}`);
     return undefined;
   }
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  // Entries drive overlay timing; drop malformed ones instead of handing them to the renderer.
+  const valid = raw.flatMap((entry): VideoRecordingHighlightEntry[] => {
+    const result = highlightEntrySchema.safeParse(entry);
+    if (!result.success) {
+      logger.warn(`[VideoRecordingRepository] Dropping invalid highlight: ${result.error.message}`);
+      return [];
+    }
+    return [result.data];
+  });
+  return valid;
 }
 
-function parseDisplayMetadata<T>(value: string | null): T | undefined {
+function parseDisplayMetadata<S extends z.ZodTypeAny>(
+  value: string | null,
+  schema: S,
+): z.infer<S> | undefined {
   if (!value) {
     return undefined;
   }
   try {
-    return JSON.parse(value) as T;
+    return schema.parse(JSON.parse(value));
   } catch (error) {
     logger.warn(`[VideoRecordingRepository] Failed to parse display metadata: ${error}`);
     return undefined;
   }
 }
 
-const captureTeardownSchema = z.object({
-  kind: z.literal("android-screenrecord"),
-  deviceTempPath: z.string().min(1),
-  devicePid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
-});
+const captureTeardownSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("android-screenrecord"),
+    deviceTempPath: z.string().min(1),
+    devicePid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  }),
+  z.object({
+    kind: z.literal("ios-host-recorder"),
+    hostPid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    hostStartToken: z.string().min(1),
+    udid: z.string().min(1),
+    capturePath: z.string().optional(),
+  }),
+]);
 
 function parseCaptureTeardown(value: string | null): VideoCaptureTeardownDescriptor | undefined {
   if (value === null) {
@@ -151,6 +209,7 @@ function parseCaptureTeardown(value: string | null): VideoCaptureTeardownDescrip
 function toRecord(row: DbVideoRecording): VideoRecordingRecord {
   return {
     recordingId: row.recording_id,
+    recorderDaemonSessionId: row.recorder_daemon_session_id ?? undefined,
     captureTeardown: parseCaptureTeardown(row.capture_teardown_json),
     deviceId: row.device_id,
     platform: row.platform as "android" | "ios",
@@ -168,12 +227,8 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
     lastAccessedAt: row.last_accessed_at,
     config: parseConfig(row.config_json),
     highlights: parseHighlights(row.highlights_json ?? null),
-    recordedPanel: parseDisplayMetadata<VideoRecordingMetadata["recordedPanel"]>(
-      row.recorded_panel_json,
-    ),
-    transitions: parseDisplayMetadata<VideoRecordingMetadata["transitions"]>(
-      row.display_transitions_json,
-    ),
+    recordedPanel: parseDisplayMetadata(row.recorded_panel_json, panelSchema),
+    transitions: parseDisplayMetadata(row.display_transitions_json, transitionsSchema),
     ownerSessionUuid: row.owner_session_uuid ?? undefined,
   };
 }
@@ -217,18 +272,29 @@ function applyMaintenanceScope<O>(
 ): SelectQueryBuilder<Database, "video_recordings", O> {
   const liveDaemonSessionIds = Array.from(query.excludeLiveDaemonSessionIds ?? []);
   if (liveDaemonSessionIds.length > 0) {
-    builder = builder.where((eb) =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom("device_sessions")
-            .select("session_uuid")
-            .whereRef("device_sessions.session_uuid", "=", "video_recordings.owner_session_uuid")
-            .where("device_sessions.status", "=", "active")
-            .where("device_sessions.daemon_session_id", "in", liveDaemonSessionIds),
+    const peers = liveDaemonSessionIds.filter((id) => id !== query.ownDaemonSessionId);
+    if (peers.length > 0) {
+      builder = builder.where("recorder_daemon_session_id", "is not", null);
+    }
+    builder = builder
+      .where((eb) =>
+        eb.or([
+          eb("recorder_daemon_session_id", "is", null),
+          eb("recorder_daemon_session_id", "not in", liveDaemonSessionIds),
+        ]),
+      )
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom("device_sessions")
+              .select("session_uuid")
+              .whereRef("device_sessions.session_uuid", "=", "video_recordings.owner_session_uuid")
+              .where("device_sessions.status", "=", "active")
+              .where("device_sessions.daemon_session_id", "in", liveDaemonSessionIds),
+          ),
         ),
-      ),
-    );
+      );
   }
   if (query.hasCaptureTeardown) {
     builder = builder.where("capture_teardown_json", "is not", null);
@@ -352,6 +418,7 @@ export class VideoRecordingRepository {
     const db = await this.getDb();
     const row: NewVideoRecording = {
       recording_id: record.recordingId,
+      recorder_daemon_session_id: record.recorderDaemonSessionId ?? null,
       device_id: record.deviceId,
       platform: record.platform,
       status: record.status,
@@ -383,6 +450,9 @@ export class VideoRecordingRepository {
         // INSERT still sets it for new rows; last_accessed_at carries the "touched"
         // time (#3498).
         oc.column("recording_id").doUpdateSet({
+          recorder_daemon_session_id: sql<
+            string | null
+          >`coalesce(${row.recorder_daemon_session_id}, video_recordings.recorder_daemon_session_id)`,
           device_id: row.device_id,
           platform: row.platform,
           status: row.status,

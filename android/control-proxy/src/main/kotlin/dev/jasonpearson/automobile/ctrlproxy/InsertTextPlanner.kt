@@ -28,11 +28,11 @@ internal fun shouldPollInsertTextMutation(
     elapsedMs < INSERT_TEXT_MUTATION_TIMEOUT_MS
 
 /** Returns the latest snapshot even on timeout, preserving the existing caret outcome rules. */
-internal fun awaitInsertTextMutation(
+internal suspend fun awaitInsertTextMutation(
   plan: InsertTextPlan,
   readSnapshot: () -> InsertTextSnapshot?,
   nowMs: () -> Long,
-  pause: (Long) -> Unit,
+  pause: suspend (Long) -> Unit,
 ): InsertTextSnapshot? {
   val start = nowMs()
   while (true) {
@@ -45,21 +45,23 @@ internal fun awaitInsertTextMutation(
 
 /** Plans a text insertion from the selection reported by an editable accessibility node. */
 internal fun planInsertText(
-  currentText: String?,
-  isShowingHintText: Boolean,
-  selectionStart: Int,
-  selectionEnd: Int,
+  snapshot: InsertTextSnapshot,
   textToInsert: String,
   remembered: RememberedCaret? = null,
 ): InsertTextPlan {
+  val currentText = snapshot.text
+  val isShowingHintText = snapshot.isShowingHintText
+  val selectionStart = snapshot.selectionStart
+  val selectionEnd = snapshot.selectionEnd
+
   val text = if (isShowingHintText) "" else currentText.orEmpty()
-  if (
+  val hasMatchingRememberedCaret =
     remembered != null &&
       remembered.text == text &&
       remembered.reportedStart == selectionStart &&
       remembered.reportedEnd == selectionEnd &&
       remembered.caret in 0..text.length
-  ) {
+  if (hasMatchingRememberedCaret) {
     return InsertTextPlan(
       text.substring(0, remembered.caret) + textToInsert + text.substring(remembered.caret),
       remembered.caret + textToInsert.length,

@@ -5,8 +5,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 
 describe("ToolRegistry tool call duration recording", () => {
-  let originalTimer: unknown;
-  let originalToolCallRepository: unknown;
+  let originalTimer: ReturnType<typeof ToolRegistry.getCollaboratorsForTesting>["timer"];
+  let originalToolCallRepository: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["toolCallRepository"];
   let timer: FakeTimer;
   let records: any[];
   let restoreWarnSpy: (() => void) | undefined;
@@ -14,9 +16,9 @@ describe("ToolRegistry tool call duration recording", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     timer = new FakeTimer();
-    originalTimer = (ToolRegistry as any).timer;
-    originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
-    (ToolRegistry as any).timer = timer;
+    originalTimer = ToolRegistry.getCollaboratorsForTesting().timer;
+    originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ timer: timer });
     records = [];
     ToolRegistry.setToolCallRepositoryForTesting({
       async recordToolCall(record: any): Promise<void> {
@@ -28,8 +30,8 @@ describe("ToolRegistry tool call duration recording", () => {
   afterEach(() => {
     restoreWarnSpy?.();
     restoreWarnSpy = undefined;
-    (ToolRegistry as any).timer = originalTimer;
-    (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ timer: originalTimer });
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     ToolRegistry.clearTools();
   });
 
@@ -95,13 +97,15 @@ describe("ToolRegistry tool call duration recording", () => {
   test("does not wait for duration recording before resolving the tool call", async () => {
     const recordGate = new Promise<void>(() => {});
     let recordStarted = false;
-    (ToolRegistry as any).toolCallRepository = {
-      async recordToolCall(record: any): Promise<void> {
-        recordStarted = true;
-        records.push(record);
-        await recordGate;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(record: any): Promise<void> {
+          recordStarted = true;
+          records.push(record);
+          await recordGate;
+        },
       },
-    };
+    });
 
     ToolRegistry.registerDeviceAware(
       "durationAwaitProbe",
@@ -134,11 +138,13 @@ describe("ToolRegistry tool call duration recording", () => {
   test("logs duration recording failures without rejecting the tool call", async () => {
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     restoreWarnSpy = () => warnSpy.mockRestore();
-    (ToolRegistry as any).toolCallRepository = {
-      async recordToolCall(): Promise<void> {
-        throw new Error("recording unavailable");
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {
+          throw new Error("recording unavailable");
+        },
       },
-    };
+    });
 
     ToolRegistry.registerDeviceAware(
       "durationRejectProbe",

@@ -37,9 +37,9 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
+# shellcheck source=scripts/ios/xcodegen_version.sh
 source "${SCRIPT_DIR}/xcodegen_version.sh"
-# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
+# shellcheck source=scripts/ios/local-sim-build-args.sh
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
@@ -73,17 +73,29 @@ echo -e "${BLUE}Xcode version:${NC} ${XCODE_VERSION}"
 echo -e "${BLUE}Derived data:${NC} ${DERIVED_DATA}"
 echo ""
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
 # Ensure iOS Simulator platform is available (Xcode 26+ requires separate download)
 has_simulator_platform() {
     xcodebuild -showsdks 2>/dev/null | grep -q "iphonesimulator" \
         && xcrun simctl list runtimes 2>/dev/null | grep -qiE "^iOS "
 }
 
-if ! has_simulator_platform; then
+run_capture_status has_simulator_platform
+if [ "$RUN_STATUS" -ne 0 ]; then
     echo -e "${YELLOW}No iOS Simulator platform detected. Attempting to install...${NC}"
     xcodebuild -downloadPlatform iOS 2>&1 || true
 
-    if ! has_simulator_platform; then
+    run_capture_status has_simulator_platform
+    if [ "$RUN_STATUS" -ne 0 ]; then
         echo -e "${RED}iOS Simulator platform still missing after download attempt.${NC}"
         echo -e "${YELLOW}Install the iOS platform in Xcode > Settings > Components.${NC}"
         exit 1

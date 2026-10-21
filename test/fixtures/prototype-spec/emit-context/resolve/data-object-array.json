@@ -1,0 +1,53 @@
+{
+  "name": "data-object-array",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Emit",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "pick",
+          "context": {
+            "obj": {
+              "data": "/order"
+            },
+            "array": {
+              "data": "/rows"
+            },
+            "escaped": {
+              "data": "/a~1b/~0key"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "state": {},
+  "pages": {},
+  "data": {
+    "order": {
+      "id": 3
+    },
+    "rows": [1, 2],
+    "a/b": {
+      "~key": true
+    }
+  },
+  "precedingActions": [],
+  "expected": {
+    "context": {
+      "obj": {
+        "id": 3
+      },
+      "array": [1, 2],
+      "escaped": true
+    }
+  }
+}

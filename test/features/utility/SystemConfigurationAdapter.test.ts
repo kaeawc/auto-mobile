@@ -9,6 +9,7 @@ import { createSystemConfigurationAdapter } from "../../../src/features/utility/
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { SystemConfigurationAdapter } from "../../../src/utils/interfaces/SystemConfigurationAdapter";
 
@@ -69,7 +70,7 @@ describe("SystemConfigurationAdapter", () => {
   const cases: ReadonlyArray<AdapterCase> = [
     {
       name: "AndroidSystemConfigurationAdapter",
-      build: () => new AndroidSystemConfigurationAdapter(androidDevice, new FakeAdbClient() as any),
+      build: () => new AndroidSystemConfigurationAdapter(androidDevice, new FakeAdbClient()),
     },
     {
       name: "IosSystemConfigurationAdapter",
@@ -125,7 +126,7 @@ describe("SystemConfigurationAdapter", () => {
       it(`retains the ${entry.name} typed failure and warns`, async () => {
         const adb = new FakeAdbExecutor();
         adb.setAndroidApiLevel(entry.legacy ? 32 : 33);
-        adb.setCommandResponse("shell id", { stdout: "uid=0(root)", stderr: "" });
+        adb.setCommandResponse("shell id", createExecResult("uid=0(root)", ""));
         adb.setCommandError(entry.command, new Error("write denied"));
         const capability = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
           throw new Error("optional service unavailable");
@@ -152,7 +153,7 @@ describe("SystemConfigurationAdapter", () => {
   describe("AndroidSystemConfigurationAdapter behavior", () => {
     it("quotes raw calendar input before the device shell and preserves normal identifiers", async () => {
       const adb = new FakeAdbClient();
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const payload = "gregorian; touch /data/local/tmp/pwn";
       adb.setCommandResult("shell settings get system calendar_type", payload);
 
@@ -180,7 +181,7 @@ describe("SystemConfigurationAdapter", () => {
         readLocaleCapture("7-fr-FR").appLocalesUser0,
       ];
       const original = adb.executeCommand.bind(adb);
-      adb.executeCommand = (async (command: string, ...rest: any[]) => {
+      adb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === `shell cmd locale get-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0`) {
           const stdout = appLocaleResponses.shift() ?? readLocaleCapture("7-fr-FR").appLocalesUser0;
           return {
@@ -191,10 +192,10 @@ describe("SystemConfigurationAdapter", () => {
             includes: (s: string) => stdout.includes(s),
           };
         }
-        return original(command, ...rest);
-      }) as any;
+        return original(command, options);
+      };
 
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("fr-FR", {
         broadcast: false,
         appId: LOCALE_CAPTURE_APP_ID,
@@ -221,9 +222,9 @@ describe("SystemConfigurationAdapter", () => {
         "Locales for com.example.app for user 10 are [ja-JP]\n",
       ];
       const original = adb.executeCommand.bind(adb);
-      adb.executeCommand = (async (command: string, ...rest: any[]) => {
+      adb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === "shell cmd locale get-app-locales 'com.example.app' --user 10") {
-          await original(command, ...rest);
+          await original(command, options);
           const stdout =
             appLocaleResponses.shift() ?? "Locales for com.example.app for user 10 are [ja-JP]\n";
           return {
@@ -234,10 +235,10 @@ describe("SystemConfigurationAdapter", () => {
             includes: (s: string) => stdout.includes(s),
           };
         }
-        return original(command, ...rest);
-      }) as any;
+        return original(command, options);
+      };
 
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("ja-JP", {
         broadcast: false,
         appId: "com.example.app",
@@ -498,11 +499,11 @@ describe("SystemConfigurationAdapter", () => {
       // persist.sys.locale is read once for the previous value, then again for the
       // race-free read-back after the framework restart.
       adb.setCommandResultSequence("shell getprop persist.sys.locale", [
-        { stdout: "en-US", stderr: "" },
-        { stdout: "ja-JP", stderr: "" },
+        createExecResult("en-US", ""),
+        createExecResult("ja-JP", ""),
       ]);
       adb.setCommandResult("shell getprop sys.boot_completed", "1");
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("ja-JP", {
         broadcast: false,
         appId: "com.example.app",
@@ -529,7 +530,7 @@ describe("SystemConfigurationAdapter", () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.build.version.sdk", "32");
       adb.setCommandError("root", new Error("adbd cannot run as root in production builds"));
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
 
       expect(result.success).toBe(false);
@@ -545,7 +546,7 @@ describe("SystemConfigurationAdapter", () => {
       adb.setCommandResult("root", "adbd cannot run as root in production builds\n");
       adb.setCommandResult("wait-for-device", "");
       adb.setCommandResult("shell id", "uid=2000(shell) gid=2000(shell)\n");
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
 
       expect(result.success).toBe(false);
@@ -561,7 +562,7 @@ describe("SystemConfigurationAdapter", () => {
         `shell cmd locale get-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0`,
         readLocaleCapture("6-he-IL").appLocalesUser0,
       );
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("fr-FR", { appId: LOCALE_CAPTURE_APP_ID });
 
       expect(result.success).toBe(false);
@@ -591,7 +592,7 @@ describe("SystemConfigurationAdapter", () => {
         `shell cmd locale get-app-locales '${LOCALE_CAPTURE_MISSING_APP_ID}' --user 0`,
         readMissingPackageCapture().getAppLocalesUser0.output,
       );
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("fr-FR", { appId: LOCALE_CAPTURE_MISSING_APP_ID });
 
       expect(result.success).toBe(false);
@@ -612,7 +613,7 @@ describe("SystemConfigurationAdapter", () => {
         "shell cmd locale get-app-locales 'com.example.app' --user 0",
         "Locales for com.example.app for user 0 are [ja-JP,en-US]\n",
       );
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("ja-JP", {
         broadcast: false,
         appId: "com.example.app",
@@ -624,7 +625,7 @@ describe("SystemConfigurationAdapter", () => {
 
     it("requires appId for Android locale changes", async () => {
       const adb = new FakeAdbClient();
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("ja-JP", { broadcast: false });
 
       expect(result.success).toBe(false);
@@ -643,7 +644,7 @@ describe("SystemConfigurationAdapter", () => {
       // its old value on read-back, so we honestly report failure.
       adb.setCommandResult("shell getprop persist.sys.locale", "en-US");
       adb.setCommandResult("shell getprop sys.boot_completed", "1");
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
 
       expect(result.success).toBe(false);
@@ -661,11 +662,11 @@ describe("SystemConfigurationAdapter", () => {
       adb.setCommandResultSequence(
         `shell cmd locale get-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0`,
         [
-          { stdout: readLocaleCapture("0-initial").appLocalesUser0, stderr: "" },
-          { stdout: readLocaleCapture("7-fr-FR").appLocalesUser0, stderr: "" },
+          createExecResult(readLocaleCapture("0-initial").appLocalesUser0, ""),
+          createExecResult(readLocaleCapture("7-fr-FR").appLocalesUser0, ""),
         ],
       );
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("fr-FR", {
         broadcast: false,
         appId: LOCALE_CAPTURE_APP_ID,
@@ -684,19 +685,19 @@ describe("SystemConfigurationAdapter", () => {
       adb.setCommandResult("shell id", "uid=0(root) gid=0(root)\n");
       // Previous value, then the value after the restart settles.
       adb.setCommandResultSequence("shell getprop persist.sys.locale", [
-        { stdout: "en-US", stderr: "" },
-        { stdout: "es-ES", stderr: "" },
+        createExecResult("en-US", ""),
+        createExecResult("es-ES", ""),
       ]);
       // The framework is still restarting for the first two polls (empty
       // boot_completed) before it comes back up — mirroring the wedge in #6346.
       adb.setCommandResultSequence("shell getprop sys.boot_completed", [
-        { stdout: "", stderr: "" },
-        { stdout: "", stderr: "" },
-        { stdout: "1", stderr: "" },
+        createExecResult("", ""),
+        createExecResult("", ""),
+        createExecResult("1", ""),
       ]);
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any, timer);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb, timer);
 
       const result = await adapter.setLocale("es-ES", {
         broadcast: false,
@@ -722,15 +723,15 @@ describe("SystemConfigurationAdapter", () => {
       adb.setCommandResult("wait-for-device", "");
       adb.setCommandResult("shell id", "uid=0(root) gid=0(root)\n");
       adb.setCommandResultSequence("shell getprop persist.sys.locale", [
-        { stdout: "en-US", stderr: "" },
-        { stdout: "es-ES", stderr: "" },
+        createExecResult("en-US", ""),
+        createExecResult("es-ES", ""),
       ]);
       // boot_completed never flips to "1"; the readiness wait times out but the
       // prop-based read-back still confirms the change was applied.
       adb.setCommandResult("shell getprop sys.boot_completed", "");
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any, timer);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb, timer);
 
       const result = await adapter.setLocale("es-ES", {
         broadcast: false,
@@ -747,7 +748,7 @@ describe("SystemConfigurationAdapter", () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell settings get system user_locale", "fr-FR");
       adb.setCommandResult("shell am get-config", "config: mcc310-mnc260-en-rUS-sw411dp\n");
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.getLocalizationSettings();
 
       expect(result.locale).toBe("en-US");
@@ -756,12 +757,10 @@ describe("SystemConfigurationAdapter", () => {
 
     it("broadcasts the LOCALE_CHANGED intent via ADB", async () => {
       const adb = new FakeAdbClient();
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.broadcastLocaleChange();
       expect(result).toBe(true);
-      const calls = (adb as any).getCommandCalls?.() ?? [];
-      // Look for the broadcast command (FakeAdbClient records under commandCalls)
-      const recorded = (adb as any).commandCalls ?? calls;
+      const recorded = adb.getCommandCalls();
       expect(
         recorded.some((c: { command: string }) =>
           c.command.includes("am broadcast -a android.intent.action.LOCALE_CHANGED"),
@@ -775,14 +774,14 @@ describe("SystemConfigurationAdapter", () => {
         "shell am broadcast -a android.intent.action.LOCALE_CHANGED",
         new Error("device offline"),
       );
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       expect(await adapter.broadcastLocaleChange()).toBe(false);
     });
 
     it("sets the system time zone via setprop and verifies the read-back", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop persist.sys.timezone", "Asia/Tokyo");
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setTimeZone("Asia/Tokyo");
       expect(result.success).toBe(true);
       expect(result.zoneId).toBe("Asia/Tokyo");
@@ -957,7 +956,7 @@ describe("SystemConfigurationAdapter", () => {
       const adb = new FakeAdbClient();
       const responses = ["America/New_York", "Asia/Tokyo"];
       const original = adb.executeCommand.bind(adb);
-      adb.executeCommand = (async (command: string, ...rest: any[]) => {
+      adb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === "shell getprop persist.sys.timezone") {
           return {
             stdout: responses.shift() ?? "Asia/Tokyo",
@@ -967,9 +966,9 @@ describe("SystemConfigurationAdapter", () => {
             includes: () => false,
           };
         }
-        return original(command, ...rest);
-      }) as any;
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+        return original(command, options);
+      };
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setTimeZone("Asia/Tokyo");
       expect(result.success).toBe(true);
       expect(result.previousZoneId).toBe("America/New_York");
@@ -979,7 +978,7 @@ describe("SystemConfigurationAdapter", () => {
       const adb = new FakeAdbClient();
       // setprop is silently ignored (e.g. non-root adbd): getprop still returns the old value.
       adb.setCommandResult("shell getprop persist.sys.timezone", "America/New_York");
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
@@ -991,7 +990,7 @@ describe("SystemConfigurationAdapter", () => {
 
     it("reports an unreadable time-zone read-back as indeterminate, not as not applied", async () => {
       const adb = new FakeAdbClient();
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
@@ -1006,7 +1005,7 @@ describe("SystemConfigurationAdapter", () => {
       );
       adb.setCommandResult("shell getprop persist.sys.timezone", "America/Chicago");
       adb.setCommandError("shell cmd alarm set-timezone 'Asia/Tokyo'", new Error("alarm offline"));
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
@@ -1018,7 +1017,7 @@ describe("SystemConfigurationAdapter", () => {
     it("shell-quotes the time-zone id to avoid injection", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop persist.sys.timezone", "Asia/Tokyo");
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       await adapter.setTimeZone("Asia/Tokyo");
       expect(adb.wasCommandExecuted("setprop persist.sys.timezone 'Asia/Tokyo'")).toBe(true);
       expect(adb.wasCommandExecuted("setprop persist.sys.timezone Asia/Tokyo;")).toBe(false);
@@ -1148,7 +1147,7 @@ describe("SystemConfigurationAdapter", () => {
     it("returns an AndroidSystemConfigurationAdapter for Android devices", () => {
       const adapter = createSystemConfigurationAdapter(
         androidDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         new FakeProcessExecutor(),
       );
       expect(adapter).toBeInstanceOf(AndroidSystemConfigurationAdapter);
@@ -1157,7 +1156,7 @@ describe("SystemConfigurationAdapter", () => {
     it("returns an IosSystemConfigurationAdapter for iOS devices", () => {
       const adapter = createSystemConfigurationAdapter(
         iosSimulator,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         new FakeProcessExecutor(),
       );
       expect(adapter).toBeInstanceOf(IosSystemConfigurationAdapter);

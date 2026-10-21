@@ -1,0 +1,13 @@
+{
+  "code": "target_identity_unresolved.device",
+  "builder": "AndroidDeviceIdentityUnresolvedError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"target_identity_unresolved: Android emulator 'emulator-5554' is listed by adb but did not answer its AVD-name probe, so it cannot be resolved for lifecycle coordination. Retry once it responds; if it stays unresponsive, call killDevice for it and then startDevice.\",\"code\":\"target_identity_unresolved\",\"retryable\":true,\"retryAfterMs\":1000,\"candidateSerials\":[\"emulator-5554\"],\"deviceId\":\"emulator-5554\"}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -16,8 +16,8 @@ import type { SetTextOptions } from "../DeviceService";
 import {
   resolveTextCtrlProxyTimeoutMs,
   getTextRequestDeadlineMs,
-  TextIndeterminateError,
 } from "../../action/textTransportTimeout";
+import { TextIndeterminateError } from "../../action/TextIndeterminateError";
 import { combineWithAmbientAbort, getRequestContext } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -44,7 +44,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     const unconfirmed = (reason: string, totalTimeMs: number): BaseResult => ({
       success: false,
       totalTimeMs,
-      // Reuse executeBoundedIosIme's retryable=false marker in SendKeys.ts
+      // Reuse executeBoundedIosIme's retryable=false marker (sendkeys/SendKeysRequestBudget.ts)
       // and InputKey.indeterminateError's dispatched-but-unconfirmed guidance.
       ...(dispatched ? { retryable: false } : {}),
       error: dispatched ? new TextIndeterminateError(reason).message : reason,

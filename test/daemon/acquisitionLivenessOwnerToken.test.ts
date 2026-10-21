@@ -7,9 +7,9 @@ import {
 } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import {
   DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
   type Session,
@@ -23,7 +23,7 @@ import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { freshStartAlreadyBoundError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { freshStartAlreadyBoundError } from "../../src/models/deviceAcquisitionRefusals";
 
 let scenario: LivenessScenario | undefined;
 isolateEmptyToolRegistry();
@@ -294,7 +294,7 @@ for (const phase of ["suspect", "awaiting-reap", "disconnect"] as const) {
     const hint = s.daemon.pool.holderReleaseRemainingMs(id);
     expect(hint).toBeGreaterThan(0);
     const before = holderClocks(session);
-    const deadline = s.daemon.pool["ownerDisconnectRelease"].remainingMs(id);
+    const deadline = s.daemon.pool.testHooks.ownerDisconnectRelease.remainingMs(id);
     const error = await explicitImageRefusal(s);
     expect(error.toPayload()).toEqual({
       code: "device_owned_by_other_session",
@@ -306,7 +306,7 @@ for (const phase of ["suspect", "awaiting-reap", "disconnect"] as const) {
       freshStartAlreadyBoundError("emulator-5554", id, false, hint).message,
     );
     expect(holderClocks(session)).toEqual(before);
-    expect(s.daemon.pool["ownerDisconnectRelease"].remainingMs(id)).toBe(deadline);
+    expect(s.daemon.pool.testHooks.ownerDisconnectRelease.remainingMs(id)).toBe(deadline);
     expect(s.daemon.pool.holderReleaseRemainingMs(id)).toBe(hint);
   });
 }
@@ -369,10 +369,15 @@ function holderClocks(session: Session) {
 
 async function explicitImageRefusal(s: LivenessScenario): Promise<InputDeviceOwnedError> {
   const error = await s.daemon.pool
-    .bindOrReuseDeviceSession("rival-image-session", "emulator-5554", "android", {
-      name: "Pixel_emulator-5554",
+    .bindOrReuseDeviceSession({
+      sessionId: "rival-image-session",
+      deviceId: "emulator-5554",
       platform: "android",
-      isRunning: true,
+      sourceImage: {
+        name: "Pixel_emulator-5554",
+        platform: "android",
+        isRunning: true,
+      },
     })
     .catch((error: unknown) => error);
   expect(error).toBeInstanceOf(InputDeviceOwnedError);

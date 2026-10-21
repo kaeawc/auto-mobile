@@ -32,6 +32,7 @@ internal data class DisplayTransition(
   val state: Int?,
   val deviceState: Int? = null,
   val rotation: Int? = null,
+  val panelFingerprint: PanelFingerprint? = null,
 )
 
 internal class DisplayRotationChangeSignal(
@@ -54,6 +55,7 @@ internal class DisplayRotationChangeSignal(
     }
     val display = displayManager?.getDisplay(displayId) ?: return null
     val size = Point()
+    // Capture provenance needs this display's real size; window metrics have different semantics.
     @Suppress("DEPRECATION") display.getRealSize(size)
     return DisplayTransition(
       change,
@@ -63,25 +65,18 @@ internal class DisplayRotationChangeSignal(
       size.y,
       display.state,
       rotation = display.rotation,
+      panelFingerprint = panelFingerprintOf(display),
     )
   }
 
   internal fun emitTransition(change: String, displayId: Int, deviceState: Int? = null) {
     val current = snapshot(displayId, change)
     if (change == "changed" && current == null) return
-    val transition = current ?: lastDisplays[displayId]?.copy(change = change)
+    val transition =
+      current ?: lastDisplays[displayId]?.copy(change = change, panelFingerprint = null)
     val previous = lastDisplays[displayId]
-    if (
-      change == "changed" &&
-        current != null &&
-        previous != null &&
-        current.width == previous.width &&
-        current.height == previous.height &&
-        current.state == previous.state &&
-        current.panelUniqueId == previous.panelUniqueId &&
-        current.rotation == previous.rotation
-    )
-      return
+    val isUnchangedDisplay = change == "changed" && sameDisplay(current, previous)
+    if (isUnchangedDisplay) return
     if (change == "removed") {
       lastDisplays.remove(displayId)
       synchronized(pendingTransitions) { pendingTransitions.remove(displayId) }
@@ -155,12 +150,15 @@ internal class DisplayRotationChangeSignal(
           handleDisplayCallback("removed", displayId)
         }
       }
+    var registered = false
     try {
       manager.registerDisplayListener(registeredListener, handler)
-    } catch (e: Exception) {
-      rotationListener = null
-      thread.quitSafely()
-      throw e
+      registered = true
+    } finally {
+      if (!registered) {
+        rotationListener = null
+        thread.quitSafely()
+      }
     }
     displayListener = registeredListener
     callbackHandler = handler
@@ -237,4 +235,15 @@ internal class RotationProvenanceTracker(private val changeSignal: RotationChang
     changeSignal.unregister()
     isRegistered = false
   }
+}
+
+private fun sameDisplay(current: DisplayTransition?, previous: DisplayTransition?): Boolean {
+  return current != null &&
+    previous != null &&
+    current.width == previous.width &&
+    current.height == previous.height &&
+    current.state == previous.state &&
+    current.panelUniqueId == previous.panelUniqueId &&
+    current.panelFingerprint == previous.panelFingerprint &&
+    current.rotation == previous.rotation
 }

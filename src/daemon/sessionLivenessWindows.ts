@@ -1,4 +1,5 @@
 import { readEnvPositiveInteger } from "../utils/envNumbers";
+import { ENV } from "../config/env";
 /**
  * The device-session release windows, in one place (owner decision 2026-10-08).
  *
@@ -41,8 +42,8 @@ export const DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS = 2_000;
 /** The daemon's resolved scan cadence, shared with cleanup retry bounds. */
 export function getSessionHeartbeatCheckIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
   return readEnvPositiveInteger(
-    "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
-    "AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+    ENV.SESSION_HEARTBEAT_CHECK_INTERVAL_MS.name,
+    ENV.SESSION_HEARTBEAT_CHECK_INTERVAL_MS.legacyName,
     { fallback: DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS },
     env,
   );
@@ -64,7 +65,7 @@ export const PROXY_HEARTBEAT_INTERVAL_MS = 2_000;
 export const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
 /**
- * Floor for an idle window a configuration source (a managed-slot config, the CLI idle env)
+ * Floor for an idle window a configuration source (a broker binding config, the CLI idle env)
  * sets: it may lengthen the 2-minute window but never shorten it, so a typo cannot release a
  * device early. The `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` knob stays below it on purpose: tests
  * and live idle checks shorten that one.
@@ -72,9 +73,9 @@ export const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 export const MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
 
 /** Env override for {@link DEFAULT_SESSION_IDLE_TIMEOUT_MS} (#10671). */
-export const SESSION_IDLE_TIMEOUT_ENV = "AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS";
+export const SESSION_IDLE_TIMEOUT_ENV = ENV.SESSION_IDLE_TIMEOUT_MS.name;
 /** Legacy-prefixed alias of {@link SESSION_IDLE_TIMEOUT_ENV}. */
-export const LEGACY_SESSION_IDLE_TIMEOUT_ENV = "AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS";
+export const LEGACY_SESSION_IDLE_TIMEOUT_ENV = ENV.SESSION_IDLE_TIMEOUT_MS.legacyName;
 
 /**
  * The configured idle window. A value that is not a positive base-10 integer is

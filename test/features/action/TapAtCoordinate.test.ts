@@ -1,7 +1,10 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
+import { createExecResult } from "../../../src/utils/execResult";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { accessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../../../src/ctrlProxy/accessibility/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import {
@@ -25,6 +28,7 @@ import {
 } from "../../../src/features/action/tapAtGesture";
 import { tapAtSchema } from "../../../src/server/interactionTools";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
+import { resolveTapAtCoordinates } from "../../../src/features/action/TapAtCoordinate";
 import type {
   CoordinateTapClient,
   IosCoordinateTapClient,
@@ -74,7 +78,7 @@ function createAndroidTapAtWithClient(
   const tapAt = new TapAtCoordinate(androidDevice, adb, {
     timer,
     androidClient,
-    iosClient: androidClient,
+    iosClient: { ...androidClient, requestDoubleTapCoordinates: async () => ({ success: true }) },
     snapshotReferences,
     lastRenderedObservation,
   });
@@ -84,6 +88,22 @@ function createAndroidTapAtWithClient(
 }
 
 describe("TapAtCoordinate", () => {
+  test("coordinate resolver uses the supplied tool name and defaults to tapAt", () => {
+    const observed = observation(10, 10);
+    expect(resolveTapAtCoordinates({ x: 10, y: 0 }, observed, "android")).toMatchObject({
+      error: expect.stringContaining("tapAt coordinates (10, 0)"),
+    });
+    expect(resolveTapAtCoordinates({ x: 10, y: 0 }, observed, "android", "hitTest")).toMatchObject({
+      error: expect.stringContaining("hitTest coordinates (10, 0)"),
+    });
+    // Deliberately malformed runtime payload for the missing-size guard.
+    const incomplete: Partial<ObserveResult> = observed;
+    delete incomplete.screenSize;
+    expect(resolveTapAtCoordinates({ x: 0, y: 0 }, observed, "android", "hitTest")).toMatchObject({
+      error: "hitTest requires a positive screenSize from a fresh observation",
+    });
+  });
+
   describe("device-lock annotation", () => {
     test.each([true, false])("matches the base annotation for secure=%s", async (secure) => {
       const deviceLock = { locked: true, keyguardShowing: true, secure };
@@ -157,7 +177,7 @@ describe("TapAtCoordinate", () => {
       );
       observeScreen.setObserveResult({
         ...observation(10, 10),
-        display: { key: "0", role: "unknown", generation: 0 },
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
         deviceLock,
       });
       const result = await tapAt.execute({ x: 1, y: 2, display: "active" });
@@ -300,28 +320,24 @@ describe("TapAtCoordinate", () => {
   });
 
   test.each([androidDevice, iosDevice])(
-    "double taps with a fake 200ms interval on %s",
+    "double taps use platform-specific dispatch on %s",
     async (device) => {
       const { tapAt, androidDispatches, iosDispatches, timer } = createTapAt(device, 100, 200);
       const start = timer.now();
       const result = await tapAt.execute({ x: 10, y: 20, action: "doubleTap" });
       expect(result).toMatchObject({ success: true, action: "doubleTap" });
       const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
-      expect(dispatches).toHaveLength(2);
-      expect(dispatches.map(({ x, y }) => [x, y])).toEqual([
-        [10, 20],
-        [10, 20],
-      ]);
-      expect(timer.now() - start).toBe(DOUBLE_TAP_GAP_MS);
+      expect(dispatches).toHaveLength(device.platform === "ios" ? 1 : 2);
+      expect(dispatches[0]).toMatchObject({ x: 10, y: 20 });
+      if (device.platform === "ios") {
+        expect(iosDispatches.map(({ kind }) => kind)).toEqual(["double"]);
+      }
+      expect(timer.now() - start).toBe(device.platform === "ios" ? 0 : DOUBLE_TAP_GAP_MS);
     },
   );
 
   test.each(
-    [
-      { device: androidDevice, display: undefined, route: "Android" },
-      { device: iosDevice, display: undefined, route: "iOS default" },
-      { device: iosDevice, display: "active", route: "iOS explicit" },
-    ].flatMap((route) =>
+    [{ device: androidDevice, display: undefined, route: "Android" }].flatMap((route) =>
       ["advance", "static", "second failure", "first stale", "cancel", "display change"].map(
         (scenario) => ({ ...route, scenario }),
       ),
@@ -334,7 +350,7 @@ describe("TapAtCoordinate", () => {
     const observeScreen = new FakeObserveScreen();
     observeScreen.setObserveResult({
       ...observation(100, 200, "epoch:7"),
-      display: { key: "0", role: "unknown", generation: 0 },
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
     });
     let current = scenario === "first stale" ? "epoch:8" : "epoch:7";
     let delivered = 0;
@@ -357,22 +373,16 @@ describe("TapAtCoordinate", () => {
       }
       return { success: true };
     };
-    const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: (_x, _y, _duration, _timeout, _perf, frameContext, onDispatch) =>
-        request(frameContext, onDispatch),
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: (tap: TapCoordinatesRequest) =>
+        request(tap.frameContext, tap.onDispatch),
     };
     // The iOS client takes its abort signal before the dispatch marker.
     const iosClient: IosCoordinateTapClient = {
-      requestTapCoordinates: (
-        _x,
-        _y,
-        _duration,
-        _timeout,
-        _perf,
-        frameContext,
-        _signal,
-        onDispatch,
-      ) => request(frameContext, onDispatch),
+      requestDoubleTapCoordinates: (_x, _y, _timeout, frame, _signal, onDispatch) =>
+        request(frame, onDispatch),
+      requestTapCoordinates: (tap: TapCoordinatesRequest) =>
+        request(tap.frameContext, tap.onDispatch),
     };
     const tapAt = new TapAtCoordinate(device, adb, {
       timer,
@@ -393,8 +403,7 @@ describe("TapAtCoordinate", () => {
     try {
       const result = await tapAt.execute(
         { x: 10, y: 20, action: "doubleTap", display },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       if (scenario === "advance" || scenario === "static") {
         expect(result).toMatchObject({ success: true, action: "doubleTap", x: 10, y: 20 });
@@ -440,8 +449,10 @@ describe("TapAtCoordinate", () => {
     }
     let runnerDelivered = 0;
     const frames: Array<string | undefined> = [];
-    const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext: frame, onDispatch } = request;
+
         frames.push(frame);
         if (frames.length === 2) {
           // No onDispatch: the runner proves this tap was never sent, so fallback is safe.
@@ -475,12 +486,236 @@ describe("TapAtCoordinate", () => {
     }
   });
 
+  describe("iOS stale frame context after a gesture (#13437)", () => {
+    const staleError = () =>
+      new ActionableError(
+        "CtrlProxy iOS tap failed: Command execution failed: Stale frame context; observe a fresh frame before retrying",
+      );
+
+    function createIosTapAt(
+      runnerFrames: string[],
+      observations: ObserveResult[],
+      snapshotReferences?: SnapshotReferenceStore,
+    ) {
+      const sent: Array<string | undefined> = [];
+      const observeScreen = new FakeObserveScreen();
+      observeScreen.setObserveSequence(observations);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const unused: CoordinateTapClient = {
+        requestTapCoordinates: async () => ({ success: true }),
+      };
+      const tapAt = new TapAtCoordinate(iosDevice, new FakeAdbExecutor(), {
+        timer,
+        snapshotReferences,
+        androidClient: unused,
+        iosClient: { ...unused, requestDoubleTapCoordinates: async () => ({ success: true }) },
+        invalidateIosCache: () => {},
+        dispatchIosCoordinateTap: async (_client, _x, _y, _duration, frameContext) => {
+          sent.push(frameContext);
+          if (frameContext === undefined || !runnerFrames.includes(frameContext)) {
+            throw staleError();
+          }
+        },
+      });
+      setFakeTapAtWindow(tapAt);
+      tapAt.observeScreen = observeScreen;
+      return { tapAt, observeScreen, sent };
+    }
+
+    test("a cached frame the runner rejects is replaced by one fresh frame and the tap lands", async () => {
+      const { tapAt, observeScreen, sent } = createIosTapAt(
+        ["epoch:2"],
+        [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2")],
+      );
+
+      const result = await tapAt.execute({ x: 10, y: 20 });
+
+      expect(result).toMatchObject({ success: true, x: 10, y: 20 });
+      expect(sent).toEqual(["epoch:1", "epoch:2"]);
+      expect(
+        observeScreen
+          .getExecuteOptions()
+          .slice(0, 2)
+          .map((options) => options.freshness),
+      ).toEqual(["cached-ok", "fresh"]);
+    });
+
+    test("retries a freshly captured iOS frame even when its semantic context is unchanged", async () => {
+      const runnerFrames: string[] = [];
+      const cached = observation(100, 200, "epoch:1");
+      const { tapAt, observeScreen, sent } = createIosTapAt(runnerFrames, [cached]);
+      observeScreen.setObserveResult((index) => {
+        // The first dispatch catches transient post-pinch UI. A fresh capture sees the
+        // original semantic state again; iOS contexts identify state, not each capture.
+        if (index > 0) {
+          runnerFrames.push("epoch:1");
+        }
+        return { ...cached, timestamp: index + 1 };
+      });
+
+      const result = await tapAt.execute({ x: 10, y: 20 });
+
+      expect(result).toMatchObject({ success: true, x: 10, y: 20 });
+      expect(sent).toEqual(["epoch:1", "epoch:1"]);
+      expect(
+        observeScreen
+          .getExecuteOptions()
+          .slice(0, 2)
+          .map(({ freshness }) => freshness),
+      ).toEqual(["cached-ok", "fresh"]);
+    });
+
+    test("bounds recovery to one retry when the same iOS context is still rejected", async () => {
+      const { tapAt, sent } = createIosTapAt([], [observation(100, 200, "epoch:1")]);
+
+      const result = await tapAt.execute({ x: 10, y: 20 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Stale frame context");
+      expect(sent).toEqual(["epoch:1", "epoch:1"]);
+    });
+
+    test.each(["stale", "unverified"])(
+      "does not retry an explicitly %s fresh-observe fallback",
+      async (verdict) => {
+        const cached = observation(100, 200, "epoch:1");
+        const refreshed = {
+          ...cached,
+          freshness: {
+            ...computeFreshness({ actualTimestamp: cached.viewHierarchy?.updatedAt, now: 1 }),
+            isFresh: verdict !== "stale",
+            verified: verdict !== "unverified",
+          },
+        };
+        const { tapAt, sent } = createIosTapAt([], [cached, refreshed]);
+
+        const result = await tapAt.execute({ x: 10, y: 20 });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Stale frame context");
+        expect(sent).toEqual(["epoch:1"]);
+      },
+    );
+
+    test("rejects an explicit snapshot that becomes stale during the iOS refresh", async () => {
+      const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const captured: ObserveResult = {
+        ...observation(100, 200, "epoch:1"),
+        display: { key: "main", role: "unknown", posture: "unknown", generation: 0 },
+      };
+      const capture = references.capture(iosDevice.deviceId, captured);
+      if (capture.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      const { tapAt, sent } = createIosTapAt(
+        [],
+        [captured, { ...captured, screenSize: { width: 200, height: 100 } }],
+        references,
+      );
+      const result = await tapAt.execute({
+        x: 10,
+        y: 20,
+        snapshotId: capture.reference.snapshotId,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Snapshot reference is stale (width changed)");
+      expect(sent).toEqual(["epoch:1"]);
+    });
+
+    test.each([false, true])(
+      "explicit snapshot refresh rejects changed layout=%s without unsafe redispatch",
+      async (changed) => {
+        const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+        const captured = observation(100, 200, "epoch:1", 0, { bounds: "[0,0][50,50]" });
+        const refreshed = observation(100, 200, "epoch:2", 0, {
+          bounds: changed ? "[0,0][90,90]" : "[0,0][50,50]",
+        });
+        const capture = references.capture(iosDevice.deviceId, captured);
+        if (capture.status !== "captured") {
+          throw new Error("Snapshot reference unavailable");
+        }
+        const { tapAt, sent } = createIosTapAt(["epoch:2"], [captured, refreshed], references);
+
+        const result = await tapAt.execute({
+          x: 10,
+          y: 20,
+          snapshotId: capture.reference.snapshotId,
+        });
+
+        expect(result.success).toBe(!changed);
+        if (changed) {
+          expect(result.error).toContain(
+            "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+          );
+        }
+        expect(sent).toEqual(changed ? ["epoch:1"] : ["epoch:1", "epoch:2"]);
+      },
+    );
+
+    test("explicit snapshot retry accepts optional activity becoming known", async () => {
+      const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const captured = {
+        ...observation(100, 200, "epoch:1"),
+        activeWindow: { appId: "com.example", activityName: "", layoutSeqSum: 1 },
+      };
+      const refreshed = {
+        ...observation(100, 200, "epoch:2"),
+        activeWindow: { ...captured.activeWindow, activityName: ".Main" },
+      };
+      const capture = references.capture(iosDevice.deviceId, captured);
+      if (capture.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      // Missing optional metadata remains non-conflicting in the shared reference store.
+      expect(
+        references.staleReason(capture.reference.snapshotId, iosDevice.deviceId, refreshed),
+      ).toBeUndefined();
+      const { tapAt, sent } = createIosTapAt(["epoch:2"], [captured, refreshed], references);
+      const result = await tapAt.execute({
+        x: 10,
+        y: 20,
+        snapshotId: capture.reference.snapshotId,
+      });
+      expect(result.success).toBe(true);
+      expect(sent).toEqual(["epoch:1", "epoch:2"]);
+    });
+
+    test("retries only once when the fresh layout is unchanged", async () => {
+      const twice = createIosTapAt(
+        [],
+        [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2")],
+      );
+      const failed = await twice.tapAt.execute({ x: 10, y: 20 });
+      expect(failed.success).toBe(false);
+      expect(failed.error).toContain("Stale frame context");
+      expect(twice.sent).toEqual(["epoch:1", "epoch:2"]);
+    });
+
+    test("asks an implicit tap caller to observe again when the refreshed layout changed", async () => {
+      const changed = createIosTapAt(
+        ["epoch:2"],
+        [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2", 0, { text: "other" })],
+      );
+      const refused = await changed.tapAt.execute({ x: 10, y: 20 });
+      expect(refused.success).toBe(false);
+      expect(refused.error).toContain(
+        "screen layout changed since the last observation. Observe again and recompute coordinates, or pass a fresh snapshotId",
+      );
+      expect(changed.sent).toEqual(["epoch:1"]);
+      expect(changed.observeScreen.getExecuteCallCount()).toBe(2);
+    });
+  });
+
   test("stale first frame retries once before delivering exactly two Android taps", async () => {
     let current = "epoch:2";
     let delivered = 0;
     const frames: Array<string | undefined> = [];
-    const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext: frame, onDispatch } = request;
+
         frames.push(frame);
         onDispatch?.();
         if (frame !== undefined && frame !== current) {
@@ -516,8 +751,6 @@ describe("TapAtCoordinate", () => {
     [
       { device: androidDevice, display: undefined, route: "Android default" },
       { device: androidDevice, display: "active", route: "Android explicit" },
-      { device: iosDevice, display: undefined, route: "iOS default" },
-      { device: iosDevice, display: "active", route: "iOS explicit" },
     ].flatMap((route) => [
       ...[1, 2].map((abortAfter) => ({ ...route, abortAfter, action: "doubleTap" as const })),
       ...(["tap", "longPress"] as const).map((action) => ({ ...route, abortAfter: 1, action })),
@@ -532,13 +765,15 @@ describe("TapAtCoordinate", () => {
       const observe = new FakeObserveScreen();
       observe.setObserveResult({
         ...observation(100, 200),
-        display: { key: "0", role: "unknown", generation: 0 },
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
       });
       let delivered = 0;
       let invalidations = 0;
       const frames: Array<string | undefined> = [];
       const client: CoordinateTapClient = {
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { frameContext: frame } = request;
+
           frames.push(frame);
           delivered++;
           if (delivered === abortAfter) {
@@ -550,7 +785,7 @@ describe("TapAtCoordinate", () => {
       const tapAt = new TapAtCoordinate(device, adb, {
         timer,
         androidClient: client,
-        iosClient: client,
+        iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
         lastRenderedObservation: () => ({ display: { key: "0" }, displayRevision: 0 }),
         invalidateIosCache: () => {
           invalidations++;
@@ -561,8 +796,7 @@ describe("TapAtCoordinate", () => {
 
       const result = await tapAt.execute(
         { x: 10, y: 20, action, display },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
 
       expect(result).toMatchObject({ success: false, x: 10, y: 20, action });
@@ -592,7 +826,7 @@ describe("TapAtCoordinate", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult({
       ...observation(100, 200),
-      display: { key: "0", role: "unknown", generation: 7 },
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 7 },
     });
     let delivered = 0;
     const client: CoordinateTapClient = {
@@ -655,52 +889,48 @@ describe("TapAtCoordinate", () => {
     },
   );
 
-  test.each([androidDevice, iosDevice])(
-    "cancels during the double-tap gap on %s",
-    async (device) => {
-      const { tapAt, timer, androidDispatches, iosDispatches, iosCacheInvalidations } =
-        createTapAt(device);
-      const gapTimer = new FakeTimer();
-      const controller = new AbortController();
-      let gapStarted!: () => void;
-      const started = new Promise<void>((resolve) => {
-        gapStarted = resolve;
+  test.each([androidDevice])("cancels during the double-tap gap on %s", async (device) => {
+    const { tapAt, timer, androidDispatches, iosDispatches, iosCacheInvalidations } =
+      createTapAt(device);
+    const gapTimer = new FakeTimer();
+    const controller = new AbortController();
+    let gapStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      gapStarted = resolve;
+    });
+    const sleep = spyOn(timer, "sleep").mockImplementation((ms) => {
+      expect(ms).toBe(DOUBLE_TAP_GAP_MS);
+      const pending = gapTimer.sleep(ms);
+      gapStarted();
+      return pending;
+    });
+    try {
+      const pending = tapAt.execute(
+        { x: 1, y: 2, action: "doubleTap" },
+        { signal: controller.signal },
+      );
+      await started;
+      gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
+      controller.abort();
+      const result = await pending;
+      expect(result).toMatchObject({
+        success: false,
+        action: "doubleTap",
       });
-      const sleep = spyOn(timer, "sleep").mockImplementation((ms) => {
-        expect(ms).toBe(DOUBLE_TAP_GAP_MS);
-        const pending = gapTimer.sleep(ms);
-        gapStarted();
-        return pending;
-      });
-      try {
-        const pending = tapAt.execute(
-          { x: 1, y: 2, action: "doubleTap" },
-          undefined,
-          controller.signal,
-        );
-        await started;
-        gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
-        controller.abort();
-        const result = await pending;
-        expect(result).toMatchObject({
-          success: false,
-          action: "doubleTap",
-        });
-        expect(result.error).toBe(
-          `Failed to tap at coordinates: ${OPERATION_CANCELLED_MESSAGE} Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically.`,
-        );
-        const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
-        expect(dispatches).toHaveLength(1);
-        expect(iosCacheInvalidations()).toBe(device.platform === "ios" ? 1 : 0);
-        gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
-        await Promise.resolve();
-        expect(dispatches).toHaveLength(1);
-      } finally {
-        gapTimer.resolveAll();
-        sleep.mockRestore();
-      }
-    },
-  );
+      expect(result.error).toBe(
+        `Failed to tap at coordinates: ${OPERATION_CANCELLED_MESSAGE} Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically.`,
+      );
+      const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
+      expect(dispatches).toHaveLength(1);
+      expect(iosCacheInvalidations()).toBe(device.platform === "ios" ? 1 : 0);
+      gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
+      await Promise.resolve();
+      expect(dispatches).toHaveLength(1);
+    } finally {
+      gapTimer.resolveAll();
+      sleep.mockRestore();
+    }
+  });
 
   test.each(
     [androidDevice, iosDevice].flatMap((device) =>
@@ -714,7 +944,7 @@ describe("TapAtCoordinate", () => {
       controller.abort();
       for (const action of ["tap", "longPress", "doubleTap"] as const) {
         expect(
-          await tapAt.execute({ x: 1, y: 2, action, display }, undefined, controller.signal),
+          await tapAt.execute({ x: 1, y: 2, action, display }, { signal: controller.signal }),
         ).toMatchObject({
           success: false,
           x: 1,
@@ -835,6 +1065,42 @@ describe("TapAtCoordinate", () => {
         error: expect.stringContaining("expired"),
       });
       expect(androidDispatches).toEqual([]);
+    },
+  );
+
+  test.each([androidDevice, iosDevice])(
+    "snapshot layout changes reject before dispatch and re-observing restores taps on $platform",
+    async (device) => {
+      const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const captured = observation(100, 200, "epoch:1", 0, { bounds: "[0,0][50,50]" });
+      const capture = references.capture(device.deviceId, captured);
+      if (capture.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      const h = createTapAt(device, 100, 200, undefined, undefined, references);
+      h.observeScreen.setObserveResult(captured);
+      const options = { x: 10, y: 20, snapshotId: capture.reference.snapshotId };
+      expect((await h.tapAt.execute(options)).success).toBe(true);
+
+      const changed = observation(100, 200, "epoch:2", 0, { bounds: "[0,0][90,90]" });
+      h.observeScreen.setObserveResult(changed);
+      expect(await h.tapAt.execute(options)).toMatchObject({
+        success: false,
+        error: expect.stringContaining(
+          "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+        ),
+      });
+      const dispatches = device.platform === "ios" ? h.iosDispatches : h.androidDispatches;
+      expect(dispatches).toHaveLength(1);
+
+      const fresh = references.capture(device.deviceId, changed);
+      if (fresh.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      expect(
+        (await h.tapAt.execute({ ...options, snapshotId: fresh.reference.snapshotId })).success,
+      ).toBe(true);
+      expect(dispatches).toHaveLength(2);
     },
   );
 
@@ -1006,7 +1272,9 @@ describe("TapAtCoordinate", () => {
     const reference = capture.reference;
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return dispatches.length === 1
           ? { success: false, error: "Stale frame context for input/tap" }
@@ -1050,7 +1318,9 @@ describe("TapAtCoordinate", () => {
     const reference = capture.reference;
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return { success: false, error: "Stale frame context for input/tap" };
       },
@@ -1112,8 +1382,10 @@ describe("TapAtCoordinate", () => {
   test.each([false, true])(
     "classifies explicit-display tap failure (dispatched %s)",
     async (dispatched) => {
-      const client: CoordinateTapClient<() => void> = {
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { onDispatch } = request;
+
           if (dispatched) {
             onDispatch?.();
           }
@@ -1156,17 +1428,9 @@ describe("TapAtCoordinate", () => {
       timer.enableAutoAdvance();
       const client = {
         supportsCommand: async () => ctrlProxy,
-        requestTapCoordinates: async (
-          _x: number,
-          _y: number,
-          _duration?: number,
-          _timeout?: number,
-          _perf?: unknown,
-          _frame?: string,
-          _onDispatch?: () => void,
-          _signal?: AbortSignal,
-          displayId?: number,
-        ) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { displayId } = request;
+
           expect(displayId).toBe(2);
           return { success: false, error: "Not connected" };
         },
@@ -1188,7 +1452,7 @@ describe("TapAtCoordinate", () => {
         {
           timer,
           androidClient: client,
-          iosClient: client,
+          iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
           lastRenderedObservation: () => ({ display: { key: "inner" } }),
         },
       );
@@ -1223,19 +1487,10 @@ describe("TapAtCoordinate", () => {
     "explicit display does not fall back after %s failure",
     async (failure) => {
       const controller = new AbortController();
-      const client: CoordinateTapClient<() => void> = {
-        requestTapCoordinates: async (
-          _x,
-          _y,
-          _duration,
-          _timeout,
-          _perf,
-          _frame,
-          _onDispatch,
-          _signal,
-          _display,
-          beforeSend,
-        ) => {
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { beforeSend } = request;
+
           if (failure === "abort") {
             controller.abort();
           } else if (failure !== "stale frame") {
@@ -1259,8 +1514,7 @@ describe("TapAtCoordinate", () => {
       }));
       const result = await tapAt.execute(
         { x: 10, y: 20, display: "0" },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain(
@@ -1394,7 +1648,9 @@ describe("TapAtCoordinate", () => {
   test("reports the clamped Android pixel when dispatch fails at the screen edge", async () => {
     const dispatched: Array<{ x: number; y: number }> = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (x, y) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y } = request;
+
         dispatched.push({ x, y });
         throw new Error("native tap failed");
       },
@@ -1479,7 +1735,7 @@ describe("TapAtCoordinate", () => {
     expect(captured.viewHierarchy?.screenScale).toBe(3);
     expect(result).toMatchObject({ success: true, x, y });
     expect(iosDispatches).toEqual([
-      { x, y, duration: 50, frameContext: captured.viewHierarchy?.frameContext },
+      { kind: "tap", x, y, duration: 50, frameContext: captured.viewHierarchy?.frameContext },
     ]);
   });
 
@@ -1505,7 +1761,7 @@ describe("TapAtCoordinate", () => {
         },
       },
     );
-    const bounds = landscape.viewHierarchy?.hierarchy.node.bounds;
+    const bounds = landscape.viewHierarchy?.hierarchy.node?.bounds;
     if (!bounds) {
       throw new Error("Landscape observation has no bounds");
     }
@@ -1529,7 +1785,9 @@ describe("TapAtCoordinate", () => {
     const result = await tapAt.execute({ x: 1.25, y: 2.75 });
 
     expect(result).toMatchObject({ success: true, x: 1.25, y: 2.75 });
-    expect(iosDispatches).toEqual([{ x: 1.25, y: 2.75, duration: 50, frameContext: "frame-123" }]);
+    expect(iosDispatches).toEqual([
+      { kind: "tap", x: 1.25, y: 2.75, duration: 50, frameContext: "frame-123" },
+    ]);
   });
 
   test("synthetic unfolded Duo bounds accept tapAt 700,48 after an orientation correction", async () => {
@@ -1550,18 +1808,25 @@ describe("TapAtCoordinate", () => {
       "ios",
     );
     observeScreen.setObserveResult(observation(951, 669));
-    const result = await tapAt.execute({ x: 700, y: 48 }, async (step) => {
-      if (step === 10) {
-        displayTransitions.checkIosGeometry(
-          iosDevice.deviceId,
-          { width: 951, height: 669 },
-          "test-observation",
-          inner,
-        );
-      }
-    });
+    const result = await tapAt.execute(
+      { x: 700, y: 48 },
+      {
+        progress: async (step) => {
+          if (step === 10) {
+            displayTransitions.checkIosGeometry(
+              iosDevice.deviceId,
+              { width: 951, height: 669 },
+              "test-observation",
+              inner,
+            );
+          }
+        },
+      },
+    );
     expect(result).toMatchObject({ success: true, x: 700, y: 48 });
-    expect(iosDispatches).toEqual([{ x: 700, y: 48, duration: 50, frameContext: "frame-123" }]);
+    expect(iosDispatches).toEqual([
+      { kind: "tap", x: 700, y: 48, duration: 50, frameContext: "frame-123" },
+    ]);
   });
 
   test("iOS tap invalidates the cache and observes from the dispatch time", async () => {
@@ -1594,20 +1859,20 @@ describe("TapAtCoordinate", () => {
     expect(iosCacheInvalidations()).toBe(1);
     expect(observeScreen.getExecuteOptions()[1]?.minTimestamp).toBe(150);
     expect(observeScreen.getExecuteCallCount()).toBe(3);
-    expect(result.observation.updatedAt).toBe(175);
+    expect(result.observation!.updatedAt).toBe(175);
   });
 
-  test("iOS double tap invalidates once after both taps", async () => {
+  test("iOS double tap invalidates once after one atomic request", async () => {
     const { tapAt, iosDispatches, iosCacheInvalidations } = createTapAt(iosDevice);
 
     const result = await tapAt.execute({ x: 1, y: 2, action: "doubleTap" });
 
     expect(result).toMatchObject({ success: true, action: "doubleTap" });
-    expect(iosDispatches).toHaveLength(2);
+    expect(iosDispatches.map(({ kind }) => kind)).toEqual(["double"]);
     expect(iosCacheInvalidations()).toBe(1);
   });
 
-  test("iOS double tap invalidates after a rejected second tap", async () => {
+  test("iOS rejected double tap makes no partial-count claim", async () => {
     const { tapAt, iosDispatches, iosCacheInvalidations } = createTapAt(
       iosDevice,
       10,
@@ -1615,16 +1880,14 @@ describe("TapAtCoordinate", () => {
       undefined,
       undefined,
       undefined,
-      2,
+      1,
     );
-
     const result = await tapAt.execute({ x: 1, y: 2, action: "doubleTap" });
-
-    expect(result).toMatchObject({ success: false, action: "doubleTap" });
-    expect(result.error).toContain("one tap was delivered");
+    expect(result.success).toBe(false);
+    expect(result.error).not.toContain("one tap was delivered");
     expect(result.error).toContain("Synthetic iOS tap rejection");
-    expect(iosDispatches).toHaveLength(2);
-    expect(iosCacheInvalidations()).toBe(1);
+    expect(iosDispatches).toHaveLength(1);
+    expect(iosCacheInvalidations()).toBe(0);
   });
 
   for (const action of ["tap", "doubleTap"] as const) {
@@ -1668,7 +1931,7 @@ describe("TapAtCoordinate", () => {
         });
         const result = await h.tapAt.execute({ x: 1, y: 2, display: "main", action });
         const count = action === "tap" ? 1 : 2;
-        expect(h.iosDispatches).toHaveLength(count);
+        expect(h.iosDispatches).toHaveLength(1);
         if (outcome === "throws") {
           expect(result.success).toBe(false);
           expect(result.error).toContain("Do not retry automatically");
@@ -1721,7 +1984,7 @@ describe("TapAtCoordinate", () => {
       display: "main",
     });
     expect(completedResult.success).toBe(true);
-    expect(completed.iosDispatches).toHaveLength(2);
+    expect(completed.iosDispatches).toHaveLength(1);
     expect(completed.iosCacheInvalidations()).toBe(1);
 
     const rejected = createTapAt(
@@ -1731,7 +1994,7 @@ describe("TapAtCoordinate", () => {
       undefined,
       undefined,
       undefined,
-      2,
+      1,
       lastRenderedObservation,
     );
     rejected.observeScreen.setObserveResult({ ...observation(10, 10), display } as ObserveResult);
@@ -1741,52 +2004,10 @@ describe("TapAtCoordinate", () => {
       action: "doubleTap",
       display: "main",
     });
-    expect(rejectedResult).toMatchObject({ success: false, action: "doubleTap" });
-    expect(rejectedResult.error).toContain("one tap was delivered");
+    expect(rejectedResult.success).toBe(false);
+    expect(rejectedResult.error).not.toContain("one tap was delivered");
     expect(rejectedResult.error).toContain("Synthetic iOS tap rejection");
-    expect(rejected.iosCacheInvalidations()).toBe(1);
-
-    const aborted = createTapAt(
-      displayDevice,
-      10,
-      10,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      lastRenderedObservation,
-    );
-    aborted.observeScreen.setObserveResult({ ...observation(10, 10), display } as ObserveResult);
-    const gapTimer = new FakeTimer();
-    const controller = new AbortController();
-    let gapStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      gapStarted = resolve;
-    });
-    const sleep = spyOn(aborted.timer, "sleep").mockImplementation((ms) => {
-      const pending = gapTimer.sleep(ms);
-      gapStarted();
-      return pending;
-    });
-    try {
-      const pending = aborted.tapAt.execute(
-        { x: 1, y: 2, action: "doubleTap", display: "main" },
-        undefined,
-        controller.signal,
-      );
-      await started;
-      controller.abort();
-      const result = await pending;
-      expect(result).toMatchObject({ success: false, action: "doubleTap" });
-      expect(result.error).toBe(
-        `Failed to tap at coordinates: ${OPERATION_CANCELLED_MESSAGE} Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically.`,
-      );
-      expect(aborted.iosDispatches).toHaveLength(1);
-      expect(aborted.iosCacheInvalidations()).toBe(1);
-    } finally {
-      gapTimer.resolveAll();
-      sleep.mockRestore();
-    }
+    expect(rejected.iosCacheInvalidations()).toBe(0);
 
     const plain = createTapAt(
       displayDevice,
@@ -1815,7 +2036,7 @@ describe("TapAtCoordinate", () => {
     const tapAt = new TapAtCoordinate(iosDevice, new FakeAdbExecutor(), {
       timer: new FakeTimer(),
       androidClient: unusedClient,
-      iosClient: unusedClient,
+      iosClient: { ...unusedClient, requestDoubleTapCoordinates: async () => ({ success: true }) },
       invalidateIosCache: () => {
         invalidations++;
       },
@@ -1842,7 +2063,7 @@ describe("TapAtCoordinate", () => {
     const iosResult = await ios.tapAt.execute({ x: 20.5, y: 68.33333333333333 });
     expect(iosResult).toMatchObject({ success: true, x: 20.5, y: 68.33333333333333 });
     expect(ios.iosDispatches).toEqual([
-      { x: 20.5, y: 68.33333333333333, duration: 50, frameContext: "frame-123" },
+      { kind: "tap", x: 20.5, y: 68.33333333333333, duration: 50, frameContext: "frame-123" },
     ]);
   });
 
@@ -1868,7 +2089,12 @@ describe("TapAtCoordinate", () => {
     }
 
     expect(iosDispatches).toEqual(
-      scaleMetadata.map(() => ({ ...logicalPoint, duration: 50, frameContext: "frame-123" })),
+      scaleMetadata.map(() => ({
+        kind: "tap",
+        ...logicalPoint,
+        duration: 50,
+        frameContext: "frame-123",
+      })),
     );
   });
 
@@ -1945,10 +2171,11 @@ describe("TapAtCoordinate", () => {
 
   test("rejects an absent screenSize without dispatch", async () => {
     const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice);
-    observeScreen.setObserveResult({
-      ...observation(10, 10),
-      screenSize: undefined,
-    } as ObserveResult);
+    const observed = observation(10, 10);
+    // Deliberately malformed runtime payload for the missing-size guard.
+    const incomplete: Partial<ObserveResult> = observed;
+    delete incomplete.screenSize;
+    observeScreen.setObserveResult(observed);
 
     const result = await tapAt.execute({ x: 0, y: 0 });
 
@@ -1967,7 +2194,7 @@ describe("TapAtCoordinate", () => {
     };
 
     await expect(
-      dispatchAndroidCoordinateTap(staleClient, adb, 1, 2, 10, "frame-123"),
+      dispatchAndroidCoordinateTap(staleClient, adb, 1, 2, 10, { frameContext: "frame-123" }),
     ).rejects.toThrow("Stale frame context");
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
   });
@@ -1977,7 +2204,9 @@ describe("TapAtCoordinate", () => {
     const rejectedClient: CoordinateTapClient = {
       requestTapCoordinates: async () => ({ success: false, error: "gesture unavailable" }),
     };
-    await dispatchAndroidCoordinateTap(rejectedClient, adb, 1, 2, 750, "frame-123");
+    await dispatchAndroidCoordinateTap(rejectedClient, adb, 1, 2, 750, {
+      frameContext: "frame-123",
+    });
     expect(adb.wasCommandExecuted("shell input touchscreen swipe 1 2 1 2 750")).toBe(true);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
   });
@@ -1985,7 +2214,9 @@ describe("TapAtCoordinate", () => {
   test("re-observes and retries one Android stale-frame rejection when the frame token advances and targeting layout is unchanged", async () => {
     const dispatches: Array<{ x: number; y: number; frameContext?: string }> = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (x, y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y, frameContext } = request;
+
         dispatches.push({ x, y, frameContext });
         return dispatches.length === 1
           ? {
@@ -2035,7 +2266,9 @@ describe("TapAtCoordinate", () => {
   test("rejects a stale-frame retry when its observation detects a fold", async () => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return dispatches.length === 1
           ? {
@@ -2080,7 +2313,9 @@ describe("TapAtCoordinate", () => {
     async ({ location, capture }) => {
       const dispatches: string[] = [];
       const client: CoordinateTapClient = {
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { frameContext } = request;
+
           dispatches.push(frameContext ?? "missing");
           return dispatches.length === 1
             ? {
@@ -2114,7 +2349,9 @@ describe("TapAtCoordinate", () => {
   test("refuses a stale-frame retry when the refreshed frame token is the rejected token", async () => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return dispatches.length === 1
           ? {
@@ -2151,10 +2388,12 @@ describe("TapAtCoordinate", () => {
       label: "navigation",
       refreshed: observation(100, 200, "epoch:2", 0, { text: "Network & internet" }),
     },
-  ])("preserves stale rejection after a genuine Android $label", async ({ refreshed }) => {
+  ])("explains the refused retry after a genuine Android $label", async ({ refreshed }) => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return {
           success: false,
@@ -2172,17 +2411,61 @@ describe("TapAtCoordinate", () => {
 
     expect(result).toMatchObject({
       success: false,
-      error: expect.stringContaining("Stale frame context"),
+      error: expect.stringContaining(
+        "screen layout changed since the last observation. Observe again and recompute coordinates, or pass a fresh snapshotId",
+      ),
     });
     expect(dispatches).toEqual(["epoch:1"]);
     expect(observeScreen.getExecuteCallCount()).toBe(2);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 20 30")).toBe(false);
   });
 
+  test.each(["missing frame", "same token", "coordinate error", "changed coordinates"])(
+    "preserves the original stale rejection for %s even when the layout changed",
+    async (reason) => {
+      const dispatches: Array<string | undefined> = [];
+      const error = "Stale frame context for input/tap";
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (request) => {
+          dispatches.push(request.frameContext);
+          return { success: false, error };
+        },
+      };
+      const refreshed = observation(
+        reason === "coordinate error" ? 10 : 200,
+        200,
+        reason === "same token" ? "epoch:1" : "epoch:2",
+        0,
+        { text: "Changed target" },
+      );
+      if (reason === "missing frame" && refreshed.viewHierarchy) {
+        refreshed.viewHierarchy.frameContext = undefined;
+      }
+      const { tapAt } = createAndroidTapAtWithClient(
+        [observation(100, 200, "epoch:1"), refreshed],
+        client,
+      );
+
+      const result = await tapAt.execute(
+        reason === "changed coordinates"
+          ? { x: 0.2, y: 0.15, coordinateSpace: "normalized" }
+          : { x: 20, y: 30 },
+      );
+
+      expect(result).toMatchObject({
+        success: false,
+        error: `Failed to tap at coordinates: ${error}`,
+      });
+      expect(dispatches).toEqual(["epoch:1"]);
+    },
+  );
+
   test("bounds Android stale-frame recovery to one retry", async () => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return {
           success: false,
@@ -2260,8 +2543,10 @@ describe("TapAtCoordinate TalkBack", () => {
     observeScreen.setObserveResult(observation(10, 10));
     const transitions = new FakeDisplayTransitionReader();
     const plainCalls: number[][] = [];
-    const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: async (x, y, duration = 0) => {
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y, duration = 0 } = request;
+
         plainCalls.push([x, y, duration]);
         return { success: true };
       },
@@ -2269,7 +2554,7 @@ describe("TapAtCoordinate TalkBack", () => {
     const tapAt = new TapAtCoordinate(device, adb, {
       timer,
       androidClient: client,
-      iosClient: client,
+      iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
       accessibilityDetector: detector,
       talkBackDriverFactory: useDefaultDriver ? undefined : { createDriver: () => driver },
       displayTransitions: transitions,
@@ -2417,7 +2702,7 @@ describe("TapAtCoordinate TalkBack", () => {
       controller.abort();
       return result;
     });
-    const result = await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal);
+    const result = await h.tapAt.execute({ x: 1, y: 2 }, { signal: controller.signal });
     expect(result.success).toBe(false);
     h.timer.advanceTime(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
     await Promise.resolve();
@@ -2474,7 +2759,16 @@ describe("TapAtCoordinate TalkBack", () => {
     const controller = new AbortController();
     const frames: (string | undefined)[] = [];
     spyOn(h.client, "requestTapCoordinates").mockImplementation(
-      async (x, y, duration, _timeout, _perf, frame, onDispatch, signal, displayId, beforeSend) => {
+      async ({
+        x: x,
+        y: y,
+        duration: duration,
+        frameContext: frame,
+        onDispatch: onDispatch,
+        signal: signal,
+        displayId: displayId,
+        beforeSend: beforeSend,
+      }) => {
         expect([x, y, duration]).toEqual([1, 2, 50]);
         expect(signal).toBe(controller.signal);
         expect(displayId).toBeUndefined();
@@ -2494,7 +2788,7 @@ describe("TapAtCoordinate TalkBack", () => {
       "requestDoubleTapCoordinates",
     ).mockResolvedValue({ success: true, totalTimeMs: 1 });
     try {
-      const result = await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal);
+      const result = await h.tapAt.execute({ x: 1, y: 2 }, { signal: controller.signal });
       expect(result.success).toBe(true);
       expect(frames).toEqual(["epoch:1", "epoch:2"]);
       expect(activation).toHaveBeenCalledTimes(1);
@@ -2506,7 +2800,7 @@ describe("TapAtCoordinate TalkBack", () => {
   test("default focus transport never retries a dispatched request with a lost reply", async () => {
     const h = setup(true, androidDevice, true);
     const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
-      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+      async ({ onDispatch: onDispatch }) => {
         onDispatch?.();
         throw new Error("Stale frame context mentioned in a lost reply");
       },
@@ -2527,7 +2821,7 @@ describe("TapAtCoordinate TalkBack", () => {
       h.timer.setTimeout(() => controller.abort(), TALKBACK_PRECISE_FOCUS_SETTLE_MS / 2);
       return result;
     });
-    expect((await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal)).success).toBe(
+    expect((await h.tapAt.execute({ x: 1, y: 2 }, { signal: controller.signal })).success).toBe(
       false,
     );
     expect(h.timer.wasSleepCalled(TALKBACK_PRECISE_FOCUS_SETTLE_MS)).toBe(true);
@@ -2560,7 +2854,12 @@ describe("TapAtCoordinate TalkBack", () => {
     "contextual TalkBack focus on display %s retries one rejected frame on the same panel",
     async (display) => {
       const h = setup(true, androidDevice, true);
-      const primary = { key: "0", role: "unknown" as const, generation: 7 };
+      const primary = {
+        key: "0",
+        role: "unknown" as const,
+        posture: "unknown" as const,
+        generation: 7,
+      };
       h.observeScreen.setObserveSequence([
         { ...observation(10, 10, "epoch:1"), display: primary },
         { ...observation(10, 10, "epoch:2"), display: primary },
@@ -2569,18 +2868,15 @@ describe("TapAtCoordinate TalkBack", () => {
       const controller = new AbortController();
       const frames: (string | undefined)[] = [];
       const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
-        async (
-          x,
-          y,
-          duration,
-          _timeout,
-          _perf,
-          frame,
-          onDispatch,
-          signal,
-          _displayId,
-          beforeSend,
-        ) => {
+        async ({
+          x: x,
+          y: y,
+          duration: duration,
+          frameContext: frame,
+          onDispatch: onDispatch,
+          signal: signal,
+          beforeSend: beforeSend,
+        }) => {
           expect([x, y, duration]).toEqual([1, 2, 50]);
           expect(signal).toBe(controller.signal);
           expect(beforeSend).toBeFunction();
@@ -2601,7 +2897,10 @@ describe("TapAtCoordinate TalkBack", () => {
         return { success: true, totalTimeMs: 1 };
       });
       try {
-        const result = await h.tapAt.execute({ x: 1, y: 2, display }, undefined, controller.signal);
+        const result = await h.tapAt.execute(
+          { x: 1, y: 2, display },
+          { signal: controller.signal },
+        );
         expect(result.success).toBe(true);
         expect(frames).toEqual(["epoch:1", "epoch:2"]);
         expect(focus).toHaveBeenCalledTimes(2);
@@ -2624,10 +2923,10 @@ describe("TapAtCoordinate TalkBack", () => {
       const h = setup(true, androidDevice, true);
       h.observeScreen.setObserveResult({
         ...observation(10, 10, "epoch:1"),
-        display: { key: "0", role: "unknown", generation: 7 },
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 7 },
       });
       const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
-        async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+        async ({ onDispatch: onDispatch }) => {
           onDispatch?.();
           if (phase === "dispatched") {
             throw new Error("Stale frame context in a lost reply");
@@ -2659,7 +2958,12 @@ describe("TapAtCoordinate TalkBack", () => {
     "explicit contextual TalkBack retry fails closed for %s",
     async (scenario) => {
       const h = setup(true, androidDevice, true);
-      const primary = { key: "0", role: "unknown" as const, generation: 7 };
+      const primary = {
+        key: "0",
+        role: "unknown" as const,
+        posture: "unknown" as const,
+        generation: 7,
+      };
       h.observeScreen.setObserveSequence([
         { ...observation(10, 10, "epoch:1"), display: primary },
         {
@@ -2675,7 +2979,7 @@ describe("TapAtCoordinate TalkBack", () => {
       ]);
       const frames: (string | undefined)[] = [];
       const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
-        async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+        async ({ frameContext: frame, onDispatch: onDispatch }) => {
           frames.push(frame);
           onDispatch?.();
           return { success: false, error: `Stale frame context: ${frame}` };
@@ -2686,7 +2990,9 @@ describe("TapAtCoordinate TalkBack", () => {
         const result = await h.tapAt.execute({ x: 1, y: 2, display: "active" });
         expect(result.success).toBe(false);
         expect(result.error).toContain(
-          `TalkBack coordinate tap failed: Focus tap failed: Stale frame context: ${scenario === "second rejection" ? "epoch:2" : "epoch:1"}`,
+          scenario === "changed layout"
+            ? "screen layout changed since the last observation. Observe again and recompute coordinates, or pass a fresh snapshotId"
+            : `TalkBack coordinate tap failed: Focus tap failed: Stale frame context: ${scenario === "second rejection" ? "epoch:2" : "epoch:1"}`,
         );
         expect(frames).toEqual(
           scenario === "second rejection" ? ["epoch:1", "epoch:2"] : ["epoch:1"],
@@ -2704,7 +3010,7 @@ describe("TapAtCoordinate TalkBack", () => {
     const h = setup(false);
     h.observeScreen.setObserveResult({
       ...observation(10, 10),
-      display: { key: "0", role: "unknown", generation: 7 },
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 7 },
     });
     expect((await h.tapAt.execute({ x: 1, y: 2, display: "active" })).success).toBe(true);
     expect(h.plainCalls).toEqual([[1, 2, 10]]);
@@ -2716,7 +3022,7 @@ describe("TapAtCoordinate TalkBack", () => {
     const h = setup();
     h.observeScreen.setObserveResult({
       ...observation(10, 10),
-      display: { key: "0", role: "unknown", generation: 7 },
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 7 },
     });
     expect((await h.tapAt.execute({ x: 1, y: 2, display: "active" })).success).toBe(true);
     expect(h.driver.tapHistory).toHaveLength(1);
@@ -2735,14 +3041,16 @@ describe("TapAtCoordinate TalkBack", () => {
         postures: [],
       },
     });
-    h.adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    h.adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:0" type INTERNAL, real 10 x 10}\nDisplay id 2: DisplayInfo{uniqueId "local:2" type EXTERNAL, real 10 x 10}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     h.observeScreen.setObserveResult({
       ...observation(10, 10),
-      display: { key: "2", role: "external", generation: 7 },
+      display: { key: "2", role: "external", posture: "unknown", generation: 7 },
     });
     const result = await h.tapAt.execute({ x: 1, y: 2, display: "2" });
     expect(result.success).toBe(false);

@@ -1,0 +1,43 @@
+{
+  "name": "page",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "pager",
+      "id": "pages",
+      "children": [
+        {
+          "type": "text",
+          "text": "Emit",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "pick",
+              "context": {
+                "page": {
+                  "page": "pages"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "state": {},
+  "pages": {
+    "pages": 2
+  },
+  "data": {},
+  "precedingActions": [],
+  "expected": {
+    "context": {
+      "page": 2
+    }
+  }
+}

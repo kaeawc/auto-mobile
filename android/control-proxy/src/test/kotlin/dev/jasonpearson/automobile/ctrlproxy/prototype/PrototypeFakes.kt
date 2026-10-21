@@ -81,11 +81,19 @@ internal class RecordingPrototypeWindowManager(
   private val history: MutableList<String>,
 ) : WindowManager {
   var view: View? = null
+  private val attachedViews = mutableSetOf<View>()
+
+  fun isViewAttached(view: View): Boolean =
+    view in attachedViews && !(failUpdate && updateFailure is IllegalArgumentException)
+
   val added = mutableListOf<WindowManager.LayoutParams>()
   val updated = mutableListOf<WindowManager.LayoutParams>()
   var removals = 0
   var failAdd = false
   var failUpdate = false
+  var updateAttempts = 0
+    private set
+
   var failRemove = false
   var updateFailure: Exception = IllegalStateException("fake update failure")
   var removeFailure: Exception = IllegalStateException("fake remove failure")
@@ -95,11 +103,13 @@ internal class RecordingPrototypeWindowManager(
     history += "add"
     this.view = view
     if (failAdd) throw IllegalStateException("fake add failure")
+    attachedViews += view
     added += snapshot(params)
   }
 
   override fun updateViewLayout(view: View, params: ViewGroup.LayoutParams) {
     check(mainThread.isMainThread())
+    updateAttempts++
     if (failUpdate) throw updateFailure
     val copy = snapshot(params)
     updated += copy
@@ -111,6 +121,7 @@ internal class RecordingPrototypeWindowManager(
   override fun removeViewImmediate(view: View) {
     check(mainThread.isMainThread())
     if (failRemove) throw removeFailure
+    attachedViews -= view
     removals++
     history += "remove"
   }
@@ -129,6 +140,7 @@ internal class FakePrototypeHost : PrototypeHost {
   val requests = mutableListOf<PrototypeRequest>()
   var accept = true
   var failure: Exception? = null
+  override var isHiddenForCapture = false
   override var isShowing = false
   override var currentPlacement: PrototypePlacement? = null
   override val isTouchThroughActive = false
@@ -144,9 +156,17 @@ internal class FakePrototypeHost : PrototypeHost {
     return accept
   }
 
-  override suspend fun show(request: PrototypeRequest) = display("show", request)
+  var beforeShow: suspend () -> Unit = {}
 
-  override suspend fun replace(request: PrototypeRequest) = display("replace", request)
+  override suspend fun show(request: PrototypeRequest): Boolean {
+    beforeShow()
+    return display("show", request)
+  }
+
+  override suspend fun replace(request: PrototypeRequest): Boolean {
+    beforeShow()
+    return display("replace", request)
+  }
 
   override suspend fun relayout(): Boolean {
     calls += "relayout"
@@ -160,6 +180,15 @@ internal class FakePrototypeHost : PrototypeHost {
     if (!isShowing) return true
     if (acceptTextField) requests[requests.lastIndex] = requests.last().copy(hasTextField = visible)
     return acceptTextField
+  }
+
+  var acceptStackBack = true
+
+  override suspend fun setStackBackEnabled(enabled: Boolean): Boolean {
+    calls += "stackBack:$enabled"
+    if (!isShowing) return true
+    if (acceptStackBack) requests[requests.lastIndex] = requests.last().copy(hasStackBack = enabled)
+    return acceptStackBack
   }
 
   override suspend fun dismiss(): Boolean {
@@ -182,13 +211,21 @@ internal class FakePrototypeHost : PrototypeHost {
 
   override suspend fun <T> withTouchThrough(settleMillis: Long, block: suspend () -> T): T = block()
 
+  var captureHidden = false
+  var captureExcluded = true
+
   override suspend fun <T> withHiddenForCapture(
     frameTimeoutMillis: Long,
     maxHiddenMillis: Long,
     block: suspend () -> T,
   ): PrototypeHiddenCapture<T> {
     calls += "hideForCapture"
-    return PrototypeHiddenCapture(block(), prototypeExcluded = true)
+    captureHidden = true
+    try {
+      return PrototypeHiddenCapture(block(), prototypeExcluded = captureExcluded)
+    } finally {
+      captureHidden = false
+    }
   }
 }
 

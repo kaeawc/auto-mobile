@@ -36,9 +36,9 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
+# shellcheck source=scripts/ios/xcodegen_version.sh
 source "${SCRIPT_DIR}/xcodegen_version.sh"
-# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
+# shellcheck source=scripts/ios/local-sim-build-args.sh
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # IOS_DIR is overridable (tests point it at a fixture dir); defaults to ios/.
@@ -143,6 +143,39 @@ run_cmd() {
     fi
     "$@"
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then run_cmd "$@"; fi
+
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
+# run_cmd with its output captured into CAPTURED_OUTPUT and its exit status in
+# CAPTURED_STATUS, without a command substitution around the function (which
+# would silently disable errexit inside it). The first argument selects what
+# happens to stderr: "merge" folds it into the output, "discard" drops it.
+CAPTURED_OUTPUT=""
+CAPTURED_STATUS=0
+capture_run_cmd() {
+    local stderr_mode="$1"
+    shift
+    local capture_file
+    capture_file=$(mktemp)
+    if [ "$stderr_mode" = "merge" ]; then
+        run_capture_status run_cmd "$@" >"$capture_file" 2>&1
+    else
+        run_capture_status run_cmd "$@" >"$capture_file" 2>/dev/null
+    fi
+    CAPTURED_STATUS=$RUN_STATUS
+    CAPTURED_OUTPUT=$(<"$capture_file")
+    rm -f "$capture_file"
+}
 
 has_simulator_sdk() {
     if [ "$DRY_RUN" = true ]; then
@@ -155,6 +188,8 @@ has_simulator_sdk() {
     xcodebuild -showsdks 2>/dev/null | grep -q "iphonesimulator" \
         && xcrun simctl list runtimes 2>/dev/null | grep -qiE "^iOS "
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then has_simulator_sdk "$@"; fi
 
 # Check if xcodebuild is available
 if ! command -v xcodebuild &> /dev/null; then
@@ -171,18 +206,18 @@ print_info "Using iOS destination: ${DESTINATION}"
 echo ""
 
 # Ensure iOS Simulator SDK is installed
-if ! has_simulator_sdk; then
+run_capture_status has_simulator_sdk
+if [ "$RUN_STATUS" -ne 0 ]; then
     echo -e "${YELLOW}No iOS Simulator SDK detected. Attempting to install iOS platform...${NC}"
-    set +e
-    run_cmd xcodebuild -downloadPlatform iOS 2>&1
-    DOWNLOAD_EXIT_CODE=$?
-    set -e
+    run_capture_status run_cmd xcodebuild -downloadPlatform iOS 2>&1
+    DOWNLOAD_EXIT_CODE=$RUN_STATUS
 
     if [ $DOWNLOAD_EXIT_CODE -ne 0 ]; then
         echo -e "${RED}Failed to download iOS platform (exit ${DOWNLOAD_EXIT_CODE}).${NC}"
     fi
 
-    if ! has_simulator_sdk; then
+    run_capture_status has_simulator_sdk
+    if [ "$RUN_STATUS" -ne 0 ]; then
         echo -e "${RED}iOS Simulator SDK still missing after download attempt.${NC}"
         echo -e "${YELLOW}Install the iOS platform in Xcode or ensure CI has the simulator SDK preinstalled.${NC}"
         exit 1
@@ -239,7 +274,8 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
     echo -e "  Building ${PROJECT_NAME}..."
 
     # Get available schemes
-    SCHEMES=$(run_cmd xcodebuild -project "${xcodeproj}" -list 2>/dev/null | sed -n '/Schemes:/,/^$/p' | grep -v "Schemes:" | sed 's/^[[:space:]]*//' | grep -v '^$' || true)
+    capture_run_cmd discard xcodebuild -project "${xcodeproj}" -list
+    SCHEMES=$(printf '%s\n' "${CAPTURED_OUTPUT}" | sed -n '/Schemes:/,/^$/p' | grep -v "Schemes:" | sed 's/^[[:space:]]*//' | grep -v '^$' || true)
 
     if [ -z "${SCHEMES}" ]; then
         print_info "No schemes found for ${PROJECT_NAME}, skipping"
@@ -251,8 +287,7 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
             echo -e "    Building scheme: ${scheme}..."
-            set +e
-            BUILD_LOG=$(run_cmd xcodebuild \
+            capture_run_cmd merge xcodebuild \
                 -project "${xcodeproj}" \
                 -scheme "${scheme}" \
                 -destination "${DESTINATION}" \
@@ -263,9 +298,9 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
                 CODE_SIGNING_REQUIRED=NO \
                 CODE_SIGNING_ALLOWED=NO \
                 "${LOCAL_SIM_ARGS[@]}" \
-                build 2>&1)
-            XCODE_EXIT=$?
-            set -e
+                build
+            BUILD_LOG="${CAPTURED_OUTPUT}"
+            XCODE_EXIT=${CAPTURED_STATUS}
             if [ $XCODE_EXIT -eq 0 ]; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else

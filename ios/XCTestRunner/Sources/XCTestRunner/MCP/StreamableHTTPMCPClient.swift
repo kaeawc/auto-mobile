@@ -14,6 +14,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
     struct Options: Sendable {
         var logger: any AutoMobileLogger = StdoutLogger()
         var scheduler: any DeadlineScheduler = SystemDeadlineScheduler()
+        var tokenProvider: any DaemonHTTPTokenProviding = DaemonHTTPTokenProvider()
     }
 
     private let state = OSAllocatedUnfairLock<State>(initialState: State())
@@ -32,7 +33,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         try self.init(
             endpoint: endpoint,
             performer: URLSessionRequestPerformer(session: session),
-            options: Options(logger: logger)
+            options: Options(logger: logger, tokenProvider: DaemonHTTPTokenProvider(logger: logger))
         )
     }
 
@@ -40,7 +41,13 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         guard endpoint.scheme != nil else { throw MCPClientError.invalidEndpoint(endpoint.absoluteString) }
         self.endpoint = endpoint
         logger = options.logger
-        self.performer = performer
+        self.performer = AuthenticatedDaemonHTTPRequestPerformer.isDaemonEndpoint(endpoint)
+            ? AuthenticatedDaemonHTTPRequestPerformer(
+                performer: performer,
+                tokenProvider: options.tokenProvider,
+                scheduler: options.scheduler
+            )
+            : performer
         scheduler = options.scheduler
     }
 
@@ -69,7 +76,14 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
 
     public func initialize(timeout: TimeInterval) async throws {
         PerfTimer.log("HTTPClient.initialize START")
-        _ = try await sendRequest(method: "initialize", params: encodeParams(Self.initializeParams()), timeout: timeout)
+        _ = try await sendRequest(
+            method: "initialize",
+            params: MCPJSONRPCHelpers.encodeParams(
+                Self.initializeParams(),
+                failureMessage: "Failed to encode MCP request"
+            ),
+            timeout: timeout
+        )
         PerfTimer.log("HTTPClient.initialize END")
     }
 
@@ -80,23 +94,26 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
     )
         async throws -> MCPToolResponse
     {
-        let params = try encodeParams(["name": name, "arguments": arguments])
+        let params = try MCPJSONRPCHelpers.encodeParams(
+            ["name": name, "arguments": arguments],
+            failureMessage: "Failed to encode MCP request"
+        )
         return try await callTool(params: params, timeout: timeout)
     }
 
     private func callTool(params: Data, timeout: TimeInterval) async throws -> MCPToolResponse {
         PerfTimer.log("HTTPClient.callTool START")
         let result = try await requestWithSession(method: "tools/call", params: params, timeout: timeout)
-        let text = try extractTextContent(from: result)
+        let text = try MCPJSONRPCHelpers.extractTextContent(from: result)
         PerfTimer.log("HTTPClient.callTool END: responseLength=\(text.count)")
         return MCPToolResponse(text: text)
     }
 
     public func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
-        let params = try encodeParams(["uri": uri])
+        let params = try MCPJSONRPCHelpers.encodeParams(["uri": uri], failureMessage: "Failed to encode MCP request")
         PerfTimer.log("HTTPClient.readResource START: uri=\(uri)")
         let result = try await requestWithSession(method: "resources/read", params: params, timeout: timeout)
-        let text = try extractResourceTextContent(from: result)
+        let text = try MCPJSONRPCHelpers.extractResourceTextContent(from: result)
         PerfTimer.log("HTTPClient.readResource END: responseLength=\(text.count)")
         return MCPResourceResponse(text: text)
     }
@@ -118,17 +135,6 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
             $0.sessionId = nil
             $0.generation &+= 1
         }
-    }
-
-    private func encodeParams(_ params: [String: Any]) throws -> Data {
-        // Foundation can raise an Objective-C exception for unsupported values, outside Swift's
-        // throws mechanism. Validate first so encoding failure remains a recoverable client error.
-        guard JSONSerialization.isValidJSONObject(params),
-              let data = try? JSONSerialization.data(withJSONObject: params)
-        else {
-            throw MCPClientError.requestFailed("Failed to encode MCP request")
-        }
-        return data
     }
 
     private func sendRequest(method: String, params: Data, timeout: TimeInterval) async throws -> [String: Any] {
@@ -286,6 +292,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
             throw MCPClientError.invalidResponse("Missing HTTP response")
         }
         if httpResponse.statusCode == 404 { throw MCPClientError.sessionExpired }
+        if httpResponse.statusCode == 401 { throw MCPClientError.requestFailed("HTTP 401") }
         // This runs only for the winning response, never inside the deadline child. A reset also
         // invalidates the snapshot, so an older in-flight response cannot restore a cleared session.
         if let sessionHeader = Self.extractSessionId(from: httpResponse) {
@@ -309,30 +316,6 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
             }
         }
         return nil
-    }
-
-    private func extractTextContent(from result: [String: Any]) throws -> String {
-        guard let content = result["content"] as? [[String: Any]] else {
-            throw MCPClientError.invalidResponse("Missing content array")
-        }
-        for item in content {
-            if let type = item["type"] as? String, type == "text",
-               let text = item["text"] as? String
-            {
-                return text
-            }
-        }
-        throw MCPClientError.invalidResponse("Missing text content")
-    }
-
-    private func extractResourceTextContent(from result: [String: Any]) throws -> String {
-        guard let contents = result["contents"] as? [[String: Any]], let first = contents.first else {
-            throw MCPClientError.invalidResponse("Missing resource contents")
-        }
-        if let text = first["text"] as? String {
-            return text
-        }
-        throw MCPClientError.invalidResponse("Missing resource text content")
     }
 }
 

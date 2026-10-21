@@ -6,6 +6,7 @@ import {
   BootedDevice,
   Element,
   ObserveResult,
+  ViewHierarchyNode,
   ViewHierarchyResult,
 } from "../../../src/models";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -15,14 +16,12 @@ import { FakeAccessibilityFocusService } from "../../fakes/FakeAccessibilityFocu
 const androidDevice: BootedDevice = {
   deviceId: "test-a11y-focus",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 
 const iosDevice: BootedDevice = {
   deviceId: "test-a11y-focus-ios",
   platform: "ios",
-  isEmulator: true,
   name: "Test Simulator",
 };
 
@@ -33,7 +32,7 @@ const bounds = (left: number, top: number, right: number, bottom: number) => ({
   bottom,
 });
 
-function makeViewHierarchy(nodes: any[]): ViewHierarchyResult {
+function makeViewHierarchy(nodes: ViewHierarchyNode[]): ViewHierarchyResult {
   return {
     hierarchy: {
       node: {
@@ -41,7 +40,7 @@ function makeViewHierarchy(nodes: any[]): ViewHierarchyResult {
         node: nodes,
       },
     },
-  } as ViewHierarchyResult;
+  };
 }
 
 function makeObserveResult(viewHierarchy: ViewHierarchyResult): ObserveResult {
@@ -132,7 +131,7 @@ describe("SetAccessibilityFocus", () => {
     service.currentFocusElement = {
       bounds: bounds(0, 0, 100, 50),
       "resource-id": "com.example:id/title",
-    } as any;
+    };
     const feature = makeFeature();
 
     const result = await feature.execute({ resourceId: "com.example:id/title" });
@@ -565,7 +564,7 @@ describe("SetAccessibilityFocus", () => {
     const target = {
       bounds: bounds(0, 0, 100, 50),
       "resource-id": "com.example:id/title",
-    } as Element;
+    };
     service.focusReadSequence = [stale, target];
 
     const result = await makeFeature().execute({ resourceId: "com.example:id/title" });
@@ -595,7 +594,7 @@ describe("SetAccessibilityFocus", () => {
     service.currentFocusElement = {
       bounds: bounds(0, 0, 100, 50),
       "resource-id": "com.example:id/title",
-    } as Element;
+    };
 
     const result = await makeFeature().execute({
       action: "clear",
@@ -685,21 +684,28 @@ describe("SetAccessibilityFocus", () => {
   });
 
   test("text focus prefers the topmost window rather than the smallest background label", async () => {
-    const hierarchy = makeViewHierarchy([
+    const background = makeViewHierarchy([
       { $: { text: "Save", "resource-id": "com.app:id/background", bounds: bounds(0, 0, 10, 10) } },
     ]);
-    hierarchy.windows = [
-      {
-        windowLayer: 9,
-        hierarchy: {
-          node: {
-            text: "Save",
-            "resource-id": "com.app:id/dialog",
-            bounds: bounds(100, 100, 400, 200),
+    const hierarchy: ViewHierarchyResult = {
+      ...background,
+      windows: [
+        {
+          windowLayer: 9,
+          hierarchy: {
+            node: [
+              {
+                $: {
+                  text: "Save",
+                  "resource-id": "com.app:id/dialog",
+                  bounds: bounds(100, 100, 400, 200),
+                },
+              },
+            ],
           },
         },
-      },
-    ] as any;
+      ],
+    };
     observeScreen.setObserveResult(makeObserveResult(hierarchy));
     await makeFeature().execute({ text: "Save" });
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.app:id/dialog" }]);

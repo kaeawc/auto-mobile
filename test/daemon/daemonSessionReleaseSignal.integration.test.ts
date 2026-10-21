@@ -1,11 +1,13 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -14,24 +16,15 @@ import {
   SUSPECT_GRACE_MS,
 } from "../../src/daemon/sessionLivenessWindows";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 
 // Issue #4610: the daemon registers a release callback (next to the nav-graph /
 // observe-cache cleanup) that fans the released session key out to the
 // SessionReleaseBroadcaster, so a connected proxy learns of a real release
 // instead of guessing with the replay TTL.
-
-interface DaemonHeartbeatMonitorInternals {
-  heartbeatMonitor: { stop(): void } | null;
-  startHeartbeatMonitor(): void;
-}
-
-interface DaemonSessionReleaseInternals {
-  cancelAndReleaseSession(sessionId: string, releaseReason: string): Promise<void>;
-}
 
 /**
  * Point a daemon-owned pool's discovery at a fake that lists exactly these
@@ -42,7 +35,7 @@ interface DaemonSessionReleaseInternals {
 function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): void {
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [...devices];
-  Object.assign(devicePool, { deviceManager });
+  devicePool.testHooks.deviceManager = deviceManager;
 }
 
 describe("Daemon session-release signal wiring", () => {
@@ -62,7 +55,7 @@ describe("Daemon session-release signal wiring", () => {
     // file DB (CLAUDE.md unit-test guard, issue #3067). The Daemon threads this
     // repository straight into its SessionManager (daemon.ts).
     const db = await createTestDatabase();
-    const daemon = new Daemon({}, undefined, undefined, new DeviceSessionRepository(db));
+    const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository(db) });
     const sessionManager = daemon.getSessionManager();
 
     const emitted: Array<{ sessionId: string; reason?: string }> = [];
@@ -88,24 +81,20 @@ describe("Daemon session-release signal wiring", () => {
     const db = await createTestDatabase();
     const timer = new FakeTimer();
     const repository = new DeviceSessionRepository(db);
-    const daemon = new Daemon({}, undefined, timer, repository);
+    const daemon = new DaemonLifecycleHarness({}, { timer, deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
-    const internals = daemon as unknown as DaemonHeartbeatMonitorInternals;
     const emitted: Array<{ sessionId: string; reason?: string }> = [];
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       emitted.push({ sessionId, reason });
     });
 
     try {
-      await sessionManager.createSession(
-        "heartbeat-expired",
-        "emulator-5554",
-        "android",
-        60_000,
-        leaseMs,
-      );
-      sessionManager.recordHeartbeat("heartbeat-expired");
-      internals.startHeartbeatMonitor();
+      await sessionManager.createSession("heartbeat-expired", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: leaseMs,
+      });
+      await deliverDaemonHeartbeat(sessionManager, "heartbeat-expired");
+      daemon.startMonitor();
 
       await timer.advanceTimeAsync(leaseMs + SUSPECT_GRACE_MS - 1);
 
@@ -127,7 +116,7 @@ describe("Daemon session-release signal wiring", () => {
       expect(emitted).toEqual([{ sessionId: "heartbeat-expired", reason: "heartbeat-timeout" }]);
     } finally {
       unsubscribe();
-      internals.heartbeatMonitor?.stop();
+      await daemon.stopMonitorAndWait();
       sessionManager.stopCleanupTimer();
     }
   });
@@ -135,10 +124,9 @@ describe("Daemon session-release signal wiring", () => {
   test("does not publish a terminal release before persistence succeeds", async () => {
     const db = await createTestDatabase();
     const repository = new DeviceSessionRepository(db);
-    const daemon = new Daemon({}, undefined, undefined, repository);
+    const daemon = new Daemon({}, { deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
-    const internals = daemon as unknown as DaemonSessionReleaseInternals;
     const sessionId = "terminal-persistence-failure";
     const deviceId = "physical-device";
     const emitted: string[] = [];
@@ -156,7 +144,7 @@ describe("Daemon session-release signal wiring", () => {
       await devicePool.assignDeviceToSession(sessionId, "android");
 
       await expect(
-        internals.cancelAndReleaseSession(
+        daemon.cancelAndReleaseSession(
           sessionId,
           deviceLossCancellationReason(deviceId, "incident-1"),
         ),
@@ -175,7 +163,7 @@ describe("Daemon session-release signal wiring", () => {
       expect(emitted).toEqual([]);
 
       markReleasedSpy.mockResolvedValue(undefined);
-      await internals.cancelAndReleaseSession(
+      await daemon.cancelAndReleaseSession(
         sessionId,
         deviceLossCancellationReason(deviceId, "incident-1"),
       );
@@ -194,9 +182,10 @@ describe("Daemon session-release signal wiring", () => {
     const timer = new FakeTimer();
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new FakeDeviceSessionPersistence() as unknown as DeviceSessionRepository,
+      {
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const devicePool = daemon.getDevicePool();
     const sessionManager = daemon.getSessionManager();
@@ -220,11 +209,11 @@ describe("Daemon session-release signal wiring", () => {
       stubPoolDiscovery(devicePool, [original]);
       await devicePool.initializeWithDevices([original]);
       await devicePool.reconcileDiscoveryObservation([original], "test:initial");
-      await devicePool.bindOrReuseDeviceSession(
-        "identity-fenced-session",
-        original.deviceId,
-        "android",
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "identity-fenced-session",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
 
       stubPoolDiscovery(devicePool, [replacement]);
       const refresh = devicePool.refreshDevices();
@@ -255,12 +244,12 @@ describe("Daemon session-release signal wiring", () => {
       "session-rebind-navigation",
       NavigationGraphManager.createForTesting(
         new NavigationRepository(db),
-        new TestCoverageRepository(undefined, db),
+        new TestCoverageRepository(db),
         undefined,
         "session-rebind-navigation",
       ),
     );
-    const daemon = new Daemon({}, undefined, undefined, new DeviceSessionRepository(db));
+    const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository(db) });
     const sessionManager = daemon.getSessionManager();
 
     try {

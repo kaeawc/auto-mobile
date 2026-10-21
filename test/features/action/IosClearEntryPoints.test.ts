@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { ClearText } from "../../../src/features/action/ClearText";
 import { InputText } from "../../../src/features/action/InputText";
@@ -8,7 +9,6 @@ import {
   TEXT_REQUEST_RESPONSE_MARGIN_MS,
 } from "../../../src/features/action/textTransportTimeout";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -19,6 +19,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { typedObservation } from "./IosTypedTextTestHarness";
 import { createSendKeysHarness, ios, android } from "./SendKeysTestHarness";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 type Entry = "sendKeys clear" | "sendKeys replace" | "ClearText" | "setUIState";
 type Outcome = {
@@ -126,12 +127,8 @@ beforeEach(() => {
   timer.enableAutoAdvance();
   proxy = new FakeIOSCtrlProxy(timer);
   androidProxy = new FakeCtrlProxy();
-  iosInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    proxy as unknown as IOSCtrlProxyClient,
-  );
-  androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    androidProxy as unknown as AndroidCtrlProxyClient,
-  );
+  iosInstance = spyOnIosClientInstance(proxy);
+  androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(androidProxy);
 });
 afterEach(() => {
   iosInstance.mockRestore();
@@ -148,8 +145,11 @@ function clearAction(device: BootedDevice, observer: FakeObserveScreen) {
 }
 
 function fieldObservation(value: string): ObserveResult {
-  return {
-    timestamp: 1,
+  return buildObserveResult({
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    updatedAt: 1,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 400, height: 800 },
     viewHierarchy: {
       hierarchy: {
@@ -166,7 +166,7 @@ function fieldObservation(value: string): ObserveResult {
         },
       },
     },
-  };
+  });
 }
 
 function formAction(
@@ -351,7 +351,7 @@ test("ClearText first and retry requests preserve the signal and live text deadl
     expect(result.success).toBe(true);
     expect(request).toHaveBeenCalledTimes(2);
     for (const args of request.mock.calls) {
-      expect(args).toEqual([
+      expect<unknown>(args).toEqual([
         undefined,
         5000,
         undefined,
@@ -388,12 +388,18 @@ test("InputText on iOS types at the caret without requesting a clear", async () 
 
 test("Android ClearText and setUIState retain acknowledgement-only clearing without warnings", async () => {
   const observer = new FakeObserveScreen();
-  observer.setObserveResult({
-    timestamp: 1,
-    viewHierarchy: {
-      hierarchy: { node: { $: { class: "android.widget.EditText", focused: true, text: "old" } } },
-    },
-  });
+  observer.setObserveResult(
+    buildObserveResult({
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: 1,
+      viewHierarchy: {
+        hierarchy: {
+          node: { $: { class: "android.widget.EditText", focused: true, text: "old" } },
+        },
+      },
+    }),
+  );
   const clear = clearAction(android, observer);
   const request = spyOn(androidProxy, "requestClearText");
   try {

@@ -37,13 +37,13 @@ describe("AUTOMOBILE_ALWAYS_LOAD_TOOLS advertisement", () => {
     } else {
       process.env[FLAG] = original;
     }
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
   });
 
   test('advertises _meta.anthropic/alwaysLoad when the flag is exactly "true"', () => {
     process.env[FLAG] = "true";
     const def = ToolRegistry.getToolDefinitions().find((d) => d.name === TOOL);
-    expect((def as any)._meta).toEqual({ "anthropic/alwaysLoad": true });
+    expect(def).toHaveProperty("_meta", { "anthropic/alwaysLoad": true });
   });
 
   test.each([
@@ -59,6 +59,6 @@ describe("AUTOMOBILE_ALWAYS_LOAD_TOOLS advertisement", () => {
       process.env[FLAG] = value;
     }
     const def = ToolRegistry.getToolDefinitions().find((d) => d.name === TOOL);
-    expect((def as any)._meta).toBeUndefined();
+    expect(def).not.toHaveProperty("_meta");
   });
 });

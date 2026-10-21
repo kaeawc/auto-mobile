@@ -1,5 +1,5 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -43,17 +43,14 @@ export const PROTOTYPE_APP_LAYER_APPOP_COMMAND = `shell appops set ${CTRL_PROXY_
  * an aborted [signal] is rethrown so a cancelled request never goes on to show the prototype.
  */
 export async function grantPrototypeAppLayer(
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
 ): Promise<void> {
   try {
-    const result = await adb.executeCommand(
-      PROTOTYPE_APP_LAYER_APPOP_COMMAND,
-      undefined,
-      undefined,
-      true,
+    const result = await adb.executeCommand(PROTOTYPE_APP_LAYER_APPOP_COMMAND, {
+      noRetry: true,
       signal,
-    );
+    });
     if (outputLooksLikeShellFailure(result.stdout, result.stderr ?? "")) {
       logger.warn(
         `[prototype] SYSTEM_ALERT_WINDOW appop grant reported a failure: ${`${result.stdout}\n${result.stderr ?? ""}`.trim()}`,

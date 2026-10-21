@@ -3,20 +3,27 @@ import { existsSync, statSync } from "node:fs";
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";
 
-function createFakeDaemonState() {
+function createFakeDaemonState(): DaemonStateAccess {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 
@@ -31,12 +38,7 @@ describe("UnixSocketServer filesystem permissions (issue #4750)", () => {
     // Keep the total path short: macOS caps Unix socket paths at ~104 chars.
     socketDir = await mkdtemp(join(tmpdir(), "sp-"));
     socketPath = join(socketDir, "n", "s.sock");
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      new FakeTimer(),
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), new FakeTimer());
     await server.start();
   });
 

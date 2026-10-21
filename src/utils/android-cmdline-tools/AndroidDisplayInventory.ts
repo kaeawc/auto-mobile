@@ -1,7 +1,7 @@
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import type { DeviceDisplays, DisplayPanel, PanelRole, Posture } from "../../models/DisplayPanel";
 import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
-import type { AdbExecutor } from "./interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
 import { parseSurfaceFlingerDisplayIds } from "./AndroidDisplayParsers";
@@ -234,14 +234,14 @@ export function parseAndroidDeviceDisplayOutcome(
 
 /** Optional, bounded inventory enrichment through the device-bound ADB seam. */
 export async function readAndroidDeviceDisplays(
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
 ): Promise<DeviceDisplays | undefined> {
   return (await readAndroidDeviceDisplaysChecked(adb, signal)).displays;
 }
 
 export async function readAndroidDeviceDisplaysChecked(
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
 ): Promise<{ displays?: DeviceDisplays; degraded: boolean; outcome: DisplayInventoryOutcome }> {
   const commands = [
@@ -251,13 +251,12 @@ export async function readAndroidDeviceDisplaysChecked(
   ] as const;
   const results = await Promise.allSettled(
     commands.map((command) =>
-      adb.executeCommand(
-        command,
-        2000,
-        command.startsWith("shell dumpsys ") ? DUMPSYS_MAX_BUFFER : undefined,
-        true,
+      adb.executeCommand(command, {
+        timeoutMs: 2000,
+        maxBuffer: command.startsWith("shell dumpsys ") ? DUMPSYS_MAX_BUFFER : undefined,
+        noRetry: true,
         signal,
-      ),
+      }),
     ),
   );
   signal?.throwIfAborted();

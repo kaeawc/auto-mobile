@@ -11,7 +11,7 @@ import {
 /**
  * The device ids a `tools/call` carries, as the pool's canonical ids (#11618). One handset
  * reachable over USB and wireless debugging is ONE pooled device held under one id; a tool call
- * may name it by either. Every holder, managed-slot, routing, admission and forward-key decision
+ * may name it by either. Every holder, broker binding, routing, admission and forward-key decision
  * is keyed on the canonical id, so the call's ids are resolved once at the ingress and nothing
  * downstream sees an alias. The resolution itself is `frameDeviceIdentity.ts`, shared with the
  * direct socket frames (#11596).
@@ -151,7 +151,7 @@ export interface ToolCallDeviceIdProbe {
   reconcileDiscovery: (devices: readonly BootedDevice[]) => Promise<void>;
   /**
    * Whether the pool tracks an Android device. One it tracks may be held by a session, assigned
-   * to a managed slot or claimed by another daemon, and an address a failed listing could not
+   * to a broker binding or claimed by another daemon, and an address a failed listing could not
    * place may be a second route to it. With none, there is nothing the address could be an alias
    * of: a host without adb (or without Android devices) is refused nothing here.
    */
@@ -168,7 +168,7 @@ export interface ControlCallDeviceIdentityInput extends ToolCallDeviceIdProbe {
 /**
  * THE entry point for a tool call's device ids (#11618): `args` with the top-level `deviceId` and
  * `killDevice`'s `device.deviceId` as the pool's canonical ids. Every path that takes a
- * caller-supplied id goes through here before any holder, managed-slot, routing, admission or
+ * caller-supplied id goes through here before any holder, broker binding, routing, admission or
  * queue decision reads it: the MCP ingress, an internal call (plan step, nested tool) and the
  * execution-target resolver.
  *

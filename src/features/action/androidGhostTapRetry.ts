@@ -1,5 +1,5 @@
 import type { ViewHierarchyResult } from "../../models";
-import { StaleDisplayError } from "../../models/StaleDisplayError";
+import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";

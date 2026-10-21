@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "rich",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "spans": [
+        {
+          "text": "x",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": ""
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.spans[0].onTap[0].name",
+  "expectedMessage": "Invalid string value"
+}

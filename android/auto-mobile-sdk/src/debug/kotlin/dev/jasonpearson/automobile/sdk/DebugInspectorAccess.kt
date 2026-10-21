@@ -12,13 +12,17 @@ import android.os.Process
  */
 internal object DebugInspectorAccess {
 
+  // Stable Android/Linux UIDs; Process exposes these constants only from API 29.
+  private const val ROOT_UID = 0
+  private const val SHELL_UID = 2000
+
   fun isAuthorized(
     callingUid: Int,
     ownUid: Int,
     callingPackages: Set<String> = emptySet(),
   ): Boolean {
-    return callingUid == Process.SHELL_UID ||
-      callingUid == Process.ROOT_UID ||
+    return callingUid == SHELL_UID ||
+      callingUid == ROOT_UID ||
       callingUid == ownUid ||
       SdkConstants.CTRL_PROXY_PACKAGE in callingPackages
   }

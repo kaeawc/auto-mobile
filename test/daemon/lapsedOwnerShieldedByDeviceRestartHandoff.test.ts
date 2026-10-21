@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -5,7 +6,7 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import {
   isRecoverableDaemonReleaseReason,
   isTerminalReleaseReason,
@@ -41,7 +42,7 @@ describe("a device restart under a session whose owner already lost its heartbea
   let announced: string[];
 
   function createOnPixelA(sessionId: string) {
-    return manager.createSession(sessionId, DEVICE, "android", undefined, undefined, "Pixel_A");
+    return manager.createSession(sessionId, DEVICE, "android", { stableDeviceId: "Pixel_A" });
   }
 
   /** `restoreMs` is how long the handoff release's device teardown takes. */
@@ -52,17 +53,13 @@ describe("a device restart under a session whose owner already lost its heartbea
     reaped = [];
     announced = [];
     persistence = new FakeDeviceSessionPersistence();
-    manager = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => undefined }),
         clock: () => ({ restore: () => timer.sleep(restoreMs) }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     manager.onSessionRelease((_session, _device, reason) => announced.push(reason));
     monitor = new SessionHeartbeatMonitor(
@@ -83,7 +80,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       });
     }
     expect(await manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     monitor.start();
   }
 
@@ -126,6 +123,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       getSessionManager: () => manager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 1, idle: 1, assigned: 0, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -309,7 +307,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       await start(restoreMs);
       await monitor.stop();
       await timer.advanceTimeAsync(silenceMs, () => drainMicrotasks(20));
-      const release = manager.releaseSession(SESSION, "daemon-shutdown", true);
+      const release = manager.releaseSession(SESSION, "daemon-shutdown", { allowExpired: true });
       await drainMicrotasks(100);
       await timer.advanceTimeAsync(restoreMs, () => drainMicrotasks(50));
       expect(await release).toBe(DEVICE);
@@ -322,21 +320,20 @@ describe("a device restart under a session whose owner already lost its heartbea
       expect(announced).toEqual(["daemon-shutdown"]);
       expect(reaped).toEqual([]);
 
-      const successor = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+      const successor = new SessionManager(timer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       successor.stopCleanupTimer();
       const summary = await successor.rehydratePersistedSessions({
         assignDeviceToSession: async (id, _platform, target) =>
           (
-            await successor.createSession(
-              id,
-              DEVICE,
-              "android",
-              target?.liveness?.sessionTimeoutMs,
-              target?.liveness?.heartbeatTimeoutMs,
-              target?.stableDeviceId,
-              target?.liveness,
-              target?.initialOwnership,
-            )
+            await successor.createSession(id, DEVICE, "android", {
+              timeoutMs: target?.liveness?.sessionTimeoutMs,
+              heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+              stableDeviceId: target?.stableDeviceId,
+              recoveredLiveness: target?.liveness,
+              initialOwnership: target?.initialOwnership,
+            })
           ).assignedDevice,
       });
       expect(summary).toEqual({

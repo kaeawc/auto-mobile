@@ -1,0 +1,147 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createDevicePoolDependencies } from "../../../helpers/devicePoolDependencies";
+import { assertInputNotOnForeignBindingDevice } from "../../../../src/daemon/inputDeviceOwnership";
+import {
+  createDefaultBindingExclusion,
+  RegistryBindingExclusion,
+} from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
+import { defaultBindingRegistryPath } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { DevicePool } from "../../../../src/daemon/devicePool";
+import { SessionManager } from "../../../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
+import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
+import { FakeTimer } from "../../../fakes/FakeTimer";
+import { assignBindingDevice } from "./bindingFixtures";
+
+// Most hosts never use managed bindings. A registry that does not exist yet means "nothing is
+// managed": no refusal anywhere, and nothing creates the file just by reading. Only a registry
+// that exists but cannot be read fails closed (discovery_incomplete).
+
+const DEVICE = { name: "iPhone", deviceId: "IOS-1", platform: "ios" as const };
+
+describe("binding registry absence", () => {
+  let timer: FakeTimer;
+  let opens: number;
+  let exists: boolean;
+  let registry: FakeBindingRegistry;
+  let failOpen: boolean;
+
+  const open = async (): Promise<BindingRegistry> => {
+    opens++;
+    if (failOpen) {
+      throw new Error("file is not a database");
+    }
+    return registry;
+  };
+
+  beforeEach(() => {
+    timer = new FakeTimer();
+    timer.setCurrentTime(1_000);
+    opens = 0;
+    exists = false;
+    failOpen = false;
+    registry = new FakeBindingRegistry(timer);
+  });
+
+  async function poolOver(exclusion: RegistryBindingExclusion) {
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const deviceManager = new FakeDeviceUtils();
+    deviceManager.setBootedDevices("ios", [DEVICE]);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "registry-absence", {
+        timer,
+        deviceManager,
+        bindingExclusion: exclusion,
+      }),
+    );
+    await pool.initializeWithDevices([DEVICE]);
+    return { pool, sessionManager };
+  }
+
+  const controlCheck = (pool: DevicePool) =>
+    pool.assertNotAssignedToBinding({
+      action: "tapOn",
+      deviceId: DEVICE.deviceId,
+      platform: "ios",
+    });
+
+  const inputCheck = (pool: DevicePool, sessionManager: SessionManager) =>
+    assertInputNotOnForeignBindingDevice({
+      action: "input/tap",
+      deviceId: DEVICE.deviceId,
+      platform: "ios",
+      requesterSessionUuid: undefined,
+      sessionManager,
+      gate: pool,
+    });
+
+  test("(a, b) an absent registry is an empty snapshot: no refusal, never opened", async () => {
+    const exclusion = new RegistryBindingExclusion(open, timer, () => exists);
+    const { pool, sessionManager } = await poolOver(exclusion);
+
+    await controlCheck(pool);
+    await inputCheck(pool, sessionManager);
+    expect(await pool.bindingStableIds("ios")).toEqual(new Set());
+    expect(opens).toBe(0);
+  });
+
+  test("a registry created later is picked up on the next refresh", async () => {
+    const exclusion = new RegistryBindingExclusion(open, timer, () => exists);
+    const { pool } = await poolOver(exclusion);
+    await controlCheck(pool);
+
+    await assignBindingDevice(registry, "ios", DEVICE.deviceId);
+    exists = true;
+
+    await expect(controlCheck(pool)).rejects.toMatchObject({
+      code: "device_assigned_to_binding",
+    });
+    expect(opens).toBe(1);
+  });
+
+  test("(c) a registry that exists but cannot be read fails closed on control and input", async () => {
+    exists = true;
+    failOpen = true;
+    const { pool, sessionManager } = await poolOver(
+      new RegistryBindingExclusion(open, timer, () => exists),
+    );
+
+    await expect(controlCheck(pool)).rejects.toBeInstanceOf(BindingDiscoveryIncompleteError);
+    await expect(inputCheck(pool, sessionManager)).rejects.toMatchObject({
+      code: "discovery_incomplete",
+    });
+  });
+
+  describe("the daemon's default exclusion", () => {
+    const key = "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR";
+    let saved: string | undefined;
+
+    beforeEach(() => {
+      saved = process.env[key];
+      process.env[key] = join(tmpdir(), `am-bindings-absent-${process.pid}-${Date.now()}`);
+    });
+
+    afterEach(() => {
+      if (saved === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = saved;
+      }
+    });
+
+    test("reads an absent host registry as empty without creating it", async () => {
+      const exclusion = createDefaultBindingExclusion(timer);
+      await exclusion.refresh();
+      expect(exclusion.holderOf({ platform: "ios", stableIds: [DEVICE.deviceId] })).toBeUndefined();
+      expect(existsSync(defaultBindingRegistryPath())).toBe(false);
+      expect(existsSync(process.env[key]!)).toBe(false);
+    });
+  });
+});

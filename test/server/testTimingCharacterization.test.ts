@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { TestExecutionRepository } from "../../src/db/testExecutionRepository";
-import { buildTestTimingResponse, type TestTimingQueryArgs } from "../../src/server/testTimingData";
+import {
+  buildTestTimingResponse,
+  type TestTimingQueryParams,
+} from "../../src/server/testTimingData";
 import { registerTestTimingResources } from "../../src/server/testTimingResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-const filters: TestTimingQueryArgs = {
+const filters: TestTimingQueryParams = {
   testClass: "Login Test",
   testMethod: "test+login",
   deviceId: "device/one",
@@ -26,7 +29,7 @@ describe("test timing filter characterization", () => {
   test.each([{}, filters, { targetSdk: 0, isCi: true }, { testClass: "", deviceName: "" }])(
     "preserves filter inclusion and query defaults for %p",
     async (args) => {
-      const repository = new TestExecutionRepository(new FakeTimer());
+      const repository = new TestExecutionRepository(undefined, new FakeTimer());
       const query = spyOn(repository, "getTimingStats").mockResolvedValue([]);
       try {
         const response = await buildTestTimingResponse(args, repository);
@@ -60,7 +63,7 @@ describe("test timing filter characterization", () => {
   );
 
   test("preserves sample rates, zero timestamps, ordering overrides and result fields", async () => {
-    const repository = new TestExecutionRepository(new FakeTimer());
+    const repository = new TestExecutionRepository(undefined, new FakeTimer());
     const query = spyOn(repository, "getTimingStats").mockResolvedValue([
       {
         testClass: "A",

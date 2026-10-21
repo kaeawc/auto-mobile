@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { SESSION_RELEASE_TEARDOWN_CAP_MS, SessionManager } from "../../src/daemon/sessionManager";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
@@ -45,14 +45,18 @@ async function harness() {
   const timer = new FakeTimer();
   timer.setCurrentTime(1000);
   const fake = new SignalAwareNetwork();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
-    () => ({ restore: async () => {} }),
-    (device) => ({ restore: (profile) => fake.restore(device.deviceId, profile) }),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
+      restore: async () => ({ status: "restored" as const }),
+    }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
+      networkCondition: (device) => ({
+        restore: (profile) => fake.restore(device.deviceId, profile),
+      }),
+    },
+  });
   managers.push(manager);
   const session = await manager.createSession("owner", oldDevice, "android");
   manager.setNetworkCondition("owner", { initialProfile: "none" });
@@ -194,4 +198,8 @@ describe("rebind and network TTL restores use the teardown shield", () => {
     expect(h.fake.calls).toHaveLength(1);
     expect(h.manager.getPendingDeviceCleanup(oldDevice)).toBeNull();
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

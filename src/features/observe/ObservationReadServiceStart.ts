@@ -1,7 +1,8 @@
+import { isIdle, holderOf } from "../../daemon/deviceBinding";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import type { BootedDevice } from "../../models";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { ActionableError } from "../../models/ActionableError";
 import { SingleFlight } from "../../utils/cache/SingleFlight";
 import {
@@ -10,10 +11,8 @@ import {
   isDeviceReadinessLocked,
 } from "../../utils/deviceReadinessLock";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import {
-  createDefaultRunnerReadinessService,
-  type RunnerReadinessService,
-} from "../../ctrlProxy/RunnerReadinessService";
+import type { RunnerReadinessService } from "../../ctrlProxy/RunnerReadinessService";
+import { createDefaultRunnerReadinessService } from "../../daemon/defaultRunnerReadinessService";
 import { serverConfig } from "../../utils/ServerConfig";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -34,18 +33,17 @@ export interface ObservationServiceOwnershipGuard {
 
 export const daemonObservationServiceOwnershipGuard: ObservationServiceOwnershipGuard = {
   canStart(device) {
-    const daemon = DaemonState.getInstance();
-    if (!daemon.isInitialized()) {
+    const pool = defaultDaemonContext.devicePool();
+    if (!pool) {
       return false;
     }
-    const pool = daemon.getDevicePool();
     const pooled = pool.getDevice(device.deviceId);
     return (
       !getDeviceAcquisitionReadiness(deviceReadinessLockKey(device.platform, device.deviceId)) &&
       pooled?.platform === device.platform &&
       pooled.name === device.name &&
-      pooled.status === "idle" &&
-      !pooled.sessionId &&
+      isIdle(pooled) &&
+      !holderOf(pooled) &&
       pool.isSafeForObservationServiceStart(device.deviceId)
     );
   },

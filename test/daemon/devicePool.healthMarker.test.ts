@@ -1,8 +1,12 @@
+import { makePool } from "../helpers/makePool";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/daemon/recordingTeardownRedrive";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video/VideoRecorderService";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { CLOCK_RESTORE_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -15,7 +19,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
 const other = { ...device, deviceId: "emulator-5556", name: "Pixel B" };
@@ -27,7 +33,7 @@ const flush = async () => {
 const managers: SessionManager[] = [];
 afterEach(() => {
   for (const manager of managers.splice(0)) {
-    manager.retireClockRestoration(device.deviceId);
+    manager.retireRestorations(device.deviceId, "removal");
     manager.stopCleanupTimer();
   }
   defaultDeviceClockRestoreRegistry.retire(device.deviceId);
@@ -39,6 +45,7 @@ afterEach(() => {
 async function harness(
   count = 1,
   assigned?: (deviceId: string, incarnation: number, visible: number | undefined) => void,
+  started?: (deviceId: string) => void | Promise<void>,
 ) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1000);
@@ -55,28 +62,30 @@ async function harness(
       throw new Error("restore unavailable");
     }
   };
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore }),
-    () => ({ restore }),
-    { networkCondition: () => ({ restore }), clock: () => ({ restore }) },
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
+      restore: async () => {
+        await restore();
+        return { status: "restored" as const };
+      },
+    }),
+    biometricEnrollmentRestorer: () => ({ restore }),
+    restorers: { networkCondition: () => ({ restore }), clock: () => ({ restore }) },
+  });
   managers.push(manager);
   const utils = new FakeDeviceUtils();
   const devices = count === 1 ? [device] : [device, other];
   utils.setBootedDevices("android", devices);
   PlatformDeviceManagerFactory.setInstance(utils);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "health-test", {
-      timer,
-      deviceManager: utils,
-      deviceHealthMarkers: markers,
-      onDeviceIncarnationAssigned: (id, incarnation) =>
-        assigned?.(id, incarnation, pool.getDeviceIncarnation(id)),
-    }),
-  );
+  const pool = makePool(manager, "health-test", {
+    timer,
+    deviceManager: utils,
+    deviceHealthMarkers: markers,
+    onDeviceIncarnationAssigned: (id, incarnation) =>
+      assigned?.(id, incarnation, pool.getDeviceIncarnation(id)),
+  });
+  pool.setDeviceProcessStartedListener(started);
   await pool.initializeWithDevices(devices);
   return {
     timer,
@@ -104,7 +113,11 @@ async function abandon(
   h: Awaited<ReturnType<typeof harness>>,
   reason: "biometric-enrollment" | "network-condition",
 ) {
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   if (reason === "biometric-enrollment") {
     h.manager.setBiometricEnrollment("old", { initialEnrollment: "not_enrolled" });
   } else {
@@ -127,7 +140,11 @@ function setRestoreState(
   } else if (reason === "network-condition") {
     manager.setNetworkCondition("old", { initialProfile: "none" });
   } else {
-    manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+    manager.getSession("old")!.cacheData.clock = {
+      initialAutomaticTime: 1,
+      clockChangedByUs: false,
+      rootedByUs: false,
+    };
   }
 }
 
@@ -209,7 +226,11 @@ for (const reason of ["biometric-enrollment", "network-condition", "clock"] as c
   test(`${reason} restores successfully with an unchanged incarnation`, async () => {
     const h = await harness();
     h.succeed();
-    await h.pool.bindOrReuseDeviceSession("old", device.deviceId, device.platform);
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "old",
+      deviceId: device.deviceId,
+      platform: device.platform,
+    });
     setRestoreState(h.manager, reason);
     await expect(h.manager.releaseSession("old")).resolves.toBe(device.deviceId);
     expect(h.calls).toBe(1);
@@ -276,7 +297,11 @@ test.each(["remove", "bump", "recreate"] as const)(
 
 test("incarnation captured before initial restore prevents blaming replacement", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.setBiometricEnrollment("old", { initialEnrollment: "not_enrolled" });
   await h.manager.releaseSession("old");
   h.pool.bumpDeviceIncarnation(device.deviceId);
@@ -297,7 +322,11 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
       registerUtilityTools();
       const acquire = () =>
         route === "direct"
-          ? h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")
+          ? h.pool.bindOrReuseDeviceSession({
+              sessionId: "next",
+              deviceId: device.deviceId,
+              platform: "android",
+            })
           : route === "autolock"
             ? h.pool.autolockDevice(device.deviceId, "android", "new-client")
             : ToolRegistry.getTool("setActiveDevice")!.handler({
@@ -321,7 +350,11 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
 
 test("TTL exhaustion marks through the same store, without racing a live owner", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.setNetworkCondition("old", { initialProfile: "none" });
   h.manager.scheduleNetworkConditionExpiry(h.manager.getSession("old")!, 1);
   await h.timer.advanceTimeAsync(1000);
@@ -332,7 +365,13 @@ test("TTL exhaustion marks through the same store, without racing a live owner",
   }
   expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("network-condition");
   expect(h.calls).toBe(3);
-  expect(await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android")).toBe("old");
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "old",
+      deviceId: device.deviceId,
+      platform: "android",
+    }),
+  ).toBe("old");
   h.succeed();
   await h.manager.releaseSession("old");
   await h.pool.releaseDevice(device.deviceId, "old");
@@ -341,8 +380,16 @@ test("TTL exhaustion marks through the same store, without racing a live owner",
 
 test("clock failure marks busy quarantine and successful retry clears it", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
-  h.manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
+  h.manager.getSession("old")!.cacheData.clock = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: false,
+    rootedByUs: false,
+  };
   await h.manager.releaseSession("old");
   await h.pool.releaseDevice(device.deviceId, "old");
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toEqual({ reason: "clock", since: 1000 });
@@ -359,7 +406,7 @@ test("availableDevices surfaces unhealthy only for marked devices", async () => 
   await abandon(h, "network-condition");
   DaemonState.getInstance().initialize(h.manager, h.pool);
   const response = await handleDaemonRequest(
-    { id: "health", method: "daemon/availableDevices" },
+    { id: "health", type: "daemon_request", method: "daemon/availableDevices", params: {} },
     DaemonState.getInstance(),
   );
   expect(response.result?.devices).toEqual([
@@ -384,7 +431,11 @@ test("timed-out background restore stops overlapping retries and retains the mar
     expect(h.calls).toBe(4);
     expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("network-condition");
     await expect(
-      h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android"),
+      h.pool.bindOrReuseDeviceSession({
+        sessionId: "next",
+        deviceId: device.deviceId,
+        platform: "android",
+      }),
     ).rejects.toThrow("network-condition");
   } finally {
     h.resume();
@@ -394,8 +445,16 @@ test("timed-out background restore stops overlapping retries and retains the mar
 
 test("clock timeout surfaces reason while the original restore remains quarantined", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
-  h.manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
+  h.manager.getSession("old")!.cacheData.clock = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: false,
+    rootedByUs: false,
+  };
   h.pause();
   const release = h.manager.releaseSession("old");
   try {
@@ -418,14 +477,18 @@ test("clock timeout surfaces reason while the original restore remains quarantin
     expect(h.calls).toBe(1);
   } finally {
     h.resume();
-    h.manager.retireClockRestoration(device.deviceId);
+    h.manager.retireRestorations(device.deviceId, "removal");
     await release;
   }
 });
 
 test("a TTL restore abandoned after its owner releases still marks the device", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.setNetworkCondition("old", { initialProfile: "none" });
   h.manager.scheduleNetworkConditionExpiry(h.manager.getSession("old")!, 1);
   await h.timer.advanceTimeAsync(1000);
@@ -449,10 +512,12 @@ test("a TTL restore abandoned after its owner releases still marks the device", 
 const APP_CLEANUP_RETRY_BUDGET_MS = 21_000;
 
 async function allocationError(h: Awaited<ReturnType<typeof harness>>): Promise<string> {
-  const error = await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android").then(
-    () => undefined,
-    (caught: unknown) => caught,
-  );
+  const error = await h.pool
+    .bindOrReuseDeviceSession({ sessionId: "next", deviceId: device.deviceId, platform: "android" })
+    .then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
   expect(error).toBeInstanceOf(ActionableError);
   return error instanceof Error ? error.message : "";
 }
@@ -596,7 +661,11 @@ test("a timed-out background restore that later fails continues with a scaled de
 
 test("a failed keep-awake restore quarantines the device until background recovery restores it (#11145)", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.setKeepScreenAwake("old", {
     applied: true,
     method: "svc",
@@ -621,12 +690,14 @@ test("a failed keep-awake restore quarantines the device until background recove
 });
 
 async function typedAllocationError(h: Awaited<ReturnType<typeof harness>>) {
-  return h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android").then(
-    () => {
-      throw new Error("expected refusal");
-    },
-    (error: unknown) => error,
-  );
+  return h.pool
+    .bindOrReuseDeviceSession({ sessionId: "next", deviceId: device.deviceId, platform: "android" })
+    .then(
+      () => {
+        throw new Error("expected refusal");
+      },
+      (error: unknown) => error,
+    );
 }
 
 test("#12112 named unhealthy recovery has an exact shrinking bound", async () => {
@@ -717,7 +788,11 @@ test("#12112 app-cleanup uses its own retry deadline and keeps the permanent rem
 
 test("#12112 clock recovery is unbounded and an orphan marker is permanent", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   setRestoreState(h.manager, "clock");
   await h.manager.releaseSession("old");
   await h.pool.releaseDevice(device.deviceId, "old");
@@ -728,7 +803,7 @@ test("#12112 clock recovery is unbounded and an orphan marker is permanent", asy
     recovering: true,
     retryAfterMs: undefined,
   });
-  h.manager.retireClockRestoration(device.deviceId);
+  h.manager.retireRestorations(device.deviceId, "removal");
   h.markers.mark(device.deviceId, h.pool.getDeviceIncarnation(device.deviceId)!, "clock");
   expect(await typedAllocationError(h)).toMatchObject({
     retryable: false,
@@ -813,7 +888,11 @@ test("#12112 every unhealthy candidate carries evidence and the smallest recover
 
 test("#12112 an unhealthy idle candidate does not preempt waiting for a healthy busy device", async () => {
   const h = await harness(2);
-  await h.pool.bindOrReuseDeviceSession("owner", other.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: other.deviceId,
+    platform: "android",
+  });
   h.markers.mark(device.deviceId, h.pool.getDeviceIncarnation(device.deviceId)!, "app-cleanup");
   let settled = false;
   const waiting = h.pool.assignDeviceToSession("next", "android").finally(() => {
@@ -831,7 +910,11 @@ test("#12112 an unhealthy idle candidate does not preempt waiting for a healthy 
 
 test("#12112 skipped ticks under a live owner preserve all three dispatched attempts", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   let calls = 0;
   h.manager.markDeviceNeedsAppCleanup(
     device.deviceId,
@@ -971,7 +1054,11 @@ test("#12112 multiple recovering markers use the largest remaining device bound"
 
 test("#12112 a bounded marker plus pending clock recovery has no device bound", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.markDeviceNeedsAppCleanup(
     device.deviceId,
     async () => {
@@ -1074,7 +1161,13 @@ test("recording-teardown refuses idle and exact binds until recovery confirms st
   await flush();
   expect(stopped).toBe(true);
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
-  expect(await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")).toBe("next");
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: device.deviceId,
+      platform: "android",
+    }),
+  ).toBe("next");
 });
 
 test("#12112 recording-teardown refusal carries its real recovery bound", async () => {
@@ -1120,7 +1213,7 @@ test("#12112 recording-teardown refusal carries its real recovery bound", async 
   expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: remainingBound });
 });
 
-test("#12112 recording-teardown refusal is permanent after three dispatched failures", async () => {
+test("#12112 recording-teardown refusal reports the re-check after three dispatched failures", async () => {
   const h = await harness();
   let calls = 0;
   h.manager.markDeviceNeedsRecorderTeardown(
@@ -1142,10 +1235,11 @@ test("#12112 recording-teardown refusal is permanent after three dispatched fail
     code: "device_unhealthy",
     deviceId: device.deviceId,
     reason: "recording-teardown",
-    retryable: false,
-    recovering: false,
+    retryable: true,
+    recovering: true,
+    retryAfterMs: 185_000,
   });
-  expect(error).not.toHaveProperty("retryAfterMs", expect.any(Number));
+  expect(error).toHaveProperty("retryAfterMs", 185_000);
   expect(error).toHaveProperty(
     "message",
     expect.stringContaining(
@@ -1158,7 +1252,11 @@ test("#12112 recording-teardown refusal is permanent after three dispatched fail
 
 test("#12112 recording-teardown recovery waits for a live owner without consuming attempts", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   let calls = 0;
   h.manager.markDeviceNeedsRecorderTeardown(
     device.deviceId,
@@ -1175,7 +1273,13 @@ test("#12112 recording-teardown recovery waits for a live owner without consumin
   await h.timer.advanceTimeAsync(1_000, flush);
   expect(calls).toBe(1);
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
-  expect(await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")).toBe("next");
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: device.deviceId,
+      platform: "android",
+    }),
+  ).toBe("next");
 });
 
 test("three recorder recovery failures hold the incarnation independently of app-cleanup", async () => {
@@ -1248,6 +1352,137 @@ test("throwing incarnation listener warns and does not break initialization or r
         String(message).includes("incarnation listener failed"),
       ),
     ).toHaveLength(2);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("pool signals only a newly tracked spawned Android process", async () => {
+  const started: string[] = [];
+  const h = await harness(1, undefined, (id) => {
+    started.push(id);
+  });
+  const pool = h.pool.testHooks;
+  await pool.trackStartedDeviceProcess.call(device, undefined);
+  expect(started).toEqual([]);
+  const child = new FakeChildProcess();
+  await pool.trackStartedDeviceProcess.call(device, child);
+  expect(started).toEqual([device.deviceId]);
+  await pool.trackStartedDeviceProcess.call(device, child);
+  expect(started).toEqual([device.deviceId]);
+});
+
+async function startupPoolHarness(forceStop: () => Promise<void>) {
+  let assigned: ((id: string) => void) | undefined;
+  let started: ((id: string) => void | Promise<void>) | undefined;
+  const h = await harness(
+    1,
+    (id) => assigned?.(id),
+    (id) => started?.(id),
+  );
+  const repo = new FakeVideoRecordingRepository();
+  await repo.insertRecording({
+    recordingId: "old-process",
+    deviceId: device.deviceId,
+    platform: "android",
+    status: "interrupted",
+    fileName: "old.mp4",
+    filePath: "/unused/old.mp4",
+    format: "mp4",
+    sizeBytes: 0,
+    createdAt: "1970-01-01T00:00:00.000Z",
+    startedAt: "1970-01-01T00:00:00.000Z",
+    lastAccessedAt: "1970-01-01T00:00:00.000Z",
+    config: DEFAULT_VIDEO_RECORDING_CONFIG,
+    captureTeardown: {
+      kind: "android-screenrecord",
+      devicePid: 11483,
+      deviceTempPath: "/sdcard/old.mp4",
+    },
+  });
+  await redriveUnconfirmedCaptureTeardowns(h.manager, {
+    recordingRepository: repo,
+    liveDaemonSessionIds: new Set(),
+    ownedCaptureIds: () => [],
+    getDevice: () => device,
+    getDeviceIncarnation: (id) => h.pool.getDeviceIncarnation(id),
+    onDeviceIncarnationAssigned: (listener) => {
+      assigned = listener;
+    },
+    onDeviceProcessStarted: (listener) => {
+      started = listener;
+    },
+    forceStopOrphanedCapture: forceStop,
+    now: () => h.timer.now(),
+    timer: h.timer,
+  });
+  return { ...h, repo };
+}
+
+test("removed startup orphan is acquirable on the first bind with a newly started process", async () => {
+  let commands = 0;
+  const h = await startupPoolHarness(async () => {
+    commands++;
+  });
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeDefined();
+  await h.pool.removeDevice(device.deviceId);
+  await h.pool.addDevice(device);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeDefined();
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "fresh",
+      deviceId: device.deviceId,
+      platform: "android",
+      childProcess: new FakeChildProcess(),
+    }),
+  ).toBe("fresh");
+  expect(commands).toBe(1);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+});
+
+test("process-start listener deadline releases real pool tracking with quarantine intact", async () => {
+  const gate = Promise.withResolvers<void>();
+  let commands = 0;
+  const h = await startupPoolHarness(async () => {
+    commands++;
+    await gate.promise;
+  });
+  const pool = h.pool.testHooks;
+  let settled = false;
+  const tracking = pool.trackStartedDeviceProcess.call(device, new FakeChildProcess()).then(() => {
+    settled = true;
+  });
+  await flush();
+  expect(commands).toBe(1);
+  expect(settled).toBe(false);
+  await h.timer.advanceTimeAsync(4999, flush);
+  expect(settled).toBe(false);
+  await h.timer.advanceTimeAsync(1, flush);
+  await tracking;
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("recording-teardown");
+  expect((await h.repo.getRecording("old-process"))?.captureTeardown).toBeDefined();
+  expect(commands).toBe(1);
+  // Settle the underlying confirmation for teardown; the deadline never overlaps probes.
+  gate.resolve();
+  await flush();
+  h.timer.reset();
+});
+
+test("a rejected process-start listener warns without failing real pool tracking", async () => {
+  const failure = new Error("listener failed");
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const h = await harness(1, undefined, () => {
+    throw failure;
+  });
+  const pool = h.pool.testHooks;
+  const child = new FakeChildProcess();
+  try {
+    await expect(pool.trackStartedDeviceProcess.call(device, child)).resolves.toBeUndefined();
+    expect(h.pool.hasStartedDeviceProcess(device.deviceId, child)).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("process-start listener failed"),
+      failure,
+    );
   } finally {
     warn.mockRestore();
   }

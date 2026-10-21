@@ -1,7 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {
@@ -11,7 +11,7 @@ import {
   joinInFlightDeviceGestureRecordingStop,
   stopDeviceGestureRecording,
   NoUserInputCapturedError,
-} from "../server/deviceGestureRecordingManager";
+} from "./deviceGestureRecordingManager";
 import { logger } from "../utils/logger";
 import {
   DeviceGestureRecordingCommand,
@@ -25,8 +25,8 @@ import {
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
-import { assertInputNotOnForeignManagedSlotDevice } from "./inputDeviceOwnership";
-import { DaemonState } from "./daemonState";
+import { assertInputNotOnForeignBindingDevice } from "./inputDeviceOwnership";
+import { defaultDaemonContext } from "./daemonContext";
 import { deviceGestureRecordingStartOwnershipRefusal } from "./deviceGestureRecordingStartAdmission";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
@@ -51,7 +51,7 @@ export interface DeviceGestureRecordingDeviceResolution {
 
 /** What device resolution needs of the device session manager; narrowed so a test can supply one. */
 export type DeviceGestureRecordingDeviceSessions = Pick<
-  DeviceSessionManager,
+  DeviceReadiness,
   "ensureDeviceReady" | "getPlatformDeviceManager" | "getCurrentDevice"
 >;
 
@@ -62,7 +62,7 @@ export type DeviceGestureRecordingDeviceSessions = Pick<
  * FUNNEL 1. This resolver runs its OWN fresh discovery, so it can be the first
  * path to see the `Unknown (<serial>)` placeholder or a different AVD on a
  * reused serial. It used to discover through
- * `DeviceSessionManager.detectConnectedPlatforms` and never fold the
+ * `DeviceReadiness.detectConnectedPlatforms` and never fold the
  * observation in, so the admission gate in `handleRequest` re-read pool state
  * from BEFORE this discovery — the same shape the video-stream and WebRTC
  * resolvers were given in #6888 (#6923).
@@ -117,28 +117,29 @@ export async function resolveDeviceGestureRecordingDevice(
 }
 
 /**
- * The managed-slot exclusion for a recording start or stop (#11352): a device a managed slot
- * holds, idle or executing, is recorded only by that slot's own execution. Refuses with the typed
- * `device_assigned_to_managed_slot`. Injected so tests can assert on the call without a pool.
+ * The broker binding exclusion for a recording start or stop (#11352): a device a broker binding
+ * holds, idle or executing, is recorded only by that binding's own execution. Refuses with the typed
+ * `device_assigned_to_binding`. Injected so tests can assert on the call without a pool.
  */
-export type DeviceGestureRecordingManagedSlotGate = (input: {
+export type DeviceGestureRecordingBindingGate = (input: {
   action: string;
   device: { deviceId: string; platform: Platform };
   requesterSessionUuid: string | undefined;
 }) => Promise<void>;
 
-const defaultManagedSlotGate: DeviceGestureRecordingManagedSlotGate = async (input) => {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
+  const sessionManager = defaultDaemonContext.sessionManager();
+  const pool = defaultDaemonContext.devicePool();
+  if (!sessionManager || !pool) {
     return;
   }
-  await assertInputNotOnForeignManagedSlotDevice({
+  await assertInputNotOnForeignBindingDevice({
     action: input.action,
     deviceId: input.device.deviceId,
     platform: input.device.platform,
     requesterSessionUuid: input.requesterSessionUuid,
-    sessionManager: daemonState.getSessionManager(),
-    gate: daemonState.getDevicePool(),
+    sessionManager,
+    gate: pool,
   });
 };
 
@@ -147,8 +148,7 @@ const defaultManagedSlotGate: DeviceGestureRecordingManagedSlotGate = async (inp
  * with the manager injectable so a test can drive real readiness (and its device writes) on fakes.
  */
 export function createDeviceGestureRecordingDeviceResolution(
-  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () =>
-    DeviceSessionManager.getInstance(),
+  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () => DeviceReadiness.getInstance(),
 ): DeviceGestureRecordingDeviceResolution {
   return {
     selectDevice: (deviceId, platform) => {
@@ -193,7 +193,7 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
   private readonly deviceResolution: DeviceGestureRecordingDeviceResolution;
-  private readonly managedSlotGate: DeviceGestureRecordingManagedSlotGate;
+  private readonly bindingGate: DeviceGestureRecordingBindingGate;
 
   constructor(
     socketPath: string = getSocketPath(DEVICE_GESTURE_RECORDING_SOCKET_CONFIG),
@@ -203,13 +203,13 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
     deviceResolution: DeviceGestureRecordingDeviceResolution = createDeviceGestureRecordingDeviceResolution(),
-    managedSlotGate: DeviceGestureRecordingManagedSlotGate = defaultManagedSlotGate,
+    bindingGate: DeviceGestureRecordingBindingGate = defaultBindingGate,
   ) {
     super(socketPath, timer, "DeviceGestureRecording");
     this.authenticator = authenticator;
     this.admissionGate = admissionGate;
     this.deviceResolution = deviceResolution;
-    this.managedSlotGate = managedSlotGate;
+    this.bindingGate = bindingGate;
   }
 
   protected async handleRequest(
@@ -231,7 +231,7 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
             return refusal;
           }
         }
-        const daemonInitialized = DaemonState.getInstance().isInitialized();
+        const daemonInitialized = defaultDaemonContext.isInitialized();
         // With a daemon registry, resolve the target before authentication so an unheld-device
         // start gets the same acquire-session refusal even without a requester identity.
         if (!daemonInitialized) {
@@ -297,8 +297,8 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
         deviceId: selected.deviceId,
       });
     }
-    // Preserve managed-slot refusals before the unheld-device start refusal (#11665).
-    await this.managedSlotGate({
+    // Preserve broker binding refusals before the unheld-device start refusal (#11665).
+    await this.bindingGate({
       action: "deviceGestureRecording start",
       device: selected,
       requesterSessionUuid: request.sessionUuid,
@@ -374,7 +374,7 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
     if (request.deviceId !== undefined && active.deviceId !== request.deviceId) {
       throw new ActionableError(`No active recording found for device ${request.deviceId}.`);
     }
-    await this.managedSlotGate({
+    await this.bindingGate({
       action: "deviceGestureRecording stop",
       device: { deviceId: active.deviceId, platform: active.platform },
       requesterSessionUuid: request.sessionUuid,

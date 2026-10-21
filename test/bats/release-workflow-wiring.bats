@@ -17,6 +17,7 @@
   [[ "$script" == *"videoJarSha256"* ]]
   [[ "$script" == *"screenCaptureHelperSha256"* ]]
   [[ "$script" == *"prototypeAgentSha256"* ]]
+  [[ "$script" == *"prototypeViewerSha256"* ]]
 }
 
 @test "prepare-release.yml passes runner sha256 into generate-release-constants" {
@@ -82,7 +83,7 @@
   [ "$status" -eq 0 ]
 
   local artifact_name
-  for artifact_name in control-proxy-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper prototype-agent network-filter; do
+  for artifact_name in control-proxy-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper prototype-agent prototype-viewer network-filter; do
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -135,7 +136,7 @@
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"
   local builder
-  for builder in build-candidate-ctrl-proxy-ios-ipa build-candidate-control-proxy-apk build-candidate-video-server-jar build-candidate-screen-capture-helper build-candidate-prototype-agent; do
+  for builder in build-candidate-ctrl-proxy-ios-ipa build-candidate-control-proxy-apk build-candidate-video-server-jar build-candidate-screen-capture-helper build-candidate-prototype-agent build-candidate-prototype-viewer; do
     run yq -r ".jobs.\"$builder\".needs" "$workflow"
     [ "$status" -eq 0 ]
     [[ "$output" == *"prepare-version"* ]]
@@ -306,7 +307,8 @@
     .github/workflows/build-control-proxy-apk.yml \
     .github/workflows/build-video-server-jar.yml \
     .github/workflows/build-screen-capture-helper.yml \
-    .github/workflows/build-prototype-agent.yml; do
+    .github/workflows/build-prototype-agent.yml \
+    .github/workflows/build-prototype-viewer.yml; do
     run yq -r '.on.workflow_call.inputs."artifact-retention-days".default' "$workflow"
     [ "$status" -eq 0 ]
     [ "$output" = "7" ]
@@ -856,4 +858,30 @@ wiring_requires_yq() {
   grep -Fq -- '-keep @kotlinx.serialization.Serializable class dev.jasonpearson.automobile.** { *; }' "$rules"
   run grep -Fq 'implementation(libs.bundles.compose.ui)' "$build"
   [ "$status" -eq 1 ]
+}
+
+@test "prepare-release records and checksum-verifies the prototype-viewer archive before release delivery (#12255)" {
+  local workflow=".github/workflows/prepare-release.yml"
+  grep -Fq "uses: ./.github/workflows/build-prototype-viewer.yml" "$workflow"
+  grep -Fq "PROTOTYPE_VIEWER_SHA256:" "$workflow"
+  grep -Fq "AutoMobilePrototypeViewer.zip prototypeviewer" "$workflow"
+  # lipo/vtool/codesign are macOS-only: the structural verifier must not run on this ubuntu job.
+  ! grep -Fq "verify-prototype-viewer.sh" "$workflow"
+  ! grep -Fq "uses: ./.github/workflows/build-prototype-viewer.yml" ".github/workflows/release.yml"
+}
+
+@test "release attaches the prototype-viewer archive and its checksum (#12255)" {
+  local workflow=".github/workflows/release.yml"
+  grep -Fq "/tmp/AutoMobilePrototypeViewer.zip" "$workflow"
+  grep -Fq "PROTOTYPE_VIEWER_CHECKSUM:" "$workflow"
+}
+
+@test "prototype-viewer release builder is ad-hoc only and uploads the archive (#12255)" {
+  local workflow=".github/workflows/build-prototype-viewer.yml"
+  grep -Fq "build-prototype-viewer-release.sh" "$workflow"
+  grep -Fq "verify-prototype-viewer.sh" "$workflow"
+  grep -Fq "name: prototype-viewer" "$workflow"
+  grep -Fq "path: /tmp/AutoMobilePrototypeViewer.zip" "$workflow"
+  ! grep -Fq "secrets." "$workflow"
+  ! grep -Fq "notarytool" "$workflow"
 }

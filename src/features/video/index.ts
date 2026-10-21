@@ -6,15 +6,8 @@ export { VideoCaptureFinalizationError, VideoRecorderService } from "./VideoReco
 export type {
   ForceStopOptions,
   VideoCaptureBackend,
-  VideoCaptureConfig,
-  RecordingHandle,
-  RecordingResult,
   StartVideoRecordingOptions,
   ActiveVideoRecording,
-  VideoRecorderServiceDependencies,
 } from "./VideoRecorderService";
 export { DEFAULT_VIDEO_RECORDING_CONFIG, parseVideoRecordingConfig } from "./VideoRecorderService";
-export { PlatformVideoCaptureBackend } from "./PlatformVideoCaptureBackend";
-export { FfmpegVideoProcessingBackend } from "./FfmpegVideoProcessingBackend";
 export { HybridVideoCaptureBackend } from "./HybridVideoCaptureBackend";
-export { IosPhysicalVideoCaptureBackend } from "./IosPhysicalVideoCaptureBackend";

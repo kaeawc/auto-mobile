@@ -1,15 +1,19 @@
+import { schemaProperty } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerSessionLogTools } from "../../src/server/sessionLogTools";
 import type { ResetAppLogsRequest, SessionLogService } from "../../src/server/sessionLogService";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
 describe("resetAppLogs tool (#7006)", () => {
-  beforeEach(() => (ToolRegistry as any).tools.clear());
-  afterEach(() => (ToolRegistry as any).tools.clear());
+  beforeEach(() => ToolRegistry.clearToolsForTesting());
+  afterEach(() => ToolRegistry.clearToolsForTesting());
 
   test("registers a discoverable, strict schema that defaults the container", () => {
     registerSessionLogTools();
@@ -17,9 +21,9 @@ describe("resetAppLogs tool (#7006)", () => {
       (tool) => tool.name === "resetAppLogs",
     );
     expect(definition).toBeDefined();
-    expect(definition!.inputSchema.properties.appId).toBeDefined();
-    expect(definition!.inputSchema.properties.paths).toBeDefined();
-    expect(definition!.inputSchema.properties.container).toBeDefined();
+    expect(schemaProperty(definition!.inputSchema.properties, "appId")).toBeDefined();
+    expect(schemaProperty(definition!.inputSchema.properties, "paths")).toBeDefined();
+    expect(schemaProperty(definition!.inputSchema.properties, "container")).toBeDefined();
 
     const validate = compileAjv2020(definition!.inputSchema);
     expect(validate({ appId: "com.example.app", paths: ["logs/app.log"] })).toBe(true);
@@ -54,9 +58,10 @@ describe("resetAppLogs tool (#7006)", () => {
       },
     };
     registerSessionLogTools(() => service);
-    const registryInternals = ToolRegistry as unknown as { toolCallRepository: unknown };
-    const originalRepository = registryInternals.toolCallRepository;
-    registryInternals.toolCallRepository = { recordToolCall: async () => {} };
+    const originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         resolveExecutionTarget: async (input) => ({
@@ -104,7 +109,7 @@ describe("resetAppLogs tool (#7006)", () => {
       });
     } finally {
       restore();
-      registryInternals.toolCallRepository = originalRepository;
+      ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalRepository });
     }
   });
 });

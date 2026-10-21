@@ -95,7 +95,12 @@ internal constructor(lifecycleFactory: ((DaemonLifecyclePhase) -> Unit) -> Daemo
 
   companion object {
     fun create(): DaemonBootstrap = DaemonBootstrap { listener ->
-      DesktopDaemonLifecycle(phaseListener = listener)
+      DesktopDaemonLifecycle(
+        options =
+          DesktopDaemonLifecycleOptions(
+            phaseListener = listener,
+          ),
+      )
     }
 
     /**

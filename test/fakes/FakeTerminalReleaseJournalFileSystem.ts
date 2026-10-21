@@ -1,10 +1,14 @@
+import type { FaultPlan } from "./FaultPlan";
 import path from "node:path";
 import type { TerminalReleaseJournalDirectory } from "../../src/daemon/terminalReleaseJournal";
 
 /** In-memory durable file store; contents survive a "crash" because tests share the instance. */
 export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJournalDirectory {
+  faultPlan?: FaultPlan;
   readonly files = new Map<string, string>();
   readonly appends: string[] = [];
+  readonly syncedDirectories: string[] = [];
+  failDirectorySync: Error | undefined;
   replaces = 0;
   /** While set, the next append throws this (a full disk). */
   failNextAppend: Error | undefined;
@@ -16,7 +20,8 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
   listNames(dirPath: string): string[] {
     return Array.from(this.files.keys())
       .filter((filePath) => path.dirname(filePath) === dirPath)
-      .map((filePath) => path.basename(filePath));
+      .map((filePath) => path.basename(filePath))
+      .sort();
   }
 
   readText(filePath: string): string | undefined {
@@ -26,22 +31,39 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
     return this.files.get(filePath);
   }
 
-  appendDurable(filePath: string, text: string): void {
+  appendDurable(filePath: string, text: string, syncDirectory = true): void {
     const failure = this.failNextAppend;
     if (failure) {
       this.failNextAppend = undefined;
       throw failure;
     }
-    this.appends.push(text);
-    this.files.set(filePath, (this.files.get(filePath) ?? "") + text);
+    const append = () => {
+      this.appends.push(text);
+      this.files.set(filePath, (this.files.get(filePath) ?? "") + text);
+    };
+    if (this.faultPlan) {
+      this.faultPlan.sync("append", append);
+      this.faultPlan.sync("fsync", () => {});
+    } else {
+      append();
+    }
+    if (syncDirectory) {
+      this.faultPlan?.sync("fsyncDir", () => {});
+      this.syncedDirectories.push(path.dirname(filePath));
+      if (this.failDirectorySync) {
+        throw this.failDirectorySync;
+      }
+    }
   }
 
   replaceDurable(filePath: string, text: string): void {
     if (this.failCompaction) {
       throw this.failCompaction;
     }
+    this.faultPlan?.sync("fsync", () => {});
     this.replaces++;
     this.files.set(filePath, text);
+    this.faultPlan?.sync("fsyncDir", () => {});
   }
 
   remove(filePath: string): void {

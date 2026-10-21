@@ -1,11 +1,12 @@
-import { pruneSessionAppearanceConfigs } from "../server/appearanceManager";
+import { pruneSessionAppearanceConfigs } from "./appearanceManager";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { DeviceSession } from "../db/types";
 import type { RehydrationSummary } from "./sessionManager";
 
 export interface AppearanceSweepSessions {
-  getSession(sessionId: string): unknown;
+  /** A pure lookup: the sweep only asks whether a session is present, so it must not start a lazy release (#12581). */
+  findSession(sessionId: string): unknown;
 }
 
 /**
@@ -56,7 +57,7 @@ export async function sweepStaleAppearanceConfigs(
     const dropped = await prune(
       async (sessionId) =>
         awaitingRecovery.has(sessionId) ||
-        isPresent(sessions.getSession(sessionId)) ||
+        isPresent(sessions.findSession(sessionId)) ||
         (await mayBelongToLivePeer(sessionId, peers, hasLivePeer)),
     );
     if (dropped.length > 0) {

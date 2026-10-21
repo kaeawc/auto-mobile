@@ -1,10 +1,11 @@
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { ExecuteGesture } from "../../../../src/features/action/ExecuteGesture";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { executeAndroidSearchDrag } from "../../../../src/features/action/swipeon/androidSearchDrag";
-import { StaleDisplayError } from "../../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../../src/features/observe/StaleDisplayError";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -31,11 +32,14 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
   const client = AndroidCtrlProxyClient.getInstance(device);
   let scrolls = 0;
   const observe = (): ObserveResult => ({
-    timestamp: timer.now(),
+    updatedAt: timer.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     screenSize: { width: 1080, height: 2400 },
     viewHierarchy: {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           "resource-id": "list",
           scrollable: true,
           bounds: { left: 0, top: 300, right: 1080, bottom: 2100 },
@@ -53,7 +57,7 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
               bounds: { left: 0, top: 600, right: 1080, bottom: 900 },
             },
           ],
-        },
+        }),
       },
     },
   });
@@ -68,7 +72,14 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
     accessibilityDetector: detector,
     accessibilityService: new FakeScrollAccessibilityService(),
     overlayDetector: new FakeOverlayDetector(),
-    talkBackExecutor: new TalkBackSwipeExecutor(device, gesture, client, detector, adb, timer),
+    talkBackExecutor: new TalkBackSwipeExecutor({
+      device,
+      executeGesture: gesture,
+      accessibilityService: client,
+      accessibilityDetector: detector,
+      adb,
+      timer,
+    }),
     getDuration: (options) => options.duration ?? geometry.getSwipeDurationFromSpeed(options.speed),
     resolveBoomerangConfig: () => undefined,
     buildPredictionArgs: () => ({}),
@@ -153,8 +164,8 @@ for (const throws of [false, true]) {
       totalTimeMs: 0,
     });
     const drag = spyOn(AndroidCtrlProxyClient.prototype, "requestDrag").mockImplementation(
-      async (...args) => {
-        args[12]?.();
+      async (request) => {
+        request.onDispatch?.();
         if (throws) {
           throw new Error("timed out");
         }
@@ -202,7 +213,16 @@ test("Android search uses the existing continuous drag, zero press and 100ms end
   expect(
     await gesture.swipe(540, 2114, 540, 590, { duration: 600, searchScroll: true }),
   ).toMatchObject({ success: true });
-  expect(drag.mock.calls[0]?.slice(0, 8)).toEqual([540, 2114, 540, 590, 0, 600, 100, 5000]);
+  expect(drag.mock.calls[0]?.[0]).toMatchObject({
+    x1: 540,
+    y1: 2114,
+    x2: 540,
+    y2: 590,
+    pressDurationMs: 0,
+    dragDurationMs: 600,
+    holdDurationMs: 100,
+    timeoutMs: 5000,
+  });
   expect(adb.getExecutedCommands()).toEqual([]);
 });
 
@@ -245,8 +265,8 @@ test("dispatched drag rejection reports an indeterminate outcome for the loop", 
   const result = await executeAndroidSearchDrag({
     client: {
       requestDeviceInfo: async () => ({ success: true, sdkInt: 36, totalTimeMs: 0 }),
-      requestDrag: async (...args) => {
-        args[12]?.();
+      requestDrag: async (request) => {
+        request.onDispatch?.();
         return { success: false, error: "ack lost", totalTimeMs: 0 };
       },
     },
@@ -270,8 +290,8 @@ test("a drag that loses its display after dispatch carries typed guidance and de
   const result = await executeAndroidSearchDrag({
     client: {
       requestDeviceInfo: async () => ({ success: true, sdkInt: 36, totalTimeMs: 0 }),
-      requestDrag: async (...args) => {
-        args[12]?.();
+      requestDrag: async (request) => {
+        request.onDispatch?.();
         throw new StaleDisplayError(details);
       },
     },

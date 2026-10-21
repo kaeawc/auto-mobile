@@ -10,7 +10,7 @@ import {
   type IosClearDataReinstaller,
 } from "../../../src/utils/ios-cmdline-tools/IosDeviceBackend";
 import { IOS_APP_DATA_FOLDERS } from "../../../src/utils/ios-cmdline-tools/iosAppContainer";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 
 const simulatorId = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
 const physicalId = "00008030-001A2B3C0E11002E";
@@ -30,7 +30,7 @@ class FakeReinstaller implements IosClearDataReinstaller {
 }
 
 function harness() {
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const reinstaller = new FakeReinstaller();
   const removals: Array<{
     path: Parameters<NonNullable<IosClearDataBackendDeps["rm"]>>[0];

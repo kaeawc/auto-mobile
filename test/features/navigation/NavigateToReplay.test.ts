@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { z } from "zod/v4";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -7,17 +7,15 @@ import type { ForegroundObserver } from "../../../src/features/navigation/foregr
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
 import type { BootedDevice } from "../../../src/models";
-import {
-  navigateToHandler,
-  resetNavigateToFactory,
-  setNavigateToFactory,
-} from "../../../src/server/navigationTools";
+import { createNavigateToHandler } from "../../../src/server/navigationTools";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+afterEach(() => mock.restore());
 
 const device: BootedDevice = { deviceId: "replay-device", platform: "ios", name: "Replay device" };
 const options = { targetScreen: "D", platform: "ios" } as const;
@@ -76,29 +74,24 @@ describe("NavigateTo replay safety", () => {
 
   afterEach(() => {
     ToolRegistry.clearTools();
-    resetNavigateToFactory();
   });
 
   function makeNav(
     waiter: ScreenTransitionWaiter | null = { waitForScreen: async () => true },
     setup = noSetup,
   ): NavigateTo {
-    return new NavigateTo(
-      device,
-      new FakeAdbClientFactory(),
-      setup,
-      waiter,
-      graph,
+    return new NavigateTo(device, new FakeAdbClientFactory(), {
+      uiStateSetup: setup,
+      screenWaiter: waiter,
+      navigationManager: graph,
       timer,
-      undefined,
-      undefined,
-      () => cleanForegroundObserver,
-    );
+      foregroundObserverProvider: () => cleanForegroundObserver,
+    });
   }
 
   test("replay routes on the current device after stripping stored routing metadata", async () => {
     const captured: Record<string, unknown>[] = [];
-    ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+    ToolRegistry.register("tapOn", "Fake tap", z.record(z.string(), z.unknown()), async (args) => {
       captured.push(args);
       return { success: true };
     });
@@ -165,7 +158,9 @@ describe("NavigateTo replay safety", () => {
           return false;
         },
       }).execute(options, async (_current, _total, message) => {
-        progressMessages.push(message);
+        if (message !== undefined) {
+          progressMessages.push(message);
+        }
       });
       expect(result).toEqual({
         success: true,
@@ -312,7 +307,7 @@ describe("NavigateTo replay safety", () => {
       signals.push(signal);
       controller.abort();
     };
-    setNavigateToFactory(() => makeNav());
+    const navigateToHandler = createNavigateToHandler({ navigateToFactory: () => makeNav() });
     await expect(navigateToHandler(device, options, undefined, controller.signal)).rejects.toThrow(
       OPERATION_CANCELLED_MESSAGE,
     );
@@ -482,14 +477,12 @@ describe("NavigateTo replay safety", () => {
     const adb = new FakeAdbClientFactory();
     timer.enableAutoAdvance();
     try {
-      const nav = new NavigateTo(
-        { ...device, platform: "android" },
-        adb,
-        noSetup,
-        { waitForScreen: async () => true },
-        graph,
+      const nav = new NavigateTo({ ...device, platform: "android" }, adb, {
+        uiStateSetup: noSetup,
+        screenWaiter: { waitForScreen: async () => true },
+        navigationManager: graph,
         timer,
-      );
+      });
       await expect(
         nav.execute({ ...options, platform: "android" }, undefined, controller.signal),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
@@ -516,10 +509,15 @@ describe("NavigateTo replay safety", () => {
     });
     const controller = new AbortController();
     let presses = 0;
-    ToolRegistry.register("pressButton", "Fake back", {}, async () => {
-      presses++;
-      return { success: true };
-    });
+    ToolRegistry.register(
+      "pressButton",
+      "Fake back",
+      z.record(z.string(), z.unknown()),
+      async () => {
+        presses++;
+        return { success: true };
+      },
+    );
     let outcome: unknown;
     const execution = makeNav()
       .execute(options, undefined, controller.signal)
@@ -550,7 +548,10 @@ describe("NavigateTo replay safety", () => {
   test("scroll setup receives the signal and its abort prevents UI setup and replay", async () => {
     const controller = new AbortController();
     const first = edge("A", "B");
-    first.uiState = { scrollPosition: { targetElement: { text: "toB" }, direction: "down" } };
+    first.uiState = {
+      selectedElements: [],
+      scrollPosition: { targetElement: { text: "toB" }, direction: "down" },
+    };
     graph.setPathResult({ found: true, path: [first], startScreen: "A", targetScreen: "B" });
     const actions: string[] = [];
     const setup: UIStateSetup = {

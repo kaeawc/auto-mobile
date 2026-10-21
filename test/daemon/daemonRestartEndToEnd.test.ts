@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { DaemonShuttingDownError } from "../../src/daemon/client";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { RestartScenario, type ShutdownKind } from "../helpers/daemonRestartScenario";
 import { warmedTests } from "../helpers/warmedTests";
 
@@ -108,8 +108,8 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
               }
             }
 
-            // At 7 s recovery has handed over. An ordinary proxy's pinned probe sees the new
-            // process and stops: reconnecting alone cannot reclaim before the owner timeout.
+            // At 7 s recovery has handed over, but the plain proxy's probe reclaims from the
+            // successor inside its lease + grace owner window, keeping every session (#12282).
             const returnedInsideRecovery = returnsAtMs === 1_000;
             if (returnedInsideRecovery) {
               expect(lapsedAt).toBeUndefined();
@@ -119,7 +119,10 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
               expect(run.scenario.driven.map((ran) => ran.sessionUuid)).toEqual(sessions);
               return;
             }
-            if (returnsAtMs === undefined || returnsAtMs === 7_000) {
+            if (returnsAtMs === 7_000) {
+              expect(lapsedAt).toBeUndefined();
+            }
+            if (returnsAtMs === undefined) {
               expect(lapsedAt).toBe(RELEASED_BY_MS);
             }
             run.ownerReturns();
@@ -163,19 +166,13 @@ describe("restart matrix: a plan's derived label session, an observer and a view
           const { manager, pool } = run.scenario.daemon;
           const close = manager.openPlanLabelMints(base, { A: base, B: label });
           try {
-            await pool.bindOrReuseDeviceSession(
-              label,
-              B,
-              "android",
-              undefined,
-              undefined,
-              undefined,
-              false,
-              undefined,
-              undefined,
-              undefined,
-              run.scenario.proxyConnection,
-            );
+            await pool.bindOrReuseDeviceSession({
+              sessionId: label,
+              deviceId: B,
+              platform: "android",
+              allowSessionRebind: false,
+              mcpSessionId: run.scenario.proxyConnection,
+            });
           } finally {
             close();
           }

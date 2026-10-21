@@ -5,7 +5,11 @@ import {
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import {
+  ownerLeaseHeartbeat,
+  SUSPECT_GRACE_MS,
+  type LivenessOwnerHold,
+} from "../../src/daemon/livenessOwnerLease";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -27,7 +31,9 @@ const test = warmedTests(async () => {
 function setup() {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   managers.push(manager);
   const heartbeat = (sessionId = "S", token = "minter", claim = true) =>
@@ -284,7 +290,7 @@ test("late stall cannot re-arm a silent minter claim hold through tool activity"
     manager.recordToolCallEnded("S");
   }
   timer.setCurrentTime(20_000);
-  const lapsed = { state: "lapsed", remainingMs: 0, holdRemainingMs: 0 };
+  const lapsed: LivenessOwnerHold = { state: "lapsed", remainingMs: 0, holdRemainingMs: 0 };
   expect(manager.getOwnerLeaseHold("S")).toEqual(lapsed);
   expect(manager.forgiveDaemonStall(20_000, 1_000, 0, 19_000)).toBe(1);
   expect(session.stallForgivenAt).toBe(19_000);
@@ -459,21 +465,20 @@ test("rehydrated awaiting-owner keeps its release window and claim behaviour wit
     await persistence.recordLivenessOwnership(id, "minter");
     await persistence.markReleased(id, "released", 0, "daemon-restart");
   }
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   managers.push(manager);
   manager.stopCleanupTimer();
   const assigner: SessionDeviceAssigner = {
     async assignDeviceToSession(id, _platform, target) {
-      const session = await manager.createSession(
-        id,
-        id,
-        "android",
-        target?.liveness?.sessionTimeoutMs,
-        target?.liveness?.heartbeatTimeoutMs,
-        target?.stableDeviceId,
-        target?.liveness,
-        target?.initialOwnership,
-      );
+      const session = await manager.createSession(id, id, "android", {
+        timeoutMs: target?.liveness?.sessionTimeoutMs,
+        heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+        stableDeviceId: target?.stableDeviceId,
+        recoveredLiveness: target?.liveness,
+        initialOwnership: target?.initialOwnership,
+      });
       return session.assignedDevice;
     },
   };

@@ -1,6 +1,9 @@
+import { ENV, readEnvNumber } from "../config/env";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { parseStrictPositiveInteger } from "../utils/envNumbers";
+import type { LockOwnerGenerationProbe } from "../utils/fileLock";
+import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
 
 /** What the watchdog observes about this daemon process. */
 export interface PrivateDaemonOrphanPort {
@@ -30,20 +33,18 @@ export interface PrivateDaemonOrphanPort {
 }
 
 export const DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS = 15 * 60_000;
-export const PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV = "AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS";
 const CHECK_INTERVAL_MS = 30_000;
 const INIT_PID = 1;
 
 /** Idle timeout for an orphaned private daemon; 0 disables the watchdog. */
 export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env[PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV];
-  // oxlint-disable-next-line auto-mobile/no-raw-env-number-parse -- 0 is meaningful here (it disables the watchdog), so the positive-integer helper does not fit.
-  const parsed = raw === undefined ? Number.NaN : Number(raw);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS;
+  return (
+    readEnvNumber(ENV.PRIVATE_DAEMON_ORPHAN_IDLE_MS, env) ?? DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS
+  );
 }
 
 /** A launcher that knows its own pid can pass it explicitly, which wins over the parent pid. */
-export const DAEMON_LAUNCHER_PID_ENV = "AUTOMOBILE_DAEMON_LAUNCHER_PID";
+export const DAEMON_LAUNCHER_PID_ENV = ENV.DAEMON_LAUNCHER_PID.name;
 
 /**
  * The launcher pid the orphan watchdog compares the parent against: the launcher-provided
@@ -60,7 +61,7 @@ export function resolveLauncherPid(
 }
 
 /** Explicit harness marker: `1` arms the orphan watchdog, `0` opts a daemon out of it. */
-export const HARNESS_PRIVATE_DAEMON_ENV = "AUTOMOBILE_HARNESS_PRIVATE_DAEMON";
+export const HARNESS_PRIVATE_DAEMON_ENV = ENV.HARNESS_PRIVATE_DAEMON.name;
 
 /**
  * A harness-style private daemon (a test, lane, or acceptance run) is one whose
@@ -84,13 +85,13 @@ export function isHarnessPrivateDaemon(
     return marker === "1";
   }
   const explicitSocket = firstNonBlank(env, [
-    "AUTOMOBILE_DAEMON_SOCKET_PATH",
-    "AUTO_MOBILE_DAEMON_SOCKET_PATH",
+    ENV.DAEMON_SOCKET_PATH.name,
+    ENV.DAEMON_SOCKET_PATH.legacyName,
   ]);
   return (
     explicitSocket !== "" &&
     socketPath !== defaultSocketPath &&
-    firstNonBlank(env, ["AUTOMOBILE_AUX_SOCKET_DIR"]) !== ""
+    firstNonBlank(env, [ENV.AUX_SOCKET_DIR.name]) !== ""
   );
 }
 
@@ -108,18 +109,23 @@ export class PrivateDaemonOrphanWatchdog {
   private lastClientActivityCount: number | null = null;
   private handle: NodeJS.Timeout | null = null;
   private shutdownRequested = false;
+  private launcherToken: string | undefined;
 
   constructor(
     private readonly port: PrivateDaemonOrphanPort,
     private readonly idleMs: number,
     private readonly timer: Timer = defaultTimer,
     private readonly checkIntervalMs: number = Math.min(CHECK_INTERVAL_MS, idleMs),
+    private readonly launcherGeneration: LockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
   ) {}
 
   start(): void {
     if (this.handle || this.idleMs <= 0) {
       return;
     }
+    this.launcherToken = this.port.launcherIsExplicit()
+      ? this.launcherGeneration.current(this.port.launcherPid())
+      : undefined;
     this.handle = this.timer.setInterval(() => this.check(), this.checkIntervalMs);
     const handle = this.handle as { unref?: () => void };
     if (typeof handle.unref === "function") {
@@ -147,7 +153,9 @@ export class PrivateDaemonOrphanWatchdog {
     }
     const launcher = this.port.launcherPid();
     return this.port.launcherIsExplicit()
-      ? !this.port.isProcessRunning(launcher)
+      ? !this.port.isProcessRunning(launcher) ||
+          (this.launcherToken !== undefined &&
+            this.launcherGeneration.compare(launcher, this.launcherToken) === "different")
       : parent !== launcher;
   }
 

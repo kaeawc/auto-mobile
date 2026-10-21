@@ -33,7 +33,7 @@ import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
-import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
+import { loadSharp } from "../../utils/image/loadSharp";
 import {
   WebpBinaryResolver,
   type ResolvedWebpBinaries,
@@ -42,6 +42,12 @@ import { logger } from "../../utils/logger";
 import type { Logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 import { checkForeignLeaseHolders } from "./foreignLeaseHolders";
+import { checkDeviceOwnership } from "./deviceOwnership";
+import { createReadOnlyBindingRegistry } from "../../daemon/readOnlyBindingRegistry";
+import {
+  DeviceOwnershipView,
+  createDefaultDeviceOwnershipSources,
+} from "../../daemon/deviceOwnershipView";
 import { checkOrphanedDaemons } from "./orphanedDaemons";
 import { listForwardLeaseHolders } from "../../daemon/forwardLeaseHolders";
 
@@ -72,6 +78,7 @@ export interface AutoMobileCheckDependencies {
   checkDaemonBuildIdentity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkOrphanedDaemons?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkForeignLeaseHolders?: () => Promise<CheckResult>;
+  checkDeviceOwnership?: () => Promise<CheckResult>;
   /** Android-branch seams so unit tests avoid real CtrlProxy/ADB I/O. */
   checkCtrlProxy?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkWorkProfileAccessibility?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
@@ -84,7 +91,8 @@ export interface ImageBackendDoctorLogger {
 export interface ImageBackendDoctorDependencies {
   platform?: NodeJS.Platform;
   hostPlatform?: NodeJS.Platform;
-  sharpLoader?: () => Promise<SharpFactory>;
+  /** Only load success matters; the loaded module is never inspected. */
+  sharpLoader?: () => Promise<unknown>;
   webpBinaryResolver?: { resolve(): Promise<ResolvedWebpBinaries> };
   logger?: ImageBackendDoctorLogger;
 }
@@ -606,10 +614,7 @@ async function checkDeviceWorkProfileAccessibility(
     const profileProbe = remainingDoctorProbe(currentProbe);
     const result = await deviceAdb.executeCommand(
       `shell settings --user ${profile.userId} get secure enabled_accessibility_services`,
-      profileProbe.timeoutMs,
-      undefined,
-      true,
-      profileProbe.signal,
+      { timeoutMs: profileProbe.timeoutMs, noRetry: true, signal: profileProbe.signal },
     );
     remainingDoctorProbe(currentProbe);
     const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
@@ -730,6 +735,17 @@ export async function runAutoMobileChecks(
     (
       dependencies.checkForeignLeaseHolders ??
       (() => checkForeignLeaseHolders({ lister: { listHolders: () => listForwardLeaseHolders() } }))
+    )(),
+  );
+  await run(() =>
+    (
+      dependencies.checkDeviceOwnership ??
+      (() =>
+        checkDeviceOwnership({
+          view: new DeviceOwnershipView(
+            createDefaultDeviceOwnershipSources({ registry: createReadOnlyBindingRegistry() }),
+          ),
+        }))
     )(),
   );
 

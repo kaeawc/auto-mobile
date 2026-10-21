@@ -1,5 +1,44 @@
-import { describe, expect, test } from "bun:test";
-import { runTwoDaemonSteps, type TwoDaemonStep } from "../helpers/twoDaemonOwnershipHarness";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { getDbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import type { DeviceSessionActivityUpdate } from "../../src/db/deviceSessionRepository";
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
+import { drainUntil } from "../helpers/fakeTimerStepping";
+import {
+  runTwoDaemonSteps,
+  TwoDaemonWorld,
+  type TwoDaemonStep,
+} from "../helpers/twoDaemonOwnershipHarness";
+
+class WedgedHeartbeatRepository extends FakeDeviceSessionRepository {
+  heartbeatPending = false;
+
+  override async listRecoverableSessions() {
+    return [];
+  }
+
+  override async recordActivity(_sessionId: string, update: DeviceSessionActivityUpdate) {
+    if (update.hasReceivedHeartbeat) {
+      // The daemon acknowledges the heartbeat while its durable write never finishes.
+      this.heartbeatPending = true;
+      await new Promise<void>(() => {});
+    }
+  }
+}
+
+async function withWedgedHeartbeatWorld(run: (world: TwoDaemonWorld) => Promise<void>) {
+  const repository = new WedgedHeartbeatRepository();
+  const world = new TwoDaemonWorld(repository, async () => [], new Set());
+  try {
+    await world.start();
+    world.acquireAny(world.clients[0]!, 0);
+    await drainUntil(() => repository.heartbeatPending, {
+      description: "heartbeat write parked in the shared barrier",
+    });
+    await run(world);
+  } finally {
+    await world.stopAll();
+  }
+}
 
 // Minimized regressions for the cross-daemon violations the two-daemon mode of the seeded
 // ownership harness (test/helpers/twoDaemonOwnershipHarness.ts) found. Each is a `test.todo`: it
@@ -18,6 +57,21 @@ const step = (kind: TwoDaemonStep["kind"], fields: Partial<TwoDaemonStep> = {}):
 });
 
 describe("cross-daemon ownership regressions", () => {
+  // Like the property suite, pay first-use module/JIT costs outside the timed test.
+  beforeAll(async () => {
+    await withWedgedHeartbeatWorld(async () => {});
+  });
+
+  test("world boundaries discard a dead daemon's pending heartbeat write", async () => {
+    await withWedgedHeartbeatWorld(async (world) => {
+      expect(getDbWriteBarrier().inFlightCount()).toBe(1);
+      world.crash(0);
+      await world.stopAll();
+      expect(getDbWriteBarrier().inFlightCount()).toBe(0);
+      expect(getDbWriteBarrier().isDraining()).toBe(false);
+    });
+  });
+
   // killDevice's lifecycle guard (assertLifecycleCallerHoldsDevice,
   // src/server/lifecycleDeviceOwnership.ts) asks only its own daemon's SessionManager who holds
   // the device. A device a live peer daemon holds (its session is assigned and its allocation

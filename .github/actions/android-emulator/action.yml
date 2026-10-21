@@ -100,11 +100,9 @@ runs:
         java -XshowSettings:properties -version 2>&1 | awk -F= '/java.specification.version/ {gsub(/ /,"",$2); if ($2+0 < 21) {print "Java 21+ is required"; exit 1}}'
 
     - name: Enable KVM group perms
-      shell: ${{ inputs.shell }}
-      run: |
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
+      uses: ./.github/actions/enable-kvm
+      with:
+        shell: ${{ inputs.shell }}
 
     - name: Free disk space for emulator
       shell: ${{ inputs.shell }}

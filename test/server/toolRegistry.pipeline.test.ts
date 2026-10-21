@@ -1,3 +1,5 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import {
@@ -29,20 +31,40 @@ import {
   resetToolCallRecordingState,
   startToolCallRecording,
   stopToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import {
   stripToolResultStructuredContent,
   structuredContentOmissionReason,
 } from "../../src/server/stripToolResultStructuredContent";
 import {
   JsonToolOutputArtifactWriter,
-  type ToolOutputArtifactFileSystem,
   type ToolOutputArtifactRetention,
 } from "../../src/server/toolOutputArtifactWriter";
+import { type ToolOutputArtifactFileSystem } from "../../src/server/nodeToolOutputArtifactFileSystem";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+
+const writtenObservation = z.looseObject({
+  viewHierarchy: z.looseObject({
+    hierarchy: z.looseObject({
+      node: z.looseObject({
+        "view-id": z.string().optional(),
+        node: z
+          .array(
+            z.looseObject({
+              "view-id": z.string().optional(),
+              occludedByViewId: z.string().optional(),
+              bounds: z.array(z.number()).optional(),
+            }),
+          )
+          .optional(),
+      }),
+    }),
+  }),
+});
+const finalizedStructured = z.looseObject({ viewHierarchy: z.unknown(), artifact: z.unknown() });
 
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {
@@ -53,14 +75,16 @@ describe("ToolRegistry device-aware pipeline", () => {
 
   let restorePipelineOverrides: (() => void) | undefined;
   let restoreDefaultPipelineOverrides: (() => void) | undefined;
-  let originalToolCallRepository: unknown;
+  let originalToolCallRepository: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["toolCallRepository"];
 
   beforeEach(() => {
     ToolRegistry.clearTools();
     restoreDefaultPipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
+    originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
   });
 
   afterEach(() => {
@@ -68,7 +92,7 @@ describe("ToolRegistry device-aware pipeline", () => {
     restorePipelineOverrides = undefined;
     restoreDefaultPipelineOverrides?.();
     restoreDefaultPipelineOverrides = undefined;
-    (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     serverConfig.setToolOutputsDir(undefined);
     ToolRegistry.clearTools();
   });
@@ -116,6 +140,38 @@ describe("ToolRegistry device-aware pipeline", () => {
     expect(tool.outputSchema).toBeDefined();
   });
 
+  test("registry unwraps a transport refusal before the actionable-error catch", async () => {
+    const typed = new AdbDeviceTransportUnavailableError(
+      device.deviceId,
+      new Error("device offline"),
+    );
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async (input) => ({
+          args: input.args,
+          device,
+          internalCall: false,
+          baseSessionUuid: undefined,
+          sessionUuid: undefined,
+          shouldResolveDevice: true,
+        }),
+      },
+      auditRunner: {
+        run: async () => {
+          throw new ActionableError("outer", { cause: typed });
+        },
+      },
+      planLifecycleManager: { afterExecution: async () => {} },
+    });
+    ToolRegistry.registerDeviceAware("transportProbe", "probe", z.object({}), async () => ({
+      success: true,
+    }));
+    await expect(ToolRegistry.getTool("transportProbe")!.handler({})).rejects.toBe(typed);
+  });
+
   test("wrapped handler delegates to fakeable pipeline collaborators in order", async () => {
     const events: string[] = [];
     const args = { sessionUuid: "session-1", platform: "android" };
@@ -159,14 +215,16 @@ describe("ToolRegistry device-aware pipeline", () => {
         },
       },
     });
-    (ToolRegistry as any).toolCallRepository = {
-      async recordToolCall(record: any) {
-        events.push("record");
-        expect(record.toolName).toBe("pipelineProbe");
-        expect(record.sessionUuid).toBe("session-1");
-        expect(record.durationMs).toBe(7);
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(record: any) {
+          events.push("record");
+          expect(record.toolName).toBe("pipelineProbe");
+          expect(record.sessionUuid).toBe("session-1");
+          expect(record.durationMs).toBe(7);
+        },
       },
-    };
+    });
 
     ToolRegistry.registerDeviceAware(
       "pipelineProbe",
@@ -305,78 +363,131 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   test.each([
-    { payload: { success: false, error: "device unavailable" }, deviceLossWins: true },
-    { payload: { success: true, value: "ok" }, deviceLossWins: false },
-    { payload: { value: "ok" }, deviceLossWins: false },
-  ])(
-    "classifies JSON-text response $payload after device loss",
-    async ({ payload, deviceLossWins }) => {
-      const controller = new AbortController();
-      const finalizedResponse = createJSONToolResponse(payload);
-      restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
-        executionTargetResolver: {
-          async resolveExecutionTarget(input: any) {
-            return {
-              args: input.args,
-              baseSessionUuid: "session-1",
-              device,
-              internalCall: false,
-              sessionUuid: "session-1",
-              shouldResolveDevice: true,
-            };
-          },
-        },
-        afterToolCall: {
-          async handle() {
-            controller.abort(
-              new DeviceLostError(
-                device.deviceId,
-                `device-disconnected:${device.deviceId}`,
-                "loss-test",
-              ),
-            );
-            return { durationMs: 0, finalizedResponse };
-          },
-        },
-        planLifecycleManager: {
-          async afterExecution() {},
-        },
-      });
-      ToolRegistry.registerDeviceAware(
-        "jsonTextFailureProbe",
-        "JSON text failure probe",
-        z.object({}),
-        async () => ({ success: true }),
-      );
-
-      const call = ToolRegistry.getTool("jsonTextFailureProbe")!.handler(
-        {},
-        undefined,
-        controller.signal,
-      );
-      if (deviceLossWins) {
-        await expect(call).rejects.toBeInstanceOf(DeviceLostError);
-      } else {
-        await expect(call).resolves.toEqual(finalizedResponse);
-      }
+    {
+      label: "marked text-only failure",
+      response: () => createJSONToolResponse({ success: false, error: "device unavailable" }),
+      deviceLossWins: true,
     },
-  );
+    {
+      label: "unmarked JSON text is not sniffed as failure",
+      response: () => ({ content: [{ type: "text", text: '{"success":false}' }] }),
+      deviceLossWins: false,
+    },
+    {
+      label: "unmarked JSON text with an error is not sniffed as failure",
+      response: () => ({
+        content: [{ type: "text", text: '{"success":false,"error":"device-secret"}' }],
+      }),
+      deviceLossWins: false,
+    },
+    {
+      label: "structured success wins over marked text failure",
+      response: () => ({
+        ...createJSONToolResponse({ success: false }),
+        structuredContent: { success: true },
+      }),
+      deviceLossWins: false,
+    },
+    {
+      label: "explicit success wins over marked text failure",
+      response: () => ({ ...createJSONToolResponse({ success: false }), success: true }),
+      deviceLossWins: false,
+    },
+    {
+      label: "isError wins over structured success",
+      response: () => ({ structuredContent: { success: true }, isError: true }),
+      deviceLossWins: true,
+    },
+    {
+      label: "explicit failure wins over structured success",
+      response: () => ({ structuredContent: { success: true }, success: false }),
+      deviceLossWins: true,
+    },
+    {
+      label: "structured failure wins over explicit success",
+      response: () => ({ structuredContent: { success: false }, success: true }),
+      deviceLossWins: true,
+    },
+    {
+      label: "plain text",
+      response: () => ({ content: [{ type: "text", text: "plain text" }] }),
+      deviceLossWins: false,
+    },
+    {
+      label: "text success",
+      response: () => createJSONToolResponse({ success: true, value: "ok" }),
+      deviceLossWins: false,
+    },
+    {
+      label: "text without success",
+      response: () => createJSONToolResponse({ value: "ok" }),
+      deviceLossWins: false,
+    },
+  ])("classifies $label after device loss", async ({ response, deviceLossWins }) => {
+    const controller = new AbortController();
+    const finalizedResponse = response();
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        async resolveExecutionTarget(input: any) {
+          return {
+            args: input.args,
+            baseSessionUuid: "session-1",
+            device,
+            internalCall: false,
+            sessionUuid: "session-1",
+            shouldResolveDevice: true,
+          };
+        },
+      },
+      afterToolCall: {
+        async handle() {
+          controller.abort(
+            new DeviceLostError(
+              device.deviceId,
+              `device-disconnected:${device.deviceId}`,
+              "loss-test",
+            ),
+          );
+          return { durationMs: 0, finalizedResponse };
+        },
+      },
+      planLifecycleManager: {
+        async afterExecution() {},
+      },
+    });
+    ToolRegistry.registerDeviceAware(
+      "jsonTextFailureProbe",
+      "JSON text failure probe",
+      z.object({}),
+      async () => ({ success: true }),
+    );
+
+    const call = ToolRegistry.getTool("jsonTextFailureProbe")!.handler(
+      {},
+      undefined,
+      controller.signal,
+    );
+    if (deviceLossWins) {
+      await expect(call).rejects.toBeInstanceOf(DeviceLostError);
+    } else {
+      await expect(call).resolves.toEqual(finalizedResponse);
+    }
+  });
 
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {
     const fakeDeviceSessionManager = new FakeDeviceSessionManager();
     fakeDeviceSessionManager.setConnectedDevices([device]);
-    const originalGetInstance = (AndroidCtrlProxyClient as any).getInstance;
     const log = new FakeLogger();
     const registry = new ToolRegistryClass(undefined, log);
 
-    (registry as any).deviceSessionManager = fakeDeviceSessionManager;
-    (registry as any).toolCallRepository = {
-      async recordToolCall(): Promise<void> {},
-    };
-    (AndroidCtrlProxyClient as any).getInstance = () => ({
-      bindSession() {
-        throw new Error("bind unavailable");
+    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    registry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {},
       },
+    });
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("bind unavailable");
     });
     const restorePipelineOverrides = registry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -402,7 +513,7 @@ describe("ToolRegistry device-aware pipeline", () => {
       );
     } finally {
       restorePipelineOverrides();
-      (AndroidCtrlProxyClient as any).getInstance = originalGetInstance;
+      getInstance.mockRestore();
     }
   });
 
@@ -414,10 +525,12 @@ describe("ToolRegistry device-aware pipeline", () => {
     const controller = new AbortController();
     const fakeManager = new FakeDeviceSessionManager();
     fakeManager.setConnectedDevices([device]);
-    (registry as any).deviceSessionManager = fakeManager;
-    (registry as any).toolCallRepository = {
-      async recordToolCall(): Promise<void> {},
-    };
+    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    registry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {},
+      },
+    });
 
     registry.registerDeviceAware(
       "readinessProbe",
@@ -465,10 +578,12 @@ describe("ToolRegistry device-aware pipeline", () => {
       await resolutionGate;
       return device;
     };
-    (registry as any).deviceSessionManager = fakeManager;
-    (registry as any).toolCallRepository = {
-      async recordToolCall(): Promise<void> {},
-    };
+    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    registry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {},
+      },
+    });
     registry.registerDeviceAware(
       "abortResolutionProbe",
       "Abort resolution probe",
@@ -508,6 +623,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
           format: "json" as const,
           payload: input.payload,
           bytes: 123,
+          resourceUri: "automobile:tool-output/fixture",
           tool: input.tool,
         },
       };
@@ -530,15 +646,15 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
   test("all does not replace the session's last hierarchy", async () => {
     const daemon = DaemonState.getInstance();
-    const originalManager = Reflect.get(daemon, "sessionManager");
     const writes: string[] = [];
-    Reflect.set(daemon, "sessionManager", {
+    const originalManager = daemon.setSessionManagerForTesting({
       setLastHierarchy: () => writes.push("hierarchy"),
     });
     const initialized = spyOn(daemon, "isInitialized").mockReturnValue(true);
     const handler = new DefaultAfterToolCallHandler(() => new FakeObservationArtifactWriter());
     try {
       await handler.handle({
+        outputSchema: undefined,
         name: "observe",
         args: { display: "all" },
         device: undefined,
@@ -552,7 +668,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       expect(writes).toEqual([]);
     } finally {
       initialized.mockRestore();
-      Reflect.set(daemon, "sessionManager", originalManager);
+      daemon.setSessionManagerForTesting(originalManager);
     }
   });
 
@@ -600,6 +716,8 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     startToolCallRecording({ connectionId: "A", timer });
     const handler = new DefaultAfterToolCallHandler();
     await handler.handle({
+      outputSchema: undefined,
+      sessionUuid: undefined,
       name: "tapOn",
       args: { text: "Only B", __mcpSessionId: "B" },
       device: undefined,
@@ -619,8 +737,11 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const handler = new DefaultAfterToolCallHandler();
     for (const connectionId of ["A", "B", "A", "B"]) {
       await handler.handle({
+        outputSchema: undefined,
+        sessionUuid: undefined,
         name: "tapOn",
         args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
+        traits: PLAN_RELEVANT,
         device: undefined,
         internalCall: false,
         response: createStructuredToolResponse({ success: true }),
@@ -661,6 +782,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     // Skeleton is the default observe projection now; this test inspects the
     // written full view hierarchy, so request the full projection per-call.
     const result = await handler.handle({
+      outputSchema: undefined,
       name: "observe",
       args: { project: "full" },
       device: undefined,
@@ -682,13 +804,16 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       },
     ]);
     expect(writer.writes).toHaveLength(1);
-    expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+    expect(
+      writtenObservation.parse(writer.writes[0].data).viewHierarchy.hierarchy.node["view-id"],
+    ).toBeUndefined();
     expect(result.finalizedResponse.structuredContent).toEqual({
       artifact: {
         path: "/tmp/artifacts/observe-1.json",
         format: "json",
         payload: "ObserveResult",
         bytes: 123,
+        resourceUri: "automobile:tool-output/fixture",
         tool: "observe",
       },
     });
@@ -716,6 +841,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     try {
       const result = await handler.handle({
+        outputSchema: undefined,
         name: "observe",
         // Skeleton is the default projection; this test inspects the written full
         // view hierarchy, so request the full projection per-call.
@@ -742,11 +868,12 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         },
       ]);
       expect(writer.writes).toHaveLength(1);
-      const writtenRoot = (writer.writes[0].data as any).viewHierarchy.hierarchy.node;
+      const writtenRoot = writtenObservation.parse(writer.writes[0].data).viewHierarchy.hierarchy
+        .node;
       expect(writtenRoot["view-id"]).toBeUndefined();
-      expect(writtenRoot.node[0]["view-id"]).toBe("com.example:id/floating_overlay");
-      expect(writtenRoot.node[1].occludedByViewId).toBe("com.example:id/floating_overlay");
-      expect(writtenRoot.node[1].bounds).toEqual([24, 0, 1056, 120]);
+      expect(writtenRoot.node?.[0]?.["view-id"]).toBe("com.example:id/floating_overlay");
+      expect(writtenRoot.node?.[1]?.occludedByViewId).toBe("com.example:id/floating_overlay");
+      expect(writtenRoot.node?.[1]?.bounds).toEqual([24, 0, 1056, 120]);
       expect(wireResult.structuredContent).toBeUndefined();
       expect(JSON.parse(wireResult.content[0].text)).toEqual({
         artifact: {
@@ -754,6 +881,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
           format: "json",
           payload: "ObserveResult",
           bytes: 123,
+          resourceUri: "automobile:tool-output/fixture",
           tool: "observe",
         },
       });
@@ -769,6 +897,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     serverConfig.setToolOutputsDir(undefined);
 
     const result = await handler.handle({
+      outputSchema: undefined,
       name: "observe",
       // Skeleton is the default projection; this test asserts the served full
       // view hierarchy stays inline, so request the full projection per-call.
@@ -783,8 +912,12 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     });
 
     expect(writer.writes).toHaveLength(0);
-    expect((result.finalizedResponse.structuredContent as any).viewHierarchy).toBeDefined();
-    expect((result.finalizedResponse.structuredContent as any).artifact).toBeUndefined();
+    expect(
+      finalizedStructured.parse(result.finalizedResponse.structuredContent).viewHierarchy,
+    ).toBeDefined();
+    expect(
+      finalizedStructured.parse(result.finalizedResponse.structuredContent).artifact,
+    ).toBeUndefined();
     expect(result.finalizedResponse.content[0].text).toBe(
       stringifyToolResponse(result.finalizedResponse.structuredContent),
     );
@@ -800,6 +933,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     serverConfig.setToolOutputsDir("/tmp/artifacts");
 
     const result = await handler.handle({
+      outputSchema: undefined,
       name: "observe",
       // Skeleton is the default projection; this test asserts the full view
       // hierarchy is preserved for internal callers, so request it per-call.
@@ -815,7 +949,9 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     expect(requestedDirectories).toEqual([]);
     expect(writer.writes).toHaveLength(0);
-    expect((result.finalizedResponse.structuredContent as any).viewHierarchy).toBeDefined();
+    expect(
+      finalizedStructured.parse(result.finalizedResponse.structuredContent).viewHierarchy,
+    ).toBeDefined();
   });
 
   // #10079: the writer's directory-validation cache and prune throttle are
@@ -823,6 +959,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   describe("artifact writer reuse across tool calls (#10079)", () => {
     const handleObserve = (handler: DefaultAfterToolCallHandler, timer: FakeTimer) =>
       handler.handle({
+        outputSchema: undefined,
         name: "observe",
         args: { project: "full" },
         device: undefined,
@@ -861,6 +998,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       serverConfig.setToolOutputsDir("/tmp/artifacts");
 
       await handler.handle({
+        outputSchema: undefined,
         name: "observe",
         args: { project: "full" },
         device: undefined,
@@ -918,11 +1056,11 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const writer = new FakeObservationArtifactWriter();
     writer.throwOnWrite = new Error("artifact disk is full");
     const telemetryEvents: unknown[] = [];
-    const originalGetInstance = (TelemetryRecorder as any).getInstance;
-    (TelemetryRecorder as any).getInstance = () => ({
-      recordToolCallEvent(event: unknown) {
-        telemetryEvents.push(event);
-      },
+    const recordToolCallEvent = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordToolCallEvent",
+    ).mockImplementation((event) => {
+      telemetryEvents.push(event);
     });
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
@@ -934,6 +1072,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
       await expect(
         handler.handle({
+          outputSchema: undefined,
           name: "observe",
           args: {},
           device: undefined,
@@ -949,17 +1088,17 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       expect(telemetryEvents).toHaveLength(0);
       expect(getToolCallRecordingStatus({ timer })?.stepCount).toBe(0);
     } finally {
-      (TelemetryRecorder as any).getInstance = originalGetInstance;
+      recordToolCallEvent.mockRestore();
     }
   });
 
   test("records a structured tool error as its code:message, not [object Object]", async () => {
-    const telemetryEvents: Array<{ success: boolean; error: unknown }> = [];
-    const originalGetInstance = (TelemetryRecorder as any).getInstance;
-    (TelemetryRecorder as any).getInstance = () => ({
-      recordToolCallEvent(event: { success: boolean; error: unknown }) {
-        telemetryEvents.push(event);
-      },
+    const telemetryEvents: Array<{ success: boolean; error?: unknown }> = [];
+    const recordToolCallEvent = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordToolCallEvent",
+    ).mockImplementation((event) => {
+      telemetryEvents.push(event);
     });
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
@@ -986,6 +1125,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       };
 
       await handler.handle({
+        outputSchema: undefined,
         name: "killDevice",
         args: {},
         device: undefined,
@@ -1003,7 +1143,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         "device_already_stopped: Failed to kill android device: Emulator is not running",
       );
     } finally {
-      (TelemetryRecorder as any).getInstance = originalGetInstance;
+      recordToolCallEvent.mockRestore();
     }
   });
 });

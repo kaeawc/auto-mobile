@@ -27,7 +27,7 @@ import { event } from "../../helpers/prototypeTestEvent";
 
 const spec: PrototypeSpec = {
   id: "panel",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root: { type: "text", text: "Hello" },
 };
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
@@ -270,4 +270,17 @@ describe("IosPrototypeTransport", () => {
     expect(await showing).toEqual({ success: true, requestId: "r1" });
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
+});
+
+test("Android patch transport forwards the request and timeout", async () => {
+  const proxy = new FakeCtrlProxy(new FakeTimer());
+  const transport = new AndroidPrototypeTransport(proxy);
+  const patch = { id: "panel", ops: [{ op: "remove" as const, path: "/data" }] };
+  proxy.setPatchResult({ success: true, revision: 2 });
+  expect(await transport.patch(patch, 250)).toEqual({
+    success: true,
+    revision: 2,
+    delivery: "answered",
+  });
+  expect(proxy.patchRequests).toEqual([patch]);
 });

@@ -2,7 +2,7 @@ import Foundation
 @testable import NetworkFilterCore
 import XCTest
 
-/// Pins the JSON the daemon parses (src/features/network-filter/NetworkFilterBridge.ts).
+/// Pins the JSON the daemon parses (src/features/networkFilter/NetworkFilterBridge.ts).
 final class ControllerContractTests: XCTestCase {
     /// A provider snapshot, decoded rather than built so this suite does not depend
     /// on how `IdentityProbe` or the attribution resolver construct one.

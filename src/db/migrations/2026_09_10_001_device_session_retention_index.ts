@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createIndex("idx_device_sessions_released_at_ms")
     .ifNotExists()
@@ -9,6 +9,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropIndex("idx_device_sessions_released_at_ms").ifExists().execute();
 }

@@ -403,7 +403,9 @@ function formatIssue(issue: ZodIssue, toolName: string, rawInput: unknown): stri
     // prefix to keep the historical "<path> expected X" format.
     return `${path} ${issue.message.replace(/^Invalid input: /, "")}`;
   }
-  return `${path} ${issue.message}`;
+  return issue.message === path || issue.message.startsWith(`${path} `)
+    ? issue.message
+    : `${path} ${issue.message}`;
 }
 
 // Walk `rawInput` along `path`; true only when every segment resolves through an
@@ -605,6 +607,15 @@ export function formatToolParamError(
     });
   const render = (entry: FlattenedIssue): string[] => {
     const { issue } = entry;
+    // A failed inline spec can be absent from Zod's refinement value; judge presence on the input.
+    if (
+      toolName === "prototype" &&
+      issue.code === "custom" &&
+      issue.message === "show requires exactly one of spec or specPath" &&
+      isProvidedInput(rawInput, ["spec"])
+    ) {
+      return [];
+    }
     if (!entry.union) {
       return [renderer(issue, isUnrecognizedKeys(issue) ? issue.keys : undefined)];
     }

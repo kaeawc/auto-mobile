@@ -1,60 +1,14 @@
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { beforeEach, describe, expect, test } from "bun:test";
-import type { SessionManager } from "../../src/daemon/sessionManager";
-import { NetworkState } from "../../src/server/NetworkState";
-import { buildNetworkMockRules } from "../../src/server/networkMockRules";
+import { NetworkState } from "../../src/utils/NetworkState";
+import { buildNetworkMockRules } from "../../src/utils/networkMockRules";
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
   type NetworkDeviceStatePusher,
-} from "../../src/server/networkStateSessionCleanup";
+} from "../../src/daemon/networkStateSessionCleanup";
+import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-type CleanupManager = Parameters<typeof registerNetworkStateSessionCleanup>[0];
-type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];
-type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
-
-class FakeSessionManager implements CleanupManager {
-  releaseCallbacks: ReleaseCallback[] = [];
-  unboundCallbacks: UnboundCallback[] = [];
-  pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
-
-  onSessionRelease(callback: ReleaseCallback): void {
-    this.releaseCallbacks.push(callback);
-  }
-
-  onSessionDeviceUnbound(callback: UnboundCallback): void {
-    this.unboundCallbacks.push(callback);
-  }
-
-  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
-    this.pendingCleanups.push({ deviceId, cleanup });
-  }
-
-  release(sessionId: string, deviceId: string, deviceIdentityReplaced = false): void {
-    for (const callback of this.releaseCallbacks) {
-      callback(
-        sessionId,
-        deviceId,
-        "explicit-release",
-        {
-          sessionId,
-          deviceId,
-          releaseReason: "explicit-release",
-          releasedAtMs: 0,
-          terminal: true,
-          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
-        },
-        { deviceIdentityReplaced },
-      );
-    }
-  }
-
-  unbind(sessionId: string, deviceId: string): void {
-    for (const callback of this.unboundCallbacks) {
-      callback(sessionId, deviceId);
-    }
-  }
-}
 
 /** Records, per device, the rules the device would receive when the push runs. */
 class FakePusher implements NetworkDeviceStatePusher {
@@ -93,7 +47,7 @@ function rule(host: string) {
 
 describe("registerNetworkStateSessionCleanup (#10061)", () => {
   let state: NetworkState;
-  let manager: FakeSessionManager;
+  let manager: FakeSessionCleanupManager;
   let pusher: FakePusher;
 
   beforeEach(() => {
@@ -101,9 +55,45 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
       timer: new FakeTimer(),
       notifier: { notifyResourceUpdated: () => {} },
     });
-    manager = new FakeSessionManager();
+    manager = new FakeSessionCleanupManager();
     pusher = new FakePusher(state);
     registerNetworkStateSessionCleanup(manager, { state: () => state, pusher });
+  });
+
+  test("release cleanup cancels an unanswered SDK push within the ten-second cap", async () => {
+    const timer = new FakeTimer();
+    const boundedManager = new FakeSessionCleanupManager();
+    let signal: AbortSignal | undefined;
+    let deadline: number | undefined;
+    const boundedPusher: NetworkDeviceStatePusher = {
+      push: async (_deviceId, options) => {
+        signal = options?.abortSignal;
+        deadline = options?.deadlineMs;
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        });
+      },
+    };
+    registerNetworkStateSessionCleanup(boundedManager, {
+      state: () => state,
+      pusher: boundedPusher,
+      timer,
+    });
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
+    boundedManager.release("session-1", DEVICE_A);
+    let settled = false;
+    const cleanup = boundedManager.pendingCleanups[0]!.cleanup.then(() => {
+      settled = true;
+    });
+    expect(deadline).toBe(timer.now() + 10_000);
+    timer.advanceTime(9999);
+    expect(signal?.aborted).toBe(false);
+    expect(settled).toBe(false);
+    timer.advanceTime(1);
+    await drainUntil(() => settled, { description: "network cleanup cap" });
+    await cleanup;
+    expect(signal?.aborted).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("releasing the owning session empties the device store and pushes the empty set", async () => {
@@ -122,7 +112,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
   test("identity replacement clears host state without a device push or quarantine", () => {
     state.addMock(DEVICE_A, rule("a.com"), "session-1");
     state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
-    manager.release("session-1", DEVICE_A, true);
+    manager.release("session-1", DEVICE_A, false, true);
     expect(state.getMocks(DEVICE_A).size).toBe(0);
     expect(state.getSimulation(DEVICE_A)).toBeNull();
     expect(pusher.pushes).toEqual([]);

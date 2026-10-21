@@ -29,26 +29,26 @@ import org.junit.runners.model.FrameworkMethod
 class TwoDevicePlainPlanTest {
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var capturingClient: MultiDeviceCapturingFakeDaemonToolClient
+  private lateinit var collaborators: PlanExecutorCollaborators
   private lateinit var runner: AutoMobileRunner
   private lateinit var notifier: MultiDeviceRecordingRunNotifier
 
   @Before
   fun setup() {
     capturingClient = MultiDeviceCapturingFakeDaemonToolClient()
-    DaemonSocketClientManager.testClient = capturingClient
-    AutoMobileSharedUtils.testDeviceChecker = TwoDeviceFakeChecker()
-    DaemonHeartbeat.testController = MultiDeviceFakeDaemonHeartbeat()
-    runner = AutoMobileRunner(TwoDevicePlainTestTarget::class.java)
+    collaborators =
+      PlanExecutorCollaborators(
+        deviceChecker = TwoDeviceFakeChecker(),
+        daemon = capturingClient,
+        heartbeat = MultiDeviceFakeDaemonHeartbeat(),
+      )
+    runner = AutoMobileRunner(TwoDevicePlainTestTarget::class.java, collaborators)
     notifier = MultiDeviceRecordingRunNotifier()
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
     SystemPropertyCache.clear()
-    PlanCache.clear()
     RegexCache.clear()
     TestTimingCache.clear()
   }
@@ -64,11 +64,12 @@ class TwoDevicePlainPlanTest {
   fun `plan content sent to daemon declares both device labels`() {
     capturingClient.setResponse("executePlan", successResponse(executedSteps = 6, totalSteps = 6))
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/dual-device-plain.yaml",
-      emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = false),
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/dual-device-plain.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = false),
+      )
 
     val planContent = capturingClient.capturedArguments?.get("planContent")?.jsonPrimitive?.content
     assertNotNull("Plan content should be sent to daemon", planContent)
@@ -81,11 +82,12 @@ class TwoDevicePlainPlanTest {
   fun `plan steps are distributed across device A and device B`() {
     capturingClient.setResponse("executePlan", successResponse(executedSteps = 6, totalSteps = 6))
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/dual-device-plain.yaml",
-      emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = false),
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/dual-device-plain.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = false),
+      )
 
     val decoded =
       decodePlanContent(capturingClient.capturedArguments!!["planContent"]!!.jsonPrimitive.content)
@@ -122,11 +124,12 @@ class TwoDevicePlainPlanTest {
     )
 
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/dual-device-plain.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/dual-device-plain.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertTrue("Execution should succeed for two-device run", result.success)
   }
@@ -156,11 +159,12 @@ class TwoDevicePlainPlanTest {
     )
 
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/dual-device-plain.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/dual-device-plain.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertFalse("Execution should fail", result.success)
     val errorMessage = result.errorMessage
@@ -227,26 +231,26 @@ class TwoDevicePlainPlanTest {
 class TwoDeviceCriticalSectionPlanTest {
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var capturingClient: MultiDeviceCapturingFakeDaemonToolClient
+  private lateinit var collaborators: PlanExecutorCollaborators
   private lateinit var runner: AutoMobileRunner
   private lateinit var notifier: MultiDeviceRecordingRunNotifier
 
   @Before
   fun setup() {
     capturingClient = MultiDeviceCapturingFakeDaemonToolClient()
-    DaemonSocketClientManager.testClient = capturingClient
-    AutoMobileSharedUtils.testDeviceChecker = TwoDeviceFakeChecker()
-    DaemonHeartbeat.testController = MultiDeviceFakeDaemonHeartbeat()
-    runner = AutoMobileRunner(TwoDeviceCriticalSectionTestTarget::class.java)
+    collaborators =
+      PlanExecutorCollaborators(
+        deviceChecker = TwoDeviceFakeChecker(),
+        daemon = capturingClient,
+        heartbeat = MultiDeviceFakeDaemonHeartbeat(),
+      )
+    runner = AutoMobileRunner(TwoDeviceCriticalSectionTestTarget::class.java, collaborators)
     notifier = MultiDeviceRecordingRunNotifier()
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
     SystemPropertyCache.clear()
-    PlanCache.clear()
     RegexCache.clear()
     TestTimingCache.clear()
   }
@@ -255,11 +259,12 @@ class TwoDeviceCriticalSectionPlanTest {
   fun `plan content includes critical section step with lock name and device count`() {
     capturingClient.setResponse("executePlan", successResponse(executedSteps = 6, totalSteps = 6))
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/dual-device-critical-section.yaml",
-      emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = false),
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/dual-device-critical-section.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = false),
+      )
 
     val planContent = capturingClient.capturedArguments?.get("planContent")?.jsonPrimitive?.content
     assertNotNull("Plan content should be sent to daemon", planContent)
@@ -273,11 +278,12 @@ class TwoDeviceCriticalSectionPlanTest {
   fun `critical section contains device-specific sub-steps for device A and device B`() {
     capturingClient.setResponse("executePlan", successResponse(executedSteps = 6, totalSteps = 6))
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/dual-device-critical-section.yaml",
-      emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = false),
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/dual-device-critical-section.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = false),
+      )
 
     val decoded =
       decodePlanContent(capturingClient.capturedArguments!!["planContent"]!!.jsonPrimitive.content)
@@ -341,11 +347,12 @@ class TwoDeviceCriticalSectionPlanTest {
     )
 
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/dual-device-critical-section.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/dual-device-critical-section.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertTrue("Execution should succeed for criticalSection plan", result.success)
   }
@@ -375,11 +382,12 @@ class TwoDeviceCriticalSectionPlanTest {
     )
 
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/dual-device-critical-section.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/dual-device-critical-section.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertFalse("Execution should fail", result.success)
     assertTrue(
@@ -437,12 +445,22 @@ class TwoDeviceCriticalSectionPlanTest {
 
 /** Target class for plain two-device plan tests. */
 class TwoDevicePlainTestTarget {
-  @Test fun testParallelDeviceOps() {}
+  private var invocations = 0
+
+  @Test
+  fun testParallelDeviceOps() {
+    invocations++
+  }
 }
 
 /** Target class for criticalSection two-device plan tests. */
 class TwoDeviceCriticalSectionTestTarget {
-  @Test fun testCriticalSectionCoordination() {}
+  private var invocations = 0
+
+  @Test
+  fun testCriticalSectionCoordination() {
+    invocations++
+  }
 }
 
 // Shared test infrastructure

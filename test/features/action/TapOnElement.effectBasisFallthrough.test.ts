@@ -18,11 +18,14 @@ afterEach(() => {
 // instead of being taken as final proof nothing changed.
 
 function makeHierarchy(marker: string): ViewHierarchyResult {
-  return { hierarchy: { node: { marker } } } as unknown as ViewHierarchyResult;
+  return { hierarchy: { node: { "resource-id": marker } } };
 }
 
 function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
   return {
+    updatedAt: 1,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     ...overrides,
@@ -33,8 +36,8 @@ function createTapOnElement(): TapOnElement {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   return new TapOnElement(
-    { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-    new FakeAdbClient() as any,
+    { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+    new FakeAdbClient(),
     { timer },
   );
 }
@@ -109,10 +112,10 @@ describe("deriveTapEffect basis fallthrough (#6258)", () => {
       viewHierarchy: makeHierarchy("time-picker-dialog"),
     });
 
-    const effect = (tap as any).deriveTapEffect(previous, current);
+    const effect = tap.deriveTapEffect(previous, current);
 
-    expect(effect.screenChanged).toBe(true);
-    expect(effect.basis).toBe("viewHierarchy changed");
+    expect(effect?.screenChanged).toBe(true);
+    expect(effect?.basis).toBe("viewHierarchy changed");
   });
 
   test("returns false when neither activeWindow nor viewHierarchy changed", () => {
@@ -126,10 +129,10 @@ describe("deriveTapEffect basis fallthrough (#6258)", () => {
     const previous = makeObservation({ activeWindow, viewHierarchy: hierarchy });
     const current = makeObservation({ activeWindow, viewHierarchy: hierarchy });
 
-    const effect = (tap as any).deriveTapEffect(previous, current);
+    const effect = tap.deriveTapEffect(previous, current);
 
-    expect(effect.screenChanged).toBe(false);
-    expect(effect.basis).toBe("activeWindow unchanged");
+    expect(effect?.screenChanged).toBe(false);
+    expect(effect?.basis).toBe("activeWindow unchanged");
   });
 
   test("still reports true immediately when activeWindow itself changed", () => {
@@ -151,9 +154,9 @@ describe("deriveTapEffect basis fallthrough (#6258)", () => {
       viewHierarchy: makeHierarchy("settings"),
     });
 
-    const effect = (tap as any).deriveTapEffect(previous, current);
+    const effect = tap.deriveTapEffect(previous, current);
 
-    expect(effect.screenChanged).toBe(true);
-    expect(effect.basis).toBe("activeWindow changed");
+    expect(effect?.screenChanged).toBe(true);
+    expect(effect?.basis).toBe("activeWindow changed");
   });
 });

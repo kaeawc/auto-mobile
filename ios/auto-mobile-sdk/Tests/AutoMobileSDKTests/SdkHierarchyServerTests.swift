@@ -296,7 +296,8 @@ final class SdkHierarchyServerTests: XCTestCase {
         }
 
         func walkNow() -> SdkViewHierarchy {
-            fatalError("The lifecycle test does not request a hierarchy")
+            XCTFail("The lifecycle test does not request a hierarchy")
+            return SdkViewHierarchy(screenScale: 1, screenWidth: 0, screenHeight: 0, root: nil)
         }
     }
 
@@ -489,7 +490,7 @@ final class SdkHierarchyServerTests: XCTestCase {
     }
 
     /// Sends `head`, then `body` as a separate write, and returns the full response.
-    private func roundTrip(port: NWEndpoint.Port, head: String, body: String) throws -> String {
+    func roundTrip(port: NWEndpoint.Port, head: String, body: String) throws -> String {
         let connection = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
         let queue = DispatchQueue(label: "sdk-hierarchy-server-test-client")
         let responded = expectation(description: "server responds")
@@ -523,7 +524,7 @@ final class SdkHierarchyServerTests: XCTestCase {
         return String(data: response.withLock { $0 }, encoding: .utf8) ?? ""
     }
 
-    private func withRunningServer(
+    func withRunningServer(
         tracker: any SdkHierarchyServing,
         identity: SdkSimulatorIdentity = SdkSimulatorIdentity(environment: [:]),
         _ body: (NWEndpoint.Port) throws -> Void

@@ -1,3 +1,4 @@
+import { unbindDevice, holderOf } from "./deviceBinding";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type {
   PooledDevice,
@@ -13,10 +14,8 @@ import type { DeviceRecoveryCoordinator } from "./deviceRecoveryCoordinator";
 import type { DeviceRecoveryPolicy } from "./poolConfig";
 import type { EmulatorLossIncident, EmulatorRecoveryOutcome } from "./emulatorLossIncident";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
-import {
-  UnconfirmedRecoveryShutdownError,
-  type AndroidEmulatorRecoveryOptions,
-} from "./androidRebootCoordinator";
+import { type AndroidEmulatorRecoveryOptions } from "./androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "./UnconfirmedRecoveryShutdownError";
 import {
   deviceRestartReleaseReason,
   isDeviceRestartReleaseReason,
@@ -264,8 +263,7 @@ export class SessionPreservingRecoveryRunner {
       );
     }
     if (this.canRemoveReleasedDevice(device, sessionId, assignmentCount)) {
-      device.sessionId = null;
-      device.status = "idle";
+      unbindDevice(device);
       this.pool.noteDeviceStateChanged?.(device);
       this.pool.suppressAutoStartForDevice(device);
       await this.pool.removeDevice(device.id, true, device);
@@ -290,7 +288,7 @@ export class SessionPreservingRecoveryRunner {
     return (
       this.pool.getPooledDevice(device.id) === device &&
       device.assignmentCount === assignmentCount &&
-      (device.sessionId === sessionId || device.sessionId === null)
+      (holderOf(device) === sessionId || holderOf(device) === null)
     );
   }
 

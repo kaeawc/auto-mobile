@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  registerAppTools,
-  resetLaunchAppToolDependencies,
-  resetTerminateAppToolDependencies,
-  setLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
-} from "../../src/server/appTools";
+import { registerAppTools } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
@@ -22,6 +16,13 @@ import {
   FakePrototypeAgentPorts,
 } from "../fakes/FakePrototypeAgentInjection";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { FakePrototypeViewerAttacher } from "../fakes/FakePrototypeViewerAttacher";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
+const appTools = createAppToolsHarness();
 
 const SIMULATOR: BootedDevice = {
   deviceId: "11111111-2222-3333-4444-555555555555",
@@ -49,23 +50,15 @@ function setup(options: { launchResult?: LaunchAppResult; connect?: PrototypeAge
   const dylibResolver = new FakePrototypeAgentDylibResolver();
   const clients: FakePrototypeAgentClient[] = [];
   const launches: LaunchCall[] = [];
+  const viewerAttacher = new FakePrototypeViewerAttacher();
   let injectorsCreated = 0;
   const observation = {
     activeWindow: { appId: APP, activityName: "Main", layoutSeqSum: 1 },
   } as ObserveResult;
-  setLaunchAppToolDependencies({
+  appTools.configure("launchApp", {
+    prototypeViewerAttacher: viewerAttacher,
     createLaunchApp: () => ({
-      execute: async (
-        appId,
-        _clear,
-        coldBoot,
-        _activity,
-        _user,
-        _skip,
-        _signal,
-        _args,
-        launchEnvironment,
-      ) => {
+      execute: async (appId, { coldBoot, launchEnvironment }) => {
         launches.push({ coldBoot: coldBoot ?? false, launchEnvironment });
         return (
           options.launchResult ?? { success: true, packageName: appId, pid: 4321, observation }
@@ -97,6 +90,7 @@ function setup(options: { launchResult?: LaunchAppResult; connect?: PrototypeAge
     dylibResolver,
     clients,
     launches,
+    viewerAttacher,
     injectorsCreated: () => injectorsCreated,
   };
 }
@@ -111,16 +105,12 @@ describe("launchApp prototype:true (#10567)", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     SessionReleaseBroadcaster.clearForTesting();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
     registerAppTools();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
+    appTools.clear();
     SessionReleaseBroadcaster.clearForTesting();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
   });
 
   test("a normal launch injects nothing and never resolves the agent", async () => {
@@ -155,6 +145,7 @@ describe("launchApp prototype:true (#10567)", () => {
       token: "token-1",
     });
     expect(response.isError).toBeUndefined();
+    expect(h.viewerAttacher.calls).toHaveLength(0);
     const payload = JSON.parse(response.content[0]!.text) as Record<string, unknown>;
     expect(payload.prototypeAgent).toEqual({
       port: 8770,
@@ -217,7 +208,7 @@ describe("launchApp prototype:true (#10567)", () => {
 
   test("terminateApp drops the record, closes the connection and frees the port", async () => {
     const h = setup();
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => ({
         execute: async () => ({ success: true, packageName: APP, wasRunning: true }),
       }),
@@ -233,9 +224,9 @@ describe("launchApp prototype:true (#10567)", () => {
 
   test("a failed terminateApp keeps the agent record and connection", async () => {
     const h = setup();
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => ({
-        execute: async () => ({ success: false, error: "devicectl failed" }),
+        execute: async () => ({ success: false, error: "devicectl failed", packageName: APP }),
       }),
     });
     await launch(SIMULATOR, { prototype: true });

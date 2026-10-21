@@ -1,26 +1,29 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { McpError } from "../../src/daemon/mcpError";
+import { AndroidAvdIdentityUnresolvedError } from "../../src/devices/deviceBootService";
+import { ActionableError } from "../../src/models/ActionableError";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
-import { TextIndeterminateError } from "../../src/features/action/textTransportTimeout";
+import { TextIndeterminateError } from "../../src/features/action/TextIndeterminateError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { SessionHeldByRecoveryError, SessionSuspectError } from "../../src/daemon/sessionManager";
-import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
-  DeviceAssignedToManagedSlotError,
-  ManagedSlotDiscoveryIncompleteError,
-  ManagedSlotOwnershipUnconfirmedError,
-  ManagedSlotOwnershipLostError,
-} from "../../src/daemon/managedSlots/managedSlotRefusal";
+  DeviceAssignedToBindingError,
+  BindingDiscoveryIncompleteError,
+  BindingOwnershipUnconfirmedError,
+  BindingOwnershipLostError,
+} from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
 
-import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/models/deviceAcquisitionRefusals";
 
 const context = { toolName: "observe", source: "MCP" } as const;
 
@@ -33,6 +36,63 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("transport refusal exposes retry and dispatch fields on both boundaries", () => {
+    const error = new AdbDeviceTransportUnavailableError(
+      "emulator-5554",
+      new Error("adb: device 'emulator-5554' not found"),
+    );
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      expect(isTypedToolRefusal(error)).toBe(true);
+      expect(JSON.parse(shapeToolCallError(error, { ...context, source }).content[0].text)).toEqual(
+        { success: false, error: error.message, ...error.toPayload() },
+      );
+    }
+  });
+
+  test('post-dispatch transport loss exposes dispatched: "unknown" on both boundaries', () => {
+    const error = new AdbDeviceTransportUnavailableError(
+      "emulator-5554",
+      new Error("connection terminated: read failed"),
+      1000,
+      "unknown",
+    );
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      const result = shapeToolCallError(error, { toolName: "openLink", source });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: false,
+        error: error.message,
+        code: "device_transport_unavailable",
+        retryable: true,
+        retryAfterMs: 1000,
+        deviceId: "emulator-5554",
+        dispatched: "unknown",
+      });
+    }
+  });
+
+  test("an unrelated structurally coded actionable error stays plain text", () => {
+    const error = Object.assign(new ActionableError("x"), { code: "some_code", retryable: true });
+    expect(shapeToolCallError(error, context).content[0].text).toBe("Error: x");
+    expect(isTypedToolRefusal(error)).toBe(false);
+  });
+
+  test("an actionable timeout exposes only its code and retryable fields", () => {
+    const error = Object.assign(new ActionableError("x"), {
+      code: "timeout",
+      retryable: true,
+      nextAction: "retry",
+      details: { extra: true },
+    });
+    expect(isTypedToolRefusal(error)).toBe(true);
+    expect(JSON.parse(shapeToolCallError(error, context).content[0].text)).toEqual({
+      success: false,
+      error: "x",
+      code: "timeout",
+      retryable: true,
+    });
   });
 
   test("a recovery-held session is a typed retryable refusal on every tool boundary", () => {
@@ -53,19 +113,17 @@ describe("shapeToolCallError", () => {
     }
   });
 
-  test("the managed-slot payload allowlist preserves each refusal on both tool boundaries", () => {
+  test("the binding payload allowlist preserves each refusal on both tool boundaries", () => {
     const refusals = [
-      new DeviceAssignedToManagedSlotError("tapOn", "device", {
+      new DeviceAssignedToBindingError("tapOn", "device", {
         platform: "android",
         stableDeviceId: "device",
-        holder: "slot",
+        holder: "session_broker",
         scopeKey: "scope",
-        slotIndex: 0,
-        scopeState: "valid",
-        execSessionUuid: null,
+        bindingIndex: 0,
       }),
-      new ManagedSlotDiscoveryIncompleteError("registry busy"),
-      new ManagedSlotOwnershipUnconfirmedError("session"),
+      new BindingDiscoveryIncompleteError("registry busy"),
+      new BindingOwnershipUnconfirmedError("session"),
     ];
     for (const error of refusals) {
       expect(isTypedToolRefusal(error)).toBe(true);
@@ -82,8 +140,8 @@ describe("shapeToolCallError", () => {
   });
 
   test("known ownership loss at the gate equals the terminal release on every wire", () => {
-    const gate = new ManagedSlotOwnershipLostError("session");
-    const released = new SessionReleasedDuringCallError("session", "managed-slot-ownership-lost");
+    const gate = new BindingOwnershipLostError("session");
+    const released = new SessionReleasedDuringCallError("session", "binding-ownership-lost");
     for (const source of ["MCP", "ProxyServer"] as const) {
       const payload = (error: Error) => {
         const { message, ...fields } = JSON.parse(
@@ -98,7 +156,7 @@ describe("shapeToolCallError", () => {
         retryable: false,
         nextAction: "acquire_new_session",
         sessionUuid: "session",
-        reason: "managed-slot-ownership-lost",
+        reason: "binding-ownership-lost",
       });
       expect(payload(gate)).not.toHaveProperty("idle");
     }
@@ -106,9 +164,9 @@ describe("shapeToolCallError", () => {
       mcpRequestFailureDetails(released, undefined),
     );
     expect(gate.message).toBe(
-      "Session session is terminal after managed-slot-ownership-lost and cannot be reused. Acquire a new device with getAndroid or getApple.",
+      "Session session is terminal after binding-ownership-lost and cannot be reused. Acquire a new device with getAndroid or getApple.",
     );
-    expect(gate.name).toBe("ManagedSlotOwnershipLostError");
+    expect(gate.name).toBe("BindingOwnershipLostError");
   });
 
   test("runner-connect deadline is a typed retryable timeout on every tool boundary", () => {
@@ -191,6 +249,49 @@ describe("shapeToolCallError", () => {
     expect(error.message).toBe(
       "Cannot safely recover session session-a: android device 'Pixel_8_API_35' is unavailable or already in use. The session can still resume if the device returns before the recovery window ends (120 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
     );
+  });
+
+  test("shapes an unresolved AVD identity with one candidate", () => {
+    const error = new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", ["emulator-5556"]);
+    expect(error.message).toBe(
+      "target_identity_unresolved: Cannot prove whether Android AVD 'Pixel_8_API_35' is already running; AVD name is unavailable for emulator-5556. Retry after identity discovery recovers.",
+    );
+    expect(isTypedToolRefusal(error)).toBe(true);
+    expect(JSON.parse(shapeToolCallError(error, context).content[0].text)).toEqual({
+      success: false,
+      error: error.message,
+      code: "target_identity_unresolved",
+      retryable: true,
+      retryAfterMs: 1000,
+      deviceId: "emulator-5556",
+      avdName: "Pixel_8_API_35",
+      candidateSerials: ["emulator-5556"],
+    });
+  });
+
+  test("shapes an unresolved AVD identity without selecting multiple candidates", () => {
+    const error = new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [
+      "emulator-5554",
+      "emulator-5556",
+    ]);
+    expect(isTypedToolRefusal(error)).toBe(true);
+    const payload = JSON.parse(shapeToolCallError(error, context).content[0].text);
+    expect(payload).toEqual({
+      success: false,
+      error: error.message,
+      code: "target_identity_unresolved",
+      retryable: true,
+      retryAfterMs: 1000,
+      avdName: "Pixel_8_API_35",
+      candidateSerials: ["emulator-5554", "emulator-5556"],
+    });
+    expect(payload).not.toHaveProperty("deviceId");
+  });
+
+  test("keeps a plain ActionableError untyped", () => {
+    const error = new ActionableError("x");
+    expect(isTypedToolRefusal(error)).toBe(false);
+    expect(shapeToolCallError(error, context).content[0].text).toBe("Error: x");
   });
 
   test("shapes a plain Error", () => {

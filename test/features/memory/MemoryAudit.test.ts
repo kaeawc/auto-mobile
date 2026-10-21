@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { MemoryAuditResultRepository } from "../../../src/db/memoryAuditResultRepository";
 import { MemoryAudit } from "../../../src/features/memory/MemoryAudit";
+import { MemoryAuditResultStore } from "../../../src/features/memory/MemoryAuditResultStore";
 import type { MemoryMetrics } from "../../../src/features/memory/MemoryMetricsCollector";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { createTestDatabase } from "../../db/testDbHelper";
@@ -54,7 +56,7 @@ describe("MemoryAudit - Unit Tests", function () {
         unreachableObjectsThreshold: 1000, // Above 50
       };
 
-      const violations = (audit as any).validateMetrics(metrics, thresholds, null);
+      const violations = audit.validateMetrics(metrics, thresholds, null);
 
       expect(violations.length).toBe(0);
     });
@@ -96,14 +98,14 @@ describe("MemoryAudit - Unit Tests", function () {
         unreachableObjectsThreshold: 1000,
       };
 
-      const violations = (audit as any).validateMetrics(metrics, thresholds, null);
+      const violations = audit.validateMetrics(metrics, thresholds, null);
 
       expect(violations.length).toBeGreaterThan(0);
       const heapViolation = violations.find((v: any) => v.metric === "javaHeapGrowth");
       expect(heapViolation).toBeDefined();
-      expect(heapViolation.actual).toBe(100);
-      expect(heapViolation.threshold).toBe(50);
-      expect(heapViolation.severity).toBe("critical"); // 100 > 50 * 1.5
+      expect(heapViolation?.actual).toBe(100);
+      expect(heapViolation?.threshold).toBe(50);
+      expect(heapViolation?.severity).toBe("critical"); // 100 > 50 * 1.5
     });
 
     test("should detect native heap growth violation", function () {
@@ -143,14 +145,14 @@ describe("MemoryAudit - Unit Tests", function () {
         unreachableObjectsThreshold: 1000,
       };
 
-      const violations = (audit as any).validateMetrics(metrics, thresholds, null);
+      const violations = audit.validateMetrics(metrics, thresholds, null);
 
       expect(violations.length).toBeGreaterThan(0);
       const nativeViolation = violations.find((v: any) => v.metric === "nativeHeapGrowth");
       expect(nativeViolation).toBeDefined();
-      expect(nativeViolation.actual).toBe(70);
-      expect(nativeViolation.threshold).toBe(30);
-      expect(nativeViolation.severity).toBe("critical"); // 70 > 30 * 1.5
+      expect(nativeViolation?.actual).toBe(70);
+      expect(nativeViolation?.threshold).toBe(30);
+      expect(nativeViolation?.severity).toBe("critical"); // 70 > 30 * 1.5
     });
 
     test("should detect GC count violation", function () {
@@ -190,14 +192,14 @@ describe("MemoryAudit - Unit Tests", function () {
         unreachableObjectsThreshold: 1000,
       };
 
-      const violations = (audit as any).validateMetrics(metrics, thresholds, null);
+      const violations = audit.validateMetrics(metrics, thresholds, null);
 
       expect(violations.length).toBeGreaterThan(0);
       const gcViolation = violations.find((v: any) => v.metric === "gcCount");
       expect(gcViolation).toBeDefined();
-      expect(gcViolation.actual).toBe(25);
-      expect(gcViolation.threshold).toBe(10);
-      expect(gcViolation.severity).toBe("critical"); // 25 > 10 * 2
+      expect(gcViolation?.actual).toBe(25);
+      expect(gcViolation?.threshold).toBe(10);
+      expect(gcViolation?.severity).toBe("critical"); // 25 > 10 * 2
     });
 
     test("should detect unreachable objects violation", function () {
@@ -237,15 +239,15 @@ describe("MemoryAudit - Unit Tests", function () {
         unreachableObjectsThreshold: 1000, // Exceeded by 2000
       };
 
-      const violations = (audit as any).validateMetrics(metrics, thresholds, null);
+      const violations = audit.validateMetrics(metrics, thresholds, null);
 
       expect(violations.length).toBeGreaterThan(0);
       const unreachableViolation = violations.find((v: any) => v.metric === "unreachableObjects");
       expect(unreachableViolation).toBeDefined();
-      expect(unreachableViolation.actual).toBe(2000);
-      expect(unreachableViolation.threshold).toBe(1000);
-      expect(unreachableViolation.severity).toBe("critical");
-      expect(unreachableViolation.contributionWeight).toBe(0.95); // High weight for leak indicator
+      expect(unreachableViolation?.actual).toBe(2000);
+      expect(unreachableViolation?.threshold).toBe(1000);
+      expect(unreachableViolation?.severity).toBe("critical");
+      expect(unreachableViolation?.contributionWeight).toBe(0.95); // High weight for leak indicator
     });
 
     test("should detect baseline anomaly when current exceeds 2x baseline", function () {
@@ -293,16 +295,16 @@ describe("MemoryAudit - Unit Tests", function () {
         unreachable_objects_baseline: 100,
       };
 
-      const violations = (audit as any).validateMetrics(metrics, thresholds, baseline);
+      const violations = audit.validateMetrics(metrics, thresholds, baseline);
 
       // Should detect anomalies even though absolute thresholds not exceeded
       const javaAnomalyViolation = violations.find((v: any) => v.metric === "javaHeapAnomaly");
       expect(javaAnomalyViolation).toBeDefined();
-      expect(javaAnomalyViolation.threshold).toBe(100); // baseline * 2
+      expect(javaAnomalyViolation?.threshold).toBe(100); // baseline * 2
 
       const gcAnomalyViolation = violations.find((v: any) => v.metric === "gcCountAnomaly");
       expect(gcAnomalyViolation).toBeDefined();
-      expect(gcAnomalyViolation.threshold).toBe(10); // baseline * 2
+      expect(gcAnomalyViolation?.threshold).toBe(10); // baseline * 2
     });
   });
 
@@ -363,7 +365,7 @@ describe("MemoryAudit - Unit Tests", function () {
         },
       ];
 
-      const diagnostics = (audit as any).generateDiagnostics(metrics, violations);
+      const diagnostics = audit.generateDiagnostics(metrics, violations);
 
       // Should include top contributors (weight > 0.5)
       expect(diagnostics).toContain("javaHeapGrowth");
@@ -411,6 +413,7 @@ describe("MemoryAudit - Unit Tests", function () {
         nativeHeapGrowthMb: 2,
         totalPssGrowthMb: 15,
         gcEvents: [],
+        unreachableObjects: { count: 0, sizeKb: 0, raw: "" },
         gcCount: 3,
         gcTotalDurationMs: 40,
       };
@@ -432,7 +435,7 @@ describe("MemoryAudit - Unit Tests", function () {
         },
       ];
 
-      const diagnostics = (audit as any).generateDiagnostics(metrics, violations);
+      const diagnostics = audit.generateDiagnostics(metrics, violations);
 
       const start = diagnostics.indexOf("Top contributors:\n") + "Top contributors:\n".length;
       const section = diagnostics.slice(start, diagnostics.indexOf("\nMemory snapshots:"));
@@ -472,20 +475,19 @@ describe("MemoryAudit - Unit Tests", function () {
 
       const violations: any[] = [];
 
-      const diagnostics = (audit as any).generateDiagnostics(metrics, violations);
+      const diagnostics = audit.generateDiagnostics(metrics, violations);
 
       expect(diagnostics).toBe("No memory issues detected");
     });
   });
 
-  describe("storeAuditResult", function () {
+  describe("MemoryAuditResultStore.store", function () {
     test("stores sendKeys arguments with typed text redacted", async function () {
       const db = await createTestDatabase();
       try {
-        const dbAudit = new MemoryAudit(
-          { deviceId: "test-device", name: "test", platform: "android" },
-          new FakeAdbClientFactory(),
-          db,
+        const store = new MemoryAuditResultStore(
+          "test-device",
+          new MemoryAuditResultRepository(db),
         );
         const snapshot = { javaHeapMb: 1, nativeHeapMb: 1, totalPssMb: 1, timestamp: 0, raw: "" };
         const metrics: MemoryMetrics = {
@@ -499,15 +501,15 @@ describe("MemoryAudit - Unit Tests", function () {
           gcTotalDurationMs: 0,
           unreachableObjects: null,
         };
-        await dbAudit["storeAuditResult"](
-          "com.example",
-          "sendKeys",
-          { commands: [{ action: "type", text: "hunter2-secret" }], platform: "android" },
+        await store.store({
+          packageName: "com.example",
+          toolName: "sendKeys",
+          toolArgs: { commands: [{ action: "type", text: "hunter2-secret" }], platform: "android" },
           metrics,
-          [],
-          null,
-          true,
-        );
+          violations: [],
+          diagnostics: null,
+          passed: true,
+        });
         const row = await db
           .selectFrom("memory_audit_results")
           .select("tool_args")

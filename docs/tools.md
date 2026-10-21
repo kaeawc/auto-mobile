@@ -15,19 +15,19 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 
 `accessibility`, `accessibilityFocus`, `appLifecycle`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
-`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
+`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
+`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
 `sqlQuery`,
-`swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
+`swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`.
 
 `sessionUuid` selects a daemon device session. When an Android session first
@@ -51,14 +51,24 @@ active daemon session. Not every listed tool exposes every routing field.
 These tools accept `raw` to return the raw hierarchy and `project` to choose
 `"skeleton"` (default) or `"full"` observation output:
 
-`biometricAuth`, `dragAndDrop`, `homeScreen`, `launchApp`, `observe`, `openLink`,
+`biometricAuth`, `dragAndDrop`, `dragPath`, `homeScreen`, `launchApp`, `multiTouch`, `observe`, `openLink`,
 `pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`,
-`shake`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
+`shake`, `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
+
+These tools also accept `includeExtras: true` to opt in to raw accessibility
+`extras` metadata in `structuredContent` only (default off). This is meaningful
+with `project: "full"` or `raw: true`; text content always strips `extras`.
 
 Skeleton output contains actionable entries; the collapsed keyboard marker `<ime>` is not a
 selector. Use `sendKeys` or `keyboard` for keyboard input.
 
 ## Observe & navigate
+
+By default, `observe` returns the same JSON payload in `structuredContent` and
+`content[0].text`, with every `extras` property stripped. To inspect raw
+accessibility metadata, pass `includeExtras: true` with `project: "full"` or
+`raw: true`: only `structuredContent` retains `extras`; text remains compact.
+Error results (`isError: true`) carry their JSON error detail in `content[0].text`.
 
 The default skeleton projection optionally includes `windowTruncations`:
 `[{ windowId: 67, package: "com.android.systemui", reasons: ["max_nodes"] }]`.
@@ -140,7 +150,10 @@ artifact and the response supplies its artifact pointer.
 field reports the resulting selector string, or `null` after an explicit clear
 or a device rebind that clears a pin. The next plain call after a clear omits
 `displayPin`, as does a never-pinned session, preserving the existing response bytes. No output schema or
-`structuredContent` is added for this tool.
+`structuredContent` is added for this tool. For tools that return both, the
+structured payload equals the parsed text payload by default. `extras` require
+`includeExtras: true` and appear only in structured content; text always strips
+them. Error results carry their JSON error detail in `content[0].text`.
 
 Use `setActiveDevice({deviceId, sessionUuid, display})` to pin a panel key or role
 (`inner`, `cover`, `rear`, `external`) for that session and device. Omission leaves
@@ -180,7 +193,7 @@ also applies to the display-aware gestures, `hitTest`, `sendKeys`, observation
 screenshot captures, and `videoRecording` starts; stopping a recording is permitted even if its panel
 has disappeared.
 
-`tapOn`, `tapAt`, `swipeOn`, `pinchOn`, `dragAndDrop`, and `sendKeys` accept the
+`tapOn`, `tapAt`, `swipeAt`, `swipeOn`, `pinchOn`, `dragAndDrop`, and `sendKeys` accept the
 same optional `display` selector. First observe the target panel, then pass the
 same panel to the action. An explicit action rejects coordinates from another
 panel and asks you to re-observe the target. A display-transition refusal carries
@@ -213,6 +226,83 @@ duration must be at most 3000 ms, and forward + pause + return must be at most
 5000 ms. Both schema and action reject unsafe timing before the forward swipe;
 increase `returnSpeed` or shorten the forward duration or pause to fit the budget.
 These timing options require `boomerang: true`.
+
+`swipeOn.durationMs` sets the forward-stroke duration exactly instead of a `speed`
+preset. It is an integer from 1 to 3000 ms (the gesture transport allows a 5000 ms
+request, minus 2000 ms of dispatch headroom). `durationMs` cannot be combined with
+`speed` or `lookFor`; out-of-range values and a `speed` + `durationMs` pair are rejected
+by the schema and the action before any dispatch. Velocity follows from swipe
+distance divided by duration; the result's `duration` (and `x1`/`y1`/`x2`/`y2`) report
+what was dispatched so the fling can be reproduced, and a single successful swipe also
+reports `velocityPxPerSecond` (native px/s, points/s on iOS), computed with the same helper as
+`swipeAt` from `effectiveDurationMs` when the iOS runner clamped the stroke, else `duration`.
+It is omitted when the route ignored the duration (`durationIgnored`, the TalkBack semantic
+scroll), for `boomerang` (`duration` is both legs) and for `lookFor` searches. With `boomerang`, `durationMs`
+applies to the forward stroke only (the return leg keeps `returnSpeed`), and the
+existing 5000 ms boomerang budget still applies. `swipeAt.durationMs` shares these
+bounds; `lookFor` and `boomerang` do not apply to `swipeAt`. Real limits: the value sent is the
+requested duration, not a measured one. Android accessibility gesture strokes complete
+at the last emitted event rather than the planned duration, and the injection path may
+quantize very short strokes, so treat durations below roughly 50 ms as a "very fast
+fling" request rather than exact timing; the effective minimum on each platform is not
+yet measured. Verify the resulting velocity on
+a device when a test depends on a pager or dismiss threshold.
+
+### Multi-finger gestures
+
+`multiTouch` performs a simultaneous 2 to 5 finger `tap`, `longPress`, or `swipe`.
+It is a dedicated tool (default-off, like `pinchOn`) rather than a `fingers` option on
+`tapAt`/`swipeOn`: it keeps the multi-pointer wire request, finger layout and capability
+gate in one place, and leaves the single-finger tools unchanged. `tapOn`/`tapAny`
+element targeting, `swipeAt` coordinate-to-coordinate travel, and multi-finger
+`doubleTap` are not covered.
+
+- **Layout.** `x`/`y` (with `coordinateSpace`) is the center of a horizontal row of
+  fingers, `fingerSpacing` px apart (default 10% of the width, kept within 40 to 160;
+  allowed 10 to 400). The row is shifted to stay on screen; a row wider than the
+  screen is refused. Fingers share one stroke, so a left or right swipe leaves the
+  fingers trailing each other along the travel axis; swipe up or down for fingers
+  side by side. The result's `points` lists every down point and `x1`/`y1`/`x2`/`y2`
+  the first finger's stroke.
+- **Swipe.** `direction` is required, and `distance` (default 30% of the travel axis) is
+  clamped to the room left so every finger stays on screen; a swipe with under 20 px of
+  room is refused, and a clamp is reported in `warning`.
+- **Duration.** `tap` holds 50 ms. `longPress` takes `durationMs` 500 to 3000 (default 1000) and `swipe` 1 to 3000 (default 300); the cap is the 5000 ms gesture request
+  minus 2000 ms of dispatch headroom.
+- **Layers.** With `layer`, every finger's down point is checked before dispatch.
+- **Android.** Two fingers use the existing CtrlProxy request. Three to five fingers
+  need the `multi_finger_gesture_v1` capability: an older APK would silently perform
+  two fingers, so the request is refused before dispatch with an actionable error.
+- **iOS.** The same fingers go through the runner's multi-finger stroke. A request that
+  was written but not acknowledged is reported as `outcomeIndeterminate` and is not
+  retryable, because it may already have landed.
+- **Limits.** A stationary stroke (tap, long press) relies on the platform accepting a
+  zero-length multi-finger path; how apps see that on each OS is unverified until it is
+  checked on a device.
+
+`swipeOn.fromEdge` (`left`, `right`, `top`, `bottom`) starts a raw swipe at a screen or
+panel edge and moves inward, for navigation drawers, the iOS interactive swipe-back,
+and edge-pull panels. `direction` must be the inward finger direction (`left` edge ->
+`right`, `right` -> `left`, `top` -> `down`, `bottom` -> `up`; `gestureType:
+"scrollTowardsDirection"` is resolved first). The touch starts `edgeInset` px (iOS
+points) inside the edge, an integer from 0 to 50, default 4, so it stays inside iOS's
+roughly 20 pt swipe-back recognizer zone. `at` (0 to 1, default 0.5) is the position
+along the edge, and the swipe travels 70% of the screen or panel extent. `fromEdge`
+cannot be combined with `container`, `lookFor`, or `autoTarget: true` (an edge swipe
+never auto-targets a scrollable). Without `display` the edge is the content edge (system
+bars excluded) unless `includeSystemInsets: true` selects the physical screen edge; with
+`display`, the selected panel's own edges are used, and omitting `includeSystemInsets`
+keeps the full panel rect while `false` uses its content edge. Android gesture
+navigation reserves a strip at the physical left and right edges for back, and the
+bottom edge for home, so a very-near-edge swipe there may be taken by the system rather
+than the app; prefer the default content-edge mode or a larger `edgeInset` when that
+happens. Named system gestures ("system back") are not provided. Edge-anchored swipes
+are a `swipeOn` option only: `swipeAt` does not take `fromEdge`, `edgeInset`, or `at`.
+For a coordinate swipe that starts at an edge, pass a `from` point at the edge with
+`coordinateSpace: "normalized"`: `0` is the left or top edge, and `1` resolves to the
+last pixel of the right or bottom edge. In absolute coordinates the far edges are
+exclusive, so use `width - 1` or `height - 1`; a value equal to the screen size is
+rejected as out of bounds.
 
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional
@@ -301,10 +391,85 @@ is aligned automatically, and results report native `x` / `y`.
 
 Set `action: "longPress"` or `"doubleTap"` for another coordinate gesture.
 Long press defaults to 1000 ms and accepts `durationMs` from 500 to 10000;
-`durationMs` is valid only for long press. Double tap uses two native taps
+`durationMs` is valid only for long press. On iOS, double tap uses one runner-side double tap. On Android, it uses two native taps
 200 ms apart. The result includes `action`. All variants accept `display`.
 
-`tapAt`, `tapOn`, `tapAny`, `swipeOn`, `dragAndDrop`, and `pinchOn` fence
+#### Swipe between two points
+
+`swipeAt({ from, to })` swipes from the point where the finger goes down to the point
+where it lifts, so it can draw diagonals that `swipeOn`'s four directions cannot. It is
+opt-in: enable it with `setToolEnabled`. Both points use the same native units as
+`tapAt`, and `coordinateSpace: "normalized"` (0 to 1) or `"percent"` (0 to 100)
+resolve them against the observed `screenSize`. Points outside the screen,
+non-finite values, and a `from` and `to` that resolve to the same point (which would
+be a tap, so use `tapAt`) are rejected before any input is sent. On Android both
+points are rounded to whole pixels first, so two distinct points that round to
+the same pixel are also rejected. The result reports the resolved native
+`x1`, `y1`, `x2`, `y2` and the `duration` in milliseconds.
+
+```ts
+swipeAt({ from: { x: 0.8, y: 0.2 }, to: { x: 0.2, y: 0.8 }, coordinateSpace: "normalized" });
+```
+
+For screenshot-derived points pass `image` with one shared source and a `from` and
+`to` in that image, as `tapAt.image` does for a single point:
+
+```ts
+swipeAt({
+  image: {
+    unit: "normalized",
+    source: { crop: observation.crop, rotation: observation.rotation },
+    from: { x: 0.2, y: 0.5 },
+    to: { x: 0.8, y: 0.25 },
+  },
+});
+```
+
+`image` is mutually exclusive with `from`, `to`, and `coordinateSpace`; its `from` and `to`
+are in `image.unit`, not `coordinateSpace`. Add
+`snapshotId` to reject the swipe when the screen geometry changed since that
+observation, or the reference expired. `speed` selects `slow`, `normal` (the
+default), or `fast` as in `swipeOn`. `durationMs` instead sets the stroke duration
+exactly (integer 1 to 3000 ms, the same bounds and transport headroom as
+`swipeOn.durationMs`); it cannot be combined with `speed`, and either violation is
+rejected before any input is sent. Velocity is the straight-line distance divided by
+the duration: the result's `duration` is what was dispatched and
+`velocityPxPerSecond` is that velocity in native px/s (points/s on iOS), so a fling can be reproduced.
+The same quantization caveat as `swipeOn.durationMs` applies on Android and no
+per-platform effective minimum has been measured. `layer` is checked at the `from` point, because touches go to the window under the
+finger-down point. `display` (panel key, role, or `active`) swipes on that
+Android panel: points, `coordinateSpace` and `image` resolve against the panel's observed
+`screenSize`, `snapshotId` and `layer` are checked against its observation, and the display fence
+is re-checked before dispatch (a changed or removed display returns `staleDisplay`). The default display uses the same injection as a call without `display`; other panels use CtrlProxy
+with the panel's `displayId` (falling back to `input touchscreen -d` if it fails before dispatch, or
+on older APKs). A swipe dispatched but not confirmed returns `outcomeIndeterminate`. iOS refuses
+`display`.
+
+##### Stylus pointer
+
+`tapAt` and `swipeAt` accept `pointer: { toolType: "stylus" }` to inject a stylus instead of a
+finger on Android, through `adb shell input stylus` (no root). `tapAt` supports `tap` and
+`longPress` (a zero-distance stylus swipe with the duration); `swipeAt` is the straight two-point
+swipe. The shell injects a constant pressure of 1.0, so `pressure` may be omitted or `1`; any other
+value is refused, never rounded. Everything else fails with a capability error before any input
+and never falls back to a finger touch: iOS, `doubleTap`, `display`, an Android release before
+API 31, and a device whose API level cannot be read. API 31 (Android 12) is the first release whose
+`input` command sets the injected event's tool type from its source (read from the AOSP tags:
+`android-12.0.0_r1` assigns it, while `android-7.0.0_r36` through `android-11.0.0_r48` build the event
+without one). That minimum is read from source; a probe app on a device that observes `TOOL_TYPE_STYLUS`
+is tracked in #13082. A recorded stylus step keeps its `pointer`, so a replay on a device that cannot
+honor it fails instead of becoming a finger touch. TalkBack routing is bypassed (a stylus tap is a raw `input` event), and whether TalkBack's touch exploration
+intercepts stylus events is unverified (#13082). Tilt, eraser, hover, pressure curves and `dragPath`
+are not supported.
+
+`recordDeviceGestures` exports a swipe that is clearly diagonal (off-axis travel at least
+half the on-axis travel), or a swipe with a known path but no direction, as
+`swipeAt` with `coordinateSpace: "normalized"` fractions of the recorded screen, so
+replay adapts to a different screen size. Straighter swipes stay `swipeOn` with a
+direction. Replay on a different orientation maps the same fractions onto the rotated
+screen.
+
+`tapAt`, `tapOn`, `tapAny`, `swipeOn`, `swipeAt`, `dragAndDrop`, and `pinchOn` fence
 coordinates when the display transitions after the caller's observation or while
 the action is preparing or dispatching. These failures include `staleDisplay`
 with the observed and current identity generations and `retry: "observe"`.
@@ -637,15 +802,53 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, or reports prototypes.                   |
+| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, reports, saves, lists or deletes.        |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
 ### prototype
 
+On Android, `show replaceOthers: false` retains other prototype windows (requires
+`prototype_multi_surface_v1`), up to four distinct ids; a fifth is refused listing the shown ids.
+A same-id show with false replaces only that prototype; omitted or true replaces the other ids.
+`dismiss {id}` removes one, `dismiss {all: true}` removes all, and `status` lists every shown id.
+`inspect` reconciles the full list. iOS shows one prototype at a time and refuses false.
+See [multiple surfaces (phase 1)](design-docs/plat/android/prototype-ux.md#multiple-surfaces-phase-1).
+
+Data, `repeat.items {path}`, `repeat.key`, `{data:/pointer}` text and `{data: pointer}` conditions
+require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show. Text field options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) similarly require `prototype_text_field_options_v1`; without it nothing is shown.
+require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
+`onLongPress`/`onDoubleTap` on box/row/column/text/image/icon/card require
+`prototype_gestures_v1`, with the same refusal before uploads or show.
+`swipeActions` on a row or listItem requires `prototype_swipe_actions_v1`, with the same refusal.
+textField `trailingIcon`, `imeAction` and `onSubmit` require `prototype_text_field_actions_v1`, with the same refusal.
+`carousel` nodes and `pager.indicator` require `prototype_carousel_v1`, with the same refusal.
+textField `leadingIcon` requires `prototype_text_field_leading_icon_v1`, with the same refusal.
+`scroll.refresh` (`{stateKey, onRefresh}`, pull-to-refresh on a vertical scroll) requires
+`prototype_refresh_v1`, with the same refusal.
+`setData`, `appendData` and `removeData` actions (a tap changing `/data`, with a `change` event per
+write and `baseRevision` required for later `/data` patches) require `prototype_data_actions_v1`,
+with the same refusal; see [data actions](design-docs/plat/android/prototype-ux.md#data-actions-12519).
+A root-level `storage` block (`{version, keys: ["state:darkMode", "data:/cart"]}`) makes the device keep
+those values per prototype id across shows, requires `prototype_storage_v1` with the same refusal,
+and is reported by `inspect` as `storage` per prototype. Stored values replace the spec's on the next
+show of the same id unless `version` changed; `clearStorage {id}` wipes them and `deleteSaved` also
+clears them; see [storage](design-docs/plat/android/prototype-ux.md#storage-12522).
+`request` actions (an HTTP call to any http(s) URL from a tap, written into `/data` with a
+`statusKey` lifecycle, `onSuccess` / `onError` lists and a `prototype_request` emit event) require
+`prototype_network_v1`, and `prototype_network_device_v1` as well for `via: "device"`, with the same
+refusal; see [the request action](design-docs/plat/android/prototype-ux.md#request-action-12523).
+Data is nested content the agent supplies and state is user-owned scalars. Rendering bindings
+(`{data:/pointer}` text, `{data: pointer}` conditions, `repeat` rows) resolve against the current data
+whenever it changes, starting with the show; action bindings (`request` url, headers, query and body,
+`setData` values, emit context) are read at the moment the action runs, after the earlier actions in
+the list have committed. The device may write data (`setData`, `appendData`, `removeData`, a request
+`into`), so patches to `/data` follow the `baseRevision` rule above. `status` remembers shown data
+beside state, `inspect` reports and adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
+
 The `prototype` tool (Android and iOS simulators) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
-`show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
-window, optional state, root) and always renders the whole spec. Instead of an inline
+`show`, `patch`, `dismiss`, `status`, `inspect`, `awaitEvent`, `save`, `listSaved`, `deleteSaved`, or `clearStorage`. `show` requires a full `spec` (id,
+window, optional data and state, root) and always renders the whole spec. Instead of an inline
 `spec`, `show` accepts `specPath`, the absolute path of a local JSON file with the same spec
 (exactly one of the two): the daemon reads it, refuses a file over the spec byte limit (1 MiB)
 before reading it, validates it like an inline spec, and names the file in every error.
@@ -654,6 +857,38 @@ The path is never sent to the device. A spec holds up to 2000 nodes, and a `repe
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; show the spec again to change it.
 
+Android saved prototypes require `prototype_saved_v1`: `save` takes `spec`, optional `assets`,
+`label` (defaults to `spec.id`, 1–120 characters) and `icon` (an asset uploaded in the same call).
+`listSaved` reads saved entries; `deleteSaved` requires `id`. A missing Android capability
+returns `unsupported_capability`. On iOS simulators these actions use the host installer,
+without a prototype agent connection. Physical iOS devices return `unsupported_platform`.
+The viewer template comes from the verified release asset, or from `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`
+(build it with `scripts/ios/prototype-viewer-build.sh`).
+The same `icon` asset id uses bytes uploaded in `assets` in that call; omit it for the default icon.
+iOS `listSaved` returns bundle ids (accepted by `deleteSaved`), labels and slugs, with
+`pinned:false` and no `savedAt` because the simulator cannot recover the save time.
+`deleteSaved` also accepts the authored prototype id on iOS.
+On Android, `save` with `pin:true` then asks the launcher to pin a home-screen shortcut and
+reports `pinned`: `pinned` (already on the home screen), `pending` (the launcher's "Add to home
+screen" dialog is open; the icon exists only once a person accepts it, and declining sends no
+signal) or `unsupported` (the default launcher cannot pin; the prototype is still saved). A
+`device_locked` or `pin_failed` pin error returns `success:false` with `saved` kept, so retrying
+the same save is safe. `autoConfirm:true` (needs `pin`) waits up to 5 s for the launcher dialog, taps its
+"Add to home screen" button (a bare "Add" only beside "Cancel"; Cancel is never tapped) with
+`adb shell input tap`, and reports `pinned` only once `listSaved` shows the shortcut pinned. Otherwise
+it stays `pending` with a reason (`confirmation_unrecognized` lists the dialog's buttons). Matching is
+by English label; resource-id and Samsung matching are not done yet (#12266). `deleteSaved` disables the shortcut; the disabled icon
+stays on the home screen. With `removeIcon:true` the host runs `cmd shortcut clear-shortcuts` for
+CtrlProxy only when no saved prototype remains, because that command clears every CtrlProxy
+shortcut; otherwise the response says the icon remains and can be removed by hand. On iOS,
+`pin` is ignored (`pinned:"unsupported"`): the app icon is on the home screen, deleting the
+prototype removes it, and `removeIcon:true` warns that separate icon removal does not apply.
+Store failures return actionable errors with `errorCode`:
+`invalid_id`, `invalid_label`, `spec_too_large`, `invalid_spec`, `invalid_asset_id`,
+`duplicate_asset_id`, `unsupported_mime_type`, `empty_asset`, `asset_too_large`, `count_limit`,
+`total_limit`, `missing_asset`, `saved_count_limit`, `storage_failure`, `unsupported_existing`,
+`not_found`, `unsupported_format`, or `internal_error`.
+
 A `show` whose `spec.id` is the prototype already on screen replaces it in place:
 it stays on the display it is on, and each pager keeps its current page (matched
 by pager id, clamped to the new page count). The new spec's `state` is
@@ -661,7 +896,7 @@ authoritative: values the user changed by tapping or typing are not carried
 over unless the spec includes them, and the rebuilt tree starts any text field
 from the spec's value. `reset: true` starts it fresh instead: pages come from
 the spec and `display` is resolved again. A show with a different id, or with
-nothing on screen, replaces any other prototype as before. A CtrlProxy that
+nothing on screen, replaces any other prototype by default (`replaceOthers: false` retains them). A CtrlProxy that
 predates in-place replacement ignores `reset` and always starts fresh.
 
 Two optional window fields need a CtrlProxy advertising
@@ -722,10 +957,14 @@ Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
 (default 5000 ms). Validation uses the existing prototype schema and limits
 before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
-no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
+no screenshot. Nodes include box/row/column/flow/grid (flow/grid require `prototype_flow_grid_v1`), text/image/icon/spacer/textField,
 Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker
 bound to state keys, and scroll/pager/tabBar/bottomNav/bottomSheet; actions are
 emit/setPage/setState/toggle/increment/decrement/dismiss.
+`emit.context` resolves named state/item/index/page/data/value bindings and requires
+`prototype_emit_context_v1` (data bindings also require `prototype_data_model_v1`).
+Events return `context`, with `contextTruncated: true` only when the resolved UTF-8 JSON
+exceeds the byte budget; the longest fitting prefix is kept.
 A spec may also carry a `theme` (light/dark mode, a seed colour, per-role colour
 overrides, typography and shapes), per-node `style` and `styleWhen` fields,
 `transition` on `visibleWhen` nodes, and a spec-level `motion` of `none` to make
@@ -785,6 +1024,72 @@ translucent, at 0.4 alpha; any other role is drawn unchanged. The per-mode forms
 `theme.colors.light` / `theme.colors.dark`) need a device advertising
 `prototype_theme_modes_v1`.
 
+Optional pager `axis` (horizontal default or vertical), `pageSpacing` (dp gap),
+strict `peek: {start?, end?}` and `pageSize` (`"fill"` default or strict `{dp}`)
+require `prototype_pager_options_v1` whenever explicitly present. Spacing and peek
+are finite 0..10000; fixed page size is finite 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
+Missing spacing/peek sides mean 0, and `{}` peek is a no-op. Units are points on iOS.
+A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical).
+Current page is the first fully visible page; page events and navigation bindings
+keep their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
+
+### Patch (#11675)
+
+Use `show` for a new screen or a window, theme or root change. Use `patch` for
+content (`/data`), state (`/state`) or one node by id (`replaceNode`) of the shown prototype. Android CtrlProxy advertises
+`prototype_patch_v1` and applies patches in place; the iOS prototype agent advertises it too
+(a relaunched app loads the current agent), so an older agent still needs the whole spec with `show`.
+
+`{action:"patch", id, ops, baseRevision?}` sends a `patch_prototype` frame
+`{requestId, id, baseRevision?, ops}` only to a device advertising
+`prototype_patch_v1`. Android and iOS use `prototype_result` replies. Success
+carries `revision`; a state conflict carries
+`{success:false,error,conflict:{revision,state:{key:scalar}}}`. Revisions are
+non-negative safe integers; conflict values are strings, booleans or finite
+numbers with valid state keys. Malformed reply fields are dropped. Show, status,
+inspect and events do not report revisions through this host contract.
+
+Ops apply in order, completely or not at all. `add`, `replace`, `remove` and
+`test` address `/data` or `/data` followed by an RFC 6901 JSON pointer: `~0`
+escapes `~`, `~1` escapes `/`; array indices are canonical non-negative decimal
+integers, and `-` appends for `add` only. Parent paths must exist. `replace`,
+`remove` and `test` require the addressed value to exist. `add`, `replace` and
+`test` carry `value`; `remove` does not. State ops address exactly
+`/state/<key>`, where keys match `[A-Za-z_][A-Za-z0-9_]{0,63}` and values are
+strings, booleans or finite numbers.
+
+`replaceNode` carries `{op:"replaceNode",id,node}`. The id must identify exactly
+one node in the tree, cannot be the root or inside a repeat, and the replacement
+must keep that id. Replacement nodes cannot contain `use` nodes or element
+anchors. Inline the component, use a bounds anchor, or use `show`.
+
+The agent writes data; the user writes state. Data-only patches and patches
+containing only data ops and `replaceNode` ignore `baseRevision`. Any state op,
+including `test`, requires `baseRevision`. A device supporting the capability
+must refuse the whole patch with `conflict` if the user changed a touched state
+key since that revision, returning the current revision and those keys' values.
+
+There are at most 64 ops, the frame is capped at 1 MiB, and the resulting whole
+spec must satisfy every spec/data limit, including node count and depth. The
+host tracks a cloned copy of each id's device spec from its last acknowledged show,
+with components expanded and anchors resolved. It applies ops to a copy and
+runs the full validator before sending. Errors preserve deterministic paths.
+The host validates state ops against the agent-declared state and leaves value
+comparison for `/state` `test` to the device; its copy cannot know user edits.
+
+Patches are FIFO per device, with one in flight at a time. A pending show makes
+patch refuse as busy. Shows are not delayed by patches. If a dispatched show
+and an acknowledged patch overlap, their device-side order is unknown: the host
+forgets its spec, warns, and requires a further successful show before patching.
+A failed dispatched show, dismissed event, successful dismiss, session release,
+device removal or unbinding also ends tracking. Inspect retains each reported tracked id
+and drops missing ids; adopted siblings do not end its tracking. A fifth-surface refusal
+with `replaceOthers: false` also retains the acknowledged specs. A timeout or connection loss after
+patch dispatch is indeterminate and requires a new show. A failure before dispatch
+keeps the tracked copy. An atomic device
+refusal leaves the tracked copy unchanged. A successful patch refreshes shown
+status data without changing `lastResult`, timestamps or event snapshots.
+
 #### iOS simulators
 
 On iOS simulators `prototype` is backed by a prototype agent injected into the app at launch
@@ -799,7 +1104,7 @@ key, a role such as `inner` or `cover`, or `active`), resolved with the same
 precedence: an explicit `display`, then the session display pin, then the default
 display. Omitting it sends no display and behaves exactly as before. A resolved
 non-default display is sent as the panel's logical `displayId` and needs a
-CtrlProxy advertising `prototype_display_id_v1`; an older APK is refused with an
+CtrlProxy advertising `prototype_display_id_v2`; an older APK is refused with an
 error rather than showing the prototype on the default display. An unknown or
 disconnected panel is refused with the usual disconnected-panel guidance. If the
 panel disappears while the prototype is up (fold), the device dismisses it with
@@ -876,7 +1181,8 @@ and device unbinding clear the corresponding buffers and host status.
 `awaitEvent` requires `id`; it waits for one event in the current session/device/id
 scope. Optional `eventName` (matching `name`), `kind` (`emit`, `page_changed`,
 `dismissed`, or `appearance_changed`), and `afterSequence` (a nonnegative integer, strictly exclusive cursor)
-are valid only for `awaitEvent`. An event of a kind this host does not know (a newer device) is
+are valid only for `awaitEvent`.
+Input and state changes (text input, toggles, sliders etc.) arrive as kind `emit` with `eventName` `change` (there is no separate `change` kind), with payload `{key,value}` for one changed key or `{keys,values}` for several. An event of a kind this host does not know (a newer device) is
 logged and skipped: it is never returned, but its sequence still counts toward `lastSequence`. Its `timeoutMs` defaults to 30000 ms and cannot
 exceed 60000 ms; the MCP request deadline for an `awaitEvent` call is that wait plus 30 s of
 headroom, so a quiet wait ends with `timedOut: true` rather than a transport timeout. Request cancellation preserves the abort reason and removes the
@@ -908,7 +1214,7 @@ CtrlProxy restart restarts a re-shown id at 1), while the cumulative `droppedCou
 is kept until explicit dismiss or scope release. Events carry only id, sequence and
 timestamp, so a late event from the previous showing cannot be told apart from the new
 showing's and is accepted if it arrives after the new show. A successful show of
-another id replaces the device's prototype: the replaced prototype's waiters settle with
+another id replaces other prototypes by default (`replaceOthers: false` retains them): the replaced prototypes' waiters settle with
 `reason: "dismissed"` and its buffers are removed. A terminal `dismissed` event remains
 buffered until consumed or the next explicit show/dismiss. Consuming it clears all
 remaining pending events and, once no waiter remains, removes the entry, so a later
@@ -980,7 +1286,7 @@ the call is a session observe, and `deviceId` must match that session's device.
 A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
 A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
 install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
-simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+simulator it may install and launch the runner. The exception never applies to a device held or
 reserved by another session: those reads use what is already installed and never run readiness.
 (Owner decision 2026-10-12, #11964.) See
 [Which read tools ready an unheld device](using/device-ownership.md#which-read-tools-ready-an-unheld-device)
@@ -1066,20 +1372,23 @@ settled screenshot is eligible.
 
 ## Interact with the UI
 
-| Tool                          | What it does                                                                                                                                                |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap.                                                    |
-| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
-| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
-| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
-| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
-| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
-| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
-| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                      |
-| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                  |
-| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                              |
-| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                             |
+| Tool                          | What it does                                                                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap, and a stylus `pointer` on Android 12+.                     |
+| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state.         |
+| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                         |
+| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                          |
+| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals, optionally with a stylus `pointer` on Android 12+; opt-in with `setToolEnabled`.                             |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                           |
+| ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android and iOS).                                                    |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                            |
+| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe: `action`, `fingers`, `x`/`y`/`coordinateSpace`, `direction`, `distance`, `fingerSpacing`, `durationMs`, `layer`. |
+| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                                       |
+| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                                       |
+| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                              |
+| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                          |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                                      |
+| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                                     |
 
 ### Tap, swipe, and form search options
 
@@ -1190,7 +1499,7 @@ malformed recursive containers are rejected.
 #### Hierarchy layer
 
 `observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, `dragAndDrop`, `swipeOn`,
-`pinchOn`, `tapAt`, `selectAllText`, and `identifyInteractions` accept an optional top-level `layer`
+`pinchOn`, `tapAt`, `swipeAt`, `selectAllText`, and `identifyInteractions` accept an optional top-level `layer`
 (`"app"` or `"prototype"`) that scopes the call to one layer of the screen. `app`
 excludes AutoMobile's own prototype window; `prototype` keeps only prototype nodes and
 fails with an actionable error when no prototype is showing. Omit it to search both,
@@ -1213,9 +1522,9 @@ dismissing a prototype records no navigation.
 
 Touches go to the window under the point where a finger goes down, so gestures
 are checked there before dispatch: the tap point (`tapAt`, `tapOn`, `tapAny`), the
-swipe start (`swipeOn`), both finger start points (`pinchOn`), and both drag
+swipe start (`swipeOn`, `swipeAt`), both finger start points (`pinchOn`), and both drag
 endpoints (`dragAndDrop`). With `layer: "app"` a gesture whose point lies under an
-prototype window is refused. With `layer: "prototype"`, `tapAt`, `swipeOn`, and
+prototype window is refused. With `layer: "prototype"`, `tapAt`, `swipeOn`, `swipeAt`, and
 `pinchOn` also refuse a point outside every prototype window, because it would
 reach the app. There is no touch-through mode: hide or move the prototype to reach
 the app beneath it.
@@ -1467,9 +1776,63 @@ and `clear` commands send keys and clear the focused field, respectively.
 <code>pinchOn.rotationDegrees</code> describes how far the two-finger axis rotates
 during the pinch. The fingers start horizontally and finish on the rotated
 axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
-a plain pinch. Android and iOS share this convention.
+a plain pinch. Android and iOS share this convention. The value must be
+between <code>-360</code> and <code>360</code> degrees; larger magnitudes are rejected.
+
+To rotate **without zooming**, keep the finger distance constant: pass
+<code>scale: 1</code> (or equal <code>distanceStart</code> and <code>distanceEnd</code>)
+together with <code>rotationDegrees</code>. <code>direction</code> is still a required
+argument but is ignored when the distance does not change, so the fingers never
+drift toward a zoom; equal distances are clamped and (on iOS) rounded together
+so they stay equal. Negative values are passed through as given. This is a
+two-finger rotate gesture, not the device <code>rotate</code> tool, which changes
+screen orientation.
+
+```json
+{ "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }
+```
 
 </details>
+
+### dragPath
+
+`dragPath` is disabled by default; enable it with `setToolEnabled`. It drives one
+finger down, along a polyline, and up using the CtrlProxy streaming stroke
+protocol, so it covers signatures and drawing canvases, Android unlock patterns,
+dragging a slider thumb to a coordinate, and long press then drag (for example a
+text-selection handle). On Android it streams start/move/end frames; on iOS the
+runner follows the whole timed path in one request (private XCTest touch
+synthesis, main display only), which needs a runner built from this revision
+(feature `path_gesture_v1`) and fails before any input on an older one.
+
+- `points`: 2 to 100 `{ x, y, durationMs? }` vertices. `durationMs` (1 to 5000,
+  default 200) is the time spent moving from the previous point to this one and
+  is ignored on the first point. Long segments are sent as moves at most 50 ms
+  apart.
+- `holdMs` (0 to 3000, default 0): press and hold at the first point before
+  moving. `releaseHoldMs` (0 to 3000, default 0): keep the finger down at the last
+  point before lifting.
+- `coordinateSpace` (`absolute` default, `normalized`, `percent`), `snapshotId`,
+  `display` and `layer` behave as in `tapAt`. Every point must lie inside the
+  screen; the first bad point is named in the error and nothing is dispatched.
+- Total finger-down time (holds plus segments) is capped at 20 seconds and must
+  fit the remaining request budget with 2 seconds of headroom; otherwise the call
+  is rejected before any input.
+- An aborted, timed-out or failed call always lifts the finger with a cancelling
+  end. A failure after the finger went down reports that the stroke may have
+  partially run; observe before retrying.
+
+```json
+{
+  "points": [
+    { "x": 0.2, "y": 0.3 },
+    { "x": 0.2, "y": 0.7, "durationMs": 400 },
+    { "x": 0.8, "y": 0.7, "durationMs": 400 }
+  ],
+  "coordinateSpace": "normalized",
+  "holdMs": 100
+}
+```
 
 ### Semantic accessibility links
 
@@ -1545,6 +1908,38 @@ termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 `removeKeyValue.fileName` are deprecated aliases for the store selector `name`.
 `setAppPermissions.action` selects `grant`, `revoke`, or `reset`.
+
+On iOS Simulator, a stored TCC Photos grant is not proof of effective full
+read/write authorization. `getAppPermissions` reports it as `unknown` with
+`verified: false`; by default `setAppPermissions` returns a non-fatal unverified
+success with `success: true`, `applied: true`, `verified: false`, a warning, and
+`code: "PHOTOS_FULL_ACCESS_UNVERIFIED"` after dispatching a full Photos grant.
+An unobservable verifier or a verifier/TCC-readback exception keeps this outcome;
+the warning is aggregated in `warnings` and the operation counts as changed.
+Only an app-level verifier reporting `authorized` yields `verified: true`, with
+no code or warning. A positive `limited`, `denied`, `notDetermined`, or `addOnly`
+observation yields `success: false`, `applied: true`, `verified: false`,
+`PHOTOS_FULL_ACCESS_NOT_ESTABLISHED`, and an actionable error. For `all`, this
+keeps the successful `all` dispatch operation and adds a separate failed `photos`
+operation; only the Photos entry counts as failed. Each operation exposes its
+own permission in `stepId`, its result, and any code, including non-fatal codes.
+A real verifier needs target-app instrumentation (design option C, still a follow-up):
+launch the app and check
+`PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
+insufficient. Results include `accessLevel` (`readWrite` for Photos and
+`addOnly` for photos-add); an unverified stored Photos grant includes
+`evidence: "storedTccGrant"`. Granting `photos-add` remains a dispatch success with
+`accessLevel: "addOnly"` and does not establish full access. No simulator/runtime
+combination is currently verified to give effective full access through
+`simctl privacy grant`; simulator verification with the Playground probe is still
+owed. This behavior is not device-verified.
+On simulator runtimes iOS 27 and later, a full stored Photos
+grant (`auth_value: 2`) implies add-only access: photos-add reports `granted` with `evidence: "impliedByFullPhotosGrant"`
+when its own row is missing or not granted. A stale PhotosAdd row remains in
+`raw` and `authValue` for transparency; an already granted PhotosAdd row is
+unchanged. Denied, limited, or unknown Photos rows do not imply add-only access.
+On iOS 26.x or an unknown runtime the stored PhotosAdd row is reported as is.
+Physical-device permission limits are unchanged.
 
 `resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
 erases every app's Keychain, regardless of `appId`.
@@ -1934,6 +2329,8 @@ fails the result carries a `warnings` entry saying so.
 Both `rotate` and `setPosture` declare output schemas and return the same JSON
 payload in text content and `structuredContent`. Ordinary clients receive
 `structuredContent` unless `--tool-results-no-structured-content` is enabled.
+`extras` are stripped from both by default; where supported, `includeExtras: true` retains them
+only in structured content. Error detail remains in `content[0].text`.
 
 `setPosture` accepts exactly one of `posture` or `hingeAngle`. `hingeAngle` is a
 finite number of degrees from **0 through 180 inclusive** and is **BEST EFFORT**,
@@ -2472,9 +2869,10 @@ label of its nearest labelled enclosing row, so a `checked` state is attributabl
 to the setting it belongs to (`com.android.settings:id/switchWidget | Airplane
 mode | toggle checked=false`).
 
-Action-observation diffs under the default skeleton projection use those same
-compact row fields for `added` and `removed` nodes; rows with no affordances are
-omitted. Their `fields.layoutWarnings` value is an `{ added, removed }` pair
+Action-observation diffs always ship beside the current `skeleton` (the rows
+above), so they carry no `added` or `removed` node lists: a node that appeared is
+a skeleton row, and one that disappeared is simply absent from it. Only `changed`
+entries (what moved from what) remain. Their `fields.layoutWarnings` value is an `{ added, removed }` pair
 rather than a whole `{ from, to }` envelope, and excludes Android system-status
 bar notification chrome. An artifact-spilled diff keeps its `skeleton`,
 `context`, and capture metadata inline while the bulky node and field deltas are
@@ -2756,7 +3154,9 @@ without `appId`; their `resolvedStore` is the domain name, which cannot start wi
 `wakeAndUnlock`, `pressButton`, `launchApp`, `terminateApp`, `getDeviceState`, and
 `setDeviceState` declare output schemas and return the same JSON payload in text
 content and `structuredContent`. Ordinary clients receive `structuredContent`
-unless `--tool-results-no-structured-content` is enabled. Each schema requires
+unless `--tool-results-no-structured-content` is enabled. Both strip `extras` by
+default; where supported, `includeExtras: true` retains them only in structured
+content. Errors carry their JSON error detail in `content[0].text`. Each schema requires
 `message`; variant fields are optional, and additional fields are accepted.
 
 `startDevice` also declares an output schema. Its `readiness` evidence contains
@@ -2825,3 +3225,143 @@ An explicit CLI/env choice applies to that connection only: proxies relay it on
 the connection profile, never restart the shared daemon for it, and never persist it.
 Unset or other env values express no preference and use the daemon's effective setting.
 `observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).
+
+### Long-running calls as MCP tasks
+
+AutoMobile implements the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview)
+(`io.modelcontextprotocol/tasks`, #4668) on the daemon's MCP endpoint. A tool that opts in can
+answer a `tools/call` with a task handle instead of blocking. `startDevice`, `executePlan` and
+`installApp` opt in; recording start and stop follow. Short interaction tools stay synchronous.
+
+To opt in, a client declares the extension on **every request** that may return a task, and on
+every `tasks/*` request, in the per-request capabilities:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "startDevice",
+    "arguments": {},
+    "_meta": {
+      "io.modelcontextprotocol/clientCapabilities": {
+        "extensions": { "io.modelcontextprotocol/tasks": {} }
+      }
+    }
+  }
+}
+```
+
+- A client that also lists the extension in its `initialize` capabilities sees
+  `capabilities.extensions["io.modelcontextprotocol/tasks"]` in the `initialize` result. The
+  daemon speaks the 2025-era protocol, where `server/discover` does not exist. This is an
+  AutoMobile extension of the spec: SEP-2663 leaves the Tasks extension undefined on
+  `2025-11-25`, but AutoMobile advertises and serves it on the 2025-era `initialize` to any
+  client that declares it, whatever `protocolVersion` that client sent (owner decision, #13143).
+- Tasks belong to the session key (the `x-auto-mobile-mcp-session-id` header). A request without
+  one always runs synchronously, and another session key cannot read or cancel the task.
+- An opted-in call answers `{"resultType": "task", "taskId": …, "status": "working", "ttlMs":
+  null, "pollIntervalMs": 1000, …}`. Poll `tasks/get` with `{"taskId": …}` at `pollIntervalMs`.
+  `completed` carries the same `result` the synchronous call returns (including an `isError`
+  result), `failed` carries the JSON-RPC `error`, and `input_required` carries `inputRequests`
+  to answer with `tasks/update` (`{"taskId": …, "inputResponses": {…}}`).
+- `tasks/cancel` is cooperative: it is acknowledged at once and the running tool is aborted;
+  the task then reports `cancelled`, or `completed` if the tool had already finished.
+- While a `startDevice` task is `working`, the daemon heartbeats the session it bound, so the
+  client need not heartbeat a session it has not seen yet. Once the task is terminal, the
+  client heartbeats that session as after a synchronous `startDevice`. Cancelling during the
+  boot stops it and leaves no session bound, as cancelling a synchronous call does.
+- While an `executePlan` task is `working`, the daemon heartbeats the plan's session and, for a
+  multi-device plan, each label session once it is allocated; the plan keeps its session's plan
+  lock as a synchronous plan does. `tasks/cancel` aborts the running step, unwinds the plan as a
+  cancelled request would (its cleanup and session release still run) and releases the lock.
+  A plan whose steps fail completes with the same `isError` result as the synchronous call;
+  a call the synchronous path answers with a JSON-RPC error (invalid arguments, for one)
+  reports `failed` with that error.
+- An `installApp` task holds the session it installs onto while `working`. `tasks/get` settles
+  with the same result the synchronous call returns (a failed install is a completed task whose
+  result has `isError: true`). `tasks/cancel` aborts the `adb install` / `simctl install` process;
+  the task reports `cancelled` and the installed-app inventory is re-read. An APK only partly
+  transferred is never committed: the device discards the abandoned install session, so the
+  previously installed version (if any) stays as it was. If the transfer had already finished and
+  the device was committing, the install may still land; the re-read inventory shows the truth.
+  The Android uninstall-and-reinstall downgrade recovery, once its uninstall has run, finishes the
+  reinstall even if cancelled, so the app is not left removed.
+- A finished task stays readable for 10 minutes (its `ttlMs` is then set, counted from
+  creation); afterwards `tasks/get` answers `-32602` "Task has expired" or "Task not found".
+- Tasks survive a daemon restart: a restarted daemon still answers `tasks/get`, and a task that
+  was running when the daemon stopped reports `failed` with an "interrupted" error.
+- `tasks/*` requests without the per-request declaration answer `-32021` (Missing Required
+  Client Capability). Progress ticks of a task become its `statusMessage`; no
+  `notifications/progress` is sent for a task.
+- The stdio proxy relays the extension: it advertises it to a client whose `initialize` declared
+  it, forwards each request's declaration and the `tasks/*` requests to the daemon, and answers
+  with the daemon's results and errors unchanged. Its tasks belong to the proxy process rather
+  than to one daemon connection, so polling keeps working after the proxy reconnects.
+- A device-binding call (`startDevice` today) runs as a task through the proxy too. The proxy
+  binds the device session when a `tasks/get` first reports the task `completed`, before it
+  answers that poll, exactly as it binds from the synchronous result; later tool calls route to
+  that session. It binds once per task, however often the task is polled and across proxy
+  reconnects. A `failed` or `cancelled` task binds nothing, and neither does a session the daemon
+  released before the completed poll (that poll answers an error). Poll the task to completion:
+  until then the proxy holds no binding for it, and the proxy stops waiting on a task left
+  unpolled for 10 minutes. A synchronous `startDevice` re-checks a device still finishing its
+  previous session's cleanup; as a task, that refusal is the task's result.
+
+## Checks
+
+Devices advertising `prototype_checks_v1` evaluate declarative checks locally. The host refuses
+show and patch results using this feature on older devices. Inputs `textField`, `slider`,
+`checkbox`, `switch`, `radioGroup`, `datePicker` and `timePicker` accept `checks` (1–8 entries)
+and `validateOn: "change" | "blur" | "submit"` (omitted means blur). Each check contains a
+nonempty `message` and exactly one rule. `validateOn` controls error display, never validity.
+The first failing message is displayed.
+
+- `required: true`: trimmed nonempty text, true for checkbox/switch, nonempty selection for
+  radioGroup/datePicker, present number for slider/timePicker.
+- `minLength` / `maxLength`: nonnegative integer UTF-16 lengths, textField only.
+- `min` / `max`: finite numeric inclusive bounds, slider and pickers only. Text fields hold
+  strings and have no numeric subtype. Date state remains YYYY-MM-DD; bounds are UTC epoch
+  milliseconds. Time pickers retain hourKey/minuteKey; checks apply independently to both keys.
+- `format`: textField only, one of email, phone, digits, decimal, url.
+- `pattern`: textField only, the restricted grammar below, at most 128 UTF-16 units.
+
+Empty string, null or missing value passes all rules except required. Whitespace is only empty
+for required. Pattern and format matching use at most 4096 UTF-16 units. Required and length checks inspect the complete value.
+Every validity reference must name declared state with at least one check. Multiple checked
+controls sharing a key must all pass. Numeric/length lower bounds must not exceed upper bounds.
+
+Formats use these exact whole-value expressions (ASCII digits):
+
+- email: `[^\s@]+@[^\s@]+\.[^\s@]+` (Unicode names allowed).
+- phone: optional leading +, then 7–15 characters from ASCII digits, space, hyphen and parentheses;
+  at least seven digits. The leading + is outside the character count. Punctuation need not balance.
+- digits: `[0-9]+`.
+- decimal: `-?[0-9]+(\.[0-9]+)?` (no exponent or leading +).
+- url: `https?://[^\s/?#]+([/?#]\S*)?` (lowercase scheme, Unicode hosts allowed).
+
+Format whitespace follows JavaScript whitespace (including NBSP); no format trims its value.
+Patterns use ASCII `\d`, `\w`, `\s` and their complements `\D`, `\W`, `\S`; `\w` is
+`[A-Za-z0-9_]` and `\s` is space, tab, CR, LF, FF, VT. Dot matches one Unicode scalar except
+CR, LF, U+2028 and U+2029. Matching consumes the entire value, even with a final newline.
+Allowed: literals, dot, classes `[abc]` / `[^abc]`, literal ranges, those six shorthand escapes,
+escaped metacharacters, anchors ^ $, groups `(…)` / `(?:…)`, alternation |, and quantifiers
+`? * + {n} {n,} {n,m}`. Every written bound is <=100 and n<=m; open upper bounds are unbounded.
+Reject backreferences, lookahead/behind, named groups, lazy/possessive quantifiers, Unicode
+properties, inline flags, word boundaries `\b` / `\B`, and every other escape (including
+`\n`, `\x`, `\u`; use literal characters). Empty classes are rejected. A group repeated more
+than once cannot contain alternation or any variable quantifier (maximum > minimum), transitively.
+At most two variable quantifiers are allowed in the entire pattern: ? * + {n,} and {n,m} when
+m>n. Fixed {n} quantifiers inside repeated groups remain allowed.
+Thus `(a|b)+`, `(a+)+`, `(a*)*` and `((ab)+)+` are rejected. Optional groups remain allowed.
+These exact rules and error substrings are pinned in the language-neutral checks fixtures.
+
+Conditions `{valid: "email"}` and `{valid: ["email", "password"]}` mean all referenced keys
+are valid, including fields whose errors are not yet shown. They compose with all/any/not in
+visibleWhen, styleWhen and enabledWhen. enabledWhen is supported on the seven input types plus
+button, iconButton, fab, chip and listItem; false disables the control and skips its onTap.
+`emit` may specify `requireValid: ["email", "password"]` (1–8 keys). Any failing key aborts the
+whole action list atomically, shows errors on every listed field, and sends
+`{kind:"validation_failed", keys:[…]}` naming only the failing keys. `change` events carry
+`validity: {key:boolean}` for checked keys. Both event kinds retain the usual event envelope.

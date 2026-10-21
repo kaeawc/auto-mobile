@@ -6,6 +6,9 @@ import {
 } from "../../src/server/deepLinkTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, DeepLinkResult } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const emptyDeepLinks = {
   schemes: [],
@@ -28,12 +31,12 @@ async function invokeHandler(result: DeepLinkResult) {
 describe("Deep Link Tools Registration", function () {
   beforeEach(() => {
     // Clear the tool registry before each test
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   });
 
   afterEach(() => {
     // Clean up after each test
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   });
 
   describe("registerDeepLinkTools", () => {

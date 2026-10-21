@@ -1,5 +1,5 @@
 import { logger } from "../../utils/logger";
-import { NavigationGraphManager } from "./NavigationGraphManager";
+import type { NavigationGraphService } from "./NavigationGraphManager";
 import { isRecordedBackEdgeTarget } from "./ExploreValidateMode";
 import {
   PathOptimizer,
@@ -12,9 +12,14 @@ import {
  * to optimize navigation paths.
  */
 export class DefaultPathOptimizer implements PathOptimizer {
-  private navigationGraph: NavigationGraphManager;
+  private navigationGraph: Pick<
+    NavigationGraphService,
+    "getEdgeTargetsFrom" | "getNode" | "findPath"
+  >;
 
-  constructor(navigationGraph: NavigationGraphManager) {
+  constructor(
+    navigationGraph: Pick<NavigationGraphService, "getEdgeTargetsFrom" | "getNode" | "findPath">,
+  ) {
     this.navigationGraph = navigationGraph;
   }
 

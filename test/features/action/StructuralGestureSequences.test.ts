@@ -1,7 +1,8 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
 import androidHome from "../../fixtures/observe/android-home.json";
-import type { BootedDevice, Element, ObserveResult } from "../../../src/models";
+import type { BootedDevice, Element } from "../../../src/models";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TalkBackSwipeExecutor } from "../../../src/features/action/swipeon/TalkBackSwipeExecutor";
@@ -25,8 +26,9 @@ import { FakeTalkBackSwipeExecutor } from "../../fakes/FakeTalkBackSwipeExecutor
 import { FakeOverlayDetector } from "../../fakes/FakeOverlayDetector";
 import { FakeElementGeometry } from "../../fakes/FakeElementGeometry";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
+import { observeResultFromFixture } from "../../helpers/observeFixture";
 
-const observation = androidHome as unknown as ObserveResult;
+const observation = observeResultFromFixture(androidHome, "androidHome");
 const hierarchy = observation.viewHierarchy!;
 const device: BootedDevice = { deviceId: "sequence-device", name: "Test", platform: "android" };
 const element: Element = {
@@ -80,26 +82,34 @@ describe("gesture request sequences", () => {
           error: "refused",
         };
       };
-      proxy.requestTwoFingerSwipe = async (x1, y1, x2, y2, duration, offset, timeout) => {
+      proxy.requestTwoFingerSwipe = async ({
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        offset,
+        timeoutMs: timeout,
+      }) => {
         calls.push(`two:${x1}:${y1}:${x2}:${y2}:${duration}:${offset}:${timeout}`);
         return { success: true, totalTimeMs: 1 };
       };
-      const executor = new TalkBackSwipeExecutor(
+      const executor = new TalkBackSwipeExecutor({
         device,
-        new FakeGestureExecutor(),
-        proxy as unknown as AndroidCtrlProxyClient,
-        new FakeAccessibilityDetector(),
-        new FakeAdbClient(),
+        executeGesture: new FakeGestureExecutor(),
+        accessibilityService: proxy,
+        accessibilityDetector: new FakeAccessibilityDetector(),
+        adb: new FakeAdbClient(),
         timer,
-      );
-      const run = executor.executeAndroidSwipeWithAccessibility(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        mode === "absent" ? null : element,
-        {
+      });
+      const run = executor.executeAndroidSwipeWithAccessibility({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: mode === "absent" ? null : element,
+        gestureOptions: {
           duration: 400,
           displayFence: {
             assertCurrent: () => {
@@ -107,9 +117,9 @@ describe("gesture request sequences", () => {
             },
           },
         },
-        new NoOpPerformanceTracker(),
-        controller.signal,
-      );
+        perf: new NoOpPerformanceTracker(),
+        signal: controller.signal,
+      });
       if (mode === "abort") {
         await expect(run).rejects.toThrow("Operation cancelled");
       } else {
@@ -135,9 +145,7 @@ describe("gesture request sequences", () => {
     const calls: string[] = [];
     const timer = clock(calls);
     const proxy = new FakeCtrlProxy(timer);
-    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      proxy as unknown as AndroidCtrlProxyClient,
-    );
+    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy);
     const available = spyOn(AndroidCtrlProxyManager.prototype, "isAvailable").mockImplementation(
       async () => {
         calls.push("availability");
@@ -148,13 +156,17 @@ describe("gesture request sequences", () => {
       const drag = new DragAndDrop({ ...device, platform }, new FakeAdbClient(), timer, {
         visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       });
-      drag.observedInteraction = async (action) => {
+      drag.observedInteraction = async (action, options) => {
         calls.push("observe-before");
-        const result = await action(observation, {
-          assertCurrent: () => {
-            calls.push("fence");
-          },
-        });
+        const result = await runBlockWith(observation)(
+          (observed) =>
+            action(observed, {
+              assertCurrent: () => {
+                calls.push("fence");
+              },
+            }),
+          options,
+        );
         calls.push("observe-after");
         return result;
       };
@@ -166,10 +178,14 @@ describe("gesture request sequences", () => {
         calls.push("resolve");
         return { sourcePoint: { x: 10, y: 20 }, targetPoint: { x: 30, y: 40 } };
       };
-      drag["executeDrag"] = async (...args) => {
-        calls.push(`drag:${args.slice(0, 7).join(":")}`);
+      drag.setDragDispatchForTesting(async (request) => {
+        const { startX, startY, endX, endY, pressDurationMs, dragDurationMs, holdDurationMs } =
+          request;
+        calls.push(
+          `drag:${[startX, startY, endX, endY, pressDurationMs, dragDurationMs, holdDurationMs].join(":")}`,
+        );
         return { success: true, a11yTotalTimeMs: 1200 };
-      };
+      });
       const result = await drag.execute({ source: { text: "Source" }, target: { text: "Target" } });
       expect(result).toMatchObject({ success: true, duration: 300, a11yTotalTimeMs: 1200 });
       expect(calls).toEqual([
@@ -194,8 +210,8 @@ describe("gesture request sequences", () => {
       const calls: string[] = [];
       const timer = clock(calls);
       const selector = new FakeElementSelector(mode === "immediate" ? element : null);
-      const select = selector.selectClickable.bind(selector);
-      selector.selectClickable = (...args) => {
+      const select = selector.select.bind(selector);
+      selector.select = (...args) => {
         calls.push("select");
         return select(...args);
       };
@@ -203,14 +219,24 @@ describe("gesture request sequences", () => {
         timer,
         elementSelector: selector,
         accessibilityDetector: new FakeAccessibilityDetector(),
+        androidTapper: {
+          executeAndroidTap: async (_action, x, y, duration, _target, context) => {
+            calls.push(`tap:${x}:${y}:${duration}`);
+            throwIfAborted(context?.signal);
+            context?.onActivationWarnings?.(["activation warning"]);
+          },
+          retryAndroidTapIfNoChange: async () => {
+            calls.push("retry-check");
+          },
+        },
       });
       const controller = new AbortController();
-      tap.observedInteraction = async (action) => {
+      tap.observedInteraction = async (action, options) => {
         calls.push("observe");
-        return action(recordObservationRead(observation));
+        return runBlockWith(() => recordObservationRead(observation))(action, options);
       };
       let refreshCount = 0;
-      tap.setRefreshViewHierarchyForTesting(async (_refresh, timeout, screen, signal) => {
+      tap.testHooks.setRefreshViewHierarchy(async (_refresh, timeout, screen, signal) => {
         expect(screen).toBe(observation.screenSize);
         expect(signal).toBe(controller.signal);
         calls.push(`refresh:${timeout}`);
@@ -227,18 +253,9 @@ describe("gesture request sequences", () => {
         selector.setNextElement(element);
         return hierarchy;
       });
-      tap["executeAndroidTap"] = async (_action, x, y, duration, _target, _signal, context) => {
-        calls.push(`tap:${x}:${y}:${duration}`);
-        throwIfAborted(_signal);
-        context?.onActivationWarnings?.(["activation warning"]);
-      };
-      tap["retryAndroidTapIfNoChange"] = async () => {
-        calls.push("retry-check");
-      };
       const run = tap.execute(
         { action: "tap", searchUntil: { duration: mode === "expired" ? 100 : 500 } },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       const result = await run;
       if (mode === "immediate") {
@@ -285,8 +302,8 @@ describe("gesture request sequences", () => {
       const calls: string[] = [];
       const timer = clock(calls);
       const selector = new FakeElementSelector();
-      const select = selector.selectClickable.bind(selector);
-      selector.selectClickable = (...args) => {
+      const select = selector.select.bind(selector);
+      selector.select = (...args) => {
         calls.push("select");
         return select(...args);
       };
@@ -298,9 +315,9 @@ describe("gesture request sequences", () => {
         calls.push("container");
         return containerFound;
       };
-      tap.observedInteraction = async (action) => {
+      tap.observedInteraction = async (action, options) => {
         calls.push("observe");
-        return action(recordObservationRead(observation));
+        return runBlockWith(() => recordObservationRead(observation))(action, options);
       };
       const result = await tap.execute({
         action: "tap",
@@ -318,9 +335,9 @@ describe("gesture request sequences", () => {
   test("tapAny skips selection when the observation has no hierarchy", async () => {
     const calls: string[] = [];
     const tap = new TapAnyElement(device, new FakeAdbClient(), { timer: clock(calls) });
-    tap.observedInteraction = async (action) => {
+    tap.observedInteraction = async (action, options) => {
       calls.push("observe");
-      return action({ ...observation, viewHierarchy: undefined });
+      return runBlockWith({ ...observation, viewHierarchy: undefined })(action, options);
     };
     tap["findClickableElement"] = () => {
       calls.push("select");
@@ -411,11 +428,9 @@ describe("gesture request sequences", () => {
     const service = {
       requestAction: proxy.requestAction.bind(proxy),
       getAccessibilityHierarchy: async (...args: unknown[]) => {
-        expect(args.slice(0, 4)).toEqual([
+        expect(args.slice(0, 2)).toEqual([
           { query: "Selected", containerElementId: undefined },
-          undefined,
-          undefined,
-          undefined,
+          { disableAllFiltering: false },
         ]);
         calls.push("hierarchy");
         lookup.nextElementByText = element;
@@ -441,7 +456,7 @@ describe("gesture request sequences", () => {
       observedInteraction: async (action) => action(observation),
     });
     const run = scroll.findTargetElement(
-      { container: { text: "Selected" } },
+      { container: { text: "Selected" }, direction: "up" },
       hierarchy,
       0,
       controller.signal,

@@ -6,6 +6,7 @@ import type { BootedDevice, SetLocaleResult, SetTimeZoneResult } from "../../src
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolIsError, toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -60,14 +61,14 @@ describe("changeLocalization handler", () => {
   });
   afterEach(() => restore());
 
-  async function callRaw(platform: "android" | "ios", args: object) {
+  async function callRaw(platform: "android" | "ios", args: Record<string, unknown>) {
     const device: BootedDevice = { deviceId: "fake-device", name: "Fake", platform };
     return await ToolRegistry.getTool("changeLocalization")!.deviceAwareHandler!(device, args);
   }
 
-  async function call(platform: "android" | "ios", args: object) {
+  async function call(platform: "android" | "ios", args: Record<string, unknown>) {
     const response = await callRaw(platform, args);
-    return JSON.parse(response.content[0].text!);
+    return toolJson(response);
   }
 
   test("applies Android fields in order and broadcasts once", async () => {
@@ -231,8 +232,8 @@ describe("changeLocalization handler", () => {
     success = false;
     error = "Android API 30 does not support app-scoped locale changes";
     const response = await callRaw("android", { locale: "ja-JP", appId: "com.example.app" });
-    expect(response.isError).toBe(true);
-    expect(JSON.parse(response.content[0].text!)).toEqual({
+    expect(toolIsError(response)).toBe(true);
+    expect(toolJson(response)).toEqual({
       success: false,
       changes: {},
       intentBroadcast: false,
@@ -248,14 +249,14 @@ describe("changeLocalization handler", () => {
       appId: "com.example.app",
       timeZone: "UTC",
     });
-    expect(response.isError).toBe(true);
-    expect(JSON.parse(response.content[0].text!).changes).toEqual({ locale: "en-GB" });
+    expect(toolIsError(response)).toBe(true);
+    expect(toolJson(response).changes).toEqual({ locale: "en-GB" });
   });
 
   test("a successful change does not set isError", async () => {
     const response = await callRaw("android", { timeZone: "UTC" });
-    expect(response.isError).toBeUndefined();
-    expect(JSON.parse(response.content[0].text!).success).toBe(true);
+    expect(toolIsError(response)).toBe(false);
+    expect(toolJson(response).success).toBe(true);
   });
 
   test("empty input neither mutates settings nor broadcasts", async () => {

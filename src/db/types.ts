@@ -503,6 +503,7 @@ export interface DeviceSessionsTable {
   daemon_session_id: string | null;
   created_at_ms: number;
   last_used_at_ms: number;
+  activity_seq: Generated<number>;
   expires_at_ms: number;
   released_at_ms: number | null;
   release_reason: string | null;
@@ -549,6 +550,30 @@ export interface DeviceResourceApplicationsTable {
   resources_json: string;
   profile_fingerprint: string;
   updated_at_ms: number;
+}
+
+/** Durable MCP Tasks extension state (#4668), owned by session key + task id. */
+export interface McpTasksTable {
+  task_id: string;
+  /** The MCP session key that created the task; only that key may read or cancel it. */
+  owner_key: string;
+  tool_name: string;
+  /** working | input_required | completed | failed | cancelled */
+  status: string;
+  status_message: string | null;
+  /** The daemon instance running the task; a row left non-terminal by another instance is failed. */
+  instance_id: string;
+  poll_interval_ms: number;
+  /** How long a terminal task stays readable. */
+  retention_ms: number;
+  created_at_ms: number;
+  last_updated_at_ms: number;
+  terminal_at_ms: number | null;
+  /** null while running; terminal_at_ms + retention_ms once terminal. */
+  expires_at_ms: number | null;
+  input_requests_json: string | null;
+  result_json: string | null;
+  error_json: string | null;
 }
 
 /** Bounded, durable diagnostics for unexpectedly lost Android emulators. */
@@ -646,6 +671,7 @@ export interface VideoRecordingsTable {
   config_json: string;
   highlights_json: string | null;
   capture_teardown_json: string | null;
+  recorder_daemon_session_id: string | null;
   recorded_panel_json: string | null;
   display_transitions_json: string | null;
   // Daemon session that started the recording (issue #4752). Nullable: rows that
@@ -826,6 +852,7 @@ export interface Database {
   device_sessions: DeviceSessionsTable;
   device_locks: DeviceLocksTable;
   device_resource_applications: DeviceResourceApplicationsTable;
+  mcp_tasks: McpTasksTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
   provisioned_device_transport_tombstones: ProvisionedDeviceTransportTombstonesTable;
   tool_selection_profile_provenance: ToolSelectionProfileProvenanceTable;

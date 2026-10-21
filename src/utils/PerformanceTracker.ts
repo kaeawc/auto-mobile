@@ -7,21 +7,11 @@
  */
 import { Timer, defaultTimer } from "./SystemTimer";
 
-/**
- * Represents a single timing entry in the performance data
- */
-export interface TimingEntry {
-  name: string;
-  durationMs: number;
-  children?: TimingData;
-}
+import type { TimingData, TimingEntry } from "../models/TimingData";
+import { NoOpPerformanceTracker } from "./NoOpPerformanceTracker";
+export { NoOpPerformanceTracker } from "./NoOpPerformanceTracker";
 
-/**
- * Timing data structure:
- * - Array = serial operations (ordered execution)
- * - Object = parallel operations (concurrent execution)
- */
-export type TimingData = TimingEntry[] | Record<string, TimingEntry>;
+export type { TimingData, TimingEntry };
 
 /**
  * Block type for tracking serial vs parallel operations
@@ -31,7 +21,7 @@ type BlockType = "serial" | "parallel";
 /**
  * Internal tracking state for a timing block
  */
-interface TimingBlock {
+export interface TimingBlock {
   name: string;
   type: BlockType;
   startMs: number;
@@ -311,67 +301,6 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
     } else {
       operation.block.entries[name] = entry;
     }
-  }
-}
-
-/**
- * No-op implementation for when performance tracking is disabled
- * All methods are essentially pass-through with minimal overhead
- */
-export class NoOpPerformanceTracker implements PerformanceTracker {
-  private root: TimingBlock = {
-    name: "noop",
-    type: "serial",
-    startMs: 0,
-    entries: [],
-    parent: null,
-  };
-  private current: TimingBlock = this.root;
-  private operationStarts: Map<string, number> = new Map();
-
-  serial(_name: string): PerformanceTracker {
-    return this;
-  }
-
-  parallel(_name: string): PerformanceTracker {
-    return this;
-  }
-
-  async track<T>(_name: string, fn: () => Promise<T>): Promise<T> {
-    return fn();
-  }
-
-  trackSync<T>(_name: string, fn: () => T): T {
-    return fn();
-  }
-
-  end(): PerformanceTracker {
-    return this;
-  }
-
-  getTimings(): TimingData | null {
-    return null;
-  }
-
-  isEnabled(): boolean {
-    return false;
-  }
-
-  addExternalTiming(_name: string, _entry: TimingEntry | TimingEntry[]): void {
-    // No-op
-  }
-
-  startOperation(_name: string): void {
-    // No-op
-  }
-
-  endOperation(_name: string): void {
-    // No-op
-  }
-
-  fork(): PerformanceTracker {
-    // No state to isolate -- every method above is already a pass-through.
-    return this;
   }
 }
 

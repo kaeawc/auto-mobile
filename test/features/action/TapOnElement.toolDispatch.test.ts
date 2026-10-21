@@ -1,3 +1,5 @@
+import { isolatedTapStrategy } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import type {
   BootedDevice,
@@ -39,18 +41,24 @@ const button: Element = {
 class StaticObserveScreen extends FakeObserveScreen {
   constructor(private readonly now: () => number) {
     super();
-    this.setObserveResult({} as ObserveResult);
+    this.setObserveResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      }),
+    );
   }
   override async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
     await super.execute(options);
     const updatedAt = this.now();
-    return {
+    return buildObserveResult({
       updatedAt,
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: { hierarchy: { node: [] }, updatedAt } as ViewHierarchyResult,
       freshness: { isFresh: true },
-    } as unknown as ObserveResult;
+    });
   }
 }
 
@@ -62,8 +70,14 @@ async function runTap() {
   adb.getDeviceTimestampMs = async () => timer.now();
   adb.isScreenOn = async () => true;
   const selector = new FakeElementSelector(button);
+  const window = new FakeWindow();
+  window.configureCachedActiveWindow(null);
   const tap = new TapOnElement(device, adb, {
     timer,
+    awaitIdle: new FakeAwaitIdle(),
+    observeScreen: new StaticObserveScreen(() => timer.now()),
+    window,
+    tapStrategy: isolatedTapStrategy(),
     elementSelector: selector,
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     hierarchyCapture: {
@@ -78,38 +92,28 @@ async function runTap() {
       }),
     },
   });
-  const window = new FakeWindow();
-  window.configureCachedActiveWindow(null);
   const hierarchy = { hierarchy: { node: [] }, updatedAt: timer.now() } as ViewHierarchyResult;
   const reports: number[] = [];
   const taps: Array<{ reportsBefore: number; at: number }> = [];
-  Object.assign(tap, {
-    awaitIdle: new FakeAwaitIdle(),
-    observeScreen: new StaticObserveScreen(() => timer.now()),
-    window,
-    strategy: {
-      isAccessibilityServiceEnabled: async () => false,
-      shouldRunPreTapStability: () => false,
-    },
-    executeAndroidTap: async () => {
-      taps.push({ reportsBefore: reports.length, at: timer.now() });
-    },
-    // The last step before the gesture: everything that waits for the target is done by here.
-    prepareSelectionCapture: async () => {
-      timer.advanceTime(WAIT_FOR_TARGET_MS);
-      return null;
-    },
-    refreshViewHierarchy: async () => hierarchy,
-    captureTerminalObservationScreenshot: async () => {},
-    recordDeferredPredictionOutcome: async () => {},
-    deriveTapEffectAfterPostTapObservation: async (_previous: unknown, current: ObserveResult) => ({
-      effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
-      observation: current,
-    }),
+  tap.executeAndroidTap = async () => {
+    taps.push({ reportsBefore: reports.length, at: timer.now() });
+  };
+  // The last step before the gesture: all waiting for the target is done here.
+  tap.prepareSelectionCapture = async () => {
+    timer.advanceTime(WAIT_FOR_TARGET_MS);
+    return null;
+  };
+  tap.refreshViewHierarchy = async () => hierarchy;
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
+  tap.deriveTapEffectAfterPostTapObservation = async (_previous, current) => ({
+    effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
+    observation: current,
   });
+  const tapOptions = { text: "Continue", action: "tap" as const, skipUiStability: true };
   const result = await runWithToolDispatchReporter(
     () => reports.push(timer.now()),
-    () => tap.execute({ text: "Continue", action: "tap", skipUiStability: true }),
+    () => tap.execute(tapOptions),
   );
   return { result, reports, taps };
 }

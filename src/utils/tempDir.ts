@@ -15,6 +15,7 @@ import fs from "node:fs";
 import os from "os";
 import path from "path";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import { AMBIENT_ENV, ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 import { resolveDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
@@ -49,7 +50,7 @@ export function resolveAutoMobileBaseDir(
   homeDir: string = os.homedir(),
   daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env),
 ): string {
-  const override = (env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR)?.trim();
+  const override = readEnvTrimmed(ENV.DATA_DIR, env);
   if (override && override.length > 0) {
     return path.resolve(daemonLaunchWorkingDirectory, override);
   }
@@ -74,7 +75,7 @@ export function resolveAutoMobileLogsDir(
   homeDir: string = os.homedir(),
   daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env),
 ): string {
-  const override = (env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR)?.trim();
+  const override = readEnvTrimmed(ENV.LOG_DIR, env);
   if (override && override.length > 0) {
     return path.resolve(daemonLaunchWorkingDirectory, override);
   }
@@ -95,15 +96,12 @@ export function resolveAutoMobileLogsDir(
  * @param env - Environment to inspect (injectable for tests)
  */
 export function assertUnitTestLogsDirIsolated(env: NodeJS.ProcessEnv = process.env): void {
-  if (env.NODE_ENV !== "test") {
+  if (readEnvRaw(AMBIENT_ENV.NODE_ENV, env) !== "test") {
     return;
   }
   // Same `??` precedence as resolveAutoMobileLogsDir/resolveAutoMobileBaseDir: an
   // empty AUTOMOBILE_* value shadows its AUTO_MOBILE_* twin there, so it must here too.
-  const overrides = [
-    env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR,
-    env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR,
-  ];
+  const overrides = [readEnvRaw(ENV.LOG_DIR, env), readEnvRaw(ENV.DATA_DIR, env)];
   if (overrides.some((value) => value !== undefined && value.trim().length > 0)) {
     return;
   }
@@ -147,7 +145,7 @@ export function getSharedAutoMobileDir(
   homeDir: string = os.userInfo().homedir,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const override = (env.AUTOMOBILE_COORDINATION_DIR ?? env.AUTO_MOBILE_COORDINATION_DIR)?.trim();
+  const override = readEnvTrimmed(ENV.COORDINATION_DIR, env);
   if (override && override.length > 0) {
     if (!path.isAbsolute(override)) {
       throw new Error(
@@ -183,9 +181,7 @@ export function getAdbServerScopedAutoMobileDir(
   env: NodeJS.ProcessEnv = process.env,
   homeDir: string = os.userInfo().homedir,
 ): string {
-  const override = (
-    env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR ?? env.AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR
-  )?.trim();
+  const override = readEnvTrimmed(ENV.ADB_SERVER_COORDINATION_DIR, env);
   if (override && override.length > 0) {
     if (!path.isAbsolute(override)) {
       throw new Error(

@@ -1,8 +1,8 @@
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { describe, expect, test } from "bun:test";
 import {
@@ -16,7 +16,7 @@ import {
   sessionOwnershipLostPayload,
   declaresDeviceSessionInvalid,
   terminalSessionRefusalFields,
-} from "../../src/server/deviceSessionResult";
+} from "../../src/daemon/deviceSessionResult";
 
 describe("sessionOwnershipLostPayload", () => {
   const release: SessionReleaseSnapshot = {
@@ -314,7 +314,7 @@ test.each([
   "expired",
   "heartbeat-timeout",
   "owner-disconnected",
-  "managed-slot-ownership-lost",
+  "binding-ownership-lost",
   "explicit-release",
 ])("ownership refusal qualifies only an idle reason: %s", (reason) => {
   const idle = ["cli-idle-timeout", "lazy-expiry", "cleanup-expired", "expired"].includes(reason);

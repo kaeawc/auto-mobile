@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { createSendKeysTextClient } from "../../../src/features/action/sendkeys/CtrlProxyTextClient";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createExecResult } from "../../../src/utils/execResult";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../../src/utils/debug";
 import type { ObserveResult } from "../../../src/models";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { clearAndroidImeQuarantine } from "../../../src/features/action/androidImeLock";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
 
@@ -11,7 +15,7 @@ const device = { ...android, deviceId: "ime-trace-fake" };
 afterEach(() => clearAndroidImeQuarantine(device.deviceId));
 
 function passwordField(): ObserveResult {
-  return {
+  return buildObserveResult({
     ...focused,
     viewHierarchy: {
       hierarchy: {
@@ -20,7 +24,7 @@ function passwordField(): ObserveResult {
         },
       },
     },
-  };
+  });
 }
 
 function harness(
@@ -143,7 +147,7 @@ describe("IME trace opt-in", () => {
     async (path) => {
       setDebugModeEnabled(true);
       const h = harness("hello");
-      h.adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
+      h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
       h.client.supportsImeTrace = async () => true;
       h.client.commitViaIme = async () => ({
         success: true,
@@ -169,6 +173,7 @@ describe("IME trace opt-in", () => {
     h.client.commitViaIme = async (text) => ({
       success: true,
       insertedText: text,
+      totalTimeMs: 0,
       imeTrace: [`seq=${++commits} t=0 event=complete`],
     });
     const result = await h.action.execute([
@@ -214,4 +219,43 @@ describe("IME trace opt-in", () => {
     expect(result.success).toBe(true);
     expect("imeTrace" in result).toBe(false);
   });
+});
+
+test.each([true, false])(
+  "SendKeys carries editorConsumed=%s through verification",
+  async (editorConsumed) => {
+    const h = harness("helloworld");
+    h.client.commitViaIme = async () => ({
+      success: true,
+      insertedText: "helloworld",
+      ...(editorConsumed ? { editorConsumed: true } : {}),
+    });
+    const result = await h.action.execute([{ action: "type", text: "hello\nworld", mode: "ime" }]);
+    expect(result.success).toBe(editorConsumed);
+    expect(result.commands[0]).not.toHaveProperty("editorConsumed");
+    expect(result.commands[0]).not.toHaveProperty("insertedText");
+  },
+);
+
+test("Android SendKeys adapter forwards the consumed verdict", async () => {
+  const h = harness("helloworld");
+  const client = AndroidCtrlProxyClient.createForTesting(device, h.adb);
+  const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+  const commit = spyOn(client, "commitViaIme").mockResolvedValue({
+    totalTimeMs: 0,
+    success: true,
+    insertedText: "helloworld",
+    editorConsumed: true,
+  });
+  try {
+    const adapter = createSendKeysTextClient(device, h.adbFactory);
+    expect(await adapter.commitViaIme("hello\nworld", null)).toMatchObject({
+      success: true,
+      insertedText: "helloworld",
+      editorConsumed: true,
+    });
+  } finally {
+    commit.mockRestore();
+    instance.mockRestore();
+  }
 });

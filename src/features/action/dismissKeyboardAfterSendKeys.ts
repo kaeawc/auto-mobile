@@ -1,10 +1,6 @@
 import type { BootedDevice, KeyboardResult } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
 
-export interface SendKeysKeyboardCloser {
-  close(signal?: AbortSignal): Promise<KeyboardResult>;
-}
-
 export async function dismissKeyboardAfterSendKeys(
   device: BootedDevice,
   enabled: boolean,

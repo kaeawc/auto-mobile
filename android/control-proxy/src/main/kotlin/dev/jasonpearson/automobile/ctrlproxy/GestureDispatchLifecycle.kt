@@ -31,8 +31,8 @@ internal class GestureDispatchLifecycle(
     startOperation(DISPATCH_GESTURE_OPERATION)
   }
 
-  fun completed(
-    beforeResult: () -> Unit = {},
+  suspend fun completed(
+    beforeResult: suspend () -> Unit = {},
     onResult: (GestureDispatchOutcome) -> Unit,
   ) {
     val outcome: GestureDispatchOutcome

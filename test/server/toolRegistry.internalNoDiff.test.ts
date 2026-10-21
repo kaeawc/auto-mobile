@@ -1,5 +1,8 @@
+import { toolPayload } from "../helpers/toolResponse";
+import { SKELETON_OBSERVATION } from "../../src/server/toolRegistryTypes";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect } from "bun:test";
+import { warmedTests } from "../helpers/warmedTests";
 import { z } from "zod/v4";
 import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
@@ -10,7 +13,7 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -30,6 +33,26 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
  *
  * These exercise the real wrapped-handler → finalize path end-to-end.
  */
+const payloadOf = (result: unknown) =>
+  z
+    .looseObject({
+      observation: z
+        .looseObject({
+          isDiff: z.boolean().optional(),
+          skeleton: z.unknown(),
+          viewHierarchy: z
+            .looseObject({
+              hierarchy: z.looseObject({
+                node: z.looseObject({ "resource-id": z.string().optional() }),
+              }),
+            })
+            .optional(),
+        })
+        .optional(),
+      observationDiff: z.looseObject({ mode: z.string(), reason: z.string() }).optional(),
+    })
+    .parse(toolPayload(result));
+
 describe("ToolRegistry internal no-diff guard (#3053)", () => {
   const androidA: BootedDevice = {
     name: "Pixel A",
@@ -46,8 +69,12 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   }
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
-  let originalAfterToolCall: unknown;
+  let originalDeviceSessionManager: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["deviceSessionManager"];
+  let originalAfterToolCall: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["afterToolCall"];
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let originalNoObserve: boolean;
@@ -58,16 +85,18 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   function sameScreenObserve(): ObserveResult {
     return {
       updatedAt: 1,
+      observationId: "same-screen",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
       viewHierarchy: {
         packageName: "com.example",
         hierarchy: {
-          node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any,
+          node: { "resource-id": "com.example:id/root", "content-desc": "keep" },
         },
       },
-    } as ObserveResult;
+    };
   }
 
   async function setupAutolockedSession(): Promise<string> {
@@ -115,7 +144,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       source: "heuristic",
       confidence: "low",
       key: "bundle=com.example|focus=Search",
-      components: { bundleId: "com.example", focusedField: "Search" } as any,
+      components: { bundleId: "com.example", focusedElementId: "Search" },
     };
     observation.viewHierarchy = {
       packageName: "com.example",
@@ -127,9 +156,9 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
             {
               "resource-id": "com.example:id/field",
               checked: checked ? "true" : undefined,
-            } as any,
+            },
           ],
-        } as any,
+        },
       },
     };
     return observation;
@@ -147,27 +176,27 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       }),
       async () =>
         createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) }),
+      SKELETON_OBSERVATION,
     );
   }
 
-  beforeEach(() => {
+  function setup(): void {
     ToolRegistry.clearTools();
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
     // #6866: the after-tool-call pipeline now settles a navigation-class action's
     // embedded observation against the DEVICE before finalizing. These tests drive
     // stub handlers with canned observations against a fake device, so swap in a
     // settle factory that resolves no delegate — the gate then leaves the stub's
     // observation exactly as the handler built it, which is what they assert on.
-    originalAfterToolCall = (ToolRegistry as any).afterToolCall;
-    (ToolRegistry as any).afterToolCall = new DefaultAfterToolCallHandler(
-      undefined,
-      () => undefined,
-    );
+    originalAfterToolCall = ToolRegistry.getCollaboratorsForTesting().afterToolCall;
+    ToolRegistry.setPipelineOverridesForTesting({
+      afterToolCall: new DefaultAfterToolCallHandler(undefined, () => undefined),
+    });
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     originalNoObserve = serverConfig.isActionsNoObserveEnabled();
     originalCompact = serverConfig.isActionsCompactMetadataEnabled();
@@ -178,13 +207,13 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     // against a fake device. The shared test preload (test/setup/testPreload.ts)
     // installs a no-op readiness driver so that setup cannot block on real
     // `adb`/network.
-  });
+  }
 
-  afterEach(() => {
+  function reset(): void {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
-    (ToolRegistry as any).afterToolCall = originalAfterToolCall;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
+    ToolRegistry.setPipelineOverridesForTesting({ afterToolCall: originalAfterToolCall });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
@@ -193,7 +222,19 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     serverConfig.setActionsCompactMetadataEnabled(originalCompact);
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
-  });
+  }
+
+  const warmedTest = warmedTests(() => {});
+  function test(name: string, scenario: () => Promise<void>): void {
+    warmedTest(name, async () => {
+      setup();
+      try {
+        await scenario();
+      } finally {
+        reset();
+      }
+    });
+  }
 
   test("compact metadata uses the actual session cache through the wrapped handler", async () => {
     serverConfig.setActionsCompactMetadataEnabled(true);
@@ -209,12 +250,12 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     const handler = ToolRegistry.getTool("tapOn")!.handler;
     const args = { platform: "android", __mcpSessionId: "mcp-session-1" };
     const output = z.object({ observation: z.record(z.string(), z.unknown()) });
-    const first = output.parse(getStructuredPayload(await handler(args))).observation;
+    const first = output.parse(toolPayload(await handler(args))).observation;
     expect(first).toHaveProperty("systemInsets");
     expect(daemonSessionManager?.getLastActionMetadata(uuid, androidA.deviceId)).toHaveProperty(
       "systemInsets",
     );
-    const second = output.parse(getStructuredPayload(await handler(args))).observation;
+    const second = output.parse(toolPayload(await handler(args))).observation;
     expect(second).not.toHaveProperty("systemInsets");
   });
 
@@ -235,7 +276,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       platform: "android",
       __mcpSessionId: "mcp-session-1",
     });
-    expect((normal.structuredContent as any).observation.isDiff).toBe(true);
+    expect(payloadOf(normal).observation?.isDiff).toBe(true);
 
     // Re-seed the baseline (the diffing tapOn advanced it), then an internal tapOn
     // must emit the FULL observation instead of a diff.
@@ -248,9 +289,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       __mcpSessionId: "mcp-session-1",
       __internalNoDiff: true,
     });
-    const obs = (internal.structuredContent as any).observation;
-    expect(obs.isDiff).toBeUndefined();
-    expect(obs.viewHierarchy.hierarchy.node["resource-id"]).toBe("com.example:id/root");
+    expect(payloadOf(internal).observation?.isDiff).toBeUndefined();
+    expect(payloadOf(internal).observation?.viewHierarchy?.hierarchy.node["resource-id"]).toBe(
+      "com.example:id/root",
+    );
   });
 
   test("EC2.3: an internal tapOn keeps its observation even with --actions-no-observe on", async () => {
@@ -264,7 +306,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       platform: "android",
       __mcpSessionId: "mcp-session-1",
     });
-    expect((normal.structuredContent as any).observation).toBeUndefined();
+    expect(payloadOf(normal).observation).toBeUndefined();
 
     // Internal tapOn: observation preserved for internal consumers.
     const internal = await ToolRegistry.getTool("tapOn")!.handler({
@@ -272,8 +314,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       __mcpSessionId: "mcp-session-1",
       __internalNoDiff: true,
     });
-    expect((internal.structuredContent as any).observation).toBeDefined();
-    expect((internal.structuredContent as any).observation.viewHierarchy).toBeDefined();
+    expect(payloadOf(internal).observation).toBeDefined();
+    expect(payloadOf(internal).observation?.viewHierarchy).toBeDefined();
   });
 
   test("action policy: ToolRegistry forwards submit IME args for uncertain-identity fallbacks", async () => {
@@ -291,10 +333,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       __mcpSessionId: "mcp-session-1",
       commands: [{ action: "key", key: "search" }],
     });
-    expect((search.structuredContent as any).observation.isDiff).toBeUndefined();
-    expect((search.structuredContent as any).observation.skeleton).toBeDefined();
-    expect((search.structuredContent as any).observation.viewHierarchy).toBeUndefined();
-    expect((search.structuredContent as any).observationDiff).toMatchObject({
+    expect(payloadOf(search).observation?.isDiff).toBeUndefined();
+    expect(payloadOf(search).observation?.skeleton).toBeDefined();
+    expect(payloadOf(search).observation?.viewHierarchy).toBeUndefined();
+    expect(payloadOf(search).observationDiff).toMatchObject({
       mode: "full",
       reason: "screen_changed",
     });
@@ -310,10 +352,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
         commands: [{ action: "key", key: "go" }],
       }),
     );
-    expect((go.structuredContent as any).observation.isDiff).toBeUndefined();
-    expect((go.structuredContent as any).observation.skeleton).toBeDefined();
-    expect((go.structuredContent as any).observation.viewHierarchy).toBeUndefined();
-    expect((go.structuredContent as any).observationDiff).toMatchObject({
+    expect(payloadOf(go).observation?.isDiff).toBeUndefined();
+    expect(payloadOf(go).observation?.skeleton).toBeDefined();
+    expect(payloadOf(go).observation?.viewHierarchy).toBeUndefined();
+    expect(payloadOf(go).observationDiff).toMatchObject({
       mode: "full",
       reason: "screen_changed",
     });
@@ -334,8 +376,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       __mcpSessionId: "mcp-session-1",
       commands: [{ action: "key", key: "next" }],
     });
-    expect((next.structuredContent as any).observation.isDiff).toBe(true);
-    expect((next.structuredContent as any).observationDiff).toMatchObject({
+    expect(payloadOf(next).observation?.isDiff).toBe(true);
+    expect(payloadOf(next).observationDiff).toMatchObject({
       mode: "diff",
       reason: "diff_emitted",
     });
@@ -351,8 +393,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
         commands: [{ action: "key", key: "previous" }],
       }),
     );
-    expect((previous.structuredContent as any).observation.isDiff).toBe(true);
-    expect((previous.structuredContent as any).observationDiff).toMatchObject({
+    expect(payloadOf(previous).observation?.isDiff).toBe(true);
+    expect(payloadOf(previous).observationDiff).toMatchObject({
       mode: "diff",
       reason: "diff_emitted",
     });

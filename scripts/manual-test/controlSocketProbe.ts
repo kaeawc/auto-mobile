@@ -4,6 +4,7 @@ import {
   DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES,
 } from "../../src/daemon/socketServer/LineFramer";
 import { z } from "zod";
+import { debuglog } from "node:util";
 import type { Timer } from "../../src/utils/SystemTimer";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import { errorMessage } from "../../src/utils/describeUnknownError";
@@ -13,6 +14,8 @@ import {
   type ConnectFrameSocket,
   type FrameConnection,
 } from "./frameWire";
+
+const debug = debuglog("automobile-manual-test");
 
 /** Pure capability response, even before initialization: daemonRequestHandlers.ts. */
 export const CONTROL_SOCKET_PROBE_METHOD = "daemon/capabilities";
@@ -27,7 +30,12 @@ const responseSchema = z.object({
 export async function probeControlSocket(
   socketPath: string,
   deps: { connect: ConnectFrameSocket; timer: Timer; ids: IdGenerator },
-  options: { timeoutMs?: number; method?: string; maxFrameBytes?: number } = {},
+  options: {
+    timeoutMs?: number;
+    method?: string;
+    maxFrameBytes?: number;
+    requireCapability?: string;
+  } = {},
 ): Promise<ControlSocketProbeResult> {
   let connection: FrameConnection | undefined;
   let settled = false;
@@ -78,10 +86,26 @@ export async function probeControlSocket(
             try {
               const response = responseSchema.safeParse(JSON.parse(line));
               if (response.success && response.data.id === id) {
-                finish({ alive: true, result: response.data.result });
+                const capabilities = z
+                  .object({ capabilities: z.array(z.string()) })
+                  .safeParse(response.data.result);
+                if (
+                  options.requireCapability &&
+                  (!response.data.success ||
+                    !capabilities.success ||
+                    !capabilities.data.capabilities.includes(options.requireCapability))
+                ) {
+                  finish({
+                    alive: false,
+                    reason: `Required capability ${options.requireCapability} is unavailable`,
+                  });
+                } else {
+                  finish({ alive: true, result: response.data.result });
+                }
               }
             } catch (error) {
               // Non-JSON lines cannot prove a matching daemon response.
+              debug(`Ignoring invalid control probe frame: ${errorMessage(error)}`);
             }
           }
           if (overflow) {
@@ -104,11 +128,13 @@ function closeConnection(connection: FrameConnection): void {
     connection.end();
   } catch (error) {
     // Graceful close can fail when the diagnostic socket has already gone away.
+    debug(`Control probe end failed: ${errorMessage(error)}`);
   }
   try {
     // End alone half-closes a net.Socket; destroy bounds cleanup even if its peer never closes.
     connection.destroy();
   } catch (error) {
     // Transport cleanup failure must not throw out of a status probe.
+    debug(`Control probe destroy failed: ${errorMessage(error)}`);
   }
 }

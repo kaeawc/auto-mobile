@@ -18,6 +18,7 @@ describe("startStartupMaintenance", () => {
     let iosStarted = false;
 
     startStartupMaintenance({
+      startNativeHelperSweep: async () => {},
       platform: "darwin",
       startAndroidSweep: () => {
         androidStarted = true;
@@ -40,6 +41,7 @@ describe("startStartupMaintenance", () => {
     const log = new FakeLogger();
 
     startStartupMaintenance({
+      startNativeHelperSweep: async () => {},
       platform: "linux",
       startAndroidSweep: async () => {
         throw new Error("temp directory unavailable");
@@ -61,6 +63,7 @@ describe("startStartupMaintenance", () => {
     const log = new FakeLogger();
 
     startStartupMaintenance({
+      startNativeHelperSweep: () => pendingPromise(),
       platform: "linux",
       startAndroidSweep: () => pendingPromise(),
       startIosReap: () => pendingPromise(),
@@ -71,6 +74,31 @@ describe("startStartupMaintenance", () => {
 
     expect(log.at("warn").map((message) => message.message)).toEqual([
       expect.stringContaining("Android CtrlProxy prefetch cleanup exceeded"),
+      expect.stringContaining("native helper cleanup exceeded"),
     ]);
   });
 });
+
+for (const platform of ["darwin", "linux", "win32"] as const) {
+  test(`native helper cleanup starts and survives rejection on ${platform}`, async () => {
+    const timer = new FakeTimer();
+    const logger = new FakeLogger();
+    let calls = 0;
+    startStartupMaintenance({
+      platform,
+      timer,
+      logger,
+      startAndroidSweep: async () => {},
+      startIosReap: async () => {},
+      startNativeHelperSweep: async () => {
+        calls++;
+        throw new Error("unavailable");
+      },
+    });
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    expect(logger.at("warn").map((m) => m.message)).toEqual([
+      expect.stringContaining("native helper cleanup failed"),
+    ]);
+  });
+}

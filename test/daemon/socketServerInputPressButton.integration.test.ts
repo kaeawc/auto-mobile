@@ -1,25 +1,29 @@
 import { spyOn } from "bun:test";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import {
+  createFakeDaemonState,
   createFakeDaemonState as createDrainDaemonState,
+  createFakeDeviceManager,
+  createFakeSession,
   createFakeSession as createDrainSession,
 } from "./helpers/inputSocketHarness";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { sendRawSocketRequest, sendSocketRequest } from "./helpers/socketRequest";
 import { PressButton } from "../../src/features/action/PressButton";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
-import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
+import type { DeviceLabelMap } from "../../src/daemon/sessionManager";
 import type { BootedDevice, PressButtonResult } from "../../src/models";
 
 const androidDevice: BootedDevice = {
@@ -34,68 +38,9 @@ const iosDevice: BootedDevice = {
   platform: "ios",
 };
 
-function createFakeDeviceManager(
-  devices: BootedDevice[],
-  succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"]),
-) {
-  return {
-    getBootedDevicesDetailed: mock(async () => ({
-      devices,
-      succeededPlatforms,
-    })),
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
-}
-
-function createFakeSession(
-  sessionId: string,
-  assignedDevice: string,
-  platform: "android" | "ios",
-): Session {
-  return {
-    sessionId,
-    assignedDevice,
-    platform,
-    createdAt: 0,
-    lastUsedAt: 0,
-    expiresAt: 60_000,
-    cacheData: {},
-    lastHeartbeat: 0,
-    sessionTimeoutMs: 60_000,
-    heartbeatTimeoutMs: 10_000,
-    heartbeatTimeoutSource: "default",
-    hasReceivedHeartbeat: false,
-  };
-}
-
-function createFakeDaemonState(
-  autolockSessions: Map<string, Session> = new Map(),
-  mcpAutolockSessions: Map<string, string> = new Map(),
-) {
-  return {
-    isInitialized: () => true,
-    getSessionManager: () => ({
-      getSession: (sessionId: string) => autolockSessions.get(sessionId) ?? null,
-      getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,
-      releaseSession: async () => null,
-    }),
-    getDevicePool: () => ({
-      refreshDevices: async () => 0,
-      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-      releaseDevice: async () => {},
-      resolveAutolockSessionForMcpSession: (
-        mcpSessionId: string | undefined,
-        platform?: "android" | "ios",
-      ) => {
-        if (!mcpSessionId) {
-          return undefined;
-        }
-        const sessionId = mcpAutolockSessions.get(mcpSessionId);
-        const session = sessionId ? autolockSessions.get(sessionId) : undefined;
-        return session?.platform === platform ? session.sessionId : undefined;
-      },
-    }),
-  };
-}
+const unexpectedDaemonState = (): never => {
+  throw new Error("Unexpected daemon state access");
+};
 
 function sendRequest(
   socketPath: string,
@@ -117,7 +62,7 @@ async function sendRequestAfterConnect(
 
 describe("UnixSocketServer input/pressButton", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let fakeTimer: FakeTimer;
   let originalPress: typeof PressButton.prototype.press;
 
@@ -155,12 +100,7 @@ describe("UnixSocketServer input/pressButton", () => {
     });
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -196,14 +136,8 @@ describe("UnixSocketServer input/pressButton", () => {
     }));
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
+    server.stubFrameContextCheck();
     await server.start();
 
     const response = await sendRequest(socketPath, "input/pressButton", {
@@ -231,12 +165,7 @@ describe("UnixSocketServer input/pressButton", () => {
     }));
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/pressButton", {
@@ -270,12 +199,7 @@ describe("UnixSocketServer input/pressButton", () => {
     }));
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     // With the FakeTimer no wall-clock elapses in the queue, so the remaining
@@ -309,12 +233,7 @@ describe("UnixSocketServer input/pressButton", () => {
     }));
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/pressButton", {
@@ -351,9 +270,8 @@ describe("UnixSocketServer input/pressButton", () => {
     const session = createFakeSession("session-1", "emulator-5554", "android");
     const autolockSessions = new Map([[session.sessionId, session]]);
     const mcpAutolockSessions = new Map<string, string>();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(autolockSessions, mcpAutolockSessions),
       fakeTimer,
     );
@@ -371,9 +289,7 @@ describe("UnixSocketServer input/pressButton", () => {
         },
       },
       () => {
-        const socketSessionId = [
-          ...(server as unknown as { sessions: Map<string, unknown> }).sessions.keys(),
-        ][0];
+        const socketSessionId = server.sessionIds[0];
         mcpAutolockSessions.set(socketSessionId, session.sessionId);
       },
     );
@@ -402,12 +318,7 @@ describe("UnixSocketServer input/pressButton", () => {
     }));
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/pressButton", {
@@ -450,11 +361,12 @@ describe("UnixSocketServer input/pressButton", () => {
     // Stable sessionManager/devicePool references (createFakeDaemonState builds
     // fresh objects per getter call, so bound-session hooks would not survive).
     const sessionManager = {
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: (): DeviceLabelMap | undefined => undefined,
       releaseSession: async () => null,
       getSessionForDevice: (deviceId: string) =>
-        deviceId === "emulator-5554" ? "session-uuid-1" : undefined,
+        deviceId === "emulator-5554" ? "session-uuid-1" : null,
     };
     const devicePool = {
       refreshDevices: async () => 0,
@@ -465,11 +377,12 @@ describe("UnixSocketServer input/pressButton", () => {
     };
     const daemonState = {
       isInitialized: () => true,
+      getDeviceSessionRegistry: unexpectedDaemonState,
       getSessionManager: () => sessionManager,
       getDevicePool: () => devicePool,
-    } as unknown as ReturnType<typeof createFakeDaemonState>;
+    };
 
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", daemonState, fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, daemonState, fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/pressButton", {
@@ -500,12 +413,7 @@ describe("UnixSocketServer input/pressButton", () => {
     }));
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/pressButton", {
@@ -523,12 +431,7 @@ describe("UnixSocketServer input/pressButton", () => {
 
   test("rejects missing, non-string, and unsupported button values with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/pressButton", {
@@ -556,17 +459,17 @@ describe("UnixSocketServer input/pressButton", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+    const client = createAndroidTestClient(androidDevice);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
     const deviceRequest = spyOn(client, "requestGlobalAction").mockImplementation(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>) => {
+      async (...args: Parameters<typeof client.requestGlobalAction>) => {
         args[4]?.throwIfAborted();
         args[5]?.();
         sent = true;
         operationStarted.resolve();
         await releaseOperation.promise;
-        return { success: true, totalTimeMs: 1 };
+        return { success: true, totalTimeMs: 1, action: "global" };
       },
     );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
@@ -574,12 +477,7 @@ describe("UnixSocketServer input/pressButton", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/pressButton", {
       platform: "android",
@@ -616,17 +514,17 @@ describe("UnixSocketServer input/pressButton", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+    const client = createAndroidTestClient(androidDevice);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
     const deviceRequest = spyOn(client, "requestGlobalAction").mockImplementation(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>) => {
+      async (...args: Parameters<typeof client.requestGlobalAction>) => {
         operationStarted.resolve();
         await releaseOperation.promise;
         args[4]?.throwIfAborted();
         args[5]?.();
         sent = true;
-        return { success: true, totalTimeMs: 1 };
+        return { success: true, totalTimeMs: 1, action: "global" };
       },
     );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
@@ -634,12 +532,7 @@ describe("UnixSocketServer input/pressButton", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/pressButton", {
       platform: "android",

@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "switch",
+          "stateKey": "liked_{item.id}"
+        }
+      ]
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "bad-key"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.repeat.items.path",
+  "expectedMessage": "Bound state key \"liked_bad-key\" is invalid (repeat item 0)"
+}

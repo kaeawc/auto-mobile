@@ -1,7 +1,10 @@
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { expect, spyOn, test } from "bun:test";
-import { DaemonSocketQueueOverflowError, UnixSocketServer } from "../../src/daemon/socketServer";
+import { DaemonSocketQueueOverflowError } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
@@ -21,32 +24,36 @@ import { FakeTimer } from "../fakes/FakeTimer";
 /** A response comparable to a base64 screenshot blob: well over 1 MiB. */
 const LARGE_FRAME_BYTES = 3 * 1024 * 1024;
 
-class BackpressuredSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
+class BackpressuredSocket extends FakeSocket {
+  /** Queued-byte count the daemon reads; assigned directly (the base type declares a property). */
+  override writableLength = 0;
   readonly callbacks: Array<(error?: Error | null) => void> = [];
-  readonly writes: string[] = [];
   readonly timeouts: number[] = [];
   backpressure = true;
 
-  setTimeout(ms: number): this {
-    this.timeouts.push(ms);
+  override setTimeout(ms?: number): this {
+    this.timeouts.push(ms ?? 0);
     return this;
   }
 
-  write(payload: string, callback: (error?: Error | null) => void): boolean {
-    this.writes.push(payload);
+  override write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
+  override write(
+    str: string | Uint8Array,
+    encoding?: BufferEncoding,
+    cb?: (err?: Error | null) => void,
+  ): boolean;
+  override write(
+    payload: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
+    super.write(payload);
     this.writableLength += Buffer.byteLength(payload);
-    this.callbacks.push(callback);
-    return !this.backpressure;
-  }
-
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
+    if (callback) {
+      this.callbacks.push(callback);
     }
-    return this;
+    return !this.backpressure;
   }
 
   /** Free queued bytes the way a reading peer does, without emptying the queue. */
@@ -63,32 +70,11 @@ class BackpressuredSocket extends EventEmitter {
   }
 }
 
-interface SocketServerInternals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
-  handleRequest(
-    sessionId: string,
-    socket: Socket,
-    request: DaemonRequest,
-    receivedAtMs: number,
-    onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
-  ): Promise<DaemonResponse | undefined>;
-  pendingSocketRequests: Set<unknown>;
-  writeFrameData(
-    socket: Socket,
-    sessionId: string,
-    frame: DaemonResponse,
-    onFlushed?: (error?: Error | null) => void,
-  ): void;
-}
-
-function connectedServer(timer: FakeTimer, socket: BackpressuredSocket): SocketServerInternals {
-  const server = new UnixSocketServer("unused", "http://localhost:0/mcp", undefined, timer);
-  const internals = server as unknown as SocketServerInternals;
-  internals.acceptingRequests = true;
-  internals.handleConnection(socket as unknown as Socket);
-  return internals;
+function connectedServer(timer: FakeTimer, socket: BackpressuredSocket): UnixSocketServerHarness {
+  const server = createHarnessServer("unused", undefined, timer);
+  server.allowRequests();
+  server.connect(socket);
+  return server;
 }
 
 const response: DaemonResponse = {
@@ -103,7 +89,7 @@ function largeFrame(bytes = LARGE_FRAME_BYTES): DaemonResponse {
 }
 
 function writtenIds(socket: BackpressuredSocket): unknown[] {
-  return socket.writes.map((line) => (JSON.parse(line) as { id: unknown }).id);
+  return socket.responses.map((frame) => frame.id);
 }
 
 test("disconnects before the bytes queued behind the head frame would exceed the cap", () => {
@@ -114,7 +100,7 @@ test("disconnects before the bytes queued behind the head frame would exceed the
   const frameBytes = Buffer.byteLength(JSON.stringify(frame) + "\n");
 
   while (!socket.destroyed) {
-    server.writeFrameData(socket as unknown as Socket, "session", frame, (error) => {
+    server.writeFrameTo(socket, "session", frame, (error) => {
       errors.push(error);
     });
   }
@@ -132,13 +118,13 @@ test("rejects an overflowing frame once with a typed queue overflow error", () =
   const server = connectedServer(new FakeTimer(), socket);
   const errors: Array<Error | null | undefined> = [];
   // A small head frame, then filler up to the cap behind it.
-  server.writeFrameData(socket as unknown as Socket, "session", response);
+  server.writeFrameTo(socket, "session", response);
   const filler = largeFrame(MAX_QUEUED_BYTES - 1024);
-  server.writeFrameData(socket as unknown as Socket, "session", filler);
+  server.writeFrameTo(socket, "session", filler);
   expect(socket.destroyed).toBeFalse();
   const queuedBeforeOverflow = socket.writableLength;
 
-  server.writeFrameData(socket as unknown as Socket, "session", largeFrame(2048), (error) => {
+  server.writeFrameTo(socket, "session", largeFrame(2048), (error) => {
     expect(socket.destroyed).toBeFalse();
     errors.push(error);
   });
@@ -168,10 +154,10 @@ test("a following small frame does not destroy a reader still draining one overs
   const frame = largeFrame();
   const frameBytes = Buffer.byteLength(JSON.stringify(frame) + "\n");
 
-  server.writeFrameData(socket as unknown as Socket, "session", frame, (error) => {
+  server.writeFrameTo(socket, "session", frame, (error) => {
     flushed.push(error);
   });
-  server.writeFrameData(socket as unknown as Socket, "session", response, (error) => {
+  server.writeFrameTo(socket, "session", response, (error) => {
     flushed.push(error);
   });
 
@@ -194,11 +180,11 @@ test("a heartbeat reply written while a large response drains keeps the connecti
   socket.backpressure = false;
   const server = connectedServer(timer, socket);
   const slow = Promise.withResolvers<unknown>();
-  server.handleLocalSocketRequest = () => slow.promise;
+  server.localRequestHandler = () => slow.promise;
   sendRequest(socket, "slow");
   await settleHandlers();
 
-  server.writeFrameData(socket as unknown as Socket, "session", largeFrame());
+  server.writeFrameTo(socket, "session", largeFrame());
   socket.emit(
     "data",
     Buffer.from(
@@ -228,8 +214,8 @@ test("a reader that frees no queued bytes for the stall deadline is destroyed wi
   const server = connectedServer(timer, socket);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    server.writeFrameData(socket as unknown as Socket, "session", largeFrame());
-    server.writeFrameData(socket as unknown as Socket, "session", response);
+    server.writeFrameTo(socket, "session", largeFrame());
+    server.writeFrameTo(socket, "session", response);
 
     timer.advanceTime(DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS - 1);
     expect(socket.destroyed).toBeFalse();
@@ -250,12 +236,12 @@ test("a reader that keeps freeing queued bytes is never treated as stalled", () 
   const timer = new FakeTimer();
   const socket = new BackpressuredSocket();
   const server = connectedServer(timer, socket);
-  server.writeFrameData(socket as unknown as Socket, "session", largeFrame());
+  server.writeFrameTo(socket, "session", largeFrame());
 
   for (let tick = 0; tick < 4; tick++) {
     timer.advanceTime(DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS - 1);
     // New frames land while the reader makes slow progress.
-    server.writeFrameData(socket as unknown as Socket, "session", response);
+    server.writeFrameTo(socket, "session", response);
     socket.drainPartially(1024);
     timer.advanceTime(1);
     expect(socket.destroyed).toBeFalse();
@@ -271,7 +257,7 @@ test("a stall deadline armed for a large frame is cancelled when the queue empti
   const timer = new FakeTimer();
   const socket = new BackpressuredSocket();
   const server = connectedServer(timer, socket);
-  server.writeFrameData(socket as unknown as Socket, "session", largeFrame());
+  server.writeFrameTo(socket, "session", largeFrame());
   const idleOnly = timer.getPendingTimeoutCount();
   socket.flush();
   expect(timer.getPendingTimeoutCount()).toBe(idleOnly - 1);
@@ -282,10 +268,10 @@ test("outbound writes cannot keep an unread RPC socket alive", () => {
   const socket = new BackpressuredSocket();
   const server = connectedServer(timer, socket);
 
-  server.writeFrameData(socket as unknown as Socket, "session", response);
+  server.writeFrameTo(socket, "session", response);
   for (let index = 0; index < 4; index++) {
     timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS / 5);
-    server.writeFrameData(socket as unknown as Socket, "session", response);
+    server.writeFrameTo(socket, "session", response);
   }
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS / 5);
 
@@ -300,7 +286,7 @@ test("inbound data and fully flushed writes refresh the RPC idle deadline", () =
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
   socket.emit("data", Buffer.from(""));
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
-  server.writeFrameData(socket as unknown as Socket, "session", response);
+  server.writeFrameTo(socket, "session", response);
   socket.flush();
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
   expect(socket.destroyed).toBeFalse();
@@ -336,12 +322,12 @@ test.each(["native", "flushed backpressure"])(
     const server = connectedServer(timer, socket);
     if (idlePath === "flushed backpressure") {
       socket.backpressure = true;
-      server.writeFrameData(socket as unknown as Socket, "session", response);
+      server.writeFrameTo(socket, "session", response);
       socket.flush();
-      socket.writes.length = 0;
+      socket.resetWrittenData();
       socket.backpressure = false;
     }
-    server.handleLocalSocketRequest = async () =>
+    server.localRequestHandler = async () =>
       new Promise<never>((_resolve, reject) => {
         timer.setTimeout(
           () =>
@@ -365,7 +351,7 @@ test.each(["native", "flushed backpressure"])(
     timer.advanceTime(longBudgetMs - DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
     await settleHandlers();
     expect(socket.destroyed).toBeFalse();
-    expect(socket.writes.map((line) => JSON.parse(line))).toEqual([
+    expect(socket.responses).toEqual([
       expect.objectContaining({
         id: "silent",
         success: false,
@@ -386,7 +372,7 @@ test("a request exactly at the idle limit survives an idle event racing its answ
   socket.backpressure = false;
   const server = connectedServer(timer, socket);
   const completed = Promise.withResolvers<unknown>();
-  server.handleLocalSocketRequest = () => completed.promise;
+  server.localRequestHandler = () => completed.promise;
   sendRequest(socket, "boundary", DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   await settleHandlers();
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
@@ -394,7 +380,7 @@ test("a request exactly at the idle limit survives an idle event racing its answ
   expect(socket.destroyed).toBeFalse();
   completed.resolve({ answered: true });
   await settleHandlers();
-  expect(socket.writes.map((line) => JSON.parse(line))).toEqual([
+  expect(socket.responses).toEqual([
     expect.objectContaining({ id: "boundary", success: true, result: { answered: true } }),
   ]);
   socket.flush();
@@ -409,24 +395,24 @@ test.each(["queued", "empty"])(
     const socket = new BackpressuredSocket();
     const server = connectedServer(timer, socket);
     const completed = Promise.withResolvers<unknown>();
-    server.handleLocalSocketRequest = () => completed.promise;
+    server.localRequestHandler = () => completed.promise;
     sendRequest(socket);
     await settleHandlers();
     completed.resolve({});
     await settleHandlers();
     expect(socket.timeouts).toEqual([DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS, 0]);
     expect(timer.getPendingTimeoutCount()).toBe(1);
-    expect(server.pendingSocketRequests.size).toBe(1);
+    expect(server.pendingRequestCount).toBe(1);
 
     if (queueState === "queued") {
-      server.writeFrameData(socket as unknown as Socket, "session", response);
+      server.writeFrameTo(socket, "session", response);
     }
     timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS / 2);
     // Flush only the terminal response, without emitting drain for later frames.
-    socket.writableLength -= Buffer.byteLength(socket.writes[0]!);
+    socket.drainPartially(Buffer.byteLength(socket.writes[0]!));
     socket.callbacks.shift()!();
     expect(socket.writableLength > 0).toBe(queueState === "queued");
-    expect(server.pendingSocketRequests.size).toBe(0);
+    expect(server.pendingRequestCount).toBe(0);
     expect(timer.getPendingTimeoutCount()).toBe(1);
 
     timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS / 2 - 1);
@@ -451,21 +437,21 @@ test.each(["queued", "empty"])(
     socket.backpressure = false;
     const server = connectedServer(timer, socket);
     const completed = Promise.withResolvers<unknown>();
-    server.handleLocalSocketRequest = () => completed.promise;
+    server.localRequestHandler = () => completed.promise;
     sendRequest(socket);
     await settleHandlers();
     timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
     completed.resolve({});
     await settleHandlers();
-    expect(server.pendingSocketRequests.size).toBe(1);
+    expect(server.pendingRequestCount).toBe(1);
     if (queueState === "queued") {
-      server.writeFrameData(socket as unknown as Socket, "session", response);
+      server.writeFrameTo(socket, "session", response);
     }
     expect(timer.getPendingTimeoutCount()).toBe(0);
-    socket.writableLength -= Buffer.byteLength(socket.writes[0]!);
+    socket.drainPartially(Buffer.byteLength(socket.writes[0]!));
     socket.callbacks.shift()!();
     expect(socket.writableLength > 0).toBe(queueState === "queued");
-    expect(server.pendingSocketRequests.size).toBe(0);
+    expect(server.pendingRequestCount).toBe(0);
     expect(socket.timeouts).toEqual([
       DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
       DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
@@ -489,7 +475,7 @@ test("all in-flight responses must flush before ordinary idle protection resumes
   const server = connectedServer(timer, socket);
   const first = Promise.withResolvers<unknown>();
   const second = Promise.withResolvers<unknown>();
-  server.handleLocalSocketRequest = (request) =>
+  server.localRequestHandler = (request) =>
     request.id === "first" ? first.promise : second.promise;
   sendRequest(socket, "first");
   sendRequest(socket, "second");
@@ -501,9 +487,9 @@ test("all in-flight responses must flush before ordinary idle protection resumes
   expect(socket.destroyed).toBeFalse();
   second.resolve({});
   await settleHandlers();
-  expect(server.pendingSocketRequests.size).toBe(1);
+  expect(server.pendingRequestCount).toBe(1);
   socket.flush();
-  expect(server.pendingSocketRequests.size).toBe(0);
+  expect(server.pendingRequestCount).toBe(0);
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
   expect(socket.destroyed).toBeFalse();
   timer.advanceTime(1);
@@ -515,13 +501,13 @@ test("an in-flight request cannot keep an unread backpressured socket alive", as
   const socket = new BackpressuredSocket();
   const server = connectedServer(timer, socket);
   const completed = Promise.withResolvers<unknown>();
-  server.handleLocalSocketRequest = () => completed.promise;
+  server.localRequestHandler = () => completed.promise;
   sendRequest(socket);
   await settleHandlers();
-  server.writeFrameData(socket as unknown as Socket, "session", response);
+  server.writeFrameTo(socket, "session", response);
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   expect(socket.destroyed).toBeTrue();
-  expect(server.pendingSocketRequests.size).toBe(0);
+  expect(server.pendingRequestCount).toBe(0);
   completed.resolve({});
   await settleHandlers();
 });
@@ -535,7 +521,7 @@ test.each([
   const socket = new BackpressuredSocket();
   const server = connectedServer(timer, socket);
   const completed = Promise.withResolvers<DaemonResponse | undefined>();
-  server.handleRequest = () => completed.promise;
+  server.requestHandler = () => completed.promise;
   socket.emit(
     "data",
     Buffer.from(JSON.stringify({ id: "control", type: "mcp_request", method }) + "\n"),
@@ -543,7 +529,7 @@ test.each([
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   socket.emit("timeout");
   expect(socket.destroyed).toBeTrue();
-  expect(server.pendingSocketRequests.size).toBe(0);
+  expect(server.pendingRequestCount).toBe(0);
   completed.resolve(undefined);
   await settleHandlers();
 });
@@ -553,7 +539,7 @@ test("a never-answering handler loses its idle exemption after its request deadl
   const socket = new BackpressuredSocket();
   const server = connectedServer(timer, socket);
   const completed = Promise.withResolvers<unknown>();
-  server.handleLocalSocketRequest = () => completed.promise;
+  server.localRequestHandler = () => completed.promise;
   sendRequest(socket);
   await settleHandlers();
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
@@ -561,7 +547,7 @@ test("a never-answering handler loses its idle exemption after its request deadl
   expect(socket.destroyed).toBeFalse();
   timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   expect(socket.destroyed).toBeTrue();
-  expect(server.pendingSocketRequests.size).toBe(0);
+  expect(server.pendingRequestCount).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
   completed.resolve({});
   await settleHandlers();
@@ -573,7 +559,7 @@ test("idle exemption follows the live progress-extended deadline", async () => {
   const server = connectedServer(timer, socket);
   const completed = Promise.withResolvers<DaemonResponse | undefined>();
   const deadline = new ProgressExtendableDeadline(0, longBudgetMs, 40 * 60 * 1000);
-  server.handleRequest = (_sessionId, _socket, _request, _receivedAtMs, onAdmitted) => {
+  server.requestHandler = (_sessionId, _socket, _request, _receivedAtMs, onAdmitted) => {
     onAdmitted?.(deadline);
     return completed.promise;
   };

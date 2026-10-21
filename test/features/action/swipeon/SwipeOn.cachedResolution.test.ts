@@ -5,7 +5,6 @@ import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecu
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ObserveResult } from "../../../../src/models";
 import { encodeAndroidFlat, encodeIosDollar } from "../../../fixtures/hierarchyArbitraries";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
@@ -27,7 +26,9 @@ function screen(
 ): ObserveResult {
   const bounds = id === "list" ? oldBounds : liveBounds;
   return {
-    timestamp: 0,
+    updatedAt: 0,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     freshness: { isFresh: true },
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
@@ -90,9 +91,7 @@ function harness({
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const ctrl = new FakeCtrlProxy(timer);
-  const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    ctrl as unknown as AndroidCtrlProxyClient,
-  );
+  const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
   restores.push(() => client.mockRestore());
   const gesture = new FakeGestureExecutor();
   const observe = new FakeObserveScreen();
@@ -137,7 +136,7 @@ function harness({
   });
   const action = new SwipeOn(
     { name: "fake", platform, deviceId: "cached-resolution-swipe" },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       timer,
       observeScreen: observe,

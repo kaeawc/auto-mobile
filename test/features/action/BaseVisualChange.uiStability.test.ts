@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
@@ -17,19 +18,22 @@ describe("BaseVisualChange UI stability platform guard", () => {
 
   const packageName = "com.example.app";
 
-  const createObserveResult = (): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-  });
+  let observationIndex = 0;
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: { $: { text: String(++observationIndex) } } } },
+    });
 
   function createVisualChange(platform: "android" | "ios"): BaseVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new BaseVisualChange(device, fakeAdb as unknown as any, fakeTimer);
-    (instance as any).awaitIdle = fakeAwaitIdle;
-    (instance as any).observeScreen = fakeObserveScreen;
-    (instance as any).window = fakeWindow;
+    const instance = new BaseVisualChange(device, fakeAdb, fakeTimer, undefined, {
+      awaitIdle: fakeAwaitIdle,
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+    });
     return instance;
   }
 
@@ -68,6 +72,38 @@ describe("BaseVisualChange UI stability platform guard", () => {
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
     expect(fakeAwaitIdle.getInitializeSignal()).toBe(controller.signal);
   });
+
+  test.each([true, false])(
+    "changed cached window=%s selects the destination only after dispatch",
+    async (changed) => {
+      const instance = createVisualChange("android");
+      const previous = createObserveResult();
+      previous.viewHierarchy!.packageName = "com.android.settings";
+      fakeObserveScreen.setObserveResult(previous);
+      const destination = "com.example.destination";
+      await instance.observedInteraction(
+        async () => {
+          if (changed) {
+            fakeWindow.configureCachedActiveWindow({
+              appId: destination,
+              activityName: "Destination",
+              layoutSeqSum: 2,
+            });
+          }
+          return { success: true };
+        },
+        { changeExpected: false, packageName: "com.android.settings" },
+      );
+      const expected = changed ? destination : "com.android.settings";
+      expect(fakeAwaitIdle.getExecutedOperations()).toContain(
+        `initializeUiStabilityTracking(${expected}, 12000)`,
+      );
+      expect(fakeAwaitIdle.getExecutedOperations()).toContain(
+        `waitForUiStabilityWithState(${expected}, 12000)`,
+      );
+      expect(fakeWindow.getGetActiveCallCount()).toBe(0);
+    },
+  );
 
   test("the default gfxinfo stability wait polls on the injected timer, not the wall clock", async () => {
     const device: BootedDevice = {
@@ -111,7 +147,7 @@ describe("BaseVisualChange UI stability platform guard", () => {
       changeExpected: true,
     });
 
-    // Inner block succeeded and hierarchies are different objects → success: true
+    // Inner block succeeded and each capture contains changed text → success: true
     expect(result.success).toBe(true);
   });
 

@@ -1,9 +1,7 @@
-import {
-  SimctlIosFilesFixtureContainer,
-  nodeAppFileFileSystem,
-  IOS_FILES_FIXTURE_BUNDLE_ID,
-} from "../../src/server/appFileService";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { SimctlIosFilesFixtureContainer } from "../../src/server/SimctlIosFilesFixtureContainer";
+import { nodeAppFileFileSystem } from "../../src/server/appFileSupport";
+import { IOS_FILES_FIXTURE_BUNDLE_ID } from "../../src/server/IosSimulatorUserFilesProvider";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import * as hostPath from "node:path";
@@ -535,7 +533,7 @@ describe("iOS Simulator bounded fixture reads", () => {
       platform: "ios",
       name: "Simulator",
     };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setContainerPath(IOS_FILES_FIXTURE_BUNDLE_ID, "/fixture");
     const files = new Map<string, Buffer>([
       ["/fixture/Documents/automobile/run/note.txt", Buffer.from("hello")],

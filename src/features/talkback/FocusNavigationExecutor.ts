@@ -7,7 +7,7 @@ import {
   type TraversalOrderResult,
   type ViewHierarchyResult,
 } from "../../models";
-import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
+import type { TalkBackElementSelector } from "./TalkBackElementSelector";
 import { DeviceDetection } from "../../utils/DeviceDetection";
 import { isDeviceLostError } from "../../models/DeviceLostError";
 import { combineWithAmbientAbort, getRequestContext } from "../../utils/AbortContext";
@@ -24,6 +24,11 @@ import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
 } from "./nodeActionTarget";
+import { FocusNavigationStoppedError } from "./FocusNavigationStoppedError";
+import { FocusNavigationUnavailableError } from "./FocusNavigationUnavailableError";
+import { DefaultFocusNavigationDriverFactory } from "./DefaultFocusNavigationDriverFactory";
+export { FocusNavigationStoppedError } from "./FocusNavigationStoppedError";
+export { FocusNavigationUnavailableError } from "./FocusNavigationUnavailableError";
 
 interface NavigationOptions {
   displayFence?: DisplayFence;
@@ -39,20 +44,6 @@ interface NavigationOptions {
    */
   signal?: AbortSignal;
 }
-
-/**
- * A request ended focus navigation (cancelled, timed out, session released, or out of time
- * budget). Deliberately not an ActionableError: callers must never treat it as a navigation
- * failure with a coordinate fallback, because the request is over.
- */
-export class FocusNavigationStoppedError extends Error {}
-
-/**
- * Focus navigation could not start: nothing was dispatched, so the screen is exactly as it was
- * observed and a caller may still use a non-cursor activation. Every other navigation failure
- * happens after a focus request was sent and must never fall back to a coordinate tap.
- */
-export class FocusNavigationUnavailableError extends ActionableError {}
 
 const BUDGET_EXHAUSTED_MESSAGE = "Request time budget exhausted during focus navigation.";
 
@@ -150,70 +141,15 @@ interface FocusNavigationExecutorDependencies {
   deviceResolver?: (deviceId: string) => BootedDevice;
 }
 
-class DefaultFocusNavigationDriver implements FocusNavigationDriver {
-  private accessibilityService: AndroidCtrlProxyClient;
-  constructor(accessibilityService: AndroidCtrlProxyClient) {
-    this.accessibilityService = accessibilityService;
-  }
-
-  async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
-    return this.accessibilityService.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      undefined,
-      true,
-    );
-  }
-
-  async requestTraversalOrder(): Promise<TraversalOrderResult> {
-    return this.accessibilityService.requestTraversalOrder();
-  }
-
-  async requestCurrentFocus(): Promise<CurrentFocusResult> {
-    return this.accessibilityService.requestCurrentFocus();
-  }
-
-  async requestAction(
-    action: string,
-    resourceId?: string,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestAction(
-      action,
-      resourceId,
-      undefined,
-      undefined,
-      undefined,
-      signal,
-    );
-  }
-
-  async requestNodeAction(
-    action: string,
-    selector: AccessibilityNodeSelector,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestNodeAction(
-      action,
-      selector,
-      undefined,
-      undefined,
-      signal,
-    );
-  }
-
-  async supportsNodeActionSelectors(): Promise<boolean> {
-    return this.accessibilityService.supportsNodeActionSelectors();
-  }
-}
-
-class DefaultFocusNavigationDriverFactory implements FocusNavigationDriverFactory {
-  createDriver(device: BootedDevice): FocusNavigationDriver {
-    return new DefaultFocusNavigationDriver(AndroidCtrlProxyClient.getInstance(device));
-  }
-}
-
+export type FocusDriverClient = Pick<
+  AndroidCtrlProxyClient,
+  | "getAccessibilityHierarchy"
+  | "requestTraversalOrder"
+  | "requestCurrentFocus"
+  | "requestAction"
+  | "requestNodeAction"
+  | "supportsNodeActionSelectors"
+>;
 function elementIdentity(element: Element): string {
   const bounds = element.bounds;
   return [
@@ -260,7 +196,7 @@ export class FocusNavigationExecutor {
    */
   async navigateToElement(
     deviceId: string,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
     options: NavigationOptions = {},
   ): Promise<boolean> {
     const signal = combineWithAmbientAbort(options.signal);
@@ -288,7 +224,7 @@ export class FocusNavigationExecutor {
 
   private async runNavigation(
     deviceId: string,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
     options: NavigationOptions,
     progress: { focusRequests: number },
   ): Promise<boolean> {
@@ -338,7 +274,7 @@ export class FocusNavigationExecutor {
    */
   private async readCursorAfterFocusRequest(
     driver: FocusNavigationDriver,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
     options: NavigationOptions,
     focusRequests: number,
   ): Promise<NavigationVerification> {
@@ -413,7 +349,7 @@ export class FocusNavigationExecutor {
   private unreachedTargetError(
     before: NavigationVerification,
     after: NavigationVerification,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
   ): ActionableError {
     const target = this.describeSelector(targetSelector);
     if (screenFingerprint(before.orderedElements) !== screenFingerprint(after.orderedElements)) {
@@ -442,7 +378,7 @@ export class FocusNavigationExecutor {
 
   private async verifyNavigationState(
     driver: FocusNavigationDriver,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
     dispatched: boolean,
     signal?: AbortSignal,
   ): Promise<NavigationVerification> {
@@ -498,7 +434,7 @@ export class FocusNavigationExecutor {
     return label ? `focus is on "${label}"` : "focus is on another element";
   }
 
-  private describeSelector(selector: FocusElementSelector): string {
+  private describeSelector(selector: TalkBackElementSelector): string {
     const parts: string[] = [];
     if (selector.resourceId) {
       parts.push(`resourceId="${selector.resourceId}"`);

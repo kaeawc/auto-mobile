@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "",
+      "active": true
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query",
+      "activeKey": "query"
+    }
+  },
+  "expectedPath": "root.activeKey",
+  "expectedMessage": "Search bar requires a boolean active key"
+}

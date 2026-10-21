@@ -61,6 +61,7 @@ MACOS_PACKAGES=(
 
 # iOS + macOS packages (have both platform support)
 IOS_MACOS_PACKAGES=(
+    "sdk-wire"
     "auto-mobile-sdk"
     "control-proxy"
     "XCTestRunner"
@@ -127,6 +128,21 @@ if xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
     fi
 else
     print_info "Skipping prototype-agent dylib (no iphonesimulator SDK)"
+fi
+echo ""
+
+# The standalone viewer links the same renderer into its own simulator app content.
+echo -e "${BLUE}Building iOS simulator prototype viewer...${NC}"
+if xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
+    PROTOTYPE_VIEWER_OUT="${PROJECT_ROOT}/scratch/prototype-viewer-ci"
+    if "${SCRIPT_DIR}/prototype-viewer-build.sh" "${PROTOTYPE_VIEWER_OUT}" 2>&1; then
+        print_status 0 "prototype-viewer app built successfully"
+    else
+        print_status 1 "prototype-viewer app build failed"
+        FAILED_PACKAGES+=("prototype-viewer app")
+    fi
+else
+    print_info "Skipping prototype-viewer app (no iphonesimulator SDK)"
 fi
 echo ""
 

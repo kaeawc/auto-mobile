@@ -2,10 +2,12 @@ import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from
 import {
   buildDisconnectedPanelMessage,
   POSTURE_PANEL_ROLES,
+  panelKeyForFingerprint,
+  type PanelFingerprint,
   type Posture,
 } from "../../models/DisplayPanel";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   parseAndroidCommittedStateIdentifier,
   parseAndroidDeviceStates,
@@ -17,10 +19,30 @@ import {
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError } from "../../models/ActionableError";
+import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
 import { DisplaySelectionError } from "./DisplaySelection";
 import { selectedDisplayPin } from "./SessionDisplayContext";
 import type { Timer } from "../../utils/SystemTimer";
+
+type AndroidPanelIdentity =
+  | string
+  | null
+  | {
+      panelUniqueId?: string | null;
+      panelFingerprint?: PanelFingerprint;
+    };
+
+function panelForAndroidIdentity(
+  panels: readonly DisplayPanel[],
+  identity: AndroidPanelIdentity | undefined,
+): DisplayPanel | undefined {
+  const evidence = typeof identity === "string" ? { panelUniqueId: identity } : identity;
+  const direct = panels.find(
+    (panel) => panel.key === physicalPanelKey(evidence?.panelUniqueId ?? ""),
+  );
+  const key = direct?.key ?? panelKeyForFingerprint(panels, evidence?.panelFingerprint);
+  return panels.find((panel) => panel.key === key);
+}
 
 export interface ObservedAndroidDisplay {
   display: DisplayRef;
@@ -28,26 +50,22 @@ export interface ObservedAndroidDisplay {
   panelKeysByLogicalId?: Readonly<Record<number, string>>;
 }
 
-export class AndroidDisplayReadError extends ActionableError {}
-
 function singlePanelKeyOrDefault(panels: readonly DisplayPanel[]): string {
   return panels.length === 1 ? panels[0].key : "0";
 }
 
 async function readAndroidDisplayInfos(
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
 ): Promise<
   { infos: ReturnType<typeof parseAndroidDisplayInfos> } | { infos: null; reason: string }
 > {
   try {
-    const output = await adb.executeCommand(
-      "shell cmd display get-displays",
-      2000,
-      undefined,
-      true,
+    const output = await adb.executeCommand("shell cmd display get-displays", {
+      timeoutMs: 2000,
+      noRetry: true,
       signal,
-    );
+    });
     signal?.throwIfAborted();
     return { infos: parseAndroidDisplayInfos(output.stdout) };
   } catch (error) {
@@ -85,14 +103,19 @@ function postureForState(current: string, supported: string): Posture {
   );
 }
 
-async function readAndroidPosture(
-  adb: Pick<AdbExecutor, "executeCommand">,
-  signal?: AbortSignal,
-): Promise<Posture> {
+async function readAndroidPosture(adb: AdbCommandRunner, signal?: AbortSignal): Promise<Posture> {
   try {
     const [current, supported] = await Promise.all([
-      adb.executeCommand("shell cmd device_state state", 2000, undefined, true, signal),
-      adb.executeCommand("shell cmd device_state print-states", 2000, undefined, true, signal),
+      adb.executeCommand("shell cmd device_state state", {
+        timeoutMs: 2000,
+        noRetry: true,
+        signal,
+      }),
+      adb.executeCommand("shell cmd device_state print-states", {
+        timeoutMs: 2000,
+        noRetry: true,
+        signal,
+      }),
     ]);
     signal?.throwIfAborted();
     return postureForState(current.stdout, supported.stdout);
@@ -150,7 +173,7 @@ export class ObservedAndroidDisplayCache {
   /** Resolve a physical panel to its current Android logical display id. */
   async logicalIdForPanel(
     device: BootedDevice,
-    adb: Pick<AdbExecutor, "executeCommand">,
+    adb: AdbCommandRunner,
     key: string,
     signal?: AbortSignal,
   ): Promise<number> {
@@ -196,14 +219,14 @@ export class ObservedAndroidDisplayCache {
   /** The hierarchy reports the display of its focused window. */
   async panelForLogicalId(
     device: BootedDevice,
-    adb: Pick<AdbExecutor, "executeCommand">,
+    adb: AdbCommandRunner,
     displayId: number | null | undefined,
     signal?: AbortSignal,
-    panelUniqueId?: string | null,
+    identity?: AndroidPanelIdentity,
     allowProbe = true,
   ): Promise<DisplayPanel | undefined> {
     const panels = device.displays?.panels ?? [];
-    const direct = panels.find((panel) => panel.key === physicalPanelKey(panelUniqueId ?? ""));
+    const direct = panelForAndroidIdentity(panels, identity);
     if (direct) {
       return direct;
     }
@@ -230,7 +253,7 @@ export class ObservedAndroidDisplayCache {
   /** Device state is sampled once per inventory or every 2 seconds; the injected timer controls expiry. */
   async posture(
     device: BootedDevice,
-    adb: Pick<AdbExecutor, "executeCommand">,
+    adb: AdbCommandRunner,
     signal?: AbortSignal,
     force = false,
   ): Promise<Posture> {
@@ -252,7 +275,7 @@ export class ObservedAndroidDisplayCache {
 
   async resolve(
     device: BootedDevice,
-    adb: Pick<AdbExecutor, "executeCommand">,
+    adb: AdbCommandRunner,
     signal?: AbortSignal,
     force = false,
   ): Promise<ObservedAndroidDisplay> {
@@ -306,7 +329,7 @@ export class ObservedAndroidDisplayCache {
 /** Android's current observation capture is bound to logical display 0. */
 export async function observedAndroidDisplay(
   device: BootedDevice,
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
   previous?: ObservedAndroidDisplay,
 ): Promise<ObservedAndroidDisplay> {
@@ -316,7 +339,7 @@ export async function observedAndroidDisplay(
 /** Keep read status private so best-effort fallbacks never become cached evidence. */
 async function readObservedAndroidDisplay(
   device: BootedDevice,
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
   previous?: ObservedAndroidDisplay,
 ): Promise<{ value: ObservedAndroidDisplay; cacheable: boolean }> {

@@ -31,6 +31,7 @@ describe("CtrlProxyHierarchy semantic links", () => {
         node: { className: "custom.Editor", focused: "true", actions: ["set_text"] },
       },
       updatedAt: 1,
+      packageName: "test.app",
     });
     expect(hasFocusedTextInput(result)).toBe(true);
   });
@@ -43,10 +44,12 @@ describe("CtrlProxyHierarchy semantic links", () => {
         "semantic-links": [{ text: "Terms of Service", occurrence: 0, start: 9, end: 25 }],
       },
       updatedAt: 1,
+      packageName: "test.app",
     });
 
-    expect(result.hierarchy["semantic-links"]).toEqual([
-      { text: "Terms of Service", occurrence: 0, start: 9, end: 25 },
-    ]);
+    expect(result.hierarchy).toHaveProperty("semantic-links");
+    expect(
+      "semantic-links" in result.hierarchy ? result.hierarchy["semantic-links"] : undefined,
+    ).toEqual([{ text: "Terms of Service", occurrence: 0, start: 9, end: 25 }]);
   });
 });

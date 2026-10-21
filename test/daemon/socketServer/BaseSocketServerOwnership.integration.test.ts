@@ -28,6 +28,9 @@ class TestServer extends RequestResponseSocketServer<NoopRequest, NoopResponse> 
   protected async handleRequest(): Promise<NoopResponse> {
     return { type: "noop_response", id: "0", success: true };
   }
+  protected createErrorResponse(id: string | undefined, error: string): NoopResponse {
+    return { type: "noop_response", id: id ?? "0", success: false, error };
+  }
 }
 
 function listenOnSocket(socketPath: string): Promise<NetServer> {

@@ -1,4 +1,4 @@
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { describe, expect, test } from "bun:test";
@@ -54,9 +54,9 @@ function harness(session?: Session) {
     waitForRecoverySettlements: async (promises: readonly Promise<void>[]) => {
       await Promise.all(promises);
     },
-  } as unknown as DeviceRecoveryCoordinator;
+  } as DeviceRecoveryCoordinator;
   const port: AdbServerResetQuarantinePoolPort = {
-    getAssignmentMutex: () => mutex,
+    withAssignmentLock: (operation) => mutex.runExclusive(operation),
     getDevices: () => devices,
     getSessionManager: () =>
       ({

@@ -1,11 +1,15 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
+
+afterEach(() => {
+  mock.restore();
+});
 
 describe("DeviceSessionManager platform scan status", () => {
   const android: BootedDevice = {
@@ -27,7 +31,7 @@ describe("DeviceSessionManager platform scan status", () => {
       adb.setDevices([android]);
       simctl.setBootedSimulators([ios]);
       const manager = DeviceSessionManager.createInstance(
-        new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), simctl as never),
+        new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), simctl),
       );
       const pinned = failedPlatform === "android" ? android : ios;
       manager.setExplicitDevicePin(pinned);
@@ -69,7 +73,7 @@ describe("DeviceSessionManager platform scan status", () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([android]);
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), new FakeSimctl() as never),
+      new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), new FakeSimctl()),
     );
     manager.setExplicitDevicePin(android);
     // Mirror AdbClient: a missing binary yields [] unless the caller opts into the throw.
@@ -82,7 +86,7 @@ describe("DeviceSessionManager platform scan status", () => {
     try {
       const scan = await manager.detectConnectedPlatformsWithStatus();
       expect(scan.scanned.android).toBe(false);
-      expect(scan.scannedSources.android).toBe(false);
+      expect(scan.scannedSources?.android).toBe(false);
       await expect(manager.ensureDeviceReady("android", "absent-device")).rejects.toThrow(
         "not found",
       );

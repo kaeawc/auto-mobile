@@ -48,7 +48,7 @@ EOF
 
 run_script() {
   run env PATH="$FAKE_BIN:$PATH" HOME="$FAKE_HOME" TMPDIR="${RUN_TMPDIR:-$FAKE_TMP}" \
-    AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE="$TIER_FILE" "$@" bash "$SCRIPT"
+    AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE="$TIER_FILE" "$@" bash "$SCRIPT" ${SELECTED_PATHS:+"$SELECTED_PATHS"}
 }
 
 @test "runs only safe files with every isolation variable under one fresh temp dir" {
@@ -156,4 +156,22 @@ run_script() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"Refusing to run"* ]]
   [ ! -e "$BUN_LOG" ]
+}
+
+@test "explicit paths run only the requested safe subset" {
+  printf 'CLAUDE.md | safe | fixture\n' >> "$TIER_FILE"
+  SELECTED_PATHS=package.json
+  run_script
+  [ "$status" -eq 0 ]
+  grep -q 'package.json' "$BUN_LOG"
+  ! grep -q 'CLAUDE.md' "$BUN_LOG"
+}
+
+@test "explicit unsafe and unlisted paths fail before running Bun" {
+  for SELECTED_PATHS in README.md unknown.integration.test.ts; do
+    run_script
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Not in safe integration tier"* ]]
+    [ ! -e "$BUN_LOG" ]
+  done
 }

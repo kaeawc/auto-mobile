@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
 import { registerAppTools } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 test("installApp requires only a booted device, not CtrlProxy automation", () => {
-  const registry = ToolRegistry as any;
+  const registry = ToolRegistry;
   const originalRegister = registry.registerDeviceAware;
   let installReadiness: string | undefined;
 

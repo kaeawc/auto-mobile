@@ -1,5 +1,5 @@
-import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createExecResult } from "../../../../src/utils/execResult";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
   type AndroidServiceRecoveryManager,
@@ -15,10 +15,8 @@ import {
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { drainUntil } from "../../../helpers/fakeTimerStepping";
 import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
-import {
-  RealCtrlProxyWebSocketInTestError,
-  defaultWebSocketFactory,
-} from "../../../../src/features/observe/DeviceServiceClient";
+import { defaultWebSocketFactory } from "../../../../src/features/observe/DeviceServiceClient";
+import { RealCtrlProxyWebSocketInTestError } from "../../../../src/features/observe/RealCtrlProxyWebSocketInTestError";
 import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlProxyWebSocketOptIn";
 
 /**
@@ -29,21 +27,12 @@ import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlPr
  * checks the accessibility service's health through an injected manager seam,
  * rebinding (#7470) or running full setup only when it is actually unhealthy.
  */
-let restoreDeviceToolProviders: () => void;
-beforeEach(() => {
-  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
-});
-afterEach(() => {
-  restoreDeviceToolProviders();
-});
-
 describe("AndroidCtrlProxyClient - connection-failure escalation to service recovery", function () {
   maskRealCtrlProxyWebSocketOptIn();
 
   const testDevice: BootedDevice = {
     deviceId: "test-device-recovery",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
 
@@ -58,7 +47,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
 
   const buildFakeAdb = (present: boolean = true): FakeAdbExecutor => {
     const fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     if (present) {
       fakeAdb.setDeviceStates([{ deviceId: testDevice.deviceId, state: "device" }]);
     }
@@ -100,7 +89,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
   }
 
   const budgetOf = (c: AndroidCtrlProxyClient): ForcedRestartBudget =>
-    (c as unknown as { forcedRestartBudget: ForcedRestartBudget }).forcedRestartBudget;
+    c.testHooks.forcedRestartBudget;
 
   /** Drive `count` connection failures, each a separate ensureConnected() dial. */
   const driveFailures = async (c: AndroidCtrlProxyClient, count: number): Promise<void> => {
@@ -114,28 +103,17 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     await new Promise((resolve) => setImmediate(resolve));
   };
 
-  test("recovers exactly once after 3 consecutive connection failures", async function () {
+  const recoverAfterThreeFailures = async (): Promise<void> => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const fakeAdb = buildFakeAdb();
     const manager = new FakeManager();
 
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+      serviceManagerFactory: () => manager,
+    });
 
     await driveFailures(client, 3);
     await flushMicrotasks();
@@ -144,45 +122,36 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(manager.setupCallCount).toBe(0);
     // An actual rebind repair resets the foreground cooldown immediately.
     expect(client.getReconnectStatus()).toBeNull();
-  });
+  };
+
+  test("recovers exactly once after 3 consecutive connection failures", recoverAfterThreeFailures);
 
   test("the unit-test WebSocket guard propagates and never escalates to recovery (#10470)", async function () {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const manager = new FakeManager();
 
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      (url) => defaultWebSocketFactory(url),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: (url) => defaultWebSocketFactory(url),
+      timer: fakeTimer,
+      serviceManagerFactory: () => manager,
+    });
 
     for (let i = 0; i < 3; i++) {
       await expect(client.ensureConnected()).rejects.toBeInstanceOf(
         RealCtrlProxyWebSocketInTestError,
       );
     }
-    await expect(client.requestTapCoordinates(10, 20)).rejects.toBeInstanceOf(
+    await expect(client.requestTapCoordinates({ x: 10, y: 20 })).rejects.toBeInstanceOf(
       RealCtrlProxyWebSocketInTestError,
     );
     // The typed-result wrappers must rethrow it too, not resolve a failed action.
     await expect(client.requestAction("click")).rejects.toBeInstanceOf(
       RealCtrlProxyWebSocketInTestError,
     );
-    await expect(client.requestActivateAccessibilityLink("Terms", 0)).rejects.toBeInstanceOf(
-      RealCtrlProxyWebSocketInTestError,
-    );
+    await expect(
+      client.requestActivateAccessibilityLink({ text: "Terms", occurrence: 0 }),
+    ).rejects.toBeInstanceOf(RealCtrlProxyWebSocketInTestError);
     await flushMicrotasks();
 
     expect(manager.isAccessibilityServiceHealthyCallCount).toBe(0);
@@ -196,14 +165,12 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     fakeTimer.enableAutoAdvance();
     const fakeAdb = buildFakeAdb();
 
-    let releaseHealthCheck: (() => void) | null = null;
+    const healthCheck = Promise.withResolvers<void>();
     let healthCheckCallCount = 0;
     const manager: AndroidServiceRecoveryManager = {
       async isAccessibilityServiceHealthy(): Promise<boolean> {
         healthCheckCallCount++;
-        await new Promise<void>((resolve) => {
-          releaseHealthCheck = resolve;
-        });
+        await healthCheck.promise;
         return false;
       },
       async rebindIfUnhealthy(): Promise<boolean> {
@@ -214,22 +181,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       },
     };
 
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+      serviceManagerFactory: () => manager,
+    });
 
     // First 3 failures cross the threshold; the health probe blocks forever
     // until released, keeping this recovery "in flight".
@@ -246,7 +202,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     // No second recovery attempt started: the health probe was not called again.
     expect(healthCheckCallCount).toBe(1);
 
-    releaseHealthCheck?.();
+    healthCheck.resolve();
     await flushMicrotasks();
   });
 
@@ -257,22 +213,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     const manager = new FakeManager();
     manager.healthy = true;
 
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+      serviceManagerFactory: () => manager,
+    });
 
     await driveFailures(client, 3);
     // Microtasks only: a real turn lets auto-advance run fake time past the cooldown.
@@ -294,25 +239,14 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     timer.enableAutoAdvance();
     const manager = new FakeManager();
     manager.healthy = true;
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      createInstantFailureWebSocketFactory(timer),
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: createInstantFailureWebSocketFactory(timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+      serviceManagerFactory: () => manager,
+    });
     client.ensureRecoveryStarted();
     expect(await client.awaitRecovery(10_000)).toBe("failed");
-    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    const budget = client.testHooks.forcedRestartBudget;
     expect(budget.snapshot()).toMatchObject({ state: "backoff", attempts: 1 });
     expect(manager.rebindIfUnhealthyCallCount).toBe(0);
   });
@@ -322,45 +256,32 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     timer.enableAutoAdvance();
     const manager = new FakeManager();
     manager.healthy = true;
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      (url) => {
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         socket.on("open", () => timer.setTimeout(() => socket.terminate(), 1000));
-        return socket as WebSocket;
+        return socket;
       },
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+      serviceManagerFactory: () => manager,
+    });
     for (const delay of [0, 30_000, 60_000]) {
       timer.advanceTime(delay);
       client.ensureRecoveryStarted();
       await client.awaitRecovery(10_000);
       await timer.advanceTimeAsync(2000);
     }
-    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    const budget = client.testHooks.forcedRestartBudget;
     expect(budget.snapshot()).toMatchObject({ state: "exhausted", attempts: 3 });
   });
 
   test("stable external Android reconnect rearms an exhausted restart budget", async function () {
     const timer = new FakeTimer();
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      createSuccessWebSocketFactory(timer),
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: createSuccessWebSocketFactory(timer),
       timer,
-    );
-    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    });
+    const budget = client.testHooks.forcedRestartBudget;
     for (const delay of [0, 30_000, 60_000]) {
       timer.advanceTime(delay);
       const token = budget.tryBeginAttempt();
@@ -384,22 +305,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       rebindIfUnhealthy: async () => false,
       setup: async () => ({ success: false, message: "not needed" }),
     };
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      createSuccessWebSocketFactory(timer),
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: createSuccessWebSocketFactory(timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+      serviceManagerFactory: () => manager,
+    });
     client.ensureRecoveryStarted();
     for (let i = 0; i < 8; i++) {
       await Promise.resolve();
@@ -430,26 +340,15 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
         return { success: true, message: "setup ok" };
       },
     };
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      (url) => {
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         sockets.push(socket);
-        return socket as WebSocket;
+        return socket;
       },
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+      serviceManagerFactory: () => manager,
+    });
     client.ensureRecoveryStarted();
     const waiting = client.awaitRecovery(10_000);
     await flushMicrotasks();
@@ -457,7 +356,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     await timer.advanceTimeAsync(2000);
     expect(await waiting).toBe("recovered");
     expect(await client.ensureConnected()).toBe(true);
-    expect((client as any).forcedRestartBudget.snapshot()).toMatchObject({
+    expect(client.testHooks.forcedRestartBudget.snapshot()).toMatchObject({
       state: "idle",
       attempts: 0,
     });
@@ -468,22 +367,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     timer.enableAutoAdvance();
     const manager = new FakeManager();
     manager.healthy = true;
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      createInstantFailureWebSocketFactory(timer),
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: createInstantFailureWebSocketFactory(timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+      serviceManagerFactory: () => manager,
+    });
     client.ensureRecoveryStarted();
     expect(await client.awaitRecovery(10_000)).toBe("failed");
     const before = timer.now();
@@ -505,23 +393,12 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       rebindIfUnhealthy: async () => false,
       setup: async () => ({ success: false, message: "failed" }),
     };
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      createInstantFailureWebSocketFactory(timer),
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: createInstantFailureWebSocketFactory(timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
-    const internals = client as any;
+      serviceManagerFactory: () => manager,
+    });
+    const internals = client.testHooks;
     client.ensureRecoveryStarted();
     const first = internals.recoveryPromise;
     for (let i = 0; i < 8; i++) {
@@ -552,22 +429,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     const fakeAdb = buildFakeAdb();
     const manager = new FakeManager();
 
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+      serviceManagerFactory: () => manager,
+    });
 
     await driveFailures(client, 2);
     await client.close();
@@ -590,22 +456,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     const fakeAdb = buildFakeAdb(false);
     const manager = new FakeManager();
 
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+      serviceManagerFactory: () => manager,
+    });
 
     await driveFailures(client, 3);
     await flushMicrotasks();
@@ -619,22 +474,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const manager = new FakeManager();
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(false),
-      createInstantFailureWebSocketFactory(timer),
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(false), {
+      webSocketFactory: createInstantFailureWebSocketFactory(timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+      serviceManagerFactory: () => manager,
+    });
     const budget = budgetOf(client!);
     for (let i = 0; i < 5; i++) {
       client.ensureRecoveryStarted();
@@ -646,12 +490,10 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
 
   describe("rearming an exhausted forced-restart budget (#11246)", function () {
     const buildClient = (timer: FakeTimer): ForcedRestartBudget => {
-      client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        buildFakeAdb(),
-        createInstantFailureWebSocketFactory(timer),
+      client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+        webSocketFactory: createInstantFailureWebSocketFactory(timer),
         timer,
-      );
+      });
       const budget = budgetOf(client!);
       for (let i = 0; i < 3; i++) {
         budget.recordFailure("service recovery failed", budget.tryBeginAttempt()!);
@@ -685,12 +527,10 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       const adb = buildFakeAdb(false);
-      client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        adb,
-        createInstantFailureWebSocketFactory(timer),
+      client = AndroidCtrlProxyClient.createForTesting(testDevice, adb, {
+        webSocketFactory: createInstantFailureWebSocketFactory(timer),
         timer,
-      );
+      });
       AndroidCtrlProxyClient.registerForTesting(client, testDevice.deviceId);
       try {
         const budget = budgetOf(client!);
@@ -724,22 +564,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     const manager = new FakeManager();
     manager.rebindRestoresHealth = false;
 
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+      serviceManagerFactory: () => manager,
+    });
 
     await driveFailures(client, 3);
     await flushMicrotasks();
@@ -768,22 +597,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
         return { success: true, message: "setup ok" };
       },
     };
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      createSuccessWebSocketFactory(timer),
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: createSuccessWebSocketFactory(timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
+      serviceManagerFactory: () => manager,
+    });
 
     client.ensureRecoveryStarted();
     expect(await client.awaitRecovery(10_000)).toBe("recovered");
@@ -809,29 +627,18 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       },
     };
     const successSocket = createSuccessWebSocketFactory(timer);
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      (url) => {
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: (url) => {
         dialTimes.push(timer.now());
         return successSocket(url);
       },
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
-    const internals = client as any;
+      serviceManagerFactory: () => manager,
+    });
+    const internals = client.testHooks;
     internals.connectionAttempts = 3;
     internals.lastConnectionAttempt = timer.now();
-    internals.config.connectionResetMs = 30_000;
+    internals.connectionResetMs = 30_000;
     expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
 
     client.ensureRecoveryStarted();
@@ -855,34 +662,24 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       },
     };
     const successSocket = createSuccessWebSocketFactory(timer);
-    client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      buildFakeAdb(),
-      (url) => {
+    client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
+      webSocketFactory: (url) => {
         dialTimes.push(timer.now());
         return successSocket(url);
       },
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => manager,
-    );
-    const internals = client as any;
+      serviceManagerFactory: () => manager,
+    });
+    const internals = client.testHooks;
     internals.connectionAttempts = 3;
     internals.lastConnectionAttempt = timer.now();
-    internals.config.connectionResetMs = 30_000;
+    internals.connectionResetMs = 30_000;
     expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
 
     client.ensureRecoveryStarted();
-    expect(await client.awaitRecovery(10_000)).toBe("timed_out");
+    // The service is already bound, so recovery is "healthy" and does not reset the
+    // connection budget: the background reconnect stays gated by the cooldown.
+    expect(await client.awaitRecovery(10_000)).toBe("failed");
     expect(dialTimes).toEqual([]);
     expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
     expect(setupCalls).toBe(0);

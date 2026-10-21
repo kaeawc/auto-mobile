@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type WebSocket from "ws";
-import { DeviceServiceClient } from "../../../src/features/observe/DeviceServiceClient";
+import {
+  DeviceServiceClient,
+  type WebSocketFactory,
+} from "../../../src/features/observe/DeviceServiceClient";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -8,12 +11,13 @@ import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 class TestDeviceServiceClient extends DeviceServiceClient {
+  cancelScreenshotBackoff(): void {}
   protected readonly logTag = "TestConcurrentConnectClient";
   private readonly setup: (signal: AbortSignal) => Promise<void>;
 
   constructor(
     timer: FakeTimer,
-    wsFactory: (url: string) => WebSocket,
+    wsFactory: WebSocketFactory,
     setup: (signal: AbortSignal) => Promise<void> = async () => {},
     config: { connectionTimeoutMs?: number } = {},
   ) {

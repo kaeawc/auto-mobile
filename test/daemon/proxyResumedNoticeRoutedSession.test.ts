@@ -7,6 +7,7 @@ import {
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { logger } from "../../src/utils/logger";
+import { isMarkedToolFailure, markToolFailure } from "../../src/utils/toolFailureSignal";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -65,6 +66,7 @@ describe("the resumed-session warning reaches the session's own first call", () 
   let clients: FakeDaemonClient[];
   let handovers: LivenessHandover[];
   let daemonSilent: boolean;
+  let toolResult: { content: Array<{ type: string; text: string }> };
   let spies: Array<ReturnType<typeof spyOn>>;
 
   const tapForwards = (): Array<Record<string, unknown>> =>
@@ -72,11 +74,12 @@ describe("the resumed-session warning reaches the session's own first call", () 
       client.callToolCalls.filter((call) => call.toolName === "tapOn").map((call) => call.params),
     );
 
-  beforeEach(() => {
+  beforeEach(async () => {
     timer = new LivenessTimer();
     clients = [];
     handovers = [];
     daemonSilent = false;
+    toolResult = { content: [{ type: "text", text: "ok" }] };
     const daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     spies = [
@@ -93,7 +96,7 @@ describe("the resumed-session warning reaches the session's own first call", () 
               ? deviceStartResult(ANDROID)
               : name === "getApple"
                 ? deviceStartResult(IOS)
-                : { content: [{ type: "text", text: "ok" }] },
+                : toolResult,
           onCallDaemonMethod: (method) => {
             if (method !== "daemon/heartbeat") {
               return undefined;
@@ -113,16 +116,7 @@ describe("the resumed-session warning reaches the session's own first call", () 
       heartbeatIntervalMs: INTERVAL_MS,
     });
     proxy.onLivenessHandover((handover) => handovers.push(handover));
-  });
 
-  afterEach(async () => {
-    await proxy.close();
-    for (const spy of spies) {
-      spy.mockRestore();
-    }
-  });
-
-  test("a call routed to the held Android session by platform carries Android's warning, and the iOS binding's first call carries its own", async () => {
     await proxy.callTool("getAndroid", {});
     await proxy.callTool("getApple", {});
     await timer.advanceTimeAsync(INTERVAL_MS);
@@ -141,33 +135,61 @@ describe("the resumed-session warning reaches the session's own first call", () 
     daemonSilent = false;
     await timer.advanceTimeAsync(INTERVAL_MS * 2);
     expect(proxy.getTerminalSessionRelease()).toBeUndefined();
-
-    // A deviceId selector reaches daemon routing without a UUID and leaves both notices pending.
-    const selectorResult = await proxy.callTool("observe", { deviceId: ANDROID.deviceId });
-    expect(clients.at(-1)!.callToolCalls.at(-1)).toMatchObject({ toolName: "observe" });
-    expect(clients.at(-1)!.callToolCalls.at(-1)!.params).not.toHaveProperty("sessionUuid");
-    expect(resumedWarningSessions(selectorResult)).toEqual([]);
-
-    // First call to reach the Android session: the proxy routes it there by platform.
-    const androidResult = await proxy.callTool("tapOn", { platform: "android", text: "OK" });
-    expect(tapForwards().at(-1)?.sessionUuid).toBe(ANDROID.sessionUuid);
-    // First call to reach the iOS session (the latest binding).
-    const iosResult = await proxy.callTool("tapOn", { text: "OK" });
-    expect(tapForwards().at(-1)?.sessionUuid).toBe(IOS.sessionUuid);
-
-    expect({
-      android: resumedWarningSessions(androidResult),
-      ios: resumedWarningSessions(iosResult),
-    }).toEqual({
-      android: [ANDROID.sessionUuid],
-      ios: [IOS.sessionUuid],
-    });
-
-    const androidAgain = await proxy.callTool("tapOn", { platform: "android", text: "OK" });
-    expect(tapForwards().at(-1)?.sessionUuid).toBe(ANDROID.sessionUuid);
-    const iosAgain = await proxy.callTool("tapOn", { text: "OK" });
-    expect(tapForwards().at(-1)?.sessionUuid).toBe(IOS.sessionUuid);
-    expect(resumedWarningSessions(androidAgain)).toEqual([]);
-    expect(resumedWarningSessions(iosAgain)).toEqual([]);
   });
+
+  afterEach(async () => {
+    await proxy.close();
+    for (const spy of spies) {
+      spy.mockRestore();
+    }
+  });
+
+  test.each([true, false])(
+    "routes each session's warning and preserves the failure mark: %s",
+    async (marked) => {
+      if (marked) {
+        markToolFailure(toolResult);
+      }
+      // A deviceId selector reaches daemon routing without a UUID and leaves both notices pending.
+      const selectorResult = await proxy.callTool("observe", { deviceId: ANDROID.deviceId });
+      expect(clients.at(-1)!.callToolCalls.at(-1)).toMatchObject({ toolName: "observe" });
+      expect(clients.at(-1)!.callToolCalls.at(-1)!.params).not.toHaveProperty("sessionUuid");
+      expect(resumedWarningSessions(selectorResult)).toEqual([]);
+
+      // First call to reach the Android session: the proxy routes it there by platform.
+      const androidResult = await proxy.callTool("tapOn", { platform: "android", text: "OK" });
+      expect(tapForwards().at(-1)?.sessionUuid).toBe(ANDROID.sessionUuid);
+      // First call to reach the iOS session (the latest binding).
+      const iosResult = await proxy.callTool("tapOn", { text: "OK" });
+      expect(tapForwards().at(-1)?.sessionUuid).toBe(IOS.sessionUuid);
+
+      for (const result of [androidResult, iosResult]) {
+        expect(isMarkedToolFailure(result)).toBe(marked);
+        expect(result).toEqual({
+          ...toolResult,
+          content: [...toolResult.content, expect.objectContaining({ type: "text" })],
+        });
+        expect(Reflect.ownKeys(result as object)).toEqual(["content"]);
+        const content = (result as typeof toolResult).content;
+        expect(content).not.toBe(toolResult.content);
+        expect(isMarkedToolFailure(content)).toBe(marked);
+        expect(Reflect.ownKeys(content)).toEqual(["0", "1", "length"]);
+      }
+
+      expect({
+        android: resumedWarningSessions(androidResult),
+        ios: resumedWarningSessions(iosResult),
+      }).toEqual({
+        android: [ANDROID.sessionUuid],
+        ios: [IOS.sessionUuid],
+      });
+
+      const androidAgain = await proxy.callTool("tapOn", { platform: "android", text: "OK" });
+      expect(tapForwards().at(-1)?.sessionUuid).toBe(ANDROID.sessionUuid);
+      const iosAgain = await proxy.callTool("tapOn", { text: "OK" });
+      expect(tapForwards().at(-1)?.sessionUuid).toBe(IOS.sessionUuid);
+      expect(resumedWarningSessions(androidAgain)).toEqual([]);
+      expect(resumedWarningSessions(iosAgain)).toEqual([]);
+    },
+  );
 });

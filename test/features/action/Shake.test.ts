@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { Shake } from "../../../src/features/action/Shake";
 import { BootedDevice, ObserveResult, ShakeOptions } from "../../../src/models";
@@ -14,6 +15,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("Shake", () => {
   let shake: Shake;
@@ -25,10 +27,12 @@ describe("Shake", () => {
 
   // Helper function to create mock ObserveResult
   const createObserveResult = (): ObserveResult => ({
-    timestamp: 1700000000000,
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    observationId: "shake-observation",
+    updatedAt: 1700000000000,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
+    viewHierarchy: { hierarchy: {} },
   });
 
   beforeEach(() => {
@@ -52,10 +56,11 @@ describe("Shake", () => {
     const defaultObserveResult = createObserveResult();
     fakeObserveScreen.setObserveResult(defaultObserveResult);
 
-    shake = new Shake(testDevice, fakeAdb, fakeTimer);
-    (shake as any).observeScreen = fakeObserveScreen;
-    (shake as any).window = fakeWindow;
-    (shake as any).awaitIdle = fakeAwaitIdle;
+    shake = new Shake(testDevice, fakeAdb, fakeTimer, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
   });
 
   test("shake dispatches with a not-fresh current pre-read", async () => {
@@ -109,22 +114,22 @@ describe("Shake", () => {
     });
 
     test("should work with progress callback", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("emu sensor set acceleration 0:9.77622:0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 100:100:100",
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 0:9.77622:0",
+        createExecResult("", ""),
+      );
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
 
       let callbackCalled = false;
-      const progressCallback = () => {
+      const progressCallback = async () => {
         callbackCalled = true;
       };
-      const resultPromise = shake.execute({ duration: 50 }, progressCallback);
+      const resultPromise = shake.execute({ duration: 50 }, { progress: progressCallback });
       const result = await resultPromise;
 
       expect(result.success).toBe(true);
@@ -137,14 +142,13 @@ describe("Shake", () => {
         platform: "ios",
         deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
       };
-      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer);
-      (iosShake as any).observeScreen = fakeObserveScreen;
-      (iosShake as any).window = fakeWindow;
-      (iosShake as any).awaitIdle = fakeAwaitIdle;
+      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
 
       try {
         const result = await iosShake.execute({ duration: 250, intensity: 77 });
@@ -190,15 +194,14 @@ describe("Shake", () => {
         platform: "ios",
         deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
       };
-      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer);
-      (iosShake as any).observeScreen = fakeObserveScreen;
-      (iosShake as any).window = fakeWindow;
-      (iosShake as any).awaitIdle = fakeAwaitIdle;
+      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
       fakeIOSCtrlProxy.setFailureMode("shake", new Error("runner disconnected"));
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
 
       try {
         const result = await iosShake.execute({ duration: 250, intensity: 77 });
@@ -247,14 +250,14 @@ describe("Shake", () => {
 
   describe("timing", () => {
     test("should respect the duration timing", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("emu sensor set acceleration 0:9.77622:0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 100:100:100",
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 0:9.77622:0",
+        createExecResult("", ""),
+      );
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
 
@@ -274,14 +277,14 @@ describe("Shake", () => {
 
   describe("edge cases", () => {
     test("should handle very high intensity values", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration 999:999:999", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("emu sensor set acceleration 0:9.77622:0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 999:999:999",
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 0:9.77622:0",
+        createExecResult("", ""),
+      );
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
 
@@ -298,14 +301,14 @@ describe("Shake", () => {
     });
 
     test("should handle very long duration", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", {
-        stdout: "",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("emu sensor set acceleration 0:9.77622:0", {
-        stdout: "",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 100:100:100",
+        createExecResult("", ""),
+      );
+      fakeAdb.setCommandResponse(
+        "emu sensor set acceleration 0:9.77622:0",
+        createExecResult("", ""),
+      );
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
 
@@ -322,10 +325,10 @@ describe("Shake", () => {
     });
 
     test("restores the captured acceleration after shaking", async () => {
-      fakeAdb.setCommandResponse("emu sensor get acceleration", {
-        stdout: "acceleration = 0:9.77622:0",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor get acceleration",
+        createExecResult("acceleration = 0:9.77622:0", ""),
+      );
       await shake.execute({ duration: 10, intensity: 100 });
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command.startsWith("emu sensor")),
@@ -340,7 +343,7 @@ describe("Shake", () => {
       "acceleration = 0e0:9.77622e0:+0",
       "before\n  acceleration =  0 : +9.77622 : -0  \nafter",
     ])("parses finite Number components with surrounding output: %s", async (stdout) => {
-      fakeAdb.setCommandResponse("emu sensor get acceleration", { stdout, stderr: "" });
+      fakeAdb.setCommandResponse("emu sensor get acceleration", createExecResult(stdout, ""));
       const result = await shake.execute({ duration: 10 });
       expect(result.success).toBe(true);
       expect(result.restoreWarning).toBeUndefined();
@@ -348,10 +351,10 @@ describe("Shake", () => {
     });
 
     test("surfaces fallback use when acceleration output is invalid", async () => {
-      fakeAdb.setCommandResponse("emu sensor get acceleration", {
-        stdout: "before\nacceleration = 0:NaN:0\nafter",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor get acceleration",
+        createExecResult("before\nacceleration = 0:NaN:0\nafter", ""),
+      );
       const result = await shake.execute({ duration: 10 });
       expect(result.success).toBe(true);
       expect(result.restoreWarning).toContain("Could not read pre-shake acceleration");
@@ -360,10 +363,10 @@ describe("Shake", () => {
     });
 
     test("restores acceleration when setting the shake vector fails", async () => {
-      fakeAdb.setCommandResponse("emu sensor get acceleration", {
-        stdout: "acceleration = 0:9.77622:0",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor get acceleration",
+        createExecResult("acceleration = 0:9.77622:0", ""),
+      );
       fakeAdb.setCommandError("emu sensor set acceleration 100:100:100", new Error("set failed"));
       const result = await shake.execute({ duration: 10 });
       expect(result.success).toBe(false);
@@ -391,16 +394,16 @@ describe("Shake", () => {
     });
 
     test("uses the issue-reported resting vector when the readback is unavailable", async () => {
-      fakeAdb.setCommandResponse("emu sensor get acceleration", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu sensor get acceleration", createExecResult("", ""));
       await shake.execute({ duration: 10 });
       expect(fakeAdb.wasCommandExecuted("emu sensor set acceleration 0:9.77622:0")).toBe(true);
     });
 
     test("reports a failed acceleration restore", async () => {
-      fakeAdb.setCommandResponse("emu sensor get acceleration", {
-        stdout: "acceleration = 0:9.77622:0",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor get acceleration",
+        createExecResult("acceleration = 0:9.77622:0", ""),
+      );
       fakeAdb.setCommandError(
         "emu sensor set acceleration 0:9.77622:0",
         new Error("restore failed"),
@@ -418,12 +421,12 @@ describe("Shake", () => {
         window: fakeWindow,
         awaitIdle: fakeAwaitIdle,
       });
-      fakeAdb.setCommandResponse("emu sensor get acceleration", {
-        stdout: "acceleration = 0:9.77622:0",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "emu sensor get acceleration",
+        createExecResult("acceleration = 0:9.77622:0", ""),
+      );
       const controller = new AbortController();
-      const pending = shake.execute({ duration: 50 }, undefined, controller.signal);
+      const pending = shake.execute({ duration: 50 }, { signal: controller.signal });
       for (
         let turn = 0;
         turn < 20 && !fakeAdb.wasCommandExecuted("emu sensor set acceleration 100:100:100");

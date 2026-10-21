@@ -197,13 +197,14 @@ test("benchmark pack enables trim while preserving caller environment", () => {
   expect(env.AUTOMOBILE_TRIM_BUNDLED_DEPS).toBe("false");
 });
 
-test("trimmed cap follows measured bytes plus 3 MiB rounded up and rejects lost trimming", () => {
-  const measuredTrimmed = 18_345_761;
-  const measuredUntrimmed = 23_838_787;
+test("cap keeps over 1 MiB of headroom on the measured size and rejects re-packed source maps", () => {
+  // Measured with trimming on and the external source maps excluded from the tarball.
+  const measuredTrimmed = 14_073_971;
+  // Same pack when the roughly 9 MB of source maps ship again.
+  const measuredUntrimmed = 23_061_125;
   const mib = 1024 * 1024;
-  expect(thresholds.thresholds.unpackedBytes).toBe(
-    Math.ceil((measuredTrimmed + 3 * mib) / mib) * mib,
-  );
+  expect(thresholds.thresholds.unpackedBytes).toBe(15 * mib);
+  expect(thresholds.thresholds.unpackedBytes - measuredTrimmed).toBeGreaterThan(mib);
   expect(
     evaluateUnpackedSize({
       unpackedBytes: measuredTrimmed,
@@ -218,4 +219,12 @@ test("trimmed cap follows measured bytes plus 3 MiB rounded up and rejects lost 
       thresholds: thresholds.thresholds,
     }).passed,
   ).toBe(false);
+});
+
+test("parses npm pack JSON preceded by lifecycle stdout noise", () => {
+  const files = [{ path: "dist/src/index.js", size: 10, mode: 493 }];
+  const json = JSON.stringify([{ name: "p", version: "1", unpackedSize: 20, files }], null, 2);
+  const parsed = parsePackOutput(`/home/runner/work/dist/build-info.json\n${json}\n`);
+  expect(parsed.name).toBe("p");
+  expect(parsed.unpackedBytes).toBe(20);
 });

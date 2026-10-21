@@ -6,7 +6,7 @@ import {
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 
 describe("daemon command stray positional arguments", () => {
-  test.each(["status", "health", "diagnose", "available-devices"])(
+  test.each(["status", "capabilities", "health", "diagnose", "available-devices"])(
     "%s rejects a stray word with usage and exit 1",
     async (command) => {
       const output: unknown[] = [];

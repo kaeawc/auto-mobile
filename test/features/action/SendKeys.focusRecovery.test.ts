@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { SendKeys, type SendKeysCommand } from "../../../src/features/action/SendKeys";
 import { TapOnElement, tapFocusFailure } from "../../../src/features/action/TapOnElement";
 import { Keyboard } from "../../../src/features/action/Keyboard";
@@ -33,7 +33,15 @@ function tapResult(success: boolean, focusVerified?: boolean) {
 describe("sendKeys selector focus recovery", () => {
   test("not-found selector makes no swipe or extra device command and appends only the hint", async () => {
     const h = createSendKeysFocusHarness();
-    const swipe = spyOn(SwipeOn.prototype, "execute").mockResolvedValue({ success: true });
+    const swipe = spyOn(SwipeOn.prototype, "execute").mockResolvedValue({
+      success: true,
+      targetType: "screen",
+      x1: 0,
+      y1: 100,
+      x2: 0,
+      y2: 0,
+      duration: 300,
+    });
     try {
       h.replies.push(missing);
       const result = await h.action.execute(commands, selector);
@@ -54,7 +62,15 @@ describe("sendKeys selector focus recovery", () => {
 
   test("stale s2 id does not scroll and gets the typed not-found hint", async () => {
     const h = createSendKeysFocusHarness();
-    const swipe = spyOn(SwipeOn.prototype, "execute").mockResolvedValue({ success: true });
+    const swipe = spyOn(SwipeOn.prototype, "execute").mockResolvedValue({
+      success: true,
+      targetType: "screen",
+      x1: 0,
+      y1: 100,
+      x2: 0,
+      y2: 0,
+      duration: 300,
+    });
     try {
       const error =
         "Failed to perform tap on element: Element id 's2-stale' is stale; re-observe and use the id from the new observation.";
@@ -292,7 +308,7 @@ describe("sendKeys selector focus recovery", () => {
     ) {
       expect(Reflect.get(this, "timer")).toBe(timer);
       expect(Reflect.get(this, "adb")).toBe(h.adb);
-      return { success: true, action: "close", keyboardOpen: false };
+      return { success: true, action: "close", keyboardOpen: false, open: false };
     });
     const freshReads: Array<
       Parameters<
@@ -330,4 +346,8 @@ describe("sendKeys selector focus recovery", () => {
       close.mockRestore();
     }
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

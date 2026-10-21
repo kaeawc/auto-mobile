@@ -77,72 +77,31 @@ internal class AutoMobileNetworkInterceptor(
   override fun intercept(chain: Interceptor.Chain): Response {
     val request = chain.request()
     val startMs = System.currentTimeMillis()
-    val policy = policyProvider?.let { observeOrNull { it() } }
-    val policyUnavailable = policyProvider != null && policy == null
-    val headersEnabled = captureHeaders && !policyUnavailable && (policy?.captureHeaders ?: true)
-    val bodiesEnabled = captureBodies && !policyUnavailable && (policy?.captureBodies ?: true)
-    val mutationsEnabled = policy?.allowMutations == true
-    val networkControlEnabled =
-      mutationsEnabled && observeOrNull { networkControlProvider?.invoke() } == true
-
-    // Capture request headers — include OkHttp defaults that will be added later
-    val reqHeaders = observeOrNull {
-      if (!headersEnabled) return@observeOrNull null
-      val headers = request.headers.toHeaderMap().toMutableMap()
-      if ("Host" !in headers) headers["Host"] = request.url.host
-      if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
-      headers
-    }
-
-    // Capture request body
-    val reqBody = observeOrNull {
-      if (bodiesEnabled && request.body != null) captureRequestBody(request) else null
-    }
-
+    val capture = prepareCapture(request, startMs)
     // --- Mock rule enforcement ---
     val mockRule =
-      if (mutationsEnabled && networkControlEnabled) {
+      if (capture.mutationsEnabled && capture.networkControlEnabled) {
         observeOrNull {
           ruleStore?.findMatchingRule(request.url.host, request.url.encodedPath, request.method)
         }
       } else null
     if (mockRule != null) {
-      val durationMs = System.currentTimeMillis() - startMs
-      val mockedResponse = observeOrNull { buildMockResponse(request, mockRule) }
-      if (mockedResponse != null) {
-        observe {
-          buffer.add(
-            SdkNetworkRequestEvent(
-              timestamp = startMs,
-              applicationId = applicationId,
-              url = request.url.toString(),
-              method = request.method,
-              statusCode = mockRule.statusCode,
-              durationMs = durationMs,
-              requestBodySize = request.body?.contentLength() ?: -1,
-              responseBodySize = mockRule.responseBody.length.toLong(),
-              host = request.url.host,
-              path = request.url.encodedPath,
-              error = "mocked:${mockRule.mockId}",
-              requestHeaders = reqHeaders,
-              requestBody = reqBody,
-              responseBody = if (bodiesEnabled) mockRule.responseBody else null,
-              contentType = mockRule.contentType,
-            ),
-          )
-        }
-        return mockedResponse
+      tryMockResponse(capture, mockRule)?.let {
+        return it
       }
     }
 
     // --- Error simulation enforcement ---
     val errorSim =
-      if (mutationsEnabled && networkControlEnabled) {
+      if (capture.mutationsEnabled && capture.networkControlEnabled) {
         observeOrNull { ruleStore?.getErrorSimulation() }
       } else null
     if (errorSim != null) {
       val durationMs = System.currentTimeMillis() - startMs
-      return handleErrorSimulation(request, errorSim, startMs, durationMs, reqHeaders, reqBody)
+      return handleErrorSimulation(
+        SimulatedRequest(request, startMs, durationMs, capture.reqHeaders, capture.reqBody),
+        errorSim,
+      )
     }
 
     // --- Normal request flow ---
@@ -153,21 +112,7 @@ internal class AutoMobileNetworkInterceptor(
       val durationMs = System.currentTimeMillis() - startMs
       observe {
         buffer.add(
-          SdkNetworkRequestEvent(
-            timestamp = startMs,
-            applicationId = applicationId,
-            url = request.url.toString(),
-            method = request.method,
-            statusCode = 0,
-            durationMs = durationMs,
-            requestBodySize = request.body?.contentLength() ?: -1,
-            responseBodySize = -1,
-            host = request.url.host,
-            path = request.url.encodedPath,
-            error = e.message,
-            requestHeaders = reqHeaders,
-            requestBody = reqBody,
-          ),
+          capture.failureEvent(durationMs, e, applicationId),
         )
       }
       throw e
@@ -175,15 +120,58 @@ internal class AutoMobileNetworkInterceptor(
 
     return observeOrNull {
       recordResponse(
-        request = request,
+        capture = capture,
         response = response,
-        startMs = startMs,
-        headersEnabled = headersEnabled,
-        bodiesEnabled = bodiesEnabled,
-        reqHeaders = reqHeaders,
-        reqBody = reqBody,
       )
     } ?: response
+  }
+
+  private fun prepareCapture(request: okhttp3.Request, startMs: Long): CapturedRequest {
+    val policy = policyProvider?.let { observeOrNull { it() } }
+    val policyUnavailable = policyProvider != null && policy == null
+    val headersEnabled = captureHeaders && !policyUnavailable && (policy?.captureHeaders ?: true)
+    val bodiesEnabled = captureBodies && !policyUnavailable && (policy?.captureBodies ?: true)
+    val mutationsEnabled = policy?.allowMutations == true
+    val networkControlEnabled =
+      mutationsEnabled && observeOrNull { networkControlProvider?.invoke() } == true
+
+    // Capture request headers — include OkHttp defaults that will be added later
+    val reqHeaders = observeOrNull { RequestHeaders.capture(request, headersEnabled) }
+
+    // Capture request body
+    val reqBody = observeOrNull {
+      if (bodiesEnabled && request.body != null) captureRequestBody(request) else null
+    }
+
+    return CapturedRequest(
+      request,
+      startMs,
+      headersEnabled,
+      bodiesEnabled,
+      mutationsEnabled,
+      networkControlEnabled,
+      reqHeaders,
+      reqBody,
+    )
+  }
+
+  private fun tryMockResponse(
+    capture: CapturedRequest,
+    mockRule: NetworkMockRuleStore.MatchedMockRule,
+  ): Response? {
+    val request = capture.request
+    val startMs = capture.startMs
+    val durationMs = System.currentTimeMillis() - startMs
+    val mockedResponse = observeOrNull { buildMockResponse(request, mockRule) }
+    if (mockedResponse != null) {
+      observe {
+        buffer.add(
+          capture.mockEvent(mockRule, durationMs, applicationId),
+        )
+      }
+      return mockedResponse
+    }
+    return null
   }
 
   /**
@@ -195,19 +183,19 @@ internal class AutoMobileNetworkInterceptor(
    * when the app finishes (or abandons) the body. See [NetworkBodyCapture.CapturingResponseBody].
    */
   private fun recordResponse(
-    request: okhttp3.Request,
+    capture: CapturedRequest,
     response: Response,
-    startMs: Long,
-    headersEnabled: Boolean,
-    bodiesEnabled: Boolean,
-    reqHeaders: Map<String, String>?,
-    reqBody: String?,
   ): Response {
+    val request = capture.request
+    val startMs = capture.startMs
+    val headersEnabled = capture.headersEnabled
     val durationMs = System.currentTimeMillis() - startMs
     val responseContentType = response.header("Content-Type")
-    val finalReqHeaders = if (headersEnabled) response.request.headers.toHeaderMap() else reqHeaders
-    val respHeaders = if (headersEnabled) response.headers.toHeaderMap() else null
-    val responseBodySize = response.body?.contentLength() ?: -1
+    val finalReqHeaders =
+      if (headersEnabled) RequestHeaders.toHeaderMap(response.request.headers)
+      else capture.reqHeaders
+    val respHeaders = if (headersEnabled) RequestHeaders.toHeaderMap(response.headers) else null
+    val responseBodySize = response.body.contentLength()
     fun event(respBody: String?) =
       SdkNetworkRequestEvent(
         timestamp = startMs,
@@ -223,17 +211,17 @@ internal class AutoMobileNetworkInterceptor(
         path = request.url.encodedPath,
         requestHeaders = finalReqHeaders,
         responseHeaders = respHeaders,
-        requestBody = reqBody,
+        requestBody = capture.reqBody,
         responseBody = respBody,
         contentType = responseContentType,
       )
 
     val body = response.body
-    val capture =
-      bodiesEnabled &&
+    val captureBody =
+      capture.bodiesEnabled &&
         isTextContentType(responseContentType) &&
         !NetworkBodyCapture.isStreamingContentType(responseContentType)
-    if (!capture || body == null) {
+    if (!captureBody || body == null) {
       buffer.add(event(null))
       return response
     }
@@ -277,37 +265,19 @@ internal class AutoMobileNetworkInterceptor(
   }
 
   private fun handleErrorSimulation(
-    request: okhttp3.Request,
+    capture: SimulatedRequest,
     sim: NetworkMockRuleStore.ErrorSimulationConfig,
-    startMs: Long,
-    durationMs: Long,
-    reqHeaders: Map<String, String>?,
-    reqBody: String?,
   ): Response {
     val errorMsg = "simulated:${sim.errorType}"
     when (sim.errorType) {
       "http500" -> {
         observe {
           buffer.add(
-            SdkNetworkRequestEvent(
-              timestamp = startMs,
-              applicationId = applicationId,
-              url = request.url.toString(),
-              method = request.method,
-              statusCode = 500,
-              durationMs = durationMs,
-              requestBodySize = request.body?.contentLength() ?: -1,
-              responseBodySize = 0,
-              host = request.url.host,
-              path = request.url.encodedPath,
-              error = errorMsg,
-              requestHeaders = reqHeaders,
-              requestBody = reqBody,
-            ),
+            capture.event(500, 0, errorMsg, applicationId),
           )
         }
         return Response.Builder()
-          .request(request)
+          .request(capture.request)
           .protocol(Protocol.HTTP_1_1)
           .code(500)
           .message("Simulated Error (AutoMobile)")
@@ -317,21 +287,7 @@ internal class AutoMobileNetworkInterceptor(
       else -> {
         observe {
           buffer.add(
-            SdkNetworkRequestEvent(
-              timestamp = startMs,
-              applicationId = applicationId,
-              url = request.url.toString(),
-              method = request.method,
-              statusCode = 0,
-              durationMs = durationMs,
-              requestBodySize = request.body?.contentLength() ?: -1,
-              responseBodySize = -1,
-              host = request.url.host,
-              path = request.url.encodedPath,
-              error = errorMsg,
-              requestHeaders = reqHeaders,
-              requestBody = reqBody,
-            ),
+            capture.event(0, -1, errorMsg, applicationId),
           )
         }
         throw when (sim.errorType) {
@@ -373,6 +329,19 @@ internal class AutoMobileNetworkInterceptor(
       AutoMobileSDK.logger.w(TAG, error) { "Network observation failed; continuing host transport" }
     }
   }
+}
+
+private object RequestHeaders {
+  fun capture(
+    request: okhttp3.Request,
+    headersEnabled: Boolean,
+  ): Map<String, String>? {
+    if (!headersEnabled) return null
+    val headers = toHeaderMap(request.headers).toMutableMap()
+    if ("Host" !in headers) headers["Host"] = request.url.host
+    if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
+    return headers
+  }
 
   /**
    * Flatten headers into a map, joining repeated names with ", " in encounter order.
@@ -386,14 +355,99 @@ internal class AutoMobileNetworkInterceptor(
    * Single-pass on purpose: this runs up to three times per intercepted request, and the common
    * single-valued header must not allocate an intermediate list or copy its value string.
    */
-  private fun okhttp3.Headers.toHeaderMap(): Map<String, String> {
+  fun toHeaderMap(headers: okhttp3.Headers): Map<String, String> {
     // Deliberately not buildMap: its MutableMap receiver shadows `size`, so `0 until size`
     // would read the map being built (0) rather than the header count and silently produce
     // an empty map.
-    val merged = LinkedHashMap<String, String>(size)
-    for (i in 0 until size) {
-      merged.merge(name(i), value(i)) { existing, next -> "$existing, $next" }
+    val merged = LinkedHashMap<String, String>(headers.size)
+    for (i in 0 until headers.size) {
+      merged.merge(headers.name(i), headers.value(i)) { existing, next -> "$existing, $next" }
     }
     return merged
   }
+}
+
+private data class CapturedRequest(
+  val request: okhttp3.Request,
+  val startMs: Long,
+  val headersEnabled: Boolean,
+  val bodiesEnabled: Boolean,
+  val mutationsEnabled: Boolean,
+  val networkControlEnabled: Boolean,
+  val reqHeaders: Map<String, String>?,
+  val reqBody: String?,
+) {
+  fun mockEvent(
+    mockRule: NetworkMockRuleStore.MatchedMockRule,
+    durationMs: Long,
+    applicationId: String?,
+  ): SdkNetworkRequestEvent =
+    SdkNetworkRequestEvent(
+      timestamp = startMs,
+      applicationId = applicationId,
+      url = request.url.toString(),
+      method = request.method,
+      statusCode = mockRule.statusCode,
+      durationMs = durationMs,
+      requestBodySize = request.body?.contentLength() ?: -1,
+      responseBodySize = mockRule.responseBody.length.toLong(),
+      host = request.url.host,
+      path = request.url.encodedPath,
+      error = "mocked:${mockRule.mockId}",
+      requestHeaders = reqHeaders,
+      requestBody = reqBody,
+      responseBody = if (bodiesEnabled) mockRule.responseBody else null,
+      contentType = mockRule.contentType,
+    )
+
+  fun failureEvent(
+    durationMs: Long,
+    error: Exception,
+    applicationId: String?,
+  ): SdkNetworkRequestEvent =
+    SdkNetworkRequestEvent(
+      timestamp = startMs,
+      applicationId = applicationId,
+      url = request.url.toString(),
+      method = request.method,
+      statusCode = 0,
+      durationMs = durationMs,
+      requestBodySize = request.body?.contentLength() ?: -1,
+      responseBodySize = -1,
+      host = request.url.host,
+      path = request.url.encodedPath,
+      error = error.message,
+      requestHeaders = reqHeaders,
+      requestBody = reqBody,
+    )
+}
+
+private data class SimulatedRequest(
+  val request: okhttp3.Request,
+  val startMs: Long,
+  val durationMs: Long,
+  val reqHeaders: Map<String, String>?,
+  val reqBody: String?,
+) {
+  fun event(
+    statusCode: Int,
+    responseBodySize: Long,
+    errorMsg: String,
+    applicationId: String?,
+  ): SdkNetworkRequestEvent =
+    SdkNetworkRequestEvent(
+      timestamp = startMs,
+      applicationId = applicationId,
+      url = request.url.toString(),
+      method = request.method,
+      statusCode = statusCode,
+      durationMs = durationMs,
+      requestBodySize = request.body?.contentLength() ?: -1,
+      responseBodySize = responseBodySize,
+      host = request.url.host,
+      path = request.url.encodedPath,
+      error = errorMsg,
+      requestHeaders = reqHeaders,
+      requestBody = reqBody,
+    )
 }

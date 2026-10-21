@@ -171,13 +171,7 @@ export class AndroidPhysicalDisplayIdResolver implements PhysicalDisplayIdResolv
     signal?: AbortSignal,
   ): Promise<ReturnType<typeof parseAndroidDisplayInfos> | null> {
     try {
-      const output = await adb.executeCommand(
-        DEFAULT_DISPLAY_INFO_COMMAND,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      const output = await adb.executeCommand(DEFAULT_DISPLAY_INFO_COMMAND, { signal });
       const infos = parseAndroidDisplayInfos(output.stdout);
       if (infos.length > 0) {
         this.logicalCache.set(deviceId, {
@@ -206,14 +200,8 @@ async function resolvePhysicalDisplay(
 ): Promise<PhysicalDisplayResolution> {
   try {
     const [surfaceFlinger, displayInfo] = await Promise.all([
-      adb.executeCommand(
-        SURFACE_FLINGER_DISPLAY_IDS_COMMAND,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      ),
-      adb.executeCommand(DEFAULT_DISPLAY_INFO_COMMAND, undefined, undefined, undefined, signal),
+      adb.executeCommand(SURFACE_FLINGER_DISPLAY_IDS_COMMAND, { signal }),
+      adb.executeCommand(DEFAULT_DISPLAY_INFO_COMMAND, { signal }),
     ]);
     const physicalIds = parseSurfaceFlingerDisplayIds(surfaceFlinger.stdout);
 

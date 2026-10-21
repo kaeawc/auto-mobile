@@ -2,12 +2,15 @@ import {
   AdbExecutor,
   type ForegroundAppReadResult,
   type AdbExecuteOptions,
+  type AdbProcess,
+  type AdbSpawnOptions,
   type DeviceTimestampResult,
   type DeviceTimestampSource,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../src/models";
 import type { AdbDeviceState } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
+import { FakeAdbProcess } from "./FakeAdbProcess";
 
 /**
  * Fake implementation of AdbExecutor for testing
@@ -17,10 +20,13 @@ export class FakeAdbExecutor implements AdbExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
   private commandResponseSequences: Map<string, ExecResult[]> = new Map();
   private commandErrors: Map<string, Error> = new Map();
+  private commandStdoutChunks = new Map<string, string[]>();
   private defaultResponse: ExecResult = this.createExecResult("", "");
   private defaultError: Error | null = null;
   private executedCommands: string[] = [];
   private executedArgv: string[][] = [];
+  private spawnCalls: string[][] = [];
+  private spawnOptions: Array<AdbSpawnOptions | undefined> = [];
   private commandCalls: Array<{
     command: string;
     timeoutMs?: number;
@@ -70,7 +76,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   /**
    * Create a proper ExecResult with all required methods
    */
-  private createExecResult(stdout: string, stderr: string): ExecResult {
+  protected createExecResult(stdout: string, stderr: string): ExecResult {
     return {
       stdout,
       stderr,
@@ -117,6 +123,11 @@ export class FakeAdbExecutor implements AdbExecutor {
     this.commandResponses.set(commandPattern, enhancedResponse);
   }
 
+  /** Stream configured chunks before the command completes or rejects. */
+  setCommandStdoutChunks(commandPattern: string, chunks: string[]): void {
+    this.commandStdoutChunks.set(commandPattern, chunks);
+  }
+
   /**
    * Configure an ordered sequence of responses for a command pattern. Each
    * matching call consumes the next response; the final response is repeated
@@ -129,6 +140,11 @@ export class FakeAdbExecutor implements AdbExecutor {
       commandPattern,
       responses.map((response) => this.ensureExecResultMethods(response)),
     );
+  }
+
+  /** Model a device whose wakefulness cannot be read (dumpsys omits the field). */
+  setWakefulnessUnknown(): void {
+    this.wakefulness = null;
   }
 
   /**
@@ -339,27 +355,32 @@ export class FakeAdbExecutor implements AdbExecutor {
    * assertions, and its space-joined form is also appended to the string
    * command history so existing pattern-based stubs keep matching.
    */
+  /**
+   * Spawn a long-lived ADB command: records the argv and returns a {@link FakeAdbProcess}
+   * that exits cleanly with code 0 once the caller has attached its listeners.
+   */
+  async spawn(args: string[], options?: AdbSpawnOptions): Promise<AdbProcess> {
+    this.spawnCalls.push([...args]);
+    this.spawnOptions.push(options);
+    const proc = new FakeAdbProcess();
+    proc.scheduleExit(0);
+    return proc;
+  }
+
+  /** All recorded spawn argv arrays, in order. */
+  getSpawnCalls(): string[][] {
+    return this.spawnCalls.map((call) => [...call]);
+  }
+
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
     await options.beforeDispatch?.(options.timeoutMs);
     this.executedArgv.push([...args]);
-    return this.executeCommand(
-      args.join(" "),
-      options.timeoutMs,
-      options.maxBuffer,
-      options.noRetry,
-      options.signal,
-      options.waitForProcessSettlementAfterAbort,
-    );
+    return this.executeCommand(args.join(" "), options);
   }
 
-  async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-  ): Promise<ExecResult> {
+  async executeCommand(command: string, options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    const { timeoutMs, maxBuffer, noRetry, signal, waitForProcessSettlementAfterAbort, onStdout } =
+      options;
     this.executedCommands.push(command);
     this.commandCalls.push({
       command,
@@ -378,6 +399,19 @@ export class FakeAdbExecutor implements AdbExecutor {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
+    const response = this.resolveCommandResponse(command);
+    const streamed = [...this.commandStdoutChunks].filter(([pattern]) => command.includes(pattern));
+    if (streamed.length > 0) {
+      for (const [, chunks] of streamed) {
+        for (const chunk of chunks) {
+          onStdout?.(chunk);
+        }
+      }
+    } else {
+      onStdout?.(response.stdout);
+    }
+
+    // Emit partial output before either successful completion or host failure.
     // Check for per-command errors based on pattern matching
     for (const [pattern, error] of this.commandErrors.entries()) {
       if (command.includes(pattern)) {
@@ -389,8 +423,6 @@ export class FakeAdbExecutor implements AdbExecutor {
     if (this.defaultError) {
       throw this.defaultError;
     }
-
-    const response = this.resolveCommandResponse(command);
 
     // Post-command abort hooks: this read has "completed"; trip any registered
     // controller so the NEXT read observes cancellation.
@@ -428,10 +460,9 @@ export class FakeAdbExecutor implements AdbExecutor {
     return this.devices;
   }
 
-  async getDeviceStates(_options?: {
-    timeoutMs?: number;
-    signal?: AbortSignal;
-  }): Promise<AdbDeviceState[]> {
+  async getDeviceStates(
+    _options?: Parameters<NonNullable<AdbExecutor["getDeviceStates"]>>[0],
+  ): Promise<AdbDeviceState[]> {
     return this.deviceStates;
   }
 
@@ -516,7 +547,12 @@ export class FakeAdbExecutor implements AdbExecutor {
     };
   }
 
-  async getAdbPathOnly(): Promise<string> {
+  /** Options passed to each getAdbPathOnly call, in order. */
+  readonly adbPathProbeOptions: Array<{ timeoutMs?: number; signal?: AbortSignal } | undefined> =
+    [];
+
+  async getAdbPathOnly(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<string> {
+    this.adbPathProbeOptions.push(options);
     return "adb";
   }
 }

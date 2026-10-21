@@ -6,8 +6,11 @@ import { join } from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_TOOL_SELECTION_PROFILE_PARAM, DAEMON_VERSION } from "../../src/daemon/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonRequest } from "../../src/daemon/types";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -23,33 +26,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
  * coverage does not assert CLI-proxy-level propagation for those clients.
  */
 
-interface McpForwardRoute {
-  executionKey: string;
-  clientKey: string;
-  toolSelectionProfileUuid?: string;
-}
-
-function createFakeDaemonState() {
-  return {
-    isInitialized: () => true,
-    getSessionManager: () => ({
-      getSession: () => null,
-      getDeviceLabels: () => undefined,
-      releaseSession: async () => null,
-    }),
-    getDevicePool: () => ({
-      refreshDevices: async () => 0,
-      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-      releaseDevice: async () => {},
-      resolveAutolockSessionForMcpSession: () => undefined,
-    }),
-  };
-}
-
-function createServer(): UnixSocketServer {
-  return new UnixSocketServer(
+function createServer(): UnixSocketServerHarness {
+  return createHarnessServer(
     join(tmpdir(), `avd-lifecycle-consistency-eae282-r2-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     new FakeTimer(),
   );
@@ -75,18 +54,6 @@ function toolSelectionResponse(sessionUuid: string) {
       },
     ],
   };
-}
-
-function getRoute(
-  server: UnixSocketServer,
-  request: DaemonRequest,
-  socketSessionId: string,
-): McpForwardRoute {
-  return (
-    server as unknown as {
-      getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
-    }
-  ).getMcpForwardRoute(request, socketSessionId);
 }
 
 describe("reaffirmed tool-selection profile acquisition forwarding", () => {
@@ -188,15 +155,15 @@ describe("reaffirmed tool-selection profile acquisition forwarding", () => {
     }
   });
 
-  test("routes a profile-bearing sessionless provisionDevice through its profile client key", () => {
+  test("routes a profile-bearing sessionless provisionDevice through its profile client key", async () => {
     const server = createServer();
     const socketSessionId = "fresh-reaffirm-socket";
     const persistedProfileUuid = "profile-persisted";
 
-    const route = getRoute(
-      server,
+    const route = await server.forwardRouteFor(
       {
         id: "acquire",
+        type: "mcp_request",
         method: "tools/call",
         params: {
           name: "provisionDevice",

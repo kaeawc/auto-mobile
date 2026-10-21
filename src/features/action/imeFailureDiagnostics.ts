@@ -12,6 +12,9 @@ import {
   imeInsertedTextMatches,
 } from "../observe/android/CtrlProxyText";
 
+// Three attempts preserve the existing diagnostic retry bound.
+export const IME_DIAGNOSTIC_ATTEMPTS = 3;
+
 export interface ImeFailureDiagnostic {
   stage:
     | "unsupportedCapability"
@@ -96,6 +99,30 @@ export function focusedImeFieldClass(observation: ObserveResult): string | null 
  * early; the editor may already hold the whole text (#10799).
  */
 export const IME_EDITOR_SYNC_LOST_ERROR = "Input connection lost while syncing editor state";
+
+/**
+ * CtrlProxy's ImeCommitDriver.NONE_APPLIED_ERROR: the editor restarted its input connection and a
+ * delta read of the field proved no dispatched unit landed (e.g. first focus of a search field).
+ */
+export const IME_EDITOR_NONE_APPLIED_ERROR =
+  "Editor restarted its input connection during IME commit; none of the dispatched text is in the editor";
+
+/** True only when the device proved zero committed text, so resending the whole commit cannot duplicate. */
+export function isRetryableImeRestartWithNothingCommitted(result: {
+  success: boolean;
+  error?: string;
+  insertedText?: string;
+  committedGraphemes?: number;
+  sessionUnsafe?: boolean;
+}): boolean {
+  return (
+    !result.success &&
+    result.error === IME_EDITOR_NONE_APPLIED_ERROR &&
+    result.insertedText === "" &&
+    (result.committedGraphemes ?? 0) === 0 &&
+    result.sessionUnsafe !== true
+  );
+}
 
 export const IME_EDITOR_SYNC_LOST_CONFIRMED_WARNING =
   "The IME editor sync was lost after every unit was dispatched; a focused-field read-back confirmed the text.";
@@ -237,7 +264,10 @@ export function verifyImeInsertedText(
   if (
     insertedText === undefined ||
     text.length === 0 ||
-    imeInsertedTextMatches(insertedText, text, { deviceSucceeded: result.success === true })
+    imeInsertedTextMatches(insertedText, text, {
+      deviceSucceeded: result.success === true,
+      editorConsumed: result.editorConsumed === true,
+    })
   ) {
     return result;
   }
@@ -310,7 +340,7 @@ export async function confirmImeCommitAfterSyncLoss(
     return result;
   }
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < IME_DIAGNOSTIC_ATTEMPTS; attempt++) {
       verification.checkAbort();
       if (attempt > 0) {
         await verification.timer.sleep(verification.settleMs);
@@ -374,7 +404,7 @@ async function verifyImeCommitReadBack(
     text.endsWith("\n") &&
     observedText === "";
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < IME_DIAGNOSTIC_ATTEMPTS; attempt++) {
       verification.checkAbort();
       if (attempt > 0) {
         await verification.timer.sleep(verification.settleMs);
@@ -411,7 +441,7 @@ async function verifyImeCommitReadBack(
       if (suffixMatches !== false || imeCommitSubsequenceMatches(observedText, text)) {
         return result;
       }
-      if (attempt === 2) {
+      if (attempt === IME_DIAGNOSTIC_ATTEMPTS - 1) {
         return withImeFailure(
           {
             ...result,

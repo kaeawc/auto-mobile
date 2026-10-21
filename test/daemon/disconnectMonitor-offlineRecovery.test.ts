@@ -8,6 +8,7 @@ import { AndroidTransportAliases } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
 import type { BootedDevice } from "../../src/models";
 import { Daemon } from "../../src/daemon/daemon";
+import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
@@ -65,7 +66,7 @@ describe("selectOfflineRecoveryCandidates", () => {
     // AndroidEmulatorClient's own fresh-provision readiness wait
     // (maybeRecoverFreshOffline) already owns bounded offline recovery for a
     // serial mid-startup, on its own 15s threshold. The monitor must not race
-    // a second concurrent 'adb reconnect offline' against that dispatch.
+    // a second concurrent 'adb -s <serial> reconnect' against that dispatch.
     const targets = selectOfflineRecoveryCandidates(
       new Set(["emulator-5554"]),
       new Set(["emulator-5554"]),
@@ -171,11 +172,17 @@ test("failed offline probes preserve attempts for the same incarnation", () => {
 function monitorHarness(
   manager: FakeDeviceManager & {
     getAndroidOfflineDeviceIds(ids: Iterable<string>): Promise<Set<string>>;
-    recoverAndroidOfflineDevices(): Promise<void>;
+    recoverAndroidOfflineDevices(ids: Iterable<string>): Promise<void>;
   },
 ) {
   const timer = new FakeTimer();
-  const device = { id: "emulator-5554", platform: "android", incarnation: 1 };
+  const device = {
+    id: "emulator-5554",
+    platform: "android",
+    incarnation: 1,
+    status: "busy" as const,
+    sessionId: "owner",
+  };
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
     deviceDisconnectMonitor: null,
@@ -191,8 +198,11 @@ function monitorHarness(
       reconcileDiscoveryObservation: async () => {},
       mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
       getAndroidTransportAliases: (): string[] => [],
-      getAllDevices: () => [device],
-      isDeviceLeasedForAndroidStartup: () => false,
+      ...({
+        getAllDevices: () => [device],
+        getDevice: (id) => (id === device.id ? device : null),
+        isDeviceLeasedForAndroidStartup: () => false,
+      } satisfies DisconnectMonitorPool),
       releaseAdbServerResetCohortReservations: async () => {},
     },
     sessionManager: {
@@ -203,6 +213,58 @@ function monitorHarness(
   daemon.startDeviceDisconnectMonitor(manager, async () => []);
   return { daemon, device, monitor: daemon.deviceDisconnectMonitor as SingleFlightInterval };
 }
+
+test("monitor dispatches only in-session offline targets", async () => {
+  const received: string[][] = [];
+  class OfflineManager extends FakeDeviceManager {
+    async getAndroidOfflineDeviceIds() {
+      return new Set(["emulator-5554", "emulator-5556", "emulator-5558"]);
+    }
+    async recoverAndroidOfflineDevices(ids: Iterable<string>) {
+      received.push([...ids]);
+    }
+  }
+  const { daemon, device, monitor } = monitorHarness(new OfflineManager());
+  const second = { ...device, id: "emulator-5558" };
+  daemon.devicePool.getAllDevices = () => [device, second];
+  daemon.sessionManager.getAssignedDevices = () => [device.id, second.id];
+  daemon.sessionManager.getAllSessions = () =>
+    [device, second].map((target) => ({
+      assignedDevice: target.id,
+      platform: "android",
+    }));
+  await monitor.run();
+  await monitor.stop();
+  expect(received).toEqual([["emulator-5554", "emulator-5558"]]);
+});
+
+test("monitor reconnects an emulator's listed-offline serial and ignores foreign rows", async () => {
+  const received: string[][] = [];
+  const probes: string[][] = [];
+  class ListedOfflineManager extends FakeDeviceManager {
+    async getAndroidOfflineDeviceIds() {
+      return new Set<string>();
+    }
+    async getAndroidListedDeviceStates(ids: Iterable<string>) {
+      probes.push([...ids]);
+      return new Map([
+        ["emulator-5554", "offline"],
+        ["emulator-5556", "offline"],
+      ]);
+    }
+    async recoverAndroidOfflineDevices(ids: Iterable<string>) {
+      received.push([...ids]);
+    }
+  }
+  const { monitor } = monitorHarness(new ListedOfflineManager());
+  try {
+    await monitor.run();
+    expect(probes).toEqual([["emulator-5554"]]);
+    expect(received).toEqual([["emulator-5554"]]);
+  } finally {
+    await monitor.stop();
+  }
+});
 
 test.each(["emulator-5554", "localhost:5555"])(
   "a reconnect to %s completing at two misses is rediscovered before disconnect evaluation",
@@ -257,12 +319,10 @@ test("alternating successful and failed offline probes do not repeat global reco
       return [{ deviceId: "emulator-5554", state: "offline" as const }];
     }
   }
-  const client = new AndroidEmulatorClient(
-    undefined,
-    null,
-    new FakeTimer(),
-    new FakeAdbClientFactory(new ProbeExecutor()),
-  );
+  const client = new AndroidEmulatorClient({
+    timer: new FakeTimer(),
+    adbFactory: new FakeAdbClientFactory(new ProbeExecutor()),
+  });
   let reconnects = 0;
   class OfflineManager extends FakeDeviceManager {
     async getAndroidOfflineDeviceIds(ids: Iterable<string>) {

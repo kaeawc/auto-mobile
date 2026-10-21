@@ -1,0 +1,16 @@
+name: recovery-interaction
+description: Plan with placeholders and an optional step, used by the plan-result/recovery interaction tests
+steps:
+  - tool: inputText
+    text: "${greeting}"
+    label: First
+  - tool: tapOn
+    text: ${dismiss}
+    optional: true
+    label: Skippable
+  - tool: tapOn
+    text: "${second}"
+    label: Second
+  - tool: tapOn
+    text: "${target}"
+    label: Failing

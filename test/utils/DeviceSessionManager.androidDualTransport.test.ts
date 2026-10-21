@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
   AdbClient,
@@ -13,6 +13,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -48,15 +49,11 @@ function harness() {
         dispatched.push(args);
         return createExecResult("", "");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      pool.current?.getAndroidTransportRouting(),
+      {
+        retryExecutor: new DefaultRetryExecutor(timer),
+        timer,
+        transportRouting: pool.current?.getAndroidTransportRouting(),
+      },
     );
   const probe = new FakeAdbExecutor();
   probe.setCommandResponse("getprop ro.serialno", createExecResult(USB, ""));
@@ -106,7 +103,10 @@ describe("Android dual-transport readiness (#11133)", () => {
     window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
     const adb = h.client(null);
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), undefined, { window }),
+      new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), undefined, {
+        window,
+        ctrlProxyManager: new FakeCtrlProxyManager(),
+      }),
       { create: (device) => h.client(device ?? null) },
       {
         admissionGate: h.pool,
@@ -149,7 +149,10 @@ describe("Android dual-transport readiness by alias id (#11133)", () => {
       const window = new FakeWindow();
       window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
       const manager = DeviceSessionManager.createInstance(
-        new FakeDeviceClientProvider(h.client(null), new FakeDeviceUtils(), undefined, { window }),
+        new FakeDeviceClientProvider(h.client(null), new FakeDeviceUtils(), undefined, {
+          window,
+          ctrlProxyManager: new FakeCtrlProxyManager(),
+        }),
         { create: (device) => h.client(device ?? null) },
         {
           admissionGate: h.pool,

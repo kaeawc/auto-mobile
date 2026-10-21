@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { markedHierarchy } from "../helpers/observeFixture";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import {
@@ -16,27 +17,44 @@ import {
   RESOURCE_URIS,
   readObservationScreenshotBytes,
   registerObservationResources,
-  resetScreenshotFileSystem,
-  resetSessionScreenshotResourceDependencies,
-  setScreenshotFileSystem,
-  setSessionScreenshotResourceDependencies,
+  type ObservationResourceDependencies,
 } from "../../src/server/observationResources";
 import {
   OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS,
   buildObservationScreenshotUri,
-} from "../../src/server/observationResourceUris";
+} from "../../src/daemon/observationResourceUris";
 import {
   ResourceRegistry,
   type ResourceContent,
   type ResourceReadContext,
 } from "../../src/server/resourceRegistry";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+let deps: ObservationResourceDependencies = {};
+function useScreenshotFileSystem(
+  value: ObservationResourceDependencies["screenshotFileSystem"] | null,
+): void {
+  deps = { ...deps, screenshotFileSystem: value ?? undefined };
+  registerObservationResources(deps);
+}
+function useSessionScreenshotResourceDependencies(
+  value: ObservationResourceDependencies["sessionScreenshotResourceDependencies"] | null,
+): void {
+  deps = { ...deps, sessionScreenshotResourceDependencies: value ?? undefined };
+  registerObservationResources(deps);
+}
+function clearScreenshotFileSystem(): void {
+  deps = { ...deps, screenshotFileSystem: undefined };
+}
+function clearSessionScreenshotResourceDependencies(): void {
+  deps = { ...deps, sessionScreenshotResourceDependencies: undefined };
+}
 
 const deviceA: BootedDevice = { deviceId: "device:a", name: "A", platform: "android" };
 const deviceB: BootedDevice = { deviceId: "device:b", name: "B", platform: "android" };
@@ -141,11 +159,11 @@ describe("observation resource failure envelopes", () => {
     setScreenshotStateStore(store);
     ScreenshotJobTracker.setTimer(timer);
     ScreenshotJobTracker.setIdGenerator(ids);
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => images[0].bytes,
     });
-    registerObservationResources();
+    registerObservationResources(deps);
   });
 
   afterEach(() => {
@@ -155,8 +173,8 @@ describe("observation resource failure envelopes", () => {
     ScreenshotJobTracker.resetIdGenerator();
     resetScreenshotStateStore();
     resetObserveCacheStore();
-    resetScreenshotFileSystem();
-    resetSessionScreenshotResourceDependencies();
+    clearScreenshotFileSystem();
+    clearSessionScreenshotResourceDependencies();
     clearDirectSessionDevices();
   });
 
@@ -168,13 +186,13 @@ describe("observation resource failure envelopes", () => {
       timer,
       ids,
     );
-    const result = { ...screen.createBaseResult(), viewHierarchy: device.name };
+    const result = { ...screen.createBaseResult(), viewHierarchy: markedHierarchy(device.name) };
     await screen.cacheObserveResult(result);
     return result;
   }
 
   function resolveSession(active = true): void {
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => (active ? { sessionUuid, device: deviceA } : undefined),
       createScreenshotService: () => {
         throw new Error("Cached resources must not capture");
@@ -303,7 +321,7 @@ describe("observation resource failure envelopes", () => {
       new Error("ENOENT EACCES misleading prose"),
       errno ? { code: errno } : {},
     );
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => {
         throw error;
@@ -327,7 +345,7 @@ describe("observation resource failure envelopes", () => {
     async (fixture) => {
       const { observationId } = await observe();
       store.updateForObservation(deviceA.deviceId, observationId, "/fake/mismatch.png");
-      setScreenshotFileSystem({
+      useScreenshotFileSystem({
         stat: async () => ({ isFile: () => true }),
         readFile: async () => fixture.bytes,
       });
@@ -340,7 +358,7 @@ describe("observation resource failure envelopes", () => {
     const b = await observe(deviceB);
     const otherBytes = Buffer.from("other device");
     store.updateForObservation(deviceB.deviceId, b.observationId, "/fake/b.png");
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => (path === "/fake/b.png" ? otherBytes : images[0].bytes),
     });
@@ -357,7 +375,7 @@ describe("observation resource failure envelopes", () => {
     const uri = buildObservationScreenshotUri(deviceA.deviceId, "unknown");
     const content = await read(uri);
     const body: FailureBody = JSON.parse(content.text!);
-    expect(await readObservationScreenshotBytes(uri)).toEqual({
+    expect(await readObservationScreenshotBytes(uri, deps)).toEqual({
       error: body.error,
       code: "OBSERVATION_NOT_RETAINED",
       retryable: false,
@@ -391,7 +409,7 @@ describe("observation resource failure envelopes", () => {
   ])("latest screenshot stat errno %s is %s without a consumer blob", async (errno, code) => {
     await observe();
     store.update(deviceA.deviceId, "/fake/unavailable.png");
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => {
         throw Object.assign(new Error("stat failed"), { code: errno });
       },
@@ -405,7 +423,7 @@ describe("observation resource failure envelopes", () => {
   test("latest screenshot non-file is unavailable", async () => {
     await observe();
     store.update(deviceA.deviceId, "/fake/directory");
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => false }),
       readFile: async () => {
         throw new Error("Must not read a directory");
@@ -421,7 +439,7 @@ describe("observation resource failure envelopes", () => {
     store.update(deviceA.deviceId, "/fake/pruned.png");
     const statPaths: string[] = [];
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async (path) => {
         statPaths.push(path);
         if (path === "/fake/pruned.png") {
@@ -466,7 +484,7 @@ describe("observation resource failure envelopes", () => {
     await observe();
     store.update(deviceA.deviceId, "/fake/pruned.png");
     let statCalls = 0;
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => {
         statCalls++;
         throw Object.assign(new Error("pruned screenshot"), { code: "ENOENT" });
@@ -529,7 +547,7 @@ describe("observation resource failure envelopes", () => {
   test.each(images)("latest screenshot consumer receives $mimeType blob", async (fixture) => {
     await observe();
     store.update(deviceA.deviceId, "/fake/latest.png");
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => fixture.bytes,
     });
@@ -540,7 +558,7 @@ describe("observation resource failure envelopes", () => {
 
   test.each(sessionUris)("foreign caller of %s sees only session identity", async (uri) => {
     let resolved = false;
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => {
         resolved = true;
         return { sessionUuid, device: deviceA };
@@ -577,7 +595,9 @@ describe("observation resource failure envelopes", () => {
     store.update(deviceA.deviceId, "/fake/session.png");
     resolveSession();
     const context = { sessionUuid: "foreign", ownsSession: () => true };
-    expect(JSON.parse((await read(sessionUris[0], context)).text!).viewHierarchy).toBe("A");
+    expect(JSON.parse((await read(sessionUris[0], context)).text!).viewHierarchy.packageName).toBe(
+      "A",
+    );
     image(await read(sessionUris[1], context));
   });
 
@@ -666,7 +686,7 @@ describe("observation resource failure envelopes", () => {
     await observe();
     resolveSession();
     store.update(deviceA.deviceId, "/fake/read.png");
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => {
         throw Object.assign(new Error("read failed"), errno ? { code: errno } : {});
@@ -684,7 +704,7 @@ describe("observation resource failure envelopes", () => {
     resolveSession();
     store.update(deviceA.deviceId, "/fake/directory");
     store.updateForObservation(deviceA.deviceId, observationId, "/fake/directory");
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => false }),
       readFile: async () => {
         throw new Error("Must not read a directory");
@@ -718,7 +738,7 @@ describe("observation resource failure envelopes", () => {
   test("observation replaced during file read never returns either image", async () => {
     const { observationId } = await observe();
     store.updateForObservation(deviceA.deviceId, observationId, "/fake/old.png");
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => {
         const newer = await observe();
@@ -738,6 +758,7 @@ describe("observation resource failure envelopes", () => {
     store.beginObservation(deviceA.deviceId, observationId);
     const pending = readObservationScreenshotBytes(
       buildObservationScreenshotUri(deviceA.deviceId, observationId),
+      deps,
     );
     await Promise.resolve();
     timer.advanceTime(10_000);
@@ -749,7 +770,7 @@ describe("observation resource failure envelopes", () => {
   });
 
   test("fresh capture failure retains retryable true and no identifying fields", async () => {
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => ({ sessionUuid, device: deviceA }),
       createScreenshotService: () => ({
         execute: async () => ({ success: false, error: "backend failed" }),

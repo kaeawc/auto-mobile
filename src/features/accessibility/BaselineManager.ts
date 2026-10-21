@@ -2,12 +2,28 @@
  * Manages accessibility violation baselines for suppressing known violations
  */
 
-import { sql, type Kysely } from "kysely";
-import { getDatabase } from "../../db/database";
+import { z } from "zod";
+import type { Kysely } from "kysely";
+import { AccessibilityBaselineRepository } from "../../db/accessibilityBaselineRepository";
 import type { Database } from "../../db/types";
 import type { WcagViolation } from "../../models/AccessibilityAudit";
 import { getCutoffDate, DEFAULT_TTL } from "../shared/MetricsUtils";
 import { logger } from "../../utils/logger";
+
+/**
+ * Baseline rows decide which violations are suppressed, by `fingerprint`. A row whose
+ * entries lack one would throw (or silently suppress nothing) inside the audit, so
+ * require it and keep the rest of the violation shape untouched.
+ */
+const baselineViolationsSchema = z.array(
+  z.custom<WcagViolation>(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      "fingerprint" in value &&
+      typeof value.fingerprint === "string",
+  ),
+);
 
 interface BaselineData {
   screenId: string;
@@ -16,34 +32,22 @@ interface BaselineData {
 }
 
 export class BaselineManager {
-  private readonly injectedDb: Kysely<Database> | null;
+  private readonly repository: AccessibilityBaselineRepository;
 
   /**
-   * @param db Optional Kysely handle. Resolved LAZILY (per use, via {@link db})
-   * rather than in a field initializer so merely constructing a manager does not
-   * open the real file-backed database. Inject an in-memory DB
+   * @param db Optional Kysely handle. The repository resolves it LAZILY (per use) so merely
+   * constructing a manager does not open the real file-backed database. Inject an in-memory DB
    * (`createTestDatabase`) for tests that exercise the query paths (issue #3067).
    */
   constructor(db?: Kysely<Database>) {
-    this.injectedDb = db ?? null;
-  }
-
-  /** The injected DB, or the shared singleton resolved on first use. */
-  private get db(): Kysely<Database> {
-    return this.injectedDb ?? getDatabase();
+    this.repository = new AccessibilityBaselineRepository(db);
   }
 
   /**
    * Get baseline for a screen
    */
   async getBaseline(screenId: string): Promise<BaselineData | null> {
-    const db = this.db;
-
-    const result = await db
-      .selectFrom("accessibility_baselines")
-      .selectAll()
-      .where("screen_id", "=", screenId)
-      .executeTakeFirst();
+    const result = await this.repository.get(screenId);
 
     if (!result) {
       return null;
@@ -69,7 +73,7 @@ export class BaselineManager {
    */
   private parseViolations(violationsJson: string, screenId: string): WcagViolation[] | null {
     try {
-      return JSON.parse(violationsJson) as WcagViolation[];
+      return baselineViolationsSchema.parse(JSON.parse(violationsJson));
     } catch (error) {
       logger.warn(
         `[BaselineManager] Corrupt violations_json for screen "${screenId}"; ignoring baseline row`,
@@ -83,42 +87,24 @@ export class BaselineManager {
    * Save baseline for a screen
    */
   async saveBaseline(screenId: string, violations: WcagViolation[]): Promise<void> {
-    const db = this.db;
     const now = new Date().toISOString();
     const violationsJson = JSON.stringify(violations);
 
-    await db
-      .insertInto("accessibility_baselines")
-      .values({
-        screen_id: screenId,
-        violations_json: violationsJson,
-        updated_at: now,
-      })
-      .onConflict((oc) =>
-        oc.column("screen_id").doUpdateSet({
-          violations_json: violationsJson,
-          updated_at: now,
-        }),
-      )
-      .execute();
+    await this.repository.upsert(screenId, violationsJson, now);
   }
 
   /**
    * Clear baseline for a screen
    */
   async clearBaseline(screenId: string): Promise<void> {
-    const db = this.db;
-
-    await db.deleteFrom("accessibility_baselines").where("screen_id", "=", screenId).execute();
+    await this.repository.delete(screenId);
   }
 
   /**
    * List all baselines
    */
   async listBaselines(): Promise<BaselineData[]> {
-    const db = this.db;
-
-    const results = await db.selectFrom("accessibility_baselines").selectAll().execute();
+    const results = await this.repository.list();
 
     const baselines: BaselineData[] = [];
     for (const row of results) {
@@ -141,16 +127,13 @@ export class BaselineManager {
    * Clear all baselines
    */
   async clearAllBaselines(): Promise<void> {
-    const db = this.db;
-
-    await db.deleteFrom("accessibility_baselines").execute();
+    await this.repository.deleteAll();
   }
 
   /**
    * Clean up old baselines (older than specified days)
    */
   async cleanupOldBaselines(daysOld: number = DEFAULT_TTL.baselineDays): Promise<number> {
-    const db = this.db;
     const cutoffIso = getCutoffDate(daysOld);
 
     // Normalize BOTH sides through `datetime(...)` before comparing, exactly as
@@ -162,11 +145,6 @@ export class BaselineManager {
     // a same-day-but-newer row would sort before the ISO cutoff and be wrongly
     // deleted. `datetime(...)` renders both forms to one canonical format,
     // comparing them as actual instants.
-    const result = await db
-      .deleteFrom("accessibility_baselines")
-      .where(sql`datetime(updated_at)`, "<", sql`datetime(${cutoffIso})`)
-      .executeTakeFirst();
-
-    return Number(result.numDeletedRows) || 0;
+    return this.repository.deleteOlderThan(cutoffIso);
   }
 }

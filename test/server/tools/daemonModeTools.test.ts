@@ -3,6 +3,9 @@ import { registerMcpTools } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../../src/utils/debug";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * Registration is the expensive step (12-30 ms), so each configuration is
@@ -35,7 +38,7 @@ function registerAndSnapshot(
   daemonMode: boolean,
   options: { debug?: boolean; embeddedSdk?: boolean } = {},
 ): RegistrationSnapshot {
-  (ToolRegistry as any).tools.clear();
+  ToolRegistry.clearToolsForTesting();
   setDebugModeEnabled(options.debug === true);
   serverConfig.setEmbeddedSdkEnabled(options.embeddedSdk === true);
   try {
@@ -54,7 +57,7 @@ function registerAndSnapshot(
   } finally {
     setDebugModeEnabled(false);
     serverConfig.setEmbeddedSdkEnabled(false);
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   }
 }
 
@@ -74,7 +77,7 @@ describe("Daemon-only MCP tools", () => {
   afterAll(() => {
     setDebugModeEnabled(false);
     serverConfig.setEmbeddedSdkEnabled(false);
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   });
 
   test("registers plan tools in both modes, criticalSection only in daemon mode", () => {

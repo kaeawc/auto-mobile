@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { testOverrides } from "../../utils/testOverrides";
+import { ENV, readEnvRaw } from "../../config/env";
 
 /**
  * Base request interface for socket servers.
@@ -87,8 +88,10 @@ export function resolveAuxSocketDir(env: NodeJS.ProcessEnv = process.env): strin
   if (testOverrides.auxSocketDir !== undefined) {
     return testOverrides.auxSocketDir;
   }
-  const override = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
+  const override = readEnvRaw(ENV.AUX_SOCKET_DIR, env)?.trim();
   return override
     ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
-    : path.join(os.homedir(), ".auto-mobile");
+    : // Auxiliary sockets are shared coordination state, with their own override;
+      // AUTOMOBILE_DATA_DIR must not move the socket namespace per agent.
+      path.join(os.homedir(), ".auto-mobile");
 }

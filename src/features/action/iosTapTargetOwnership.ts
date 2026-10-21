@@ -352,7 +352,7 @@ function isOverlay(query: OwnershipQuery, node: SearchableEntry, scroll: Searcha
     node.properties.visible !== "false" &&
     node.properties.hidden !== true &&
     node.properties.hidden !== "true" &&
-    node.windowRank === target.windowRank &&
+    node.windowRank <= target.windowRank &&
     node.rootGroup === target.rootGroup &&
     ![target, ...matched].some((anchor) => isRelated(nodes, node, anchor)) &&
     (!isDescendant(nodes, node, scroll) || node.index > target.index)

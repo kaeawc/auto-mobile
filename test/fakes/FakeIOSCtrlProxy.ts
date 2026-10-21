@@ -1,4 +1,8 @@
-import { IOSCtrlProxy } from "../../src/features/observe/ios";
+import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type { IosActivateAccessibilityLinkRequest } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
+import { IosCtrlProxy } from "../../src/features/observe/ios";
+import { convertIosHierarchy } from "../helpers/iosHierarchyConverter";
 import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
   CtrlProxyScreenshotResult,
@@ -32,22 +36,31 @@ import type {
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
-import type { BaseResult, SwipeRequestOptions } from "../../src/features/observe/shared/types";
+import type {
+  BaseResult,
+  DragRequest,
+  SwipeRequest,
+} from "../../src/features/observe/shared/types";
 import { ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
+import type { MultiFingerSwipeRequest } from "../../src/utils/interfaces/MultiFingerSwipeRequest";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { Timer } from "../../src/utils/SystemTimer";
 import type { CtrlProxyRequestActionOptions } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
 import type { InputKeyModifier, InputKeyName } from "../../src/features/action/InputKey";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
+import {
+  resolveAccessibilityHierarchyArgs,
+  type AccessibilityHierarchyRequest,
+} from "../../src/features/observe/hierarchyReadArgs";
 
 /**
- * Fake implementation of IOSCtrlProxy for testing
+ * Fake implementation of IosCtrlProxy for testing
  * Allows configuring responses for hierarchy, screenshots, and gesture operations
  * Tracks method calls for test assertions
  */
-export class FakeIOSCtrlProxy implements IOSCtrlProxy {
+export class FakeIOSCtrlProxy implements IosCtrlProxy {
   supportedCommands: string[] | null = null;
 
   async getSupportedCommands(): Promise<string[] | null> {
@@ -156,7 +169,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private voiceOverState: boolean = false;
   private voiceOverActivateResult: CtrlProxyActionResult | null = null;
   private setVoiceOverEnabledResult: CtrlProxyActionResult | null = null;
-  private multiFingerSwipeResult: CtrlProxySwipeResult | null = null;
+  private multiFingerSwipeResult: IOSDispatchResult<CtrlProxySwipeResult> | null = null;
+  private pressButtonResult: IOSDispatchResult<CtrlProxyPressButtonResult> | null = null;
+  private pressKeyResult: IOSDispatchResult<CtrlProxyPressKeyResult> | null = null;
+  private requestLog: Array<{ type: string } & Record<string, unknown>> = [];
+  private pressHomeResult: IOSDispatchResult<CtrlProxyPressHomeResult> | null = null;
+  private pressBackResult: IOSDispatchResult<CtrlProxyPressBackResult> | null = null;
   private actionResult: CtrlProxyActionResult | null = null;
   private clipboardResult: CtrlProxyClipboardResult | null = null;
   private clipboardResults: CtrlProxyClipboardResult[] = [];
@@ -236,6 +254,25 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     } else {
       this.failureMap.set(operation, error);
     }
+  }
+
+  setPressButtonResult(result: IOSDispatchResult<CtrlProxyPressButtonResult> | null): void {
+    this.pressButtonResult = result;
+  }
+
+  /** Configure the pressKey result; the dispatch contract is the one documented on `setTapResult`. */
+  setPressKeyResult(result: IOSDispatchResult<CtrlProxyPressKeyResult> | null): void {
+    this.pressKeyResult = result;
+  }
+
+  /** Configure the pressHome result; the dispatch contract is the one documented on `setTapResult`. */
+  setPressHomeResult(result: IOSDispatchResult<CtrlProxyPressHomeResult> | null): void {
+    this.pressHomeResult = result;
+  }
+
+  /** Configure the pressBack result; the dispatch contract is the one documented on `setTapResult`. */
+  setPressBackResult(result: IOSDispatchResult<CtrlProxyPressBackResult> | null): void {
+    this.pressBackResult = result;
   }
 
   /**
@@ -334,7 +371,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   /**
    * Configure multi-finger swipe result (null = default success)
    */
-  setMultiFingerSwipeResult(result: CtrlProxySwipeResult | null): void {
+  setMultiFingerSwipeResult(result: IOSDispatchResult<CtrlProxySwipeResult> | null): void {
     this.multiFingerSwipeResult = result;
   }
 
@@ -546,7 +583,17 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   /**
    * Clear all call history
    */
+  /**
+   * Gesture and key requests in call order, named and shaped like the runner frames they stand for
+   * (`request_tap_coordinates` with `x`, `y`, `duration`...), so a test can check the cross-operation
+   * order the per-operation histories lose. See `test/contracts/IOSCtrlProxyContract.ts`.
+   */
+  getRequestLog(): ReadonlyArray<{ type: string } & Record<string, unknown>> {
+    return this.requestLog;
+  }
+
   clearHistory(): void {
+    this.requestLog = [];
     this.tapHistory = [];
     this.swipeHistory = [];
     this.dragHistory = [];
@@ -592,7 +639,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     }
   }
 
-  // MARK: - IOSCtrlProxy Implementation
+  // MARK: - IosCtrlProxy Implementation
 
   async connectWithoutSetup(signal?: AbortSignal): Promise<boolean> {
     this.connectWithoutSetupHistory.push({ signalProvided: signal !== undefined });
@@ -607,14 +654,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    request?: AccessibilityHierarchyRequest,
   ): Promise<ViewHierarchyResult | null> {
-    void signal;
+    const { readOptions } = resolveAccessibilityHierarchyArgs(request);
+    const timeoutMs = typeof readOptions === "number" ? readOptions : readOptions?.timeoutMs;
     this.hierarchyRequestCount++;
     this.hierarchyRequestTimeouts.push(timeoutMs);
     await this.applyDelay("getHierarchy");
@@ -701,56 +744,62 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]> {
+  ): ReturnType<IosCtrlProxy["requestHierarchySync"]> {
     return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, {
       forceCapture: true,
     });
   }
 
   requestHierarchySyncWithoutObservationStreamPush(
-    ...args: Parameters<IOSCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]>
-  ): ReturnType<IOSCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]> {
+    ...args: Parameters<IosCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]>
+  ): ReturnType<IosCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]> {
     return this.requestHierarchySync(...args);
   }
 
   requestAddHighlight(
-    ...args: Parameters<IOSCtrlProxy["requestAddHighlight"]>
-  ): ReturnType<IOSCtrlProxy["requestAddHighlight"]> {
+    ...args: Parameters<IosCtrlProxy["requestAddHighlight"]>
+  ): ReturnType<IosCtrlProxy["requestAddHighlight"]> {
     void args;
     return Promise.resolve({ success: true });
   }
 
   setNetworkErrorSimulation(
-    ...args: Parameters<IOSCtrlProxy["setNetworkErrorSimulation"]>
-  ): ReturnType<IOSCtrlProxy["setNetworkErrorSimulation"]> {
+    ...args: Parameters<IosCtrlProxy["setNetworkErrorSimulation"]>
+  ): ReturnType<IosCtrlProxy["setNetworkErrorSimulation"]> {
     void args;
     return Promise.resolve({ success: true, totalTimeMs: 0 });
   }
 
   convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult {
-    return {
-      hierarchy: {
-        node: {
-          $: {
-            text: "Fake Hierarchy",
-          },
-        },
-      },
-      packageName: hierarchy.packageName,
-      updatedAt: hierarchy.updatedAt,
-    };
+    return convertIosHierarchy(hierarchy);
   }
 
-  async requestTapCoordinates(
+  readonly doubleTapHistory: Array<{ x: number; y: number }> = [];
+
+  async requestDoubleTapCoordinates(
     x: number,
     y: number,
-    duration: number = 0,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    frameContext?: string,
+    _timeoutMs?: number,
+    _frameContext?: string,
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    signal?.throwIfAborted();
+    await this.applyDelay("tap");
+    this.checkFailure("tap");
+    this.doubleTapHistory.push({ x, y });
+    return this.settleDispatch<CtrlProxyTapResult>(
+      this.tapResult ?? { success: true, totalTimeMs: 50 },
+      onDispatch,
+      signal,
+    );
+  }
+
+  async requestTapCoordinates(
+    request: TapCoordinatesRequest,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    const { x, y, duration = 0, signal, onDispatch } = request;
+
     // Mirrors `sendIOSPressCommand`: an already-expired caller deadline never reaches the
     // device and surfaces as the abort reason, not as a failed result.
     signal?.throwIfAborted();
@@ -759,6 +808,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.checkFailure("tap");
 
     this.tapHistory.push({ x, y, duration });
+    this.requestLog.push({ type: "request_tap_coordinates", x, y, duration });
 
     return this.settleDispatch<CtrlProxyTapResult>(
       this.tapResult ?? {
@@ -770,23 +820,15 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     );
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    contextOptions?: string | SwipeRequestOptions,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+  async requestSwipe(request: SwipeRequest): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    const { x1, y1, x2, y2, signal, onDispatch } = request;
+    const { duration = 300 } = request;
     signal?.throwIfAborted();
     await this.applyDelay("swipe");
     this.checkFailure("swipe");
 
     this.swipeHistory.push({ x1, y1, x2, y2, duration });
+    this.requestLog.push({ type: "request_swipe", x1, y1, x2, y2, duration });
 
     return this.settleDispatch<CtrlProxySwipeResult>(
       this.swipeResult ?? {
@@ -799,16 +841,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     );
   }
 
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-  ): Promise<CtrlProxyDragResult> {
+  async requestDrag(request: DragRequest): Promise<CtrlProxyDragResult> {
+    const { x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs } = request;
     await this.applyDelay("drag");
     this.checkFailure("drag");
 
@@ -839,17 +873,20 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    request: PinchRequest,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      signal,
+    } = request;
+
     signal?.throwIfAborted();
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
@@ -917,8 +954,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   requestAppendText(
-    ...args: Parameters<IOSCtrlProxy["requestAppendText"]>
-  ): ReturnType<IOSCtrlProxy["requestAppendText"]> {
+    ...args: Parameters<IosCtrlProxy["requestAppendText"]>
+  ): ReturnType<IosCtrlProxy["requestAppendText"]> {
     const [text, timeoutMs, perf, frameContext] = args;
     return this.requestSetText(text, { timeoutMs, perf, frameContext });
   }
@@ -1014,11 +1051,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     await this.applyDelay("pressKey");
     this.checkFailure("pressKey");
     this.pressKeyHistory.push({ key, modifiers });
-    return {
-      success: true,
-      totalTimeMs: timeoutMs > 0 ? 1 : 0,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    this.requestLog.push({ type: "request_press_key", key, modifiers });
+    return this.settleDispatch<CtrlProxyPressKeyResult>(
+      this.pressKeyResult ?? { success: true, totalTimeMs: timeoutMs > 0 ? 1 : 0 },
+    );
   }
 
   async requestPressHome(
@@ -1028,12 +1064,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");
     this.checkFailure("pressHome");
+    this.requestLog.push({ type: "request_press_home" });
 
-    return {
-      success: true,
-      totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    return this.settleDispatch<CtrlProxyPressHomeResult>(
+      this.pressHomeResult ?? { success: true, totalTimeMs: 100 },
+    );
   }
 
   async requestPressBack(
@@ -1043,12 +1078,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.pressBackRequestCount++;
     await this.applyDelay("pressBack");
     this.checkFailure("pressBack");
+    this.requestLog.push({ type: "request_press_back" });
 
-    return {
-      success: true,
-      totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    return this.settleDispatch<CtrlProxyPressBackResult>(
+      this.pressBackResult ?? { success: true, totalTimeMs: 100 },
+    );
   }
 
   async requestShake(
@@ -1075,11 +1109,15 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     await this.applyDelay("pressButton");
     this.checkFailure("pressButton");
 
-    return {
-      success: true,
-      totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    return (
+      this.pressButtonResult ?? {
+        success: true,
+        totalTimeMs: 100,
+        dispatched: true,
+        acknowledged: true,
+        perfTiming: this.performanceTiming || undefined,
+      }
+    );
   }
 
   async requestRecentApps(
@@ -1161,8 +1199,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   requestResetPermissions(
-    ...args: Parameters<IOSCtrlProxy["requestResetPermissions"]>
-  ): ReturnType<IOSCtrlProxy["requestResetPermissions"]> {
+    ...args: Parameters<IosCtrlProxy["requestResetPermissions"]>
+  ): ReturnType<IosCtrlProxy["requestResetPermissions"]> {
     void args;
     return Promise.resolve({ success: true, totalTimeMs: 0 });
   }
@@ -1200,8 +1238,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   requestScreenshotWithoutObservationStreamPush(
-    ...args: Parameters<IOSCtrlProxy["requestScreenshotWithoutObservationStreamPush"]>
-  ): ReturnType<IOSCtrlProxy["requestScreenshotWithoutObservationStreamPush"]> {
+    ...args: Parameters<IosCtrlProxy["requestScreenshotWithoutObservationStreamPush"]>
+  ): ReturnType<IosCtrlProxy["requestScreenshotWithoutObservationStreamPush"]> {
     return this.requestScreenshot(...args);
   }
 
@@ -1278,30 +1316,56 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   async requestMultiFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    fingerCount: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    fingerSpacing?: number,
-  ): Promise<CtrlProxySwipeResult> {
+    request: MultiFingerSwipeRequest,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    const { x1, y1, x2, y2, fingerCount, fingerSpacing, signal, onDispatch, beforeSend } = request;
+    const { duration = 300 } = request;
+    // Mirrors `sendIOSPressCommand`: an expired deadline never reaches the device, and the
+    // synchronous display fence runs immediately before the socket write.
+    signal?.throwIfAborted();
     await this.applyDelay("multiFingerSwipe");
     this.checkFailure("multiFingerSwipe");
+    beforeSend?.();
 
     this.multiFingerSwipeHistory.push({ x1, y1, x2, y2, fingerCount, duration, fingerSpacing });
 
-    if (this.multiFingerSwipeResult) {
-      return this.multiFingerSwipeResult;
-    }
+    return this.settleDispatch<CtrlProxySwipeResult>(
+      this.multiFingerSwipeResult ?? {
+        success: true,
+        totalTimeMs: duration,
+        gestureTimeMs: duration,
+      },
+      onDispatch,
+      signal,
+    );
+  }
 
+  private pathGestureHistory: Array<{
+    points: Array<{ x: number; y: number; offsetMs: number }>;
+    frameContext?: string;
+  }> = [];
+  private pathGestureResult: CtrlProxySwipeResult | null = null;
+
+  setPathGestureResult(result: CtrlProxySwipeResult): void {
+    this.pathGestureResult = result;
+  }
+
+  getPathGestureHistory() {
+    return this.pathGestureHistory;
+  }
+
+  async requestPathGesture(
+    points: ReadonlyArray<{ x: number; y: number; offsetMs: number }>,
+    _timeoutMs?: number,
+    frameContext?: string,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    await this.applyDelay("pathGesture");
+    this.checkFailure("pathGesture");
+    this.pathGestureHistory.push({ points: points.map((point) => ({ ...point })), frameContext });
     return {
-      success: true,
-      totalTimeMs: duration,
-      gestureTimeMs: duration,
-      perfTiming: this.performanceTiming || undefined,
+      ...(this.pathGestureResult ?? { success: true, totalTimeMs: points.at(-1)?.offsetMs ?? 0 }),
+      dispatched: true,
+      acknowledged: true,
     };
   }
 
@@ -1376,14 +1440,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    _timeoutMs?: number,
-    _perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosActivateAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult> {
+    const { text, occurrence, ownerResourceId, signal, onDispatch } = request;
+
     signal?.throwIfAborted();
     await this.applyDelay("accessibilityLink");
     this.checkFailure("accessibilityLink");

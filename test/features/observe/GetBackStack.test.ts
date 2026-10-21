@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -116,7 +117,7 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
 `;
 
     const testFakeAdb = new FakeAdbExecutor();
-    testFakeAdb.setCommandResponse("dumpsys activity activities", { stdout, stderr: "" });
+    testFakeAdb.setCommandResponse("dumpsys activity activities", createExecResult(stdout, ""));
     const testFactory = new FakeAdbClientFactory(testFakeAdb);
     getBackStack = new GetBackStack(mockDevice, testFactory);
 
@@ -139,7 +140,7 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
   test("should handle empty back stack", async function () {
     // Mock empty output
     const emptyFakeAdb = new FakeAdbExecutor();
-    emptyFakeAdb.setCommandResponse("dumpsys activity activities", { stdout: "", stderr: "" });
+    emptyFakeAdb.setCommandResponse("dumpsys activity activities", createExecResult("", ""));
     const emptyFactory = new FakeAdbClientFactory(emptyFakeAdb);
     getBackStack = new GetBackStack(mockDevice, emptyFactory);
 

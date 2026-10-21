@@ -1,3 +1,4 @@
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
@@ -16,8 +17,10 @@ import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManage
  */
 class SpyKeepScreenAwakeRestorer implements KeepScreenAwakeRestorer {
   readonly restored: KeepScreenAwakeState[] = [];
-  async restore(state: KeepScreenAwakeState): Promise<void> {
+  async restore(state: KeepScreenAwakeState): Promise<{ status: "restored" }> {
     this.restored.push(state);
+
+    return { status: "restored" as const };
   }
 }
 
@@ -38,14 +41,17 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
   // default file-backed DeviceSessionRepository is never resolved (unit guard).
   function makeRepo(): { repo: any; activity: string[] } {
     const activity: string[] = [];
-    const repo = {
+    const repo = Object.assign(new FakeDeviceSessionPersistence(), {
+      recordLivenessOwnership: async () => {},
+      replaceLivenessOwnership: async () => {},
+      claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
       async upsertActiveSession(): Promise<void> {},
       async recordActivity(sessionId: string): Promise<void> {
         activity.push(sessionId);
       },
       async markReleased(): Promise<void> {},
       async markStaleActiveSessionsExpired(): Promise<void> {},
-    };
+    } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>);
     return { repo, activity };
   }
 
@@ -93,7 +99,7 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
     test("EC4: getKeepScreenAwake records NO session activity", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const mgr = new SessionManager(fakeTimer, repo, { barrier: () => barrier });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.setKeepScreenAwake("s1", state);
@@ -121,12 +127,10 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
       const { repo } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
       const spy = new SpyKeepScreenAwakeRestorer();
-      const mgr = new SessionManager(
-        fakeTimer,
-        repo,
-        () => barrier,
-        () => spy,
-      );
+      const mgr = new SessionManager(fakeTimer, repo, {
+        barrier: () => barrier,
+        keepScreenAwakeRestorer: () => spy,
+      });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         const applied: KeepScreenAwakeState = {
@@ -150,12 +154,10 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
       const { repo } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
       const spy = new SpyKeepScreenAwakeRestorer();
-      const mgr = new SessionManager(
-        fakeTimer,
-        repo,
-        () => barrier,
-        () => spy,
-      );
+      const mgr = new SessionManager(fakeTimer, repo, {
+        barrier: () => barrier,
+        keepScreenAwakeRestorer: () => spy,
+      });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.setKeepScreenAwake("s1", { applied: false, skipReason: "disabled" });
@@ -171,12 +173,10 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
       const { repo } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
       const spy = new SpyKeepScreenAwakeRestorer();
-      const mgr = new SessionManager(
-        fakeTimer,
-        repo,
-        () => barrier,
-        () => spy,
-      );
+      const mgr = new SessionManager(fakeTimer, repo, {
+        barrier: () => barrier,
+        keepScreenAwakeRestorer: () => spy,
+      });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         await mgr.releaseSession("s1");
@@ -213,7 +213,7 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
     test("EC4: getDeviceLabels records NO session activity, unlike getSessionCache", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const mgr = new SessionManager(fakeTimer, repo, { barrier: () => barrier });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.setDeviceLabels("s1", labels);

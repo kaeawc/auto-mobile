@@ -2,6 +2,8 @@ import type { AdbExecutor, ForegroundApp } from "./interfaces/AdbExecutor";
 import { classifyAndroidUser, type AndroidUser } from "../../models/AndroidUser";
 import { isPackageInstalledForUser } from "./isPackageInstalledForUser";
 import { logger } from "../logger";
+import { AndroidUserTargetUnavailableError } from "./AndroidUserTargetUnavailableError";
+export { AndroidUserTargetUnavailableError } from "./AndroidUserTargetUnavailableError";
 
 export type UserTargetSource =
   | "explicit"
@@ -38,25 +40,6 @@ export interface UserTargetRequest<InstalledOnly extends boolean = false> {
 }
 
 /**
- * Device state was read, but no unambiguous active target can be selected.
- * `kind` separates an ambiguous choice (several managed profiles) from a missing
- * one (no running primary, which is also what an empty or unparsed user list
- * looks like); `users` is every user the device listed, so a caller can tell a
- * single-user device from a multi-user one before deciding how to react.
- */
-export class AndroidUserTargetUnavailableError extends Error {
-  constructor(
-    message: string,
-    readonly details: { kind: "ambiguous" | "unavailable"; users: readonly AndroidUser[] } = {
-      kind: "unavailable",
-      users: [],
-    },
-  ) {
-    super(message);
-  }
-}
-
-/**
  * Resolves the user for one public operation. Explicit IDs (including zero)
  * win; otherwise a foreground instance of the requested package wins, followed
  * by the sole running managed profile and finally the running primary user. A
@@ -81,13 +64,10 @@ export class AndroidUserTargetResolver {
     }
 
     if (request.currentUser) {
-      const result = await this.adb.executeCommand(
-        "shell am get-current-user",
-        undefined,
-        undefined,
-        true,
-        request.signal,
-      );
+      const result = await this.adb.executeCommand("shell am get-current-user", {
+        noRetry: true,
+        signal: request.signal,
+      });
       const currentUserId = Number.parseInt(result.stdout.trim(), 10);
       if (Number.isSafeInteger(currentUserId) && currentUserId >= 0) {
         return { userId: currentUserId, source: "currentUser" };

@@ -1,3 +1,4 @@
+import { holderOf } from "../../daemon/deviceBinding";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DefaultFileSystem, type FileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import path from "path";
@@ -10,12 +11,8 @@ import { Window } from "./Window";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 import { ScreenshotResult } from "../../models/ScreenshotResult";
-import { Image } from "../../utils/image-utils";
 import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimensions";
-import {
-  validateScreenshotOptions,
-  type ScreenshotEncodingOptions,
-} from "./screenshot/screenshotOptions";
+import { encodeScreenshot, encodingOptions } from "./screenshot/screenshotEncoding";
 import { BootedDevice } from "../../models";
 import {
   ScreenshotJobHandle,
@@ -37,7 +34,7 @@ import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKin
 import { AndroidCtrlProxyClient } from "./android";
 import type { CtrlProxyScreenshotResult } from "./ios/types";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, IdGenerator } from "../../utils/IdGenerator";
 import {
@@ -97,50 +94,6 @@ export interface ScreenshotOptions {
   hidePrototypes?: boolean;
 }
 
-async function encodeScreenshot(
-  source: Buffer,
-  options: ScreenshotEncodingOptions,
-): Promise<Buffer> {
-  const format = options.format ?? "png";
-  if (
-    detectImageMimeType(source) === `image/${format}` &&
-    options.quality === undefined &&
-    options.lossless !== true
-  ) {
-    return source;
-  }
-  if (!detectImageMimeType(source)) {
-    throw new Error("Screenshot has an unsupported image format");
-  }
-  const image = Image.fromBuffer(source);
-  let encoded: Buffer;
-  switch (format) {
-    case "png":
-      encoded = await image.png().toBuffer();
-      break;
-    case "jpeg":
-      encoded = await image.jpeg({ quality: options.quality }).toBuffer();
-      break;
-    case "webp":
-      encoded = await image
-        .webp(options.lossless ? { lossless: true } : { quality: options.quality ?? 75 })
-        .toBuffer();
-      break;
-  }
-  if (detectImageMimeType(encoded) !== `image/${format}`) {
-    throw new Error(`Screenshot encoder did not produce ${format} bytes`);
-  }
-  return encoded;
-}
-
-function encodingOptions(options: ScreenshotOptions): ScreenshotEncodingOptions {
-  return validateScreenshotOptions({
-    ...(options.format === undefined ? {} : { format: options.format }),
-    ...(options.quality === undefined ? {} : { quality: options.quality }),
-    ...(options.lossless === undefined ? {} : { lossless: options.lossless }),
-  });
-}
-
 function ctrlProxyScreenshotFormat(
   result: CtrlProxyScreenshotResult,
   imageBuffer: Buffer,
@@ -162,20 +115,32 @@ function resolveIosPrototypeHider(
   return hider ?? defaultIosCapturePrototypeHider;
 }
 
+export interface TakeScreenshotOptions {
+  adbFactory?: AdbClientFactory;
+  timer?: Timer;
+  idGenerator?: IdGenerator;
+  fileWriter?: ScreenshotFileWriter;
+  fileSystem?: FileSystem;
+  cacheDirResolver?: () => string;
+  physicalDisplayIdResolver?: PhysicalDisplayIdResolver;
+  cleanupOnCreate?: boolean;
+  pathProtection?: ScreenshotPathProtection;
+  iosPrototypeHider?: IosCapturePrototypeHiderResolver;
+}
+
 export class TakeScreenshot implements ScreenshotService {
+  /** Typed unit-test view of the private capture paths. */
+  readonly testHooks = {
+    filePull: (...args: [string, ScreenshotOptions?, AbortSignal?]) =>
+      this.captureScreenshotFilePull(...args),
+    ios: (...args: [string, ScreenshotOptions, AbortSignal?]) => this.captureiOSScreenshot(...args),
+    base64: (...args: [string, ScreenshotOptions?, AbortSignal?, boolean?]) =>
+      this.captureScreenshotBase64(...args),
+  };
+
   /** Device reads may write one capture but must not evict another session's cache. */
   static forObservationRead(device: BootedDevice): TakeScreenshot {
-    return new TakeScreenshot(
-      device,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      false,
-    );
+    return new TakeScreenshot(device, { cleanupOnCreate: false });
   }
 
   /** Read a screenshot without changing an owner's client or starting a service. */
@@ -239,11 +204,8 @@ export class TakeScreenshot implements ScreenshotService {
     if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator") {
       return this.captureSimulatorObserverScreenshot(signal);
     }
-    const daemon = DaemonState.getInstance();
-    if (
-      daemon.isInitialized() &&
-      daemon.getDevicePool().getDevice(this.device.deviceId)?.sessionId
-    ) {
+    const pool = defaultDaemonContext.devicePool();
+    if (pool && holderOf(pool.getDevice(this.device.deviceId))) {
       return { success: false, error: "Owned iOS device has no connected screenshot service" };
     }
     const transient = IOSCtrlProxyClient.createForObservationRead(this.device);
@@ -290,7 +252,7 @@ export class TakeScreenshot implements ScreenshotService {
    * follows `AUTOMOBILE_DATA_DIR`, so a cached path would keep pointing at a
    * data dir that a test (or a reconfigured process) has since removed.
    */
-  private static getCacheDir(): string {
+  static getCacheDir(): string {
     return ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS);
   }
 
@@ -299,23 +261,17 @@ export class TakeScreenshot implements ScreenshotService {
    * @param device - Device to run ADB commands against
    * @param adbFactory - Factory for creating AdbClient instances
    */
-  constructor(
-    device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    timer: Timer = defaultTimer,
-    idGenerator: IdGenerator = defaultIdGenerator,
-    fileWriter: ScreenshotFileWriter = defaultScreenshotFileWriter,
-    fileSystem: FileSystem = new DefaultFileSystem(),
-    cacheDirResolver: () => string = () => TakeScreenshot.getCacheDir(),
-    physicalDisplayIdResolver: PhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({
-      timer,
-    }),
-    cleanupOnCreate = true,
-    options: {
-      pathProtection?: ScreenshotPathProtection;
-      iosPrototypeHider?: IosCapturePrototypeHiderResolver;
-    } = {},
-  ) {
+  constructor(device: BootedDevice, options: TakeScreenshotOptions = {}) {
+    const {
+      adbFactory = defaultAdbClientFactory,
+      timer = defaultTimer,
+      idGenerator = defaultIdGenerator,
+      fileWriter = defaultScreenshotFileWriter,
+      fileSystem = new DefaultFileSystem(),
+      cacheDirResolver = () => TakeScreenshot.getCacheDir(),
+      physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({ timer }),
+      cleanupOnCreate = true,
+    } = options;
     this.pathProtection = options.pathProtection ?? screenshotPathProtection;
     this.iosPrototypeHider = resolveIosPrototypeHider(options.iosPrototypeHider);
     this.device = device;
@@ -687,8 +643,6 @@ export class TakeScreenshot implements ScreenshotService {
 
   /**
    * Capture screenshot using CtrlProxy iOS
-   * @param finalPath - Path to save the screenshot
-   * @returns ScreenshotResult with path to the saved screenshot or error
    */
   private async captureiOSScreenshot(
     finalPath: string,
@@ -881,9 +835,6 @@ export class TakeScreenshot implements ScreenshotService {
 
   /**
    * Capture screenshot using base64 encoding (faster but may hit buffer limits)
-   * @param finalPath - Path to save the screenshot
-   * @param options - Screenshot format options
-   * @returns ScreenshotResult with path to the saved screenshot or error
    */
   private async captureScreenshotBase64(
     finalPath: string,
@@ -911,13 +862,7 @@ export class TakeScreenshot implements ScreenshotService {
       try {
         throwIfAborted(signal);
         captureDispatched = true;
-        const captured = await this.adb.executeCommand(
-          command,
-          undefined,
-          maxBuffer,
-          undefined,
-          signal,
-        );
+        const captured = await this.adb.executeCommand(command, { maxBuffer, signal });
         captureCompleted = true;
         return captured;
       } finally {
@@ -979,9 +924,6 @@ export class TakeScreenshot implements ScreenshotService {
 
   /**
    * Capture screenshot using file pull approach (more reliable for large screenshots)
-   * @param finalPath - Path to save the screenshot
-   * @param options - Screenshot format options
-   * @returns ScreenshotResult with path to the saved screenshot or error
    */
   private async captureScreenshotFilePull(
     finalPath: string,
@@ -990,7 +932,7 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     logger.info(`[SCREENSHOT] Using file pull approach`);
-    const tempFile = `/sdcard/screenshot_${this.sanitizeDeviceTempId(this.idGenerator.next())}.png`;
+    const tempFile = `/sdcard/screenshot_${screenshotTempIdToken(this.idGenerator.next())}.png`;
     const tempLocalFile = `${finalPath}.temp`;
     let result: ScreenshotResult;
     let captureDispatched = false;
@@ -1005,10 +947,7 @@ export class TakeScreenshot implements ScreenshotService {
       captureDispatched = true;
       const screencapResult = await this.adb.executeCommand(
         `shell "screencap ${displayArgument}-p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
+        { signal },
       );
       if (this.hasFailedScreencap(screencapResult.stdout, screencapResult.stderr)) {
         throw new Error(`Screencap failed: ${screencapResult.stderr}`);
@@ -1097,10 +1036,6 @@ export class TakeScreenshot implements ScreenshotService {
 
   private hasFailedScreencap(stdout: string, stderr: string): boolean {
     return !/AM_SCREENCAP_RC:0(?:\s|$)/.test(stdout) || this.hasCommandError(stderr);
-  }
-
-  private sanitizeDeviceTempId(rawId: string): string {
-    return screenshotTempIdToken(rawId);
   }
 
   private hasCommandError(stderr: string): boolean {

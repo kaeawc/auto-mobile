@@ -4,54 +4,32 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpOverloadError, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
-import { MCP_FORWARD_START_HEADROOM_MS, UnixSocketServer } from "../../src/daemon/socketServer";
+import { MCP_FORWARD_START_HEADROOM_MS } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { overloadRefusalError } from "../helpers/refusalWireFixtures";
 
-function createFakeDaemonState() {
-  return {
-    isInitialized: () => true,
-    getSessionManager: () => ({
-      getSession: () => null,
-      getDeviceLabels: () => undefined,
-      releaseSession: async () => null,
-    }),
-    getDevicePool: () => ({
-      refreshDevices: async () => 0,
-      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-      releaseDevice: async () => {},
-      resolveAutolockSessionForMcpSession: () => undefined,
-    }),
-  };
-}
-
-function createServer(timer: FakeTimer): UnixSocketServer {
-  return new UnixSocketServer(
+function createServer(timer: FakeTimer): UnixSocketServerHarness {
+  return createHarnessServer(
     join(tmpdir(), `forward-budget-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     timer,
   );
 }
 
 function requireBudget(
-  server: UnixSocketServer,
+  server: UnixSocketServerHarness,
   request: DaemonRequest,
   totalTimeoutMs: number,
   deadline: ProgressExtendableDeadline,
   phase: string,
 ): number {
-  return (
-    server as unknown as {
-      requireRemainingMcpForwardBudget: (
-        request: DaemonRequest,
-        totalTimeoutMs: number,
-        deadline: ProgressExtendableDeadline,
-        phase: string,
-      ) => number;
-    }
-  ).requireRemainingMcpForwardBudget(request, totalTimeoutMs, deadline, phase);
+  return server.requireForwardBudget(request, totalTimeoutMs, deadline, phase);
 }
 
 const request: DaemonRequest = {
@@ -109,7 +87,10 @@ describe("UnixSocketServer MCP forward budget classification", () => {
       expect.unreachable("insufficient forward budget should throw");
     } catch (error) {
       expect(error).toBeInstanceOf(McpOverloadError);
-      expect((error as McpOverloadError).failure).toMatchObject({
+      if (!(error instanceof McpOverloadError)) {
+        throw error;
+      }
+      expect(error.failure).toMatchObject({
         code: "daemon_overloaded",
         retryable: true,
         reason: "insufficient_forward_budget",

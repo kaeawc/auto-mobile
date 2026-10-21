@@ -99,7 +99,7 @@ describe("PlanPartitioner.partition (property-based)", () => {
         fc.oneof(fc.constant(undefined), fc.constant([])),
         deviceFreeSteps,
         (devices, steps) => {
-          const plan: Plan = { name: "p", devices, steps };
+          const plan: Plan = { name: "p", devices: devices && [...devices], steps };
           return PlanPartitioner.partition(plan) === null;
         },
       ),

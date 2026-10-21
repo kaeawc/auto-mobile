@@ -1,7 +1,7 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
-import type { ManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -9,14 +9,11 @@ import {
   resetBootedDevicesResourceCache,
   setDeviceManager,
 } from "../../src/server/bootedDeviceResources";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
-// Inventory contract: unknown never fails open. When the managed-slot registry is unreadable and no
+// Inventory contract: unknown never fails open. When the broker binding registry is unreadable and no
 // snapshot was ever loaded, `availableDevices` (getRefreshedStats) refuses, and the booted resource
 // drops the platform's devices as a failed observation. But the resource's pool summary then falls
 // back to the pool's own entries WITHOUT refreshing ownership, so a device a slot may hold is
@@ -25,15 +22,15 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 const SIM = "SIM-UNKNOWN-SLOTS";
 const sim: BootedDevice = { deviceId: SIM, name: SIM, platform: "ios" };
 
-const unreadableSlots: ManagedSlotExclusion = {
+const unreadableSlots: BindingExclusion = {
   refresh: async () => {
-    throw new Error("slot registry unreadable");
+    throw new Error("binding registry unreadable");
   },
   holderOf: () => undefined,
   stableIdsFor: () => new Set(),
 };
 
-describe("pool summary when managed-slot ownership is unknown", () => {
+describe("pool summary when binding ownership is unknown", () => {
   let sessions: SessionManager | undefined;
 
   afterEach(() => {
@@ -50,15 +47,11 @@ describe("pool summary when managed-slot ownership is unknown", () => {
     manager.setBootedDevices("ios", [sim]);
     manager.setBootedDevices("android", []);
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "hunt-unknown-slots", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        managedSlotExclusion: unreadableSlots,
-      }),
-    );
+    const pool = makePool(sessions, "hunt-unknown-slots", {
+      timer,
+      deviceManager: manager,
+      bindingExclusion: unreadableSlots,
+    });
     await pool.initializeWithDevices([sim]);
     DaemonState.getInstance().initialize(sessions, pool);
     setDeviceManager(manager);

@@ -1,4 +1,6 @@
+import { DeviceUnreachableError } from "../../models/DeviceUnreachableError";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { unsupportedVideoPlatformError } from "./unsupportedVideoPlatformError";
 import { ActionableError, toActionableError, BootedDevice, ExecResult } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
@@ -25,7 +27,7 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { capBitrateKbps, VideoCaptureFinalizationError } from "./VideoRecorderService";
-import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
+import { ANDROID_SCREENRECORD_MAX_SECONDS, SCREENRECORD_MS } from "./androidScreenrecord";
 import {
   buildPidReportingScreenrecordArgs,
   isOwnRecorderCmdline,
@@ -41,6 +43,9 @@ import {
   probeScreenrecordDisplayFlag,
   resolveAndroidRecordingDisplay,
 } from "./AndroidRecordingDisplay";
+
+// screenrecord needs time to finish writing the device file.
+const SCREENRECORD_FINALIZE_SETTLE_MS = 1000;
 
 interface AndroidBackendHandle {
   kind: "android";
@@ -263,10 +268,9 @@ export function clampBitrateKbps(config: VideoCaptureConfig): number {
  * every iOS device to `FfmpegVideoProcessingBackend`, whose `startIos` drives
  * `simctl … recordVideo` with the SIGINT + moov-atom flush + materialization wait
  * that a robust iOS capture needs. The former platform-native `simctl recordVideo`
- * branch here spawned the recorder with all stdio ignored, so a failed recording
- * surfaced only an exit code with no stderr to diagnose it — and it was unreachable
- * in production. It was removed rather than hardened (issue #4773); iOS callers are
- * rejected explicitly so a future mis-wire fails loudly instead of silently.
+ * branch here ignored all stdio, so a failed capture surfaced only an exit code, and it
+ * was unreachable in production; it was removed (issue #4773). iOS callers are rejected
+ * explicitly so a future mis-wire fails loudly instead of silently.
  */
 export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   constructor(
@@ -294,7 +298,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
     }
 
-    throw new ActionableError(`Unsupported platform for video recording: ${device.platform}`);
+    throw unsupportedVideoPlatformError(device.platform);
   }
 
   describeCaptureTeardown(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
@@ -322,7 +326,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     const adb = this.adbFactory.create(device);
     try {
-      const outcome = await this.signalDeviceRecorder(adb, descriptor, pid, 9);
+      const outcome = await this.signalDeviceRecorder(adb, descriptor, pid, 9, true);
       if (outcome === "not-ours") {
         return;
       }
@@ -372,7 +376,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     try {
       await raceWithDeadline(backendHandle.exitPromise, {
         timer: this.timer,
-        timeoutMs: 10000,
+        timeoutMs: SCREENRECORD_MS.gracefulExit,
         label: "Video capture graceful exit",
         timeoutError: () => gracefulExitTimeout,
         onTimeout: () => {
@@ -407,7 +411,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         // Give screenrecord extra time to finalize the file on device. Even
         // though the process has exited, file writes may still be in progress.
         logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
-        await this.timer.sleep(1000);
+        await this.timer.sleep(SCREENRECORD_FINALIZE_SETTLE_MS);
         retainDeviceFile = !(await this.waitForDeviceFileToFinalize(adb, backendHandle));
         if (retainDeviceFile) {
           throw new ActionableError(
@@ -505,7 +509,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         logger.info(`[VideoCapture] Device recorder pid ${pid} SIGINT: ${outcome}`);
         return;
       }
-      const pk = await adb.executeCommand("shell pkill -2 screenrecord", 8000);
+      const pk = await adb.executeCommand("shell pkill -2 screenrecord", SCREENRECORD_MS.pkillOpts);
       logger.info(
         `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`,
       );
@@ -521,15 +525,33 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    * be our `screenrecord` (same unique output file) right before the kill so a reused
    * pid is never signalled; a pid that is gone or no longer ours reports "not-ours".
    */
-  private async signalDeviceRecorder(
+  async signalDeviceRecorder(
     adb: AdbExecutor,
     backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     pid: number,
     signal: 2 | 9,
+    orphan = false,
   ): Promise<"signalled" | "not-ours"> {
-    const probe = await this.readDeviceRecorderCmdline(adb, pid);
+    let probe: ExecResult;
+    try {
+      probe = await this.readDeviceRecorderCmdline(adb, pid);
+    } catch (error) {
+      if (!orphan) {
+        throw error;
+      }
+      throw new DeviceUnreachableError(
+        `Cannot reach device to inspect orphan recorder pid ${pid}; retry when the device answers.`,
+        { cause: error },
+      );
+    }
     if (probe.error) {
-      throw toActionableError(probe.error, `Could not inspect recorder pid ${pid}`);
+      if (!orphan) {
+        throw toActionableError(probe.error, `Could not inspect recorder pid ${pid}`);
+      }
+      throw new DeviceUnreachableError(
+        `Cannot reach device to inspect orphan recorder pid ${pid}; retry when the device answers.`,
+        { cause: probe.error },
+      );
     }
     if (!isOwnRecorderCmdline(probe.stdout, backendHandle.deviceTempPath)) {
       logger.warn(
@@ -537,10 +559,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
       return "not-ours";
     }
-    const killed = await adb.executeCommand(
-      `shell kill -${signal} ${pid}`,
-      SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
-    );
+    const killed = await adb.executeCommand(`shell kill -${signal} ${pid}`, {
+      timeoutMs: SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
+    });
     if (killed.error) {
       throw toActionableError(killed.error, `Could not signal recorder pid ${pid}`);
     }
@@ -552,12 +573,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    * gone (no /proc entry), so only a transport failure throws.
    */
   private readDeviceRecorderCmdline(adb: AdbExecutor, pid: number): Promise<ExecResult> {
-    return adb.executeCommand(
-      `shell 'cat /proc/${pid}/cmdline 2>/dev/null; true'`,
-      SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
-      undefined,
-      true,
-    );
+    return adb.executeCommand(`shell 'cat /proc/${pid}/cmdline 2>/dev/null; true'`, {
+      timeoutMs: SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
+      noRetry: true,
+    });
   }
 
   /** Returns a failure description, or undefined when the recorder was handled or skipped. */
@@ -579,7 +598,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     try {
       if (pid === undefined) {
-        await adb.executeCommand("shell pkill -9 screenrecord", 8000);
+        await adb.executeCommand("shell pkill -9 screenrecord", SCREENRECORD_MS.pkillOpts);
       } else {
         await this.signalDeviceRecorder(adb, backendHandle, pid, 9);
       }
@@ -648,12 +667,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     deviceTempPath: string,
   ): Promise<number | null> {
     try {
-      const result = await adb.executeCommand(
-        `shell stat -c %s ${deviceTempPath}`,
-        5000,
-        undefined,
-        true,
-      );
+      const result = await adb.executeCommand(`shell stat -c %s ${deviceTempPath}`, {
+        timeoutMs: SCREENRECORD_MS.probe,
+        noRetry: true,
+      });
       const parsed = Number.parseInt(result.stdout.trim(), 10);
       return Number.isFinite(parsed) ? parsed : null;
     } catch (error) {
@@ -736,9 +753,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       // than masking command/transport failures with `|| true`.
       const result = await adb.executeCommand(
         'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'',
-        5000,
-        undefined,
-        true,
+        { timeoutMs: SCREENRECORD_MS.probe, noRetry: true },
       );
       return (
         !result.error && result.stderr.trim() === "" && result.stdout.trim() === "pidof-status:1"
@@ -866,7 +881,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     try {
       await adb.execute(["shell", "rm", "-f", backendHandle.deviceTempPath], {
-        timeoutMs: 8000,
+        timeoutMs: SCREENRECORD_MS.tempFileRemove,
       });
     } catch (error) {
       logger.warn(`[VideoCapture] Device temp-file cleanup failed: ${error}`);
@@ -1035,7 +1050,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     await this.cleanupDeviceRecording(adb, { deviceTempPath }, false);
   }
 
-  private resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
+  resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
     if (maxDurationSeconds && maxDurationSeconds > 0) {
       return Math.min(maxDurationSeconds, ANDROID_SCREENRECORD_MAX_SECONDS);
     }

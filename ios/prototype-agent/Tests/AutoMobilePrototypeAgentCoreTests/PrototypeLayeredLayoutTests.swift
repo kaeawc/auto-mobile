@@ -28,7 +28,7 @@ import XCTest
         }
 
         private enum Wrapper {
-            case none
+            case absent
             case layered
         }
 
@@ -39,8 +39,9 @@ import XCTest
             var body: some View {
                 VStack(alignment: .leading) {
                     switch wrapper {
-                    case .none: Recorder(probe: probe) { Color.clear }
-                    case .layered: PrototypeLayeredLayout(alignment: .topLeading) {
+                    case .absent: Recorder(probe: probe) { Color.clear }
+                    case .layered:
+                        PrototypeLayeredLayout(alignment: .topLeading) {
                             Recorder(probe: probe) { Color.clear }
                         }
                     }
@@ -66,7 +67,7 @@ import XCTest
             // Not at the 40 pt it measured: an HStack placed at exactly its ideal width shares it
             // evenly, which cut "Edit"/"Save" short in material-controls (#10899). Unwrapped, the
             // VStack makes the same placement.
-            XCTAssertEqual(placedWidth(.none), 300)
+            XCTAssertEqual(placedWidth(.absent), 300)
             XCTAssertEqual(placedWidth(.layered), 300)
         }
 

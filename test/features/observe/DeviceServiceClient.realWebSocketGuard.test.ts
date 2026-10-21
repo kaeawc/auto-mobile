@@ -3,11 +3,11 @@ import type WebSocket from "ws";
 import {
   DeviceServiceClient,
   REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV,
-  RealCtrlProxyWebSocketInTestError,
   assertUnitTestRealWebSocketAllowed,
   defaultWebSocketFactory,
   type WebSocketFactory,
 } from "../../../src/features/observe/DeviceServiceClient";
+import { RealCtrlProxyWebSocketInTestError } from "../../../src/features/observe/RealCtrlProxyWebSocketInTestError";
 import { daemonProcessEnvironment } from "../../../src/daemon/daemonOptionScopes";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";

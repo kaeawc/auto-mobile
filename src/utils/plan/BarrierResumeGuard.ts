@@ -1,4 +1,6 @@
+import { effectiveStepField } from "./effectiveStepField";
 import { ActionableError } from "../../models";
+import { isCoordinationTool } from "./coordinationTools";
 import { Plan, PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
@@ -21,28 +23,13 @@ interface GenerationSpan {
   arrivals: Arrival[];
 }
 
-const COORDINATION_TOOLS = new Set(["barrier", "criticalSection"]);
-
-/** True for the plan tools that rendezvous several device tracks. */
-export function isCoordinationTool(tool: string): boolean {
-  return COORDINATION_TOOLS.has(tool);
-}
+export { isCoordinationTool };
 
 /**
  * Resolve a coordination field (`lock`/`deviceCount`) honoring PlanNormalizer's
  * params-wins precedence, with an inline fallback for a step that reaches this
  * guard before normalization. Mirrors `PlanValidator.effectiveField`.
  */
-function effectiveField(step: PlanStep, field: string): unknown {
-  const params = step.params;
-  if (params && typeof params === "object" && Object.prototype.hasOwnProperty.call(params, field)) {
-    return (params as Record<string, unknown>)[field];
-  }
-  // oxlint-disable-next-line auto-mobile/no-unknown-cast
-  const inlineFields = step as unknown as Record<string, unknown>;
-  return inlineFields[field];
-}
-
 interface Arrival {
   planIndex: number;
   deviceCount: number | undefined;
@@ -239,7 +226,7 @@ function spanForArrivals(lock: string, arrivals: Arrival[]): GenerationSpan {
 }
 
 function readDeviceCount(step: PlanStep): number | undefined {
-  const rawCount = effectiveField(step, "deviceCount");
+  const rawCount = effectiveStepField(step, "deviceCount");
   return typeof rawCount === "number" && Number.isInteger(rawCount) && rawCount >= 1
     ? rawCount
     : undefined;
@@ -252,7 +239,7 @@ function readDeviceCount(step: PlanStep): number | undefined {
  * normalized contract as execution.
  */
 function readDevice(step: PlanStep): string | undefined {
-  const device = effectiveField(step, "device");
+  const device = effectiveStepField(step, "device");
   return typeof device === "string" && device.length > 0 ? device : undefined;
 }
 
@@ -278,10 +265,10 @@ function collectGenerationSpans(
 
   for (let planIndex = 0; planIndex < plan.steps.length; planIndex++) {
     const step = plan.steps[planIndex];
-    if (!COORDINATION_TOOLS.has(step.tool)) {
+    if (!isCoordinationTool(step.tool)) {
       continue;
     }
-    const lock = effectiveField(step, "lock");
+    const lock = effectiveStepField(step, "lock");
     if (typeof lock !== "string" || lock.length === 0) {
       continue;
     }
@@ -344,10 +331,10 @@ function lockArrivalsByLock(plan: Plan): Map<string, Arrival[]> {
   const arrivalsByLock = new Map<string, Arrival[]>();
   for (let planIndex = 0; planIndex < plan.steps.length; planIndex++) {
     const step = plan.steps[planIndex];
-    if (!COORDINATION_TOOLS.has(step.tool)) {
+    if (!isCoordinationTool(step.tool)) {
       continue;
     }
-    const lock = effectiveField(step, "lock");
+    const lock = effectiveStepField(step, "lock");
     if (typeof lock !== "string" || lock.length === 0) {
       continue;
     }
@@ -368,10 +355,10 @@ function collectDeviceLockOrder(plan: Plan, safe: number): Map<string, string[]>
   const deviceLockOrder = new Map<string, string[]>();
   for (let planIndex = safe; planIndex < plan.steps.length; planIndex++) {
     const step = plan.steps[planIndex];
-    if (!COORDINATION_TOOLS.has(step.tool)) {
+    if (!isCoordinationTool(step.tool)) {
       continue;
     }
-    const lock = effectiveField(step, "lock");
+    const lock = effectiveStepField(step, "lock");
     const device = readDevice(step);
     if (!isTrackedLock(lock, device, arrivalsByLock) || device === undefined) {
       continue;

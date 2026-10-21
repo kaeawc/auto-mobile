@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
 import type { BootedDevice } from "../../src/models";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -31,11 +31,11 @@ describe("physical iOS device resolution reaches ListInstalledApps", () => {
     };
     const manager = new MultiPlatformDeviceManager(
       null,
-      {
+      fakeDeviceManagerSimctl({
         isAvailable: async () => true,
         getBootedSimulators: async () => [],
-      } as unknown as SimCtlClient,
-      { getBootedDevices: async () => [] } as unknown as AndroidEmulatorClient,
+      }),
+      createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
       undefined,
       undefined,
       { listConnectedDevices: async () => ({ devices: [physical], complete: true }) },

@@ -315,3 +315,45 @@ commit_changed_swift_file() {
   [[ "$output" != *"swiftlint"* ]]
   [[ "$output" != *"swift "* ]]
 }
+
+install_attestation_recorder() {
+  mkdir -p "${fixture_root}/scripts/ci"
+  cat > "${fixture_root}/scripts/ci/record-attestations.sh" <<'SCRIPT'
+#!/bin/bash
+printf 'attestation %s\n' "$*" >> "${PREPUSH_IOS_COMMAND_LOG}"
+SCRIPT
+  chmod +x "${fixture_root}/scripts/ci/record-attestations.sh"
+}
+
+@test "attests partial scope and skipped lint when no Swift files changed" {
+  create_real_git_fixture
+  install_attestation_recorder
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" /bin/bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 0 ]
+  grep -F -- '--scope partial' "${command_log}"
+  grep -F 'SwiftFormat=skip:0 SwiftLint=skip:0 CtrlProxy runner build=skip:0' "${command_log}"
+}
+
+@test "attests full scope after lint and simulator-free tests" {
+  create_real_git_fixture
+  commit_changed_swift_file
+  install_attestation_recorder
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" /bin/bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 0 ]
+  grep -F -- '--scope full' "${command_log}"
+  grep -F 'SwiftFormat=pass:0 SwiftLint=pass:0' "${command_log}"
+}
+
+@test "runner build opt-out always marks iOS attestation partial" {
+  create_real_git_fixture
+  commit_changed_swift_file
+  install_attestation_recorder
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD=1 PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    /bin/bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 0 ]
+  grep -F -- '--scope partial --scope-note CtrlProxy runner build disabled' "${command_log}"
+  grep -F 'CtrlProxy runner build=skip:0' "${command_log}"
+}

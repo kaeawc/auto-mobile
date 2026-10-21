@@ -1,0 +1,75 @@
+{
+  "spec": {
+    "id": "repeatDataStrings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "items": [
+        {
+          "title": "Latte"
+        }
+      ],
+      "label": "{item.title} / {status}",
+      "active": true
+    },
+    "state": {
+      "status": "ready"
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/items"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{data:/label}",
+          "styleWhen": [
+            {
+              "when": {
+                "data": "/active",
+                "equals": true
+              },
+              "style": {
+                "alpha": 0.5
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "title": "Latte"
+        }
+      ],
+      "as": "item"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{item.title} / {status}",
+        "styleWhen": [
+          {
+            "when": {
+              "all": []
+            },
+            "style": {
+              "alpha": 0.5
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

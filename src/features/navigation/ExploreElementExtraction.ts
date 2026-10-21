@@ -6,6 +6,7 @@ import type { ElementSelectionResult } from "../../models/ElementSelectionResult
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ResolutionAction } from "../../models/ResolutionAction";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+import { CONTAINS_IGNORE_CASE, EXACT_MATCH } from "../utility/SelectionPolicy";
 import { nodeAttributes, type NodeAttributes } from "../../models/ViewHierarchyResult";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
 import {
@@ -218,7 +219,7 @@ function tapPropertiesFor(element: Element): NodeAttributes {
 export function tapSelectorFor(
   element: Element,
   viewHierarchy: ViewHierarchyResult,
-  selector: ElementSelector = new ResolverElementSelector(),
+  selector: Pick<ElementSelector, "select"> = new ResolverElementSelector(),
 ): TapSelector | null {
   const properties = tapPropertiesFor(element);
   const id = asString(properties["resource-id"]);
@@ -234,23 +235,30 @@ export function tapSelectorFor(
     candidates.push({
       selector: { elementId: id },
       select: (index) =>
-        selector.selectByResourceId(viewHierarchy, id, {
-          partialMatch: false,
-          index,
-          intentAction,
-        }),
+        selector.select(
+          viewHierarchy,
+          { elementId: id },
+          {
+            ...EXACT_MATCH,
+            index,
+            intentAction,
+          },
+        ),
     });
   }
   if (text) {
     candidates.push({
       selector: { text },
       select: (index) =>
-        selector.selectByText(viewHierarchy, text, {
-          partialMatch: true,
-          caseSensitive: false,
-          index,
-          intentAction,
-        }),
+        selector.select(
+          viewHierarchy,
+          { text },
+          {
+            ...CONTAINS_IGNORE_CASE,
+            index,
+            intentAction,
+          },
+        ),
     });
   }
   const isTarget = targetMatcher(element);

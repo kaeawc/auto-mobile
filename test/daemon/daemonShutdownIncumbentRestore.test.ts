@@ -9,7 +9,7 @@ import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -31,31 +31,17 @@ class RecordingIncumbentGuard extends IncumbentOwnerGuard {
   }
 }
 
-interface DaemonBindInternals {
-  socketBindCommitted: boolean;
-}
-
 function daemonWith(guard: IncumbentOwnerGuard): Daemon {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   return new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    guard,
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      incumbentOwnerGuard: guard,
+    },
   );
 }
 
@@ -105,7 +91,7 @@ describe("Daemon shutdown before the socket bind (#11156)", () => {
   test("leaves the PID record alone once this daemon committed the socket bind", async () => {
     const guard = new RecordingIncumbentGuard();
     const daemon = daemonWith(guard);
-    (daemon as unknown as DaemonBindInternals).socketBindCommitted = true;
+    daemon.testHooks.setSocketBindCommitted(true);
 
     await daemon.stop();
 

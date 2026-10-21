@@ -1,6 +1,8 @@
-import type { IosVoiceOverDetector } from "../../src/features/accessibility/interfaces/IosVoiceOverDetector";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios";
-import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import type {
+  IosVoiceOverDetector,
+  VoiceOverStateClient,
+} from "../../src/features/accessibility/interfaces/IosVoiceOverDetector";
+import type { FeatureFlagReader } from "../../src/features/featureFlags/FeatureFlagService";
 
 /**
  * Fake implementation of IosVoiceOverDetector for testing.
@@ -15,7 +17,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   private invalidatedDevices: string[] = [];
 
   /** Records the `featureFlags` argument passed to each isVoiceOverEnabled call (regression guard for #3925). */
-  public readonly isVoiceOverEnabledFeatureFlagsArgs: Array<FeatureFlagService | undefined> = [];
+  public readonly isVoiceOverEnabledFeatureFlagsArgs: Array<FeatureFlagReader | undefined> = [];
   /** Records the request budget passed to each detection attempt. */
   public readonly isVoiceOverEnabledTimeoutMsArgs: Array<number | undefined> = [];
 
@@ -74,8 +76,8 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
 
   async isVoiceOverEnabled(
     _deviceId: string,
-    _client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    _client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     _signal?: AbortSignal,
   ): Promise<boolean> {
@@ -95,8 +97,8 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
    */
   async isVoiceOverActiveOrUnknown(
     _deviceId: string,
-    _client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    _client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     _signal?: AbortSignal,
   ): Promise<boolean> {
@@ -112,8 +114,8 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
    */
   async resolveState(
     _deviceId: string,
-    _client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService,
+    _client: VoiceOverStateClient,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     _signal?: AbortSignal,
   ): Promise<boolean | null> {

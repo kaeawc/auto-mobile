@@ -13,6 +13,10 @@ import { TapOnElement } from "../action/TapOnElement";
 import { logger } from "../../utils/logger";
 import { extractAllElements, tapSelectorFor } from "./ExploreElementExtraction";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import type { ActionCall } from "../action/ActionCall";
+
+// Blocker checks wait for the UI to settle after interaction.
+const BLOCKER_DETECTION_SETTLE_MS = 1000;
 
 /**
  * Minimal tap-action seam consumed by the blocker handlers. They inspect the
@@ -27,7 +31,7 @@ import { defaultTimer, Timer } from "../../utils/SystemTimer";
  * attributed to the next app navigation event.
  */
 export interface DialogTapAction {
-  execute(options: TapOnElementOptions, progress?: ProgressCallback): Promise<BaseActionResult>;
+  execute(options: TapOnElementOptions, call?: ActionCall): Promise<BaseActionResult>;
 }
 
 /**
@@ -426,7 +430,7 @@ export async function handlePermissionDialog(
     const tapOn = tapActionFactory(device, adb);
     let tapResult: BaseActionResult;
     try {
-      tapResult = await tapOn.execute({ ...selector, action: "tap" }, progress);
+      tapResult = await tapOn.execute({ ...selector, action: "tap" }, { progress });
     } catch (error) {
       logger.warn(`[Explore] Failed to handle permission dialog: ${error}`);
       continue;
@@ -438,7 +442,7 @@ export async function handlePermissionDialog(
       );
       return false;
     }
-    await timer.sleep(1000);
+    await timer.sleep(BLOCKER_DETECTION_SETTLE_MS);
     return true;
   }
 
@@ -474,7 +478,7 @@ async function dismissDialog(
     const tapOn = tapActionFactory(device, adb);
     let tapResult: BaseActionResult;
     try {
-      tapResult = await tapOn.execute({ ...selector, action: "tap" }, progress);
+      tapResult = await tapOn.execute({ ...selector, action: "tap" }, { progress });
     } catch (error) {
       logger.warn(`[Explore] Failed to dismiss dialog: ${error}`);
       continue;
@@ -486,17 +490,12 @@ async function dismissDialog(
       );
       return false;
     }
-    await timer.sleep(1000);
+    await timer.sleep(BLOCKER_DETECTION_SETTLE_MS);
     return true;
   }
 
   return false;
 }
-
-/**
- * Handler for dead end situations
- */
-type DeadEndHandler = (progress?: ProgressCallback) => Promise<void>;
 
 /**
  * Detect and handle blocker screens (login, permissions, dialogs)
@@ -506,7 +505,6 @@ export async function detectAndHandleBlockers(
   device: BootedDevice,
   adb: AdbExecutor | null,
   elementParser: ElementParser,
-  _handleDeadEnd: DeadEndHandler,
   progress?: ProgressCallback,
   deps: BlockerHandlerDeps = {},
 ): Promise<boolean> {

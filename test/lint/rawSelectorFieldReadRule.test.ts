@@ -29,7 +29,11 @@ test("scope covers debug/server but excludes canonical utility and tests", () =>
   expect(check(code, "src/server/tool.ts")).toHaveLength(1);
   expect(check(code, "src/features/accessibility/SetAccessibilityFocus.ts")).toHaveLength(1);
   expect(check(code, "src/features/observe/ConditionPredicates.ts")).toHaveLength(1);
+  expect(check(code, "src/features/utility/DeepLinkManager.ts")).toHaveLength(1);
+  expect(check(code, "src/features/talkback/FocusElementMatcher.ts")).toHaveLength(1);
+  expect(check(code, "src/features/talkback/nested/Deep.ts")).toHaveLength(1);
   expect(check(code, "src/features/utility/SearchableNode.ts")).toEqual([]);
+  expect(check(code, "src/features/utility/DeepLinkManagerHelper.ts")).toEqual([]);
   expect(check(code, "test/features/action/Test.ts")).toEqual([]);
 });
 
@@ -495,4 +499,52 @@ test("generic wrappers mark only raw-valued properties", () => {
   const code =
     "interface Envelope<T> { node: T; metadata: { text: string } } function inspect(envelope: Envelope<ViewHierarchyNode>) { return [envelope.node.text, envelope.metadata.text]; }";
   expect(check(code)).toHaveLength(1);
+});
+
+test("the sanctioned accessor module is out of scope, and its callers read no raw field", () => {
+  const code = 'function read(props: Record<string, unknown>) { return props["resource-id"]; }';
+  expect(check(code, "src/features/utility/elementProperties.ts")).toEqual([]);
+  for (const file of ["hierarchy", "matching", "groupExpansion", "dismissal"]) {
+    const filename = `src/features/systemTray/helpers/${file}.ts`;
+    expect(check(code, filename)).toHaveLength(1);
+    expect(
+      check(
+        "function read(props: Record<string, unknown>) { return rawResourceId(props) + rawText(props); }",
+        filename,
+      ),
+    ).toEqual([]);
+  }
+});
+
+test("raw accessor imports are rejected outside the allow-list", () => {
+  const code = 'import { rawText } from "../utility/elementProperties";';
+  expect(check(code, "src/features/action/TapOnElement.ts")).toHaveLength(1);
+  expect(check(code, "src/server/interactionTools.ts")).toHaveLength(1);
+  expect(
+    check(
+      'import { rawNodeValue as v, isTruthyFlag } from "../utility/elementProperties";',
+      "src/features/debug/Search.ts",
+    ),
+  ).toHaveLength(1);
+  expect(check(code, "src/features/systemTray/notificationHints.ts")).toEqual([]);
+  for (const file of ["hierarchy", "matching", "groupExpansion", "dismissal"]) {
+    expect(check(code, `src/features/systemTray/helpers/${file}.ts`)).toEqual([]);
+  }
+  for (const file of ["dependencies", "runtime", "listing"]) {
+    expect(check(code, `src/features/systemTray/helpers/${file}.ts`)).toHaveLength(1);
+  }
+  expect(check(code, "src/features/systemTray/systemTrayHelpers.ts")).toHaveLength(1);
+  expect(check(code, "src/features/action/LongPressMetadataDetector.ts")).toEqual([]);
+  expect(
+    check(
+      'import { isTruthyFlag } from "../utility/elementProperties";',
+      "src/features/action/TapOnElement.ts",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      'import type { RawNodeProperties } from "../utility/elementProperties";',
+      "src/features/action/TapOnElement.ts",
+    ),
+  ).toEqual([]);
 });

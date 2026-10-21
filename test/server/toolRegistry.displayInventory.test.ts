@@ -1,7 +1,9 @@
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -14,6 +16,7 @@ import { FakeDisplayInventorySource } from "../fakes/FakeDisplayInventoryProvide
 import { CachingDisplayInventoryProvider } from "../../src/devices/DisplayInventoryProvider";
 import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 import type { DeviceSession } from "../../src/db/types";
+import { sessionRow } from "../helpers/sessionManagerSuite";
 
 const android: BootedDevice = {
   name: "Pixel Fold",
@@ -29,8 +32,7 @@ const displays = {
 };
 
 describe("ToolRegistry display inventory resolution", () => {
-  let originalManager: unknown;
-  let originalRepository: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restoreInventory: () => void;
   let ctrlProxyStub: CtrlProxySetupStub;
   let sessionManager: SessionManager | undefined;
@@ -39,17 +41,17 @@ describe("ToolRegistry display inventory resolution", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeManager = new FakeDeviceSessionManager();
-    originalManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    originalRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "deviceSessionManager", fakeManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", { recordToolCall: async () => {} });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     ctrlProxyStub = stubCtrlProxySetup();
   });
 
   afterEach(() => {
     restoreInventory?.();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalRepository);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager?.stopCleanupTimer();
@@ -235,7 +237,7 @@ describe("ToolRegistry display inventory resolution", () => {
       fakeManager.setConnectedDevices([target]);
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const persisted: DeviceSession = {
+      const persisted: DeviceSession = sessionRow({
         session_uuid: "display-session",
         device_id: target.deviceId,
         stable_device_id: target.platform === "ios" ? target.deviceId : target.name,
@@ -255,14 +257,20 @@ describe("ToolRegistry display inventory resolution", () => {
         has_received_heartbeat: 1,
         created_at: "2026-09-03T00:00:00.000Z",
         updated_at: "2026-09-03T00:00:00.000Z",
-      };
-      sessionManager = new SessionManager(timer, {
-        getSession: async () => persisted,
-        upsertActiveSession: async () => {},
-        recordActivity: async () => {},
-        markReleased: async () => {},
-        markStaleActiveSessionsExpired: async () => {},
       });
+      sessionManager = new SessionManager(
+        timer,
+        Object.assign(new FakeDeviceSessionPersistence(), {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          getSession: async () => persisted,
+          upsertActiveSession: async () => {},
+          recordActivity: async () => {},
+          markReleased: async () => {},
+          markStaleActiveSessionsExpired: async () => {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
+      );
       const deviceUtils = new FakeDeviceUtils();
       deviceUtils.setBootedDevices(target.platform, [target]);
       const pool = new DevicePool(

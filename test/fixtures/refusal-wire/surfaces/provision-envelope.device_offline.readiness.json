@@ -13,7 +13,7 @@
       "readinessPhase": "runner-setup",
       "attempt": 1,
       "deviceId": "emulator-5554",
-      "daemonBuild": "0.0.84+fixture-build"
+      "daemonBuild": "0.0.0+fixture-build"
     },
     "lifecycle": {
       "state": "no_device_created",
@@ -26,7 +26,7 @@
         "readinessPhase": "runner-setup",
         "attempt": 1,
         "deviceId": "emulator-5554",
-        "daemonBuild": "0.0.84+fixture-build"
+        "daemonBuild": "0.0.0+fixture-build"
       }
     },
     "recovery": {
@@ -51,7 +51,7 @@
       },
       "freshness": {
         "observedAtMs": 0,
-        "daemonBuild": "0.0.84+fixture-build",
+        "daemonBuild": "0.0.0+fixture-build",
         "source": "snapshot"
       }
     }

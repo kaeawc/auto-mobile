@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": 1
+    },
+    "root": {
+      "type": "slider",
+      "stateKey": "value",
+      "checks": [
+        {
+          "message": "Bad",
+          "pattern": "a"
+        }
+      ],
+      "min": 0,
+      "max": 100
+    }
+  },
+  "expectedPath": "root.checks[0].pattern"
+}

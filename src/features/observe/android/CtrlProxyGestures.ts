@@ -1,3 +1,4 @@
+import type { TwoFingerSwipeRequest } from "./types";
 /**
  * CtrlProxyGestures - Android gesture delegate.
  *
@@ -13,7 +14,20 @@ import {
 } from "../shared/SharedGestureDelegate";
 import { sendCommand } from "../DeviceServiceUtils";
 import type { DelegateContext, A11ySwipeResult, A11yTapCoordinatesResult } from "./types";
-import { normalizeCtrlProxyMilliseconds } from "./ctrlProxyProtocol";
+import {
+  MULTI_FINGER_GESTURE_CAPABILITY,
+  normalizeCtrlProxyMilliseconds,
+} from "./ctrlProxyProtocol";
+
+export interface GestureStartRequest {
+  gestureId: string;
+  x: number;
+  y: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  displayId?: number;
+  beforeSend?: () => void;
+}
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
@@ -86,18 +100,20 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * arrives, instead of the promise only ever settling via its timeout. The requestId keeps the
    * `two_finger_swipe_` prefix so callers/loggers that key on it are unaffected.
    */
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    offset: number = 100,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+  async requestTwoFingerSwipe(request: TwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    const {
+      x1,
+      y1,
+      x2,
+      y2,
+      duration = 300,
+      offset = 100,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      displayId,
+      beforeSend,
+    } = request;
+
     // Coordinates go through the shared `coord()` policy (roundCoordinates: true for Android) so
     // TalkBack two-finger swipes land on whole pixels, exactly like the sibling swipe/tap/drag/
     // pinch gestures (#3049). Intentional and not to be regressed — the runner accepts fractional
@@ -125,6 +141,58 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   }
 
   /**
+   * Request an N-finger (2-5) simultaneous stroke. Finger `i` starts `i * fingerSpacing` px right
+   * of the first finger's path, matching the iOS runner. Identical start and end points make a
+   * multi-finger tap, or a long press with a long duration. Counts above two need
+   * `multi_finger_gesture_v1`: an older runner would silently perform two fingers, so it is refused
+   * before dispatch with `unsupportedCapability`.
+   */
+  async requestMultiFingerSwipe(request: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    fingerCount: number;
+    duration: number;
+    fingerSpacing: number;
+    timeoutMs: number;
+    perf?: PerformanceTracker;
+    displayId?: number;
+    signal?: AbortSignal;
+    onDispatch?: () => void;
+    beforeSend?: () => void;
+  }): Promise<A11ySwipeResult> {
+    const needsDisplay = request.displayId !== undefined && request.displayId !== 0;
+    return sendCommand<A11ySwipeResult>(this.context, {
+      idPrefix: "multi_finger_swipe",
+      responseType: "swipe",
+      messageType: "request_two_finger_swipe",
+      params: this.gestureParams("request_two_finger_swipe", {
+        x1: this.coord(request.x1),
+        y1: this.coord(request.y1),
+        x2: this.coord(request.x2),
+        y2: this.coord(request.y2),
+        duration: request.duration,
+        offset: Math.round(request.fingerSpacing),
+        ...(request.fingerCount > 2 ? { fingerCount: request.fingerCount } : {}),
+        ...this.gestureDisplayParams(request.displayId),
+      }),
+      timeoutMs: request.timeoutMs,
+      perf: request.perf ?? new NoOpPerformanceTracker(),
+      errorLabel: "Multi-finger gesture",
+      abortSignal: request.signal,
+      beforeSend: request.beforeSend,
+      onDispatch: request.onDispatch,
+      requiredCapability:
+        request.fingerCount > 2
+          ? MULTI_FINGER_GESTURE_CAPABILITY
+          : needsDisplay
+            ? "gesture_display_id_v1"
+            : undefined,
+    });
+  }
+
+  /**
    * Begin a streamed gesture (finger down) at ([x], [y]). Android-only: the runner chains the
    * start/move/end sharing [gestureId] into one continued AccessibilityService gesture so the device
    * tracks the pointer live (issue: streaming gesture input). Each frame is correlated by requestId
@@ -133,16 +201,18 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * The display fence guards start only; a mid-stream transition does not cancel move/end.
    * The runner continues the accepted gesture on its original display.
    */
-  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
-  async requestGestureStart(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+
+  async requestGestureStart(request: GestureStartRequest): Promise<A11ySwipeResult> {
+    const {
+      gestureId,
+      x,
+      y,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      displayId,
+      beforeSend,
+    } = request;
+
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_start",
       responseType: "swipe",

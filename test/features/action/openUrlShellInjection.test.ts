@@ -1,10 +1,23 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { afterEach, describe, expect, spyOn, test, mock, beforeEach } from "bun:test";
+import type { ObserveResult } from "../../../src/models";
 import { OpenURL } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeDeviceUrlLauncher } from "../../fakes/FakeDeviceUrlLauncher";
+
+afterEach(() => mock.restore());
+
+const observeResultStub = {
+  observationId: "open-url-stub",
+  display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+  updatedAt: 0,
+  screenSize: { width: 1080, height: 1920 },
+  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+  viewHierarchy: { hierarchy: {} },
+} satisfies ObserveResult;
 
 /**
  * Issue #4213: `openLink` interpolated the caller-supplied URL into a command
@@ -73,17 +86,16 @@ describe("openLink does not let a URL escape the Android device shell (issue #42
 
   // Run execute() without the observe/visual-change machinery: the platform
   // dispatch is the only part under test here.
-  const stubObservedInteraction = () => {
+  beforeEach(() => {
     const spy = spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(
-      async (block: any) => block({} as any),
+      runBlockWith(observeResultStub),
     );
     restores.push(() => spy.mockRestore());
-  };
+  });
 
   test.each(hostileUrls)("android argv: %s", async (_label, url, quoted) => {
-    stubObservedInteraction();
     const fakeAdb = new FakeAdbExecutor();
-    const openURL = new OpenURL(ANDROID_DEVICE, fakeAdb as unknown as any);
+    const openURL = new OpenURL(ANDROID_DEVICE, fakeAdb);
 
     const result = await openURL.execute(url);
 
@@ -96,14 +108,13 @@ describe("openLink does not let a URL escape the Android device shell (issue #42
   });
 
   test("the reproduced injection payload cannot terminate the -d argument", async () => {
-    stubObservedInteraction();
     const fakeAdb = new FakeAdbExecutor();
     // Before the fix this produced:
     //   am start -a android.intent.action.VIEW -d "https://x/" ; id ; echo ""
     // i.e. a second shell command (`id`) executed on the device.
     const payload = 'https://x/" ; id ; echo "';
 
-    await new OpenURL(ANDROID_DEVICE, fakeAdb as unknown as any).execute(payload);
+    await new OpenURL(ANDROID_DEVICE, fakeAdb).execute(payload);
 
     const [argv] = fakeAdb.getExecutedArgv();
     const shellCommand = argv[1];
@@ -127,21 +138,20 @@ describe("openLink passes the URL to simctl as its own argv element (issue #4213
     }
   });
 
-  const stubObservedInteraction = () => {
+  beforeEach(() => {
     const spy = spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(
-      async (block: any) => block({} as any),
+      runBlockWith(observeResultStub),
     );
     restores.push(() => spy.mockRestore());
-  };
+  });
 
   test.each(hostileUrls)("ios simulator argv: %s", async (_label, url) => {
-    stubObservedInteraction();
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const openURL = new OpenURL(
       iosSimulator,
-      new FakeAdbExecutor() as unknown as any,
-      simctl as any,
-      new FakeDeviceUrlLauncher() as any,
+      new FakeAdbExecutor(),
+      simctl,
+      new FakeDeviceUrlLauncher(),
     );
 
     const result = await openURL.execute(url);

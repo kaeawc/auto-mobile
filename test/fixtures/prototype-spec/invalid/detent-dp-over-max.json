@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "bottomSheet",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "child": {
+        "type": "spacer"
+      },
+      "detents": [
+        {
+          "dp": 10001
+        }
+      ]
+    },
+    "state": {
+      "open": true
+    }
+  },
+  "expectedPath": "root.detents[0].dp",
+  "expectedMessage": "Invalid number value"
+}

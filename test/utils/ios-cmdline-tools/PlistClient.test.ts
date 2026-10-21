@@ -121,3 +121,31 @@ describe("PlistClient", () => {
     expect(aborted).toBe(true);
   });
 });
+
+test("writes an XML plist from JSON stdin through literal argv", async () => {
+  const value = { CFBundleName: 'Quotes " & unicode 日本', nested: { keep: [1, true] } };
+  const process: PlistProcess = async (request) => {
+    expect(request.args).toEqual([
+      "-convert",
+      "xml1",
+      "-o",
+      "/tmp/a;literal/Info.plist",
+      "--",
+      "-",
+    ]);
+    expect(JSON.parse(request.input!.toString("utf8"))).toEqual(value);
+    return { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+  };
+  await new PlistClient(process, { timer: new FakeTimer() }).writeXmlFromJson(
+    "/tmp/a;literal/Info.plist",
+    value,
+  );
+});
+test("surfaces plist write process failures", async () => {
+  const process: PlistProcess = async () => {
+    throw new Error("write denied");
+  };
+  await expect(
+    new PlistClient(process, { timer: new FakeTimer() }).writeXmlFromJson("/tmp/Info.plist", {}),
+  ).rejects.toThrow("write denied");
+});

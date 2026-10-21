@@ -1,3 +1,7 @@
+import {
+  deliverDaemonHeartbeat,
+  deliverDaemonHeartbeatIfKnown,
+} from "../helpers/daemonHeartbeatHandler";
 import { describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -44,6 +48,8 @@ interface SessionKind {
   name: string;
   /** Whether an owner process heartbeats for it (a one-shot CLI has none). */
   heartbeats: boolean;
+  /** What its owner's heartbeat frames carry (its liveness owner token, if it claimed one). */
+  heartbeatParams?: Record<string, unknown>;
   setUp(manager: SessionManager): Promise<void>;
 }
 
@@ -52,7 +58,7 @@ const SESSION_KINDS: readonly SessionKind[] = [
     name: "cli-idle",
     heartbeats: false,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", 60_000);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
       expect(manager.adoptCliLivenessPolicy(SESSION, IDLE_MS)).toBe(true);
     },
   },
@@ -62,15 +68,16 @@ const SESSION_KINDS: readonly SessionKind[] = [
     name: "cli-idle adopted from a 30-minute session",
     heartbeats: false,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", 30 * 60_000);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 30 * 60_000 });
       expect(manager.adoptCliLivenessPolicy(SESSION, IDLE_MS)).toBe(true);
     },
   },
   {
     name: "proxy-owned (liveness token)",
     heartbeats: true,
+    heartbeatParams: { livenessOwnerToken: "proxy-token" },
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       expect(await manager.claimLivenessOwnership(SESSION, "proxy-token")).toBe("claimed");
     },
   },
@@ -78,14 +85,14 @@ const SESSION_KINDS: readonly SessionKind[] = [
     name: "heartbeat without an owner token",
     heartbeats: true,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     },
   },
   {
     name: "managed execution",
     heartbeats: true,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", 60_000);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
       await manager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: IDLE_MS });
     },
   },
@@ -228,9 +235,9 @@ class IdleWorld {
     }
   }
 
-  private heartbeat(): void {
+  private async heartbeat(): Promise<void> {
     if (this.kind.heartbeats && this.held) {
-      this.manager.recordHeartbeat(SESSION);
+      await deliverDaemonHeartbeatIfKnown(this.manager, SESSION, this.kind.heartbeatParams);
     }
   }
 
@@ -283,7 +290,7 @@ class IdleWorld {
         // Time passes with every scan and heartbeat on time.
         for (let elapsed = 0; elapsed < step.ms && this.held; elapsed += SCAN_MS) {
           await this.timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(5));
-          this.heartbeat();
+          await this.heartbeat();
           await this.scan();
         }
         return;
@@ -298,7 +305,7 @@ class IdleWorld {
         }
         if (this.held) {
           await this.scan();
-          this.heartbeat();
+          await this.heartbeat();
         }
         return;
       case "sleep":
@@ -310,7 +317,7 @@ class IdleWorld {
         }
         if (this.held) {
           await this.scan();
-          this.heartbeat();
+          await this.heartbeat();
         }
         return;
       case "wallStep":
@@ -318,7 +325,7 @@ class IdleWorld {
         this.wallSteppedMs += step.ms;
         await this.scan();
         // The owner keeps heartbeating across the step; a forward one reads as host sleep.
-        this.heartbeat();
+        await this.heartbeat();
         return;
       case "call":
         await this.call();
@@ -377,7 +384,7 @@ describe("the scan, a late call's admission and idleReleaseAt give one idle dead
           await manager.adoptManagedExecutionLivenessPolicy(SESSION);
           await manager.claimLivenessOwnership(SESSION, "managed-owner");
           timer.setCurrentTime(session.expiresAt + 1);
-          manager.recordHeartbeat(SESSION, "managed-owner");
+          await deliverDaemonHeartbeat(manager, SESSION, { livenessOwnerToken: "managed-owner" });
           const age =
             phase === "live"
               ? 0

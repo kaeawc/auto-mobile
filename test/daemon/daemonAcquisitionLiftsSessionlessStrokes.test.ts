@@ -6,7 +6,7 @@ import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -16,10 +16,6 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 // were started on the device while no session held it. The lift itself is covered against the
 // real socket server in `socketServerInputSessionlessStrokeAtAcquisition.test.ts`; this pins the
 // daemon's own wiring of the hook.
-
-interface DaemonSocketServerInternals {
-  socketServer: { liftSessionlessStrokesOn(deviceId: string): void } | null;
-}
 
 describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
   const restores: Array<() => void> = [];
@@ -41,9 +37,11 @@ describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
     restores.push(() => appearance.mockRestore());
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
   });
 
@@ -61,11 +59,11 @@ describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
 
   test("a session acquiring a device lifts the sessionless strokes on that device", async () => {
     const lifted: string[] = [];
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: (deviceId) => {
         lifted.push(deviceId);
       },
-    };
+    });
 
     await daemon.getSessionManager().createSession("new-owner", "emulator-5560", "android");
 
@@ -73,7 +71,7 @@ describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
   });
 
   test("an acquisition before the socket server exists has no stroke to lift and succeeds", async () => {
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = null;
+    daemon.testHooks.setSocketServer(null);
 
     await daemon.getSessionManager().createSession("new-owner", "emulator-5560", "android");
 

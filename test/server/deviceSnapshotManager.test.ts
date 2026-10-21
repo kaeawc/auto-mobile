@@ -12,7 +12,7 @@ import {
   restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
   updateDeviceSnapshotConfig,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
@@ -29,7 +29,10 @@ import { createInstalledAppsDeviceIncarnationListener } from "../../src/server/a
 import { PerDeviceInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { RestoreSnapshot } from "../../src/features/action/RestoreSnapshot";
+import {
+  RestoreSnapshot,
+  type RestoreSnapshotArgs,
+} from "../../src/features/action/RestoreSnapshot";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -47,7 +50,7 @@ describe("deviceSnapshotManager", () => {
   let configRepository: FakeDeviceSnapshotConfigRepository;
   let store: FakeDeviceSnapshotStore;
   let captureCalls: Array<Record<string, unknown>>;
-  let restoreCalls: Array<Record<string, unknown>>;
+  let restoreCalls: Array<RestoreSnapshotArgs>;
 
   beforeEach(async () => {
     fakeTimer = new FakeTimer();
@@ -58,9 +61,9 @@ describe("deviceSnapshotManager", () => {
     restoreCalls = [];
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: store as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: store,
       // No real ~/.android/avd scan in a unit test (#6490).
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: fakeTimer,
@@ -493,7 +496,7 @@ describe("deviceSnapshotManager", () => {
     const survivors = (await repository.listSnapshots()).map((record) => record.snapshotName);
     const survivorNames = new Set(survivors);
     const totalSize = (await repository.listSnapshots()).reduce(
-      (sum, record) => sum + record.sizeBytes,
+      (sum, record) => sum + (record.sizeBytes ?? 0),
       0,
     );
     const allInitial = ["s1", "s2", "s3", "cap-a", "cap-b"];
@@ -709,7 +712,7 @@ describe("deviceSnapshotManager", () => {
       ).rejects.toThrow("replacement failed");
       expect(store.deleteCalls).toEqual([]);
       expect(await repository.getSnapshot("cross-device")).toEqual(priorRecord);
-      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+      expect(store.hasSnapshotInAnyScope("cross-device")).toBe(true);
 
       await setDeviceSnapshotManagerDependencies({
         createCaptureProvider: (device) => ({
@@ -734,11 +737,11 @@ describe("deviceSnapshotManager", () => {
         scenario.expectedDeletes.map((options) => ({ snapshotName: "cross-device", options })),
       );
       expect((await repository.getSnapshot("cross-device"))?.deviceId).toBe(current.deviceId);
-      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+      expect(store.hasSnapshotInAnyScope("cross-device")).toBe(true);
       const deletionCount = store.deleteCalls.length;
       await captureDeviceSnapshot(current, { snapshotName: "cross-device", useVmSnapshot: false });
       expect(store.deleteCalls).toHaveLength(deletionCount);
-      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+      expect(store.hasSnapshotInAnyScope("cross-device")).toBe(true);
     },
   );
 
@@ -1005,17 +1008,19 @@ describe("deviceSnapshotManager", () => {
       }
       const adb = new FakeAdbClient();
       adb.setCommandResult(`emu avd snapshot load ${manifest.snapshotName}`, "OK");
-      const emulator = new DeferredEmulator(null, null, fakeTimer, { create: () => adb });
+      const emulator = new DeferredEmulator({
+        timer: fakeTimer,
+        adbFactory: { create: () => adb },
+      });
       await setDeviceSnapshotManagerDependencies({
         deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([listener]),
         createRestoreProvider: () =>
-          new RestoreSnapshot(
-            device,
-            { create: () => adb },
+          new RestoreSnapshot(device, {
+            adbFactory: { create: () => adb },
             emulator,
-            fakeTimer,
-            new DeviceSnapshotStore(path.join(os.tmpdir(), "settlement-test-unused")),
-          ),
+            timer: fakeTimer,
+            store: new DeviceSnapshotStore(path.join(os.tmpdir(), "settlement-test-unused")),
+          }),
       });
       const restore = restoreDeviceSnapshot(device, { snapshotName: manifest.snapshotName });
       // Attach rejection handling before rejecting the deferred readiness promise.
@@ -1333,7 +1338,7 @@ describe("deviceSnapshotManager", () => {
       );
 
       await setDeviceSnapshotManagerDependencies({
-        snapshotStore: legacyStore as any,
+        snapshotStore: legacyStore,
       });
 
       const { result, manifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
@@ -1386,7 +1391,7 @@ describe("deviceSnapshotManager", () => {
       );
 
       await setDeviceSnapshotManagerDependencies({
-        snapshotStore: legacyStore as any,
+        snapshotStore: legacyStore,
       });
 
       const { snapshots, count } = await listDeviceSnapshots();
@@ -1429,7 +1434,7 @@ describe("deviceSnapshotManager", () => {
         noOpSnapshotFileSync,
       );
       await realStore.ensureSnapshotsDirectory();
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
       const snapshotName = "evict-me";
       const avdName = "Pixel_5";
@@ -1490,7 +1495,7 @@ describe("deviceSnapshotManager", () => {
         noOpSnapshotFileSync,
       );
       await realStore.ensureSnapshotsDirectory();
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
       const snapshotName = "legacy-flat";
       const avdName = "Pixel_5";
@@ -1708,7 +1713,7 @@ describe("deviceSnapshotManager", () => {
         noOpSnapshotFileSync,
       );
       await realStore.ensureSnapshotsDirectory();
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
       // A leftover set-aside dir from an interrupted overwrite: it holds the
       // prior snapshot's manifest.json at the flat base level. Importing it would
@@ -1744,7 +1749,7 @@ describe("deviceSnapshotManager", () => {
         noOpSnapshotFileSync,
       );
       await realStore.ensureSnapshotsDirectory();
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
       // A different AVD's real snapshot living under the "android" scope root.
       const other = { platform: "android" as const, avdName: "Pixel_7" };
@@ -1798,7 +1803,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const snapshotName = "baseline";
         const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
@@ -1848,7 +1853,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const snapshotName = "baseline";
         const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
@@ -1901,7 +1906,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const snapshotName = "settings-baseline";
         const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
@@ -1954,7 +1959,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const androidOptions = { platform: "android" as const, avdName: "Pixel_5" };
         const asideDir = realStore.getSnapshotPathWithOptions("ghost.replacing", androidOptions);
@@ -1990,7 +1995,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const snapshotName = "corrupt";
         const androidOptions = { platform: "android" as const, avdName: "Pixel_5" };

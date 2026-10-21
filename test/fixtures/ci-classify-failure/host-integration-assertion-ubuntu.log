@@ -1,0 +1,52 @@
+2026-10-15T14:31:35.0150505Z (pass) KeyedJsonConfigRepository > appearance_configs rejects invalid config "string" [1.73ms]
+2026-10-15T14:31:35.0165238Z 243 |             key: "global",
+2026-10-15T14:31:35.0165806Z 244 |             config_json: json,
+2026-10-15T14:31:35.0166482Z 245 |             updated_at: new Date().toISOString(),
+2026-10-15T14:31:35.0167150Z 246 |           })
+2026-10-15T14:31:35.0167623Z 247 |           .execute();
+2026-10-15T14:31:35.0168454Z 248 |         expect(await repo.getConfig()).toBeNull();
+2026-10-15T14:31:35.0169178Z                                              ^
+2026-10-15T14:31:35.0169820Z error: expect(received).toBeNull()
+2026-10-15T14:31:35.0170236Z 
+2026-10-15T14:31:35.0170416Z Received: {
+2026-10-15T14:31:35.0170862Z   includeAppData: true,
+2026-10-15T14:31:35.0171394Z   includeSettings: true,
+2026-10-15T14:31:35.0171919Z   useVmSnapshot: true,
+2026-10-15T14:31:35.0172429Z   strictBackupMode: false,
+2026-10-15T14:31:35.0172856Z   vmSnapshotTimeoutMs: 30000,
+2026-10-15T14:31:35.0173232Z   maxVmSnapshotsPerAvd: 3,
+2026-10-15T14:31:35.0173583Z   maxArchiveSizeMb: 100,
+2026-10-15T14:31:35.0173904Z }
+2026-10-15T14:31:35.0174045Z 
+2026-10-15T14:31:35.0174663Z       at <anonymous> (/home/runner/work/auto-mobile/auto-mobile/test/db/keyedJsonConfigRepository.integration.test.ts:248:40)
+2026-10-15T14:31:35.0175420Z 
+2026-10-15T14:31:35.0198812Z ##[error]Received: {
+  includeAppData: true,
+  includeSettings: true,
+  useVmSnapshot: true,
+  strictBackupMode: false,
+  vmSnapshotTimeoutMs: 30000,
+  maxVmSnapshotsPerAvd: 3,
+  maxArchiveSizeMb: 100,
+}
+
+      at <anonymous> (/home/runner/work/auto-mobile/auto-mobile/test/db/keyedJsonConfigRepository.integration.test.ts:248:40)
+2026-10-15T14:31:35.0209115Z (fail) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config {"defaultMode":42} [1.86ms]
+2026-10-15T14:31:35.0209875Z (pass) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config 42 [1.73ms]
+2026-10-15T14:31:35.0210526Z (pass) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config [] [1.86ms]
+2026-10-15T14:31:35.0222785Z (pass) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config null [1.79ms]
+2026-10-15T14:31:35.0239800Z (pass) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config "string" [1.70ms]
+2026-10-15T14:31:35.0261146Z (pass) KeyedJsonConfigRepository > video_recording_configs rejects invalid config {"defaultMode":42} [2.12ms]
+2026-10-15T14:31:35.0278927Z (pass) KeyedJsonConfigRepository > video_recording_configs rejects invalid config 42 [1.75ms]
+2026-10-15T14:31:35.0295954Z (pass) KeyedJsonConfigRepository > video_recording_configs rejects invalid config [] [1.72ms]
+2026-10-15T14:31:35.0316774Z (pass) KeyedJsonConfigRepository > video_recording_configs rejects invalid config null [2.05ms]
+2026-10-15T14:31:35.0335333Z (pass) KeyedJsonConfigRepository > video_recording_configs rejects invalid config "string" [1.85ms]
+2026-10-15T14:31:35.0353869Z (pass) KeyedJsonConfigRepository > reads a legacy snapshot config without VM retention fields [1.84ms]
+2026-10-15T14:31:35.0373548Z (pass) KeyedJsonConfigRepository > returns null and logs a warning for malformed config JSON [1.96ms]
+2026-10-15T14:31:35.0378412Z 
+2026-10-15T14:31:35.0379212Z ##[endgroup]
+2026-10-15T14:31:35.0379415Z 
+2026-10-15T14:31:35.0379548Z 1 tests failed:
+2026-10-15T14:31:35.0380378Z (fail) KeyedJsonConfigRepository > device_snapshot_configs rejects invalid config {"defaultMode":42} [1.86ms]
+2026-10-15T14:31:35.0381527Z 
+2026-10-15T14:31:35.0381672Z  27 pass

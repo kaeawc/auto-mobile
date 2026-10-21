@@ -15,7 +15,6 @@ import type {
 } from "../../../models/ObserveScope";
 
 export type {
-  FocusAnchor,
   ObserveFocusSelector,
   NormalizedRegion,
   ObserveScopeInput,

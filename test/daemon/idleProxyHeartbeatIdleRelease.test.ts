@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
@@ -26,7 +26,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -35,6 +35,20 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+
+let available: ReturnType<typeof spyOn<typeof DaemonClient, "isAvailable">>;
+let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+let info: ReturnType<typeof spyOn<typeof logger, "info">>;
+beforeEach(() => {
+  available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  warn = spyOn(logger, "warn").mockImplementation(() => {});
+  info = spyOn(logger, "info").mockImplementation(() => {});
+});
+afterEach(() => {
+  available.mockRestore();
+  warn.mockRestore();
+  info.mockRestore();
+});
 
 // #10656 (H1 of #10655): a liveness heartbeat must not count as device use.
 //
@@ -123,7 +137,6 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
   let heartbeats: HeartbeatReply[];
   let forwarded: ForwardedCall[];
   let reaped: Array<{ sessionId: string; reason: string }>;
-  const spies: Array<ReturnType<typeof spyOn>> = [];
 
   /** Advance fake time, letting each due event's async work (a keeper round trip) settle. */
   async function idleFor(ms: number): Promise<void> {
@@ -134,12 +147,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     return await handleDaemonRequest({ id: method, type: "daemon_request", method, params }, state);
   }
 
-  beforeEach(async () => {
-    spies.push(
-      spyOn(DaemonClient, "isAvailable").mockResolvedValue(true),
-      spyOn(logger, "warn").mockImplementation(() => {}),
-      spyOn(logger, "info").mockImplementation(() => {}),
-    );
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     heartbeats = [];
     forwarded = [];
@@ -147,7 +155,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
 
     // Daemon side. SessionManager arms its real 5 min cleanup sweep on `timer`.
     persistence = new FakeDeviceSessionPersistence();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
     const discovery = new FakeDeviceUtils();
     discovery.setBootedDevices("android", [DEVICE]);
     pool = new DevicePool(
@@ -183,7 +191,11 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
           boundSession: params[DAEMON_BOUND_SESSION_PARAM],
         });
         if (tool === "getAndroid") {
-          await pool.bindOrReuseDeviceSession(SESSION, DEVICE.deviceId, "android");
+          await pool.bindOrReuseDeviceSession({
+            sessionId: SESSION,
+            deviceId: DEVICE.deviceId,
+            platform: "android",
+          });
           return;
         }
         // A device tool call resolves its session as ToolExecutionContext does. This is the
@@ -244,15 +256,24 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     await drainMicrotasks(TURNS_PER_EVENT);
     expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "busy", sessionId: SESSION });
     expect(manager.getSession(SESSION)?.livenessOwnerToken).toBe(OWNER_TOKEN);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(async () => {
     await proxy.close();
     await monitor.stop();
     manager.stopCleanupTimer();
-    for (const spy of spies.splice(0)) {
-      spy.mockRestore();
-    }
   });
 
   /** The monotonic release point for SESSION, or undefined while it is still held. */
@@ -272,124 +293,139 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     return undefined;
   }
 
-  test("an idle owner's heartbeats do not extend the idle deadline: the device is freed after the idle window while the proxy stays open", async () => {
-    expect(LEASE_MS).toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
-    expect(KEEPER_INTERVAL_MS).toBe(PROXY_HEARTBEAT_INTERVAL_MS);
-    const acquiredAt = timer.now();
-    expect(manager.getSession(SESSION)!.expiresAt).toBe(acquiredAt + SESSION_IDLE_TIMEOUT_MS);
+  arranged(
+    "an idle owner's heartbeats do not extend the idle deadline: the device is freed after the idle window while the proxy stays open",
+    async () => {
+      expect(LEASE_MS).toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
+      expect(KEEPER_INTERVAL_MS).toBe(PROXY_HEARTBEAT_INTERVAL_MS);
+      const acquiredAt = timer.now();
+      expect(manager.getSession(SESSION)!.expiresAt).toBe(acquiredAt + SESSION_IDLE_TIMEOUT_MS);
 
-    // Just before the deadline: a tick every keeper interval, none of them counted as use.
-    await idleFor(SESSION_IDLE_TIMEOUT_MS - KEEPER_INTERVAL_MS);
-    expect(heartbeats.length).toBeGreaterThan(SESSION_IDLE_TIMEOUT_MS / KEEPER_INTERVAL_MS - 5);
-    expect(heartbeats.every((reply) => reply.success && reply.token === OWNER_TOKEN)).toBe(true);
-    const held = manager.getSession(SESSION);
-    expect(held).not.toBeNull();
-    expect(held!.lastUsedAt).toBe(acquiredAt);
-    expect(held!.expiresAt).toBe(acquiredAt + SESSION_IDLE_TIMEOUT_MS);
-    // The heartbeats still prove liveness: the owner lease is current.
-    expect(held!.lastOwnerHeartbeat).toBeGreaterThan(timer.now() - LEASE_MS);
-    const info = await daemonMethod("daemon/sessionInfo", { sessionId: SESSION });
-    expect(info.result).toMatchObject({
-      lastUsedAt: acquiredAt,
-      expiresAt: acquiredAt + SESSION_IDLE_TIMEOUT_MS,
-      liveness: { state: "live" },
-    });
-    expect(await persistence.getSession?.(SESSION)).toMatchObject({
-      status: "active",
-      last_used_at_ms: acquiredAt,
-      expires_at_ms: acquiredAt + SESSION_IDLE_TIMEOUT_MS,
-    });
+      // Just before the deadline: a tick every keeper interval, none of them counted as use.
+      await idleFor(SESSION_IDLE_TIMEOUT_MS - KEEPER_INTERVAL_MS);
+      expect(heartbeats.length).toBeGreaterThan(SESSION_IDLE_TIMEOUT_MS / KEEPER_INTERVAL_MS - 5);
+      expect(heartbeats.every((reply) => reply.success && reply.token === OWNER_TOKEN)).toBe(true);
+      const held = manager.getSession(SESSION);
+      expect(held).not.toBeNull();
+      expect(held!.lastUsedAt).toBe(acquiredAt);
+      expect(held!.expiresAt).toBe(acquiredAt + SESSION_IDLE_TIMEOUT_MS);
+      // The heartbeats still prove liveness: the owner lease is current.
+      expect(held!.lastOwnerHeartbeat).toBeGreaterThan(timer.now() - LEASE_MS);
+      const info = await daemonMethod("daemon/sessionInfo", { sessionId: SESSION });
+      expect(info.result).toMatchObject({
+        lastUsedAt: acquiredAt,
+        expiresAt: acquiredAt + SESSION_IDLE_TIMEOUT_MS,
+        liveness: { state: "live" },
+      });
+      expect(await persistence.getSession(SESSION)).toMatchObject({
+        status: "active",
+        last_used_at_ms: acquiredAt,
+        expires_at_ms: acquiredAt + SESSION_IDLE_TIMEOUT_MS,
+      });
 
-    const releasedAt = await idleUntilReleased(RELEASE_SLACK_MS * 2);
-    expect(releasedAt).toBeDefined();
-    expect(releasedAt!).toBeGreaterThan(acquiredAt + SESSION_IDLE_TIMEOUT_MS);
-    expect(releasedAt!).toBeLessThanOrEqual(
-      acquiredAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS,
-    );
+      const releasedAt = await idleUntilReleased(RELEASE_SLACK_MS * 2);
+      expect(releasedAt).toBeDefined();
+      expect(releasedAt!).toBeGreaterThan(acquiredAt + SESSION_IDLE_TIMEOUT_MS);
+      expect(releasedAt!).toBeLessThanOrEqual(
+        acquiredAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS,
+      );
 
-    // Released as idle, not as a dead owner: the heartbeat reaper never fired.
-    expect(reaped).toEqual([]);
-    expect(forwarded.map((call) => call.tool)).toEqual(["getAndroid"]);
-    expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "idle", sessionId: null });
-    const available = await daemonMethod("daemon/availableDevices");
-    expect(available.result).toMatchObject({ availableDevices: 1, assignedDevices: 0 });
-    // Whichever idle path wins — the scan's sweep or the next tick's lookup — the
-    // reason is an idle expiry, never "heartbeat-timeout".
-    const releasedRow = await persistence.getSession?.(SESSION);
-    expect(releasedRow).toMatchObject({ status: "expired" });
-    expect(["cleanup-expired"]).toContain(releasedRow!.release_reason!);
-  });
+      // Released as idle, not as a dead owner: the heartbeat reaper never fired.
+      expect(reaped).toEqual([]);
+      expect(forwarded.map((call) => call.tool)).toEqual(["getAndroid"]);
+      expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "idle", sessionId: null });
+      const available = await daemonMethod("daemon/availableDevices");
+      expect(available.result).toMatchObject({ availableDevices: 1, assignedDevices: 0 });
+      // Whichever idle path wins — the scan's sweep or the next tick's lookup — the
+      // reason is an idle expiry, never "heartbeat-timeout".
+      const releasedRow = await persistence.getSession(SESSION);
+      expect(releasedRow).toMatchObject({ status: "expired" });
+      expect(["cleanup-expired"]).toContain(releasedRow!.release_reason!);
+    },
+  );
 
-  test("a tool call a minute before the deadline moves the release a full window later; heartbeats alone never move it", async () => {
-    const acquiredAt = timer.now();
-    await idleFor(SESSION_IDLE_TIMEOUT_MS - 60_000);
-    const usedAt = timer.now();
-    await proxy.callTool("tapOn", { action: "tap", text: "OK" });
-    expect(forwarded.at(-1)).toEqual({
-      tool: "tapOn",
-      sessionUuid: SESSION,
-      boundSession: SESSION,
-    });
-    expect(manager.getSession(SESSION)!.lastUsedAt).toBe(usedAt);
-    expect(manager.getSession(SESSION)!.expiresAt).toBe(usedAt + SESSION_IDLE_TIMEOUT_MS);
+  arranged(
+    "a tool call a minute before the deadline moves the release a full window later; heartbeats alone never move it",
+    async () => {
+      const acquiredAt = timer.now();
+      await idleFor(SESSION_IDLE_TIMEOUT_MS - 60_000);
+      const usedAt = timer.now();
+      await proxy.callTool("tapOn", { action: "tap", text: "OK" });
+      expect(forwarded.at(-1)).toEqual({
+        tool: "tapOn",
+        sessionUuid: SESSION,
+        boundSession: SESSION,
+      });
+      expect(manager.getSession(SESSION)!.lastUsedAt).toBe(usedAt);
+      expect(manager.getSession(SESSION)!.expiresAt).toBe(usedAt + SESSION_IDLE_TIMEOUT_MS);
 
-    // Past the original deadline the session is still held, on the tool call's clock.
-    await idleFor(acquiredAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS - timer.now());
-    expect(isReleased()).toBe(false);
-    expect(manager.getSession(SESSION)!.expiresAt).toBe(usedAt + SESSION_IDLE_TIMEOUT_MS);
+      // Past the original deadline the session is still held, on the tool call's clock.
+      await idleFor(acquiredAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS - timer.now());
+      expect(isReleased()).toBe(false);
+      expect(manager.getSession(SESSION)!.expiresAt).toBe(usedAt + SESSION_IDLE_TIMEOUT_MS);
 
-    await idleFor(usedAt + SESSION_IDLE_TIMEOUT_MS - KEEPER_INTERVAL_MS - timer.now());
-    expect(isReleased()).toBe(false);
-    const releasedAt = await idleUntilReleased(RELEASE_SLACK_MS * 2);
-    expect(releasedAt).toBeDefined();
-    expect(releasedAt!).toBeGreaterThan(usedAt + SESSION_IDLE_TIMEOUT_MS);
-    expect(releasedAt!).toBeLessThanOrEqual(usedAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS);
-    expect(reaped).toEqual([]);
-    expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "idle", sessionId: null });
-  });
+      await idleFor(usedAt + SESSION_IDLE_TIMEOUT_MS - KEEPER_INTERVAL_MS - timer.now());
+      expect(isReleased()).toBe(false);
+      const releasedAt = await idleUntilReleased(RELEASE_SLACK_MS * 2);
+      expect(releasedAt).toBeDefined();
+      expect(releasedAt!).toBeGreaterThan(usedAt + SESSION_IDLE_TIMEOUT_MS);
+      expect(releasedAt!).toBeLessThanOrEqual(usedAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS);
+      expect(reaped).toEqual([]);
+      expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "idle", sessionId: null });
+    },
+  );
 
-  test("#10692: an agent driving the device through a platform selector keeps it, and it is released one window after its last call", async () => {
-    const until = timer.now() + SESSION_IDLE_TIMEOUT_MS * 3;
-    while (timer.now() < until) {
-      await idleFor(SESSION_IDLE_TIMEOUT_MS / 2);
-      await proxy.callTool("pressButton", { platform: "android", button: "back" });
-    }
-    const lastCallAt = timer.now();
-    expect(forwarded.at(-1)).toMatchObject({ tool: "pressButton", sessionUuid: undefined });
-    expect(isReleased()).toBe(false);
-    expect(manager.getSession(SESSION)!.lastUsedAt).toBe(lastCallAt);
+  arranged(
+    "#10692: an agent driving the device through a platform selector keeps it, and it is released one window after its last call",
+    async () => {
+      const until = timer.now() + SESSION_IDLE_TIMEOUT_MS * 3;
+      while (timer.now() < until) {
+        await idleFor(SESSION_IDLE_TIMEOUT_MS / 2);
+        await proxy.callTool("pressButton", { platform: "android", button: "back" });
+      }
+      const lastCallAt = timer.now();
+      expect(forwarded.at(-1)).toMatchObject({ tool: "pressButton", sessionUuid: undefined });
+      expect(isReleased()).toBe(false);
+      expect(manager.getSession(SESSION)!.lastUsedAt).toBe(lastCallAt);
 
-    const releasedAt = await idleUntilReleased(SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS * 2);
-    expect(releasedAt).toBeDefined();
-    expect(releasedAt!).toBeGreaterThan(lastCallAt + SESSION_IDLE_TIMEOUT_MS);
-    expect(releasedAt!).toBeLessThanOrEqual(
-      lastCallAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS,
-    );
-    // Released as idle, never as an owner that stopped heartbeating.
-    expect(reaped).toEqual([]);
-  });
+      const releasedAt = await idleUntilReleased(SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS * 2);
+      expect(releasedAt).toBeDefined();
+      expect(releasedAt!).toBeGreaterThan(lastCallAt + SESSION_IDLE_TIMEOUT_MS);
+      expect(releasedAt!).toBeLessThanOrEqual(
+        lastCallAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS,
+      );
+      // Released as idle, never as an owner that stopped heartbeating.
+      expect(reaped).toEqual([]);
+    },
+  );
 
-  test("past the replay TTL the proxy no longer replays the idle binding: heartbeat acks do not refresh it", async () => {
-    await idleFor(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + RELEASE_SLACK_MS);
+  arranged(
+    "past the replay TTL the proxy no longer replays the idle binding: heartbeat acks do not refresh it",
+    async () => {
+      await idleFor(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + RELEASE_SLACK_MS);
 
-    // A sessionless call from the long-idle agent is not rewritten onto the
-    // released session; it is told to acquire a new device instead.
-    await expect(proxy.callTool("observe", {})).rejects.toThrow(/released|getAndroid/i);
-    expect(forwarded.map((call) => call.tool)).toEqual(["getAndroid"]);
-  });
+      // A sessionless call from the long-idle agent is not rewritten onto the
+      // released session; it is told to acquire a new device instead.
+      await expect(proxy.callTool("observe", {})).rejects.toThrow(/released|getAndroid/i);
+      expect(forwarded.map((call) => call.tool)).toEqual(["getAndroid"]);
+    },
+  );
 
-  test("control: once the proxy keeper stops, the same harness frees the device within lease, grace and one scan", async () => {
-    await idleFor(60_000);
-    expect(reaped).toEqual([]);
+  arranged(
+    "control: once the proxy keeper stops, the same harness frees the device within lease, grace and one scan",
+    async () => {
+      await idleFor(60_000);
+      expect(reaped).toEqual([]);
 
-    // stdin EOF: the proxy closes and stops its keeper. Nothing else changes.
-    await proxy.close();
-    // Lease, then suspect grace, then one reaper scan.
-    await idleFor(LEASE_MS + SUSPECT_GRACE_MS + REAPER_SCAN_MS + KEEPER_INTERVAL_MS);
+      // stdin EOF: the proxy closes and stops its keeper. Nothing else changes.
+      await proxy.close();
+      // Lease, then suspect grace, then one reaper scan.
+      await idleFor(LEASE_MS + SUSPECT_GRACE_MS + REAPER_SCAN_MS + KEEPER_INTERVAL_MS);
 
-    // Owner gone is still reported as a heartbeat timeout, distinct from idle expiry.
-    expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
-    expect(manager.getSession(SESSION)).toBeNull();
-    expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "idle", sessionId: null });
-  });
+      // Owner gone is still reported as a heartbeat timeout, distinct from idle expiry.
+      expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "idle", sessionId: null });
+    },
+  );
 });

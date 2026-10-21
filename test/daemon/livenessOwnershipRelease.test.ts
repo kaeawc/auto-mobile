@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
   handleDaemonRequest,
@@ -9,6 +9,10 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const SESSION = "handoff-session";
 const DEVICE = "emulator-5554";
@@ -45,10 +49,10 @@ describe("deliberate liveness ownership release", () => {
    * one tool-call write (which rolls its own refresh back) so the next tick re-issues the row,
    * giving the race a write to suspend in.
    */
-  async function forgetStoredActivity(sessionId = SESSION): Promise<void> {
-    const failing = spyOn(persistence, "recordActivity").mockRejectedValueOnce(
-      new Error("activity write failed"),
-    );
+  async function forgetStoredActivity(
+    failing: ReturnType<typeof spyOn<FakeDeviceSessionPersistence, "recordActivity">>,
+    sessionId = SESSION,
+  ): Promise<void> {
     try {
       await expect(manager.getOrCreateSession(sessionId)).rejects.toThrow();
       expect(failing).toHaveBeenCalledTimes(1);
@@ -60,7 +64,7 @@ describe("deliberate liveness ownership release", () => {
   beforeEach(async () => {
     timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
     state = {
       isInitialized: () => true,
       getSessionManager: () => manager,
@@ -83,7 +87,10 @@ describe("deliberate liveness ownership release", () => {
       },
       timer,
     );
-    await manager.createSession(SESSION, DEVICE, "android", 60_000, undefined, "Pixel_8_API_35");
+    await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: 60_000,
+      stableDeviceId: "Pixel_8_API_35",
+    });
     expect((await claim(OWNER)).success).toBe(true);
   });
   afterEach(async () => {
@@ -123,7 +130,10 @@ describe("deliberate liveness ownership release", () => {
       const id = "tick-adopted";
       await manager.createSession(id, DEVICE, "android");
       expect((await tick(OWNER, id)).success).toBe(true);
-      await forgetStoredActivity(id);
+      const failing = spyOn(persistence, "recordActivity").mockRejectedValueOnce(
+        new Error("activity write failed"),
+      );
+      await forgetStoredActivity(failing, id);
       timer.advanceTime(4_000);
       const entered = Promise.withResolvers<void>();
       const resume = Promise.withResolvers<void>();
@@ -397,14 +407,22 @@ describe("deliberate liveness ownership release", () => {
       if (lapsed) {
         timer.advanceTime(LEASE + SUSPECT_GRACE_MS + 1);
       }
-      const method = releaseFirst ? "releaseLivenessOwnership" : "claimLivenessOwnership";
-      const original = manager[method].bind(manager);
-      const spy = spyOn(manager, method).mockImplementation(async (...args) => {
-        const result = await original(...args);
+      // Suspends the first operation's response after it has taken effect.
+      const suspend = async <T>(result: Promise<T>): Promise<T> => {
+        const value = await result;
         entered.resolve();
         await resume.promise;
-        return result;
-      });
+        return value;
+      };
+      const originalRelease = manager.releaseLivenessOwnership.bind(manager);
+      const originalClaim = manager.claimLivenessOwnership.bind(manager);
+      const spy = releaseFirst
+        ? spyOn(manager, "releaseLivenessOwnership").mockImplementation((...args) =>
+            suspend(originalRelease(...args)),
+          )
+        : spyOn(manager, "claimLivenessOwnership").mockImplementation((...args) =>
+            suspend(originalClaim(...args)),
+          );
       try {
         const first = releaseFirst ? release() : claim("next");
         await entered.promise;
@@ -434,7 +452,10 @@ describe("deliberate liveness ownership release", () => {
   test.each([false, true])(
     "release vs owner tick is gated, releaseFirst=%s",
     async (releaseFirst) => {
-      await forgetStoredActivity();
+      const failing = spyOn(persistence, "recordActivity").mockRejectedValueOnce(
+        new Error("activity write failed"),
+      );
+      await forgetStoredActivity(failing);
       timer.advanceTime(4_000);
       const entered = Promise.withResolvers<void>();
       const resume = Promise.withResolvers<void>();
@@ -551,7 +572,10 @@ describe("deliberate liveness ownership release", () => {
   });
 
   test("an older failed heartbeat cannot roll back activity across release", async () => {
-    await forgetStoredActivity();
+    const failing = spyOn(persistence, "recordActivity").mockRejectedValueOnce(
+      new Error("activity write failed"),
+    );
+    await forgetStoredActivity(failing);
     const entered = Promise.withResolvers<void>();
     const failed = Promise.withResolvers<void>();
     const logged = Promise.withResolvers<void>();
@@ -610,7 +634,7 @@ describe("deliberate liveness ownership release", () => {
       finish.resolve();
       expect((await released).success).toBe(true);
       expect((await claimed).success).toBe(true);
-      expect((await persistence.getSession?.(SESSION))?.liveness_owner_token).toBe("next");
+      expect((await persistence.getSession(SESSION))?.liveness_owner_token).toBe("next");
     } finally {
       finish.resolve();
       spy.mockRestore();

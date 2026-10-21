@@ -24,16 +24,18 @@ function emulatorClientWithMissingAdb(spawns: string[] = []): AndroidEmulatorCli
   const timer = new FakeTimer();
   const adb = new AdbClient(
     null,
-    async (command) => {
+    async (command: string) => {
       spawns.push(String(command));
       throw Object.assign(new Error("spawn adb ENOENT"), { code: "ENOENT" });
     },
-    null,
-    undefined,
-    timer,
+    { timer },
   );
   const factory: AdbClientFactory = { create: () => adb };
-  return new AndroidEmulatorClient(async () => execResult(""), null, timer, factory);
+  return new AndroidEmulatorClient({
+    execAsync: async () => execResult(""),
+    timer,
+    adbFactory: factory,
+  });
 }
 
 /**

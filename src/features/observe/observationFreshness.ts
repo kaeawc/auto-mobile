@@ -14,7 +14,8 @@
  * hierarchy cache could serve a tree that was minutes old under that label.
  */
 
-import { readEnvPositiveInteger } from "../../utils/envNumbers";
+import { ENV } from "../../config/env";
+import { readEnvInt } from "../../utils/envNumbers";
 import type { ObserveResult, CtrlProxyIncompleteReason } from "../../models";
 import type { HierarchyUnavailableReason } from "../../models/ViewHierarchyResult";
 
@@ -61,7 +62,7 @@ export const MAX_UNAVAILABLE_DETAIL_LENGTH = 500;
 
 /** Env override, for hosts whose runner is slower or whose budget is tighter. */
 export function maxObservationAgeMs(): number {
-  return readEnvPositiveInteger("AUTOMOBILE_MAX_OBSERVATION_AGE_MS", undefined, {
+  return readEnvInt(ENV.MAX_OBSERVATION_AGE_MS, process.env, {
     fallback: DEFAULT_MAX_OBSERVATION_AGE_MS,
   });
 }

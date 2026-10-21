@@ -1,3 +1,6 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
+import { makePool } from "../helpers/makePool";
+import { bindDevice, markDeviceError, unbindDevice } from "../../src/daemon/deviceBinding";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
@@ -5,7 +8,6 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 interface PredicateContext {
   pool: DevicePool;
@@ -26,8 +28,7 @@ const rows: PredicateRow[] = [
   {
     name: "available",
     prepare: ({ device, session }) => {
-      device.status = "idle";
-      device.sessionId = null;
+      unbindDevice(device);
       session.assignedDevice = "";
     },
     expected: [false, true, false, false],
@@ -38,14 +39,14 @@ const rows: PredicateRow[] = [
     prepare: ({ pool, device, session }) => {
       device.adbServerResetSession = session;
       device.adbServerResetSessionId = session.sessionId;
-      pool["devices"].delete(device.id);
+      pool.testHooks.devices.delete(device.id);
     },
     expected: [true, false, false, false],
   },
   {
     name: "suspect/grace",
-    prepare: ({ manager, timer, session }) => {
-      manager.recordHeartbeat(session.sessionId);
+    prepare: async ({ manager, timer, session }) => {
+      await deliverDaemonHeartbeat(manager, session.sessionId);
       // The suspect grace holds only the heartbeat lease, not idleness (#11107): keep the idle
       // window open so the lease, not the idle deadline, decides this row.
       session.expiresAt = timer.now() + 120_000;
@@ -64,7 +65,7 @@ const rows: PredicateRow[] = [
   {
     name: "released with expiryOrigin",
     prepare: async ({ manager, session }) => {
-      await manager.releaseSession(session.sessionId, "explicit-release", false, undefined, {
+      await manager.releaseSession(session.sessionId, "explicit-release", {
         expiryOrigin: "cleanup-expired",
       });
     },
@@ -73,7 +74,7 @@ const rows: PredicateRow[] = [
   {
     name: "same-id replacement entry",
     prepare: ({ pool, device }) => {
-      pool["devices"].set(device.id, { ...device, incarnation: device.incarnation + 1 });
+      pool.testHooks.devices.set(device.id, { ...device, incarnation: device.incarnation + 1 });
     },
     expected: [true, false, false, false],
   },
@@ -94,15 +95,14 @@ const rows: PredicateRow[] = [
   {
     name: "error entry with matching owner",
     prepare: ({ device }) => {
-      device.status = "error";
+      markDeviceError(device);
     },
     expected: [true, false, false, true],
   },
   {
     name: "idle identity quarantine",
     prepare: ({ device, session }) => {
-      device.status = "idle";
-      device.sessionId = null;
+      unbindDevice(device);
       device.identityUnresolved = true;
       session.assignedDevice = "";
     },
@@ -112,20 +112,23 @@ const rows: PredicateRow[] = [
 
 async function createContext(autolock: boolean): Promise<PredicateContext> {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const booted = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [booted]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "predicate-daemon", { timer, deviceManager: utils }),
-  );
+  const pool = makePool(manager, "predicate-daemon", { timer, deviceManager: utils });
   await pool.initializeWithDevices([booted]);
-  const session = await manager.createSession("owner", booted.deviceId, "android", 1_000, 1_000);
-  await pool.bindOrReuseDeviceSession(session.sessionId, booted.deviceId, "android");
+  const session = await manager.createSession("owner", booted.deviceId, "android", {
+    timeoutMs: 1_000,
+    heartbeatTimeoutMs: 1_000,
+  });
+  await pool.bindOrReuseDeviceSession({
+    sessionId: session.sessionId,
+    deviceId: booted.deviceId,
+    platform: "android",
+  });
   manager.stopCleanupTimer();
   const device = pool.getDevice(booted.deviceId)!;
   device.autolockSessionId = autolock ? session.sessionId : undefined;
@@ -142,13 +145,31 @@ for (const autolock of [false, true]) {
     try {
       await row.prepare?.(context);
       expect([
-        pool["isPreservedSessionCurrent"](session, device.id),
-        pool["isCurrentIdleDeviceAssignable"](device),
-        pool["isSessionAssignmentCurrent"](device, session),
-        pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount),
-      ]).toEqual(row.expected);
+        pool.testHooks.isPreservedSessionCurrent(session, device.id),
+        pool.testHooks.isCurrentIdleDeviceAssignable(device),
+        pool.testHooks.isSessionAssignmentCurrent(device, session),
+        pool.testHooks.isCapturedReleaseCurrent(device, session.sessionId, assignmentCount),
+      ]).toEqual([...row.expected]);
     } finally {
       manager.stopCleanupTimer();
     }
   });
 }
+
+// The owner-mismatch check is the single fence for a release naming a session that no longer
+// holds the device; a second, later mismatch check was unreachable and was deleted (#11802).
+test("captured release is refused when another session holds the device", async () => {
+  const { pool, manager, device, session } = await createContext(false);
+  try {
+    const assignmentCount = device.assignmentCount;
+    bindDevice(device, "other-session");
+    expect(
+      pool.testHooks.isCapturedReleaseCurrent(device, session.sessionId, assignmentCount),
+    ).toBe(false);
+    expect(pool.testHooks.isCapturedReleaseCurrent(device, "other-session", assignmentCount)).toBe(
+      true,
+    );
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});

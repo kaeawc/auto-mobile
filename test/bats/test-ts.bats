@@ -59,6 +59,12 @@ write_junit_report_with_lines() {
 setup() {
   # scripts/test-ts.sh resolves ROOT with pwd -P; a checkout reached through a
   # symlink (macOS /tmp -> /private/tmp) makes $PWD differ from what it prints.
+  # Stubbed lanes own their own pool and load source. Defaults/retry tests must
+  # not inherit the invoking host's limits or consume another lane's slots.
+  export AUTOMOBILE_COORDINATION_DIR="$BATS_TEST_TMPDIR/coordination"
+  export AUTOMOBILE_TEST_LOADAVG_FILE="$BATS_TEST_TMPDIR/loadavg"
+  echo 0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
+  unset AUTOMOBILE_HOST_TEST_SLOTS AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
   ROOT_PHYS="$(pwd -P)"
   SHARD_SCRATCH="$BATS_TEST_TMPDIR/scratch"
   export AUTOMOBILE_TEST_TS_SCRATCH_DIR="$SHARD_SCRATCH"
@@ -68,6 +74,9 @@ setup() {
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
   unset RUNNER_OS AUTOMOBILE_TEST_TIMEOUT_MS AUTOMOBILE_UNIT_TEST_WORKERS \
     AUTOMOBILE_INTEGRATION_TEST_WORKERS AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE
+  # Host load limits must not override the defaults asserted by stubbed lanes.
+  # Tests that exercise retries or wall budgets set their own values explicitly.
+  unset AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
   # Chunking and shared-process knobs are lane tuning that a caller shell (CI job env,
   # orchestrator) may export; every test that depends on them sets them explicitly.
   unset AUTOMOBILE_UNIT_TEST_CHUNK_FILES AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE \
@@ -142,7 +151,9 @@ if [[ "$1" == */scripts/lib/runner-calibration.ts ]]; then
       printf '%s|%s\n' "$4" "$3" >> "$STUB_PROBE_RECORD"
     fi
     if [[ -n "${STUB_PROBE_EXIT:-}" ]]; then exit "$STUB_PROBE_EXIT"; fi
-    printf '%s\t%s\t25\n' "$4" "${STUB_PROBE_MS:-10}" >> "$3"
+    probe_ms="${STUB_PROBE_MS:-10}"
+    if [[ "$4" == *" attempt 2 "* ]]; then probe_ms="${STUB_PROBE_RETRY_MS:-$probe_ms}"; fi
+    printf '%s\t%s\t25\n' "$4" "$probe_ms" >> "$3"
     exit 0
   fi
   if [[ "$2" == measure ]]; then
@@ -195,6 +206,14 @@ if [[ "$1" == test && -n "${STUB_SHARED_FAIL:-}" && " $* " != *" --isolate "* ]]
 fi
 if [[ "$1" == test && -n "${STUB_BUN_TEST_MODE_FILE:-}" ]]; then
   printf '%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" >> "$STUB_BUN_TEST_MODE_FILE"
+fi
+# Coverage now records process groups through the portable watchdog. Inject
+# the command's timeout status while asserting its inherited wall budget.
+if [[ ( "$1" == test || ( "$1" == --config=* && "${2:-}" == test ) ) && -n "${STUB_BUN_WALL_EXIT:-}" ]]; then
+  if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
+    printf '%s\n' "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" >> "$STUB_BUN_WALL_FILE"
+  fi
+  exit "$STUB_BUN_WALL_EXIT"
 fi
 if [[ -n "${STUB_BUN_EXIT:-}" ]]; then exit "$STUB_BUN_EXIT"; fi
 if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
@@ -604,9 +623,9 @@ windows_tier_fixture() {
   run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration
   [ "$status" -eq 0 ]
   [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
-  [[ "${lines[0]}" == "bun test --isolate --timeout 5000 $UNSAFE_ONE $UNSAFE_TWO " ]]
+  [[ "${lines[0]}" == "bun test --isolate --timeout 20000 $UNSAFE_ONE $UNSAFE_TWO " ]]
   for k in 1 2; do
-    [[ "${lines[$k]}" == "bun test --isolate --timeout 5000 --path-ignore-patterns $UNSAFE_ONE --path-ignore-patterns $UNSAFE_TWO --shard=$k/2 .integration.test.ts " ]]
+    [[ "${lines[$k]}" == "bun test --isolate --timeout 20000 --path-ignore-patterns $UNSAFE_ONE --path-ignore-patterns $UNSAFE_TWO --shard=$k/2 .integration.test.ts " ]]
   done
   [[ "$output" != *"run_with_timeout"* ]]
   [[ "$output" != *"timeout 900"* ]]
@@ -616,7 +635,7 @@ windows_tier_fixture() {
   run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     AUTOMOBILE_INTEGRATION_TEST_WORKERS=1 bash "$SCRIPT" integration
   [ "$status" -eq 0 ]
-  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts ' ]
+  [ "$output" = 'bun test --isolate --timeout 20000 .integration.test.ts ' ]
 }
 
 @test "Windows integration passthrough bail keeps exactly the legacy command" {
@@ -625,7 +644,7 @@ windows_tier_fixture() {
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
   [[ "$output" != *"--shard="* ]]
   [[ "$output" != *"--path-ignore-patterns"* ]]
-  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts --bail ' ]
+  [ "$output" = 'bun test --isolate --timeout 20000 .integration.test.ts --bail ' ]
 }
 
 @test "Windows integration passthrough reporter keeps exactly the legacy command" {
@@ -635,7 +654,7 @@ windows_tier_fixture() {
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
   [[ "$output" != *"--shard="* ]]
   [[ "$output" != *"--path-ignore-patterns"* ]]
-  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts --reporter junit --reporter-outfile x.xml ' ]
+  [ "$output" = 'bun test --isolate --timeout 20000 .integration.test.ts --reporter junit --reporter-outfile x.xml ' ]
 }
 
 @test "Windows unit wall timeout keeps the legacy command" {
@@ -644,7 +663,7 @@ windows_tier_fixture() {
   [ "$status" -eq 0 ]
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
   [[ "$output" != *"--shard="* ]]
-  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 5000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
+  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 20000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
 }
 
 @test "Windows integration wall timeout keeps the legacy command" {
@@ -653,7 +672,7 @@ windows_tier_fixture() {
   [ "$status" -eq 0 ]
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
   [[ "$output" != *"--shard="* ]]
-  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts ' ]
+  [ "$output" = 'bun test --isolate --timeout 20000 .integration.test.ts ' ]
 }
 
 @test "Windows unit print mode leaves shard directories untouched" {
@@ -692,7 +711,7 @@ windows_tier_fixture() {
   run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     AUTOMOBILE_UNIT_TEST_WORKERS=1 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
-  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 5000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
+  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 20000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
 }
 
 @test "Windows explicit unit paths keep one command" {
@@ -750,7 +769,7 @@ EOF
   [ "$status" -eq 7 ]
   [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 3 ]
   [[ "$output" == *"test-ts: integration unsafe wall="*"s status=0"* ]]
-  [[ "$output" == *"==> integration unsafe"*"output: test --isolate --timeout 5000 $UNSAFE_ONE $UNSAFE_TWO"* ]]
+  [[ "$output" == *"==> integration unsafe"*"output: test --isolate --timeout 20000 $UNSAFE_ONE $UNSAFE_TWO"* ]]
   [[ "$output" == *"==> integration safe 1/2"*"--shard=1/2"* ]]
   [[ "$output" == *"==> integration safe 2/2"*"--shard=2/2"* ]]
 }
@@ -886,7 +905,7 @@ EOF
 # Shard retry on infra exits (#10583). One worker keeps invocations sequential.
 run_retry_lane() {
   # Isolated chunking is off so each attempt is one `bun test` invocation per group.
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+  run env -u GITHUB_ACTIONS -u GITHUB_STEP_SUMMARY PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=0 "$@" bash "$SCRIPT" unit
 }
 
@@ -906,6 +925,162 @@ bun_test_invocations() {
   [[ "$output" == *"==> TypeScript unit shard 1/1 (attempt 1 of 2, retried)"* ]]
   [ -f "$SHARD_SCRATCH/test-ts-unit-shards/shard-0.attempt-1.log" ]
   [ -s "$report_dir/shard-0.xml" ]
+}
+
+@test "a starved shard timeout skips the same-runner retry and fails with 124" {
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=200 \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$BATS_TEST_TMPDIR/contended-reports"
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"RUNNER-CONTENDED: unit shard 0 hit its 180s wall-clock budget on a starved runner (probe slowdown 8x >= 2.5x); not retrying on the same runner. Attempt 1 is rerun automatically on a fresh runner; on attempt 2 or later, do not rerun by hand: file or classify it as a new issue."* ]]
+  [[ "$output" != *"RETRY:"* ]]
+  [[ "$output" == *"retried=0"* ]]
+  [[ "$output" != *"::error"* ]]
+  [[ "$output" != *"RUNNER-STARVED-SUSPECTED:"* ]]
+}
+
+@test "below-threshold timeout summaries include calibration before a passing retry" {
+  summary="$BATS_TEST_TMPDIR/timeout-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=50 GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 0 ]
+  grep -Fx -- '- Unit shard 0 hit its 180s wall-clock budget (attempt 1); runner probe slowdown 2x (contended threshold 2.5x).' "$summary"
+  [ "$(grep -c 'runner probe slowdown' "$summary")" -eq 1 ]
+}
+
+@test "timeout summaries say when calibration is unavailable" {
+  summary="$BATS_TEST_TMPDIR/timeout-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 124" AUTOMOBILE_RUNNER_CALIBRATION=0 GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 124 ]
+  grep -Fx -- '- Unit shard 0 hit its 180s wall-clock budget (attempt 1); no calibration sample.' "$summary"
+  grep -Fx -- '- Unit shard 0 hit its 180s wall-clock budget (attempt 2); no calibration sample.' "$summary"
+  [[ "$output" == *"worst probe slowdown n/a)"* ]]
+}
+
+@test "both below-threshold timeouts emit a lane marker and Actions summary" {
+  summary="$BATS_TEST_TMPDIR/starved-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 124" STUB_PROBE_MS=50 STUB_PROBE_RETRY_MS=25 \
+    GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  marker='RUNNER-STARVED-SUSPECTED: all 1 unit shards hit the 180 s wall-clock budget on both attempts (worst probe slowdown 2x); every shard being slow on a retried runner points at a starved runner, not a code regression.'
+  [[ "$output" == *"$marker"* ]]
+  [[ "$output" == *"::error title=Unit lane runner starvation suspected::$marker"* ]]
+  grep -Fx -- "$marker" "$summary"
+  grep -Fx -- '- Unit shard 0 hit its 180s wall-clock budget (attempt 2); runner probe slowdown 1x (contended threshold 2.5x).' "$summary"
+  [ "$(grep -c 'runner probe slowdown' "$summary")" -eq 2 ]
+}
+
+@test "signal kill followed by a below-threshold timeout does not emit a lane marker" {
+  run_retry_lane STUB_BUN_EXITS="137 124" STUB_PROBE_MS=50
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"was killed by signal 9 (exit 137)"* ]]
+  [[ "$output" != *"RUNNER-STARVED-SUSPECTED:"* ]]
+}
+
+@test "timeout summary write failures preserve the shard exit status" {
+  run_retry_lane STUB_BUN_EXITS="124 124" STUB_PROBE_MS=50 GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR"
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"RUNNER-STARVED-SUSPECTED:"* ]]
+}
+
+@test "all two shards must time out twice for the lane marker" {
+  run_retry_lane AUTOMOBILE_UNIT_TEST_WORKERS=2 STUB_BUN_EXIT=124 STUB_PROBE_MS=50
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"RUNNER-STARVED-SUSPECTED: all 2 unit shards"* ]]
+  [ "$(bun_test_invocations)" -eq 4 ]
+
+  : > "$BUN_ARGS_FILE"
+  hook="$BATS_TEST_TMPDIR/partial-timeout.sh"
+  cat > "$hook" <<'EOF'
+case "$AUTOMOBILE_WATCHDOG_LABEL" in
+  "unit shard 0") exit 124 ;;
+  *) exit 0 ;;
+esac
+EOF
+  run_retry_lane AUTOMOBILE_UNIT_TEST_WORKERS=2 STUB_SHARD_HOOK="$hook" STUB_PROBE_MS=50
+  [ "$status" -eq 124 ]
+  [[ "$output" != *"RUNNER-STARVED-SUSPECTED:"* ]]
+  [ "$(bun_test_invocations)" -eq 3 ]
+}
+
+@test "contention threshold accepts decimals and includes equality" {
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=200 AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN=8.5
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=200 AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN=8
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"probe slowdown 8x >= 8x"* ]]
+}
+
+@test "incident-scale contention skips retry while 2x slowdown still retries" {
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=88
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"probe slowdown 3.52x >= 2.5x"* ]]
+  [[ "$output" == *"RUNNER-CONTENDED:"* ]]
+  [[ "$output" != *"RETRY:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=50
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"RETRY:"* ]]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
+}
+
+@test "invalid contention thresholds are rejected before tests launch" {
+  for threshold in 0 -1 nope NaN Infinity 0.0; do
+    run_retry_lane AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN="$threshold"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN must be a positive number"* ]]
+    [ "$(bun_test_invocations)" -eq 0 ]
+  done
+}
+
+@test "a starved timeout emits an Actions error and summary once" {
+  summary="$BATS_TEST_TMPDIR/contended-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=200 GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"::error title=Unit shard runner contended::RUNNER-CONTENDED: unit shard 0"* ]]
+  [ "$(grep -c '^RUNNER-CONTENDED:' "$summary")" -eq 1 ]
+}
+
+@test "a final timeout reports contention with retries disabled or after a retry" {
+  run_retry_lane STUB_BUN_EXITS="124" STUB_PROBE_MS=200 AUTOMOBILE_UNIT_SHARD_RETRIES=0
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"RUNNER-CONTENDED: unit shard 0 hit its 180s wall-clock budget on a starved runner"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="124 124" STUB_PROBE_MS=10 STUB_PROBE_RETRY_MS=200
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"RUNNER-CONTENDED: unit shard 0 hit its 180s wall-clock budget after a retry on a starved runner"* ]]
+}
+
+@test "missing calibration keeps retries and contention does not affect other exits" {
+  run_retry_lane STUB_BUN_EXITS="124 0" AUTOMOBILE_RUNNER_CALIBRATION=0
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="143 0" STUB_PROBE_MS=200
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="1" STUB_PROBE_MS=200
+  [ "$status" -eq 1 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
 }
 
 @test "a shard retry deletes that shard's stale reports but not another shard's" {
@@ -1221,6 +1396,13 @@ EOF
   [[ "$output" == *"--timeout 20000"* ]]
 }
 
+@test "Windows CI runner retains per-test and hook timeout headroom" {
+  run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 RUNNER_OS=Windows bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--timeout 20000"* ]]
+  [[ "$output" != *"--timeout 5000"* ]]
+}
+
 @test "changed lane delegates affected selection to Bun" {
   run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     AUTOMOBILE_UNIT_TEST_WORKERS=3 bash "$SCRIPT" changed
@@ -1530,30 +1712,21 @@ EOF
 }
 
 @test "coverage wall timeout is 720 seconds" {
-  cat > "$STUB_BIN/timeout" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/timeout-args"
-exit 124
-EOF
-  chmod +x "$STUB_BIN/timeout"
-
-  run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  wall_file="$BATS_TEST_TMPDIR/wall-budgets"
+  run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_BIN:$PATH" \
+    STUB_BUN_WALL_EXIT=124 STUB_BUN_WALL_FILE="$wall_file" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 720 ' "$BATS_TEST_TMPDIR/timeout-args"
+  [ "$(sort -u "$wall_file")" = 720 ]
 
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=33 bash "$SCRIPT" coverage
+  : > "$wall_file"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=33 \
+    STUB_BUN_WALL_EXIT=124 STUB_BUN_WALL_FILE="$wall_file" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 33 ' "$BATS_TEST_TMPDIR/timeout-args"
+  [ "$(sort -u "$wall_file")" = 33 ]
 }
 
 @test "coverage wall timeout prints a diagnostic on deadline" {
-  cat > "$STUB_BIN/timeout" <<'EOF'
-#!/usr/bin/env bash
-exit 124
-EOF
-  chmod +x "$STUB_BIN/timeout"
-
-  run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  run env PATH="$STUB_BIN:$PATH" STUB_BUN_WALL_EXIT=124 bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget"* ]]
   [[ "$output" == *"shard 1/2"* ]]
@@ -1587,7 +1760,7 @@ EOF
       coverage) label="Coverage"; expected_budget=720 ;;
       stress) label="Stress"; expected_budget=300 ;;
     esac
-    run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "$mode"
+    run env PATH="$STUB_BIN:$PATH" STUB_BUN_WALL_EXIT=124 bash "$SCRIPT" "$mode"
     [ "$status" -eq 124 ]
     [[ "$output" != *"bad substitution"* ]]
     [[ "$output" == *"${label} test run exceeded its ${expected_budget}s wall-clock budget"* ]]

@@ -11,6 +11,7 @@ ios_runner_sha256="${IOS_CTRL_PROXY_RUNNER_SHA256:-}"
 video_jar_checksum="${VIDEO_JAR_SHA256:-}"
 screen_capture_helper_checksum="${SCREEN_CAPTURE_HELPER_SHA256:-}"
 prototype_agent_checksum="${PROTOTYPE_AGENT_SHA256:-}"
+prototype_viewer_checksum="${PROTOTYPE_VIEWER_SHA256:-}"
 network_filter_checksum="${NETWORK_FILTER_SHA256:-}"
 
 max_registry_entries=100
@@ -20,7 +21,7 @@ max_registry_entries=100
 #   - Checksums only (no version): update registry[0] checksums in place
 #   - Nothing set: no-op
 has_checksums=false
-if [ -n "$apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$network_filter_checksum" ]; then
+if [ -n "$apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ]; then
   has_checksums=true
 fi
 
@@ -69,6 +70,12 @@ fi
 if [ -n "$prototype_agent_checksum" ] && ! [[ "$prototype_agent_checksum" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: PROTOTYPE_AGENT_SHA256 must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${prototype_agent_checksum}"
+  exit 1
+fi
+
+if [ -n "$prototype_viewer_checksum" ] && ! [[ "$prototype_viewer_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: PROTOTYPE_VIEWER_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${prototype_viewer_checksum}"
   exit 1
 fi
 
@@ -170,8 +177,8 @@ PY
 
 if [ -n "$release_version" ]; then
   # Mode: add new registry entry (requires every production release artifact).
-  if [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$network_filter_checksum" ]; then
-    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, PROTOTYPE_AGENT_SHA256, and NETWORK_FILTER_SHA256"
+  if [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$prototype_viewer_checksum" ] || [ -z "$network_filter_checksum" ]; then
+    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, PROTOTYPE_AGENT_SHA256, PROTOTYPE_VIEWER_SHA256, and NETWORK_FILTER_SHA256"
     exit 1
   fi
 
@@ -193,6 +200,7 @@ if [ -n "$release_version" ]; then
     videoJarSha256: \"${video_jar_checksum}\",
     screenCaptureHelperSha256: \"${screen_capture_helper_checksum}\",
     prototypeAgentSha256: \"${prototype_agent_checksum}\",
+    prototypeViewerSha256: \"${prototype_viewer_checksum}\",
     networkFilterSha256: \"${network_filter_checksum}\",
   },"
 
@@ -263,6 +271,10 @@ else
     update_registry_field "$tmp_file" "nightly" "prototypeAgentSha256" "$prototype_agent_checksum"
   fi
 
+  if [ -n "$prototype_viewer_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "prototypeViewerSha256" "$prototype_viewer_checksum"
+  fi
+
   if [ -n "$network_filter_checksum" ]; then
     update_registry_field "$tmp_file" "nightly" "networkFilterSha256" "$network_filter_checksum"
   fi
@@ -282,6 +294,10 @@ else
   fi
   if [ -n "$prototype_agent_checksum" ]; then
     echo "   prototype-agent checksum (nightly): ${prototype_agent_checksum}"
+  fi
+
+  if [ -n "$prototype_viewer_checksum" ]; then
+    echo "   prototype-viewer checksum (nightly): ${prototype_viewer_checksum}"
   fi
   if [ -n "$network_filter_checksum" ]; then
     echo "   network-filter checksum (nightly): ${network_filter_checksum}"
@@ -346,6 +362,13 @@ if [ -n "$prototype_agent_checksum" ]; then
     update_registry_field "$tmp_file" "$release_version" "prototypeAgentSha256" "$prototype_agent_checksum"
   fi
   echo "   prototype-agent checksum: ${prototype_agent_checksum}"
+fi
+
+if [ -n "$prototype_viewer_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "prototypeViewerSha256" "$prototype_viewer_checksum"
+  fi
+  echo "   prototype-viewer checksum: ${prototype_viewer_checksum}"
 fi
 
 if [ -n "$network_filter_checksum" ]; then

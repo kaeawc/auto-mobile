@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test"
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -10,6 +10,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 const LIMIT = 512;
 const SESSION = "android-session";
@@ -33,16 +34,14 @@ function makeWire(): Wire {
     "in-memory://oversized-siblings",
     1_000,
     timer,
-    {},
+    ISOLATED_DAEMON_RECOVERY,
     null,
-    new FakeIdGenerator(),
-    "darwin",
-    LIMIT,
+    { idGenerator: new FakeIdGenerator(), platformOverride: "darwin", maxInboundFrameBytes: LIMIT },
   );
-  client.attachSocketForTesting(socket);
+  client.testHooks.attachSocket(socket);
   const requests: DaemonRequest[] = [];
   const answer = (request: DaemonRequest, payload: unknown) =>
-    client.simulateIncomingDataForTesting(
+    client.testHooks.simulateIncomingData(
       Buffer.from(
         JSON.stringify({ id: request.id, type: "mcp_response", success: true, result: payload }) +
           "\n",
@@ -195,7 +194,7 @@ test("an in-flight keeper heartbeat sibling reconnects and continues its held se
   expect(heartbeatFailure).toHaveLength(1);
   expect(heartbeatFailure[0]).toBeInstanceOf(DaemonUnavailableError);
   expect(heartbeatFailure[0]).toMatchObject({ cause: ownerError });
-  expect(wire.client.hasPendingRequestForTesting(heartbeat.id)).toBe(false);
+  expect(wire.client.testHooks.hasPendingRequest(heartbeat.id)).toBe(false);
   expect(wires.length).toBe(2);
   expect(
     wires[1]!.requests.some(

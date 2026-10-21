@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Rotate, unlockDeviceStateRotationEntry } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -94,12 +95,14 @@ function harness(adb: DeviceStateLockAdb) {
   const rotate = new Rotate(device, adb, timer);
   const observe = new FakeObserveScreen();
   observe.enableAutoVaryHierarchy();
-  observe.setObserveResult(() => ({
-    timestamp: timer.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-  }));
+  observe.setObserveResult(() =>
+    buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
+    }),
+  );
   const window = new FakeWindow();
   window.configureCachedActiveWindow(null);
   window.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 1 });
@@ -165,7 +168,7 @@ describe("Rotate device_state_rotation_lock handling without a session", () => {
     adb.auto = 0;
     adb.lock = LOCKED_STATE_1;
     const rotate = harness(adb);
-    const result = await rotate.execute("landscape", undefined, false);
+    const result = await rotate.execute("landscape", { lockOrientation: false });
     expect(adb.auto).toBe(1);
     expect(adb.lock).toBe(BASELINE);
     expect(lockCommands(adb)).toEqual([

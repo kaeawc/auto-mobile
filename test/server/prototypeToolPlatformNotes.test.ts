@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import { prototypePlatformNotes } from "../../src/features/prototype/prototypePlatformNotes";
@@ -21,7 +22,7 @@ const android: BootedDevice = {
 };
 const spec: PrototypeSpec = {
   id: "panel",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   state: { open: true },
   root: {
     type: "column",
@@ -83,11 +84,11 @@ describe("prototype tool platform notes", () => {
     unsubscribe();
     restore();
   });
-  async function call(input: unknown, device = ios) {
+  async function call(input: Record<string, unknown>, device = ios) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
     return {
-      raw: response.structuredContent,
-      payload: prototypeOutputSchema.parse(response.structuredContent),
+      raw: readToolResponse(response).structuredContent,
+      payload: prototypeOutputSchema.parse(readToolResponse(response).structuredContent),
     };
   }
   test("successful iOS show returns all five typed notes", async () => {
@@ -95,6 +96,75 @@ describe("prototype tool platform notes", () => {
     expect(payload.success).toBe(true);
     expect(payload.platformNotes).toEqual(prototypePlatformNotes(spec, "ios", () => false));
     expect(payload.platformNotes).toHaveLength(5);
+  });
+  test("iOS text field options return substituted notes without a counter difference", async () => {
+    const { payload } = await call({
+      action: "show",
+      spec: {
+        ...spec,
+        state: { name: "Ada" },
+        root: {
+          type: "textField",
+          stateKey: "name",
+          label: "Name",
+          variant: "outlined",
+          maxLength: 20,
+        },
+      },
+    });
+    expect(payload.success).toBe(true);
+    expect(
+      payload.platformNotes?.map(({ construct, effect, paths }) => ({ construct, effect, paths })),
+    ).toEqual([
+      { construct: "textField.variant", effect: "substituted", paths: ["root.variant"] },
+      { construct: "textField.label", effect: "substituted", paths: ["root.label"] },
+    ]);
+  });
+  test("iOS stack show explains the back gesture", async () => {
+    agent.handshake.capabilities = [...agent.handshake.capabilities, "prototype_stack_v1"];
+    const { payload } = await call({
+      action: "show",
+      spec: {
+        ...spec,
+        root: {
+          type: "stack",
+          id: "nav",
+          start: "home",
+          screens: { home: { type: "text", text: "Home" } },
+        },
+      },
+    });
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toContainEqual(
+      expect.objectContaining({
+        construct: "stack",
+        detail: expect.stringContaining("left-edge swipe"),
+      }),
+    );
+  });
+  test("iOS carousel show explains the fixed-width substitution", async () => {
+    agent.handshake.capabilities = [...agent.handshake.capabilities, "prototype_carousel_v1"];
+    const { payload } = await call({
+      action: "show",
+      spec: {
+        ...spec,
+        root: {
+          type: "carousel",
+          variant: "hero",
+          itemWidth: 200,
+          children: [{ type: "text", text: "One" }],
+        },
+      },
+    });
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toContainEqual(
+      expect.objectContaining({
+        construct: "carousel",
+        effect: "substituted",
+        paths: ["root"],
+        detail: expect.stringContaining("fixed-width items"),
+      }),
+    );
   });
   test("Android show retains its exact result shape", async () => {
     const { raw, payload } = await call({ action: "show", spec }, android);
@@ -153,5 +223,66 @@ describe("prototype tool platform notes", () => {
     expect(agent.requests[0].body.spec).toMatchObject({
       root: { type: "icon", name: "alarm_add" },
     });
+  });
+  test.each(["onLongPress", "onDoubleTap"] as const)(
+    "%s notes name only the authored gesture",
+    async (gesture) => {
+      agent.handshake.capabilities.push("prototype_gestures_v1");
+      const authored = {
+        ...spec,
+        root: { type: "text", text: "Press", [gesture]: [{ type: "emit", name: "gesture" }] },
+      };
+      const { payload } = await call({ action: "show", spec: authored });
+      expect(payload.success).toBe(true);
+      const note = payload.platformNotes?.find((entry) => entry.construct === "node.gestures");
+      expect(note?.paths).toEqual([`root.${gesture}`]);
+      if (gesture === "onLongPress") {
+        expect(note?.detail).toContain("Long-press");
+        expect(note?.detail).not.toContain("double-tap");
+        expect(note?.detail).not.toContain("onTap fires");
+      } else {
+        expect(note?.detail).not.toContain("Long-press");
+        expect(note?.detail).toContain("double-tap");
+        expect(note?.detail).toContain("onTap fires only after");
+      }
+    },
+  );
+  test("gesture shows report system timing on iOS only, including expanded components", async () => {
+    agent.handshake.capabilities.push("prototype_gestures_v1");
+    client.setSupportedCommands(["prototype_gestures_v1", "prototype_persistence_replay_v1"]);
+    const authored = {
+      ...spec,
+      components: {
+        tile: {
+          root: {
+            type: "text",
+            text: "Press",
+            onLongPress: [{ type: "emit", name: "long" }],
+            onDoubleTap: [{ type: "emit", name: "double" }],
+          },
+        },
+      },
+      root: { type: "use", component: "tile" },
+    };
+    const { payload } = await call({ action: "show", spec: authored });
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toMatchObject([
+      {
+        platform: "ios",
+        construct: "node.gestures",
+        effect: "substituted",
+        paths: ["root.onLongPress", "root.onDoubleTap"],
+      },
+    ]);
+    expect(payload.platformNotes?.[0].detail).toContain("0.5 s");
+    expect(payload.platformNotes?.[0].detail).toContain("0.4 s");
+    expect(payload.platformNotes?.[0].detail).toContain("double-tap window is the system's");
+    expect((await call({ action: "show", spec: authored }, android)).raw).not.toHaveProperty(
+      "platformNotes",
+    );
+    agent.queueReplies({ success: false, error: "Device refused" });
+    expect((await call({ action: "show", spec: authored })).raw).not.toHaveProperty(
+      "platformNotes",
+    );
   });
 });

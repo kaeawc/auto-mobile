@@ -2,5 +2,19 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>TooGenericExceptionCaught:AutoMobileAgent.kt:AutoMobileAgent$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AutoMobileAgent.kt:AutoMobileAgent.DefaultMCPClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AutoMobileAgent.kt:AutoMobileAgent.WaitForTool$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AutoMobileRunner.kt:AutoMobileRunner$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AutoMobileSharedUtils.kt:DeviceAvailabilityChecker$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:BackgroundHeartbeatManager.kt:BackgroundHeartbeatManager$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:DaemonLauncher.kt:DaemonConnectionProvider$e: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:DaemonSocketClient.kt:DaemonSocketClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FailureRedactingMCPClient.kt:FailureRedactingMCPClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:HeldDeviceWaitingMCPClient.kt:HeldDeviceWaitingMCPClient$error: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:PlanExecutor.kt:PlanExecutor$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RecoveryConfigProvider.kt:DaemonRecoveryConfigProvider$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RedactingMCPClient.kt:RedactingMCPClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:TestTimingCache.kt:TestTimingStore$e: Exception</ID>
   </CurrentIssues>
 </SmellBaseline>

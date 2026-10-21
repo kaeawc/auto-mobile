@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { AppearanceConfig } from "../../src/server/appearanceManager";
+import type { AppearanceConfig } from "../../src/models";
 import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
 import { DeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
 import {
@@ -19,7 +19,12 @@ test("a host-appearance-sync night-mode change is reset when another session acq
   );
   const scheduler = new AppearanceSyncScheduler(new FakeTimer(), {
     isEnabled: () => true,
-    getConfig: async () => ({ syncWithHost: true }) as AppearanceConfig,
+    getConfig: async () =>
+      ({
+        syncWithHost: true,
+        defaultMode: "auto",
+        applyOnConnect: false,
+      }) satisfies AppearanceConfig,
     resolveMode: async () => "dark",
     getTargets: () => [target],
     apply: async (_device, mode) => {

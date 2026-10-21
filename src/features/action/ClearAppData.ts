@@ -133,7 +133,7 @@ export class ClearAppData {
           try {
             return await adb.executeCommand(
               `shell pm clear --user ${targetUserId} ${shellQuote(packageName)}`,
-              CLEAR_APP_DATA_TIMEOUT_MS,
+              { timeoutMs: CLEAR_APP_DATA_TIMEOUT_MS },
             );
           } finally {
             this.cacheInvalidator.invalidate(this.device);

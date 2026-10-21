@@ -26,7 +26,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeDeviceClockAdapter } from "../../fakes/FakeDeviceClockAdapter";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 
 const android: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const instant = "2030-01-01T00:00:00Z";
@@ -93,7 +93,7 @@ describe("device clock", () => {
       platform: "ios",
       iosVersion: "17.5",
     };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `spawn ${device.deviceId} notifyutil -1 com.apple.BiometricKit.enrollmentChanged -s com.apple.BiometricKit.enrollmentChanged 1 -g com.apple.BiometricKit.enrollmentChanged -p com.apple.BiometricKit.enrollmentChanged`,
       "com.apple.BiometricKit.enrollmentChanged 1\n",
@@ -262,7 +262,7 @@ describe("device clock", () => {
     h.adapter.automaticTime = 0;
     expect((await h.write({ mode: "reset" })).verified).toBe(true);
     expect(h.adapter.instantMs).toBe(h.timer.now());
-    expect(h.adapter.automaticTime).toBe(1);
+    expect<number>(h.adapter.automaticTime).toBe(1);
     expect(h.slot.get()).toBeUndefined();
     expect(h.invalidations).toEqual([android.deviceId]);
   });
@@ -518,7 +518,7 @@ describe("device clock", () => {
     adb.setCommandResponse("unroot", {
       ...response(""),
       stderr: "error: device offline",
-      error: new Error("device offline"),
+      error: "device offline",
     });
     adb.setCommandResponse("shell id", response("uid=2000(shell)"));
     await new AndroidDeviceClockAdapter(adb).unroot();
@@ -529,7 +529,7 @@ describe("device clock", () => {
     adb.setCommandResponse("unroot", {
       ...response(""),
       stderr: "unroot failed",
-      error: new Error("unroot failed"),
+      error: "unroot failed",
     });
     adb.setCommandResponse("shell id", response("uid=0(root)"));
     await expect(new AndroidDeviceClockAdapter(adb).unroot()).rejects.toBeInstanceOf(

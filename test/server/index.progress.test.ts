@@ -39,7 +39,7 @@ describe("CallTool progress notifications echo the client's token (issue #6118)"
     if (fixture) {
       await fixture.teardown();
     }
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
     restoreHermeticServer();
   });
 
@@ -51,11 +51,14 @@ describe("CallTool progress notifications echo the client's token (issue #6118)"
       errors.push(String(error));
     };
 
-    await client.callTool({ name: TOOL, arguments: {} }, undefined, {
-      onprogress: (notification) => {
-        received.push(notification as unknown as { progress: number; total?: number });
+    await client.callTool(
+      { name: TOOL, arguments: {} },
+      {
+        onprogress: (notification) => {
+          received.push(notification);
+        },
       },
-    });
+    );
 
     expect(received).toHaveLength(2);
     expect(received[0].progress).toBe(1);

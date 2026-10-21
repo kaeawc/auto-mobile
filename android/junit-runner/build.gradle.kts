@@ -8,10 +8,10 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
   `java-library`
   alias(libs.plugins.mavenPublish)
+  id("automobile.published-library")
 }
 
 java {
-  toolchain { languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get())) }
   // Configure Gradle daemon to use same JDK
   System.setProperty("org.gradle.java.home", System.getProperty("java.home"))
   withSourcesJar()
@@ -79,42 +79,6 @@ tasks.withType<KotlinCompile>().configureEach {
   }
 }
 
-mavenPublishing {
-  // Coordinates: group and version from root, artifact from local gradle.properties
-  coordinates(
-    property("GROUP").toString(),
-    property("POM_ARTIFACT_ID").toString(),
-    version.toString(),
-  )
-
-  pom {
-    name.set(property("POM_NAME").toString())
-    description.set(property("POM_DESCRIPTION").toString())
-    inceptionYear.set("2025")
-    url.set(property("POM_URL").toString())
-    licenses {
-      license {
-        name.set(property("POM_LICENCE_NAME").toString())
-        url.set(property("POM_LICENCE_URL").toString())
-        distribution.set("repo")
-      }
-    }
-    developers {
-      developer {
-        id.set(property("POM_DEVELOPER_ID").toString())
-        name.set(property("POM_DEVELOPER_NAME").toString())
-        url.set("https://github.com/${property("POM_DEVELOPER_ID")}/")
-        email.set(property("POM_DEVELOPER_EMAIL").toString())
-      }
-    }
-    scm {
-      url.set(property("POM_SCM_URL").toString())
-      connection.set(property("POM_SCM_CONNECTION").toString())
-      developerConnection.set(property("POM_SCM_DEV_CONNECTION").toString())
-    }
-  }
-}
-
 tasks.configureEach {
   if (name == "generateMetadataFileForMavenPublication") {
     dependsOn("plainJavadocJar")
@@ -128,6 +92,10 @@ tasks.withType<Test> {
   // JUnit 4 suites (e.g. RecoveryLoopTest) running on the same platform.
   useJUnitPlatform()
 
+  inputs
+    .file(layout.projectDirectory.file("../../test/fixtures/daemon-http-endpoints.json"))
+    .withPropertyName("daemonHttpEndpointVectors")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
   // DaemonStatePathsTest reads the daemon state-path vectors shared with the TypeScript daemon,
   // the desktop app and XCTestRunner (#10906).
   inputs
@@ -146,6 +114,10 @@ tasks.withType<Test> {
   inputs
     .dir(layout.projectDirectory.dir("../../test/fixtures/refusal-wire-hints"))
     .withPropertyName("refusalWireHintFixtures")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+  inputs
+    .file(layout.projectDirectory.file("../../schemas/tool-definitions.json"))
+    .withPropertyName("toolDefinitions")
     .withPathSensitivity(PathSensitivity.RELATIVE)
 
   // Enable parallel test execution across multiple devices

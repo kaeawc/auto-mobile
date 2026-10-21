@@ -1,5 +1,7 @@
+import type { IosBootInstrumentation, IosBootRequest } from "../../models/IosBootInstrumentation";
+export type { IosBootInstrumentation, IosBootRequest };
 import type { BootAdmissionResult } from "../bootAdmission/BootAdmissionGate";
-import { logger } from "../../utils/logger";
+import { logger, type Logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { deviceResourceProfileFingerprint } from "../../utils/deviceResourceDrift";
 import type { SimulatorWorkloadProfile } from "../../models/DeviceResourceReconciliation";
@@ -14,29 +16,12 @@ export function bootProfileId(profile?: SimulatorWorkloadProfile): string {
   return deviceResourceProfileFingerprint(profile ?? { resources: {} });
 }
 
-export interface IosBootRequest {
-  udid: string;
-  /** Simctl runtime identifier of the simulator being booted, when known. */
-  runtime?: string;
-  /** Resource profile the boot is for; omitted means no overrides were requested. */
-  profile?: SimulatorWorkloadProfile;
-  /** Budget for the boot itself; a platform at capacity is refused before it starts. */
-  timeoutMs: number;
-  /** Cancels the capacity check (the boot path's ambient request signal). */
-  signal?: AbortSignal;
-}
-
-/** Seam the iOS boot path calls; swappable for a fake so boot tests stay hermetic. */
-export interface IosBootInstrumentation {
-  /** Runs `boot` with the full budget once admitted and records a successful duration. */
-  run<T>(request: IosBootRequest, boot: (remainingMs: number) => Promise<T>): Promise<T>;
-}
-
 export interface FleetBootInstrumentationOptions {
   history: BootDurationHistory;
   timer: Pick<Timer, "now">;
   /** Absent means boots are never refused; durations are still recorded. */
   gate?: SimulatorCapacityGate;
+  logger?: Pick<Logger, "info">;
 }
 
 /**
@@ -83,7 +68,7 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
     assertCapacityGranted(result);
     if (result.decision.outcome === "reuse-warm") {
       // Never substitute a different simulator for the one requested; just do not refuse because of it.
-      logger.info(
+      (this.options.logger ?? logger).info(
         `compatible warm simulator ${result.decision.udid} is booted; booting ${request.udid} as requested`,
       );
     }

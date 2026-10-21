@@ -13,7 +13,7 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
   comments, commit messages, and assistant chat responses — where a clickable
   link genuinely aids navigation for the reader. Do NOT require links in
   checked-in repository content: neither source code comments (bare `#NNNN` is
-  the established convention — 625 references in `src/`, zero linked) nor Markdown
+  the established convention — `src/` references are bare, never linked) nor Markdown
   documentation files (under `docs/` and elsewhere), where bare `#NNNN` is
   likewise fine. Forcing explicit links into committed files renders as noise in
   an editor and makes the touched file the only inconsistent one. Automated
@@ -21,6 +21,8 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
   source-code comments or Markdown files; treat those as compliant.
 - After implementation changes, run relevant validation commands
 - Before pushing shell/scripts changes, run `scripts/prepush-shell.sh` and `bun run format` (the formatter catches Fast Validation fan-out); if `bun.lock` and/or `package.json` changed in the diff, run `bun scripts/release/pin-runtime-deps.ts --write` and commit `package.json`, `bun.lock`, and `scripts/release/runtime-graph.json`; otherwise rebase onto current main and do not hand-edit pins to mask a stale base; never run two `bats test/bats/` sweeps concurrently on one machine; when an Actions API job log is empty, read the `fast-validation-logs` workflow artifact's per-check `.status`/`.log` files under `scratch/fast-validate-*/`.
+- Use `scripts/prepush.sh` to select and run the relevant per-lane pre-push gates.
+- Changes to `package.json` or `bun.lock` select runtime-pins, node, and integration lanes; runtime-graph input changes also require `scripts/prepush-integration.sh`.
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
 - Run `scripts/prepush-android.sh` from the repository root before pushing changes under `android/`; its scoped Detekt pass is a smoke check, not a substitute for the full-tree CI Detekt job.
@@ -117,13 +119,24 @@ bun test <file>        # Run specific test file (no cache)
 ## Node Pre-push Gate
 
 Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
+Use `scripts/prepush.sh` (`--list` to preview, `--all`, `--changed`, or `--base`) to select per-lane gates from changed paths; per-lane scripts remain usable standalone and each records its own attestation, while the dispatcher does not.
 Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
-loop; formatting, typecheck, and lint intentionally remain full repository
-gates. It also runs the tool-free TypeScript subset of CI Fast Validation
+loop; early selection via `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, and the cross-cutting source-scan tests in `test/always-run-tests.txt` (which always run, since moving code breaks them untouched); a unit cap fallback replaces the changed lane with the full unit lane and skips unit extras, while integration caps use the full safe lane. Formatting, typecheck, and lint intentionally remain full repository
+gates. Typecheck and lint stay strictly serial and separate because oxlint 1.88's experimental `--type-check` and tsgolint diagnostics do not replace the fail-closed typecheck parser, TS2688/`@types/bun` guard, or separate src/test tsconfig projects. It also runs the tool-free TypeScript subset of CI Fast Validation
 (`scripts/all_fast_validate_checks.sh --only ...`, ~10 s, including the offline
-lychee pass when `lychee` is installed), the `test/lint/` suites (including the
-Windows path-separator assertion guard), and, on Linux or with `--timing`, the
-100 ms unit budget. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
+lychee pass when `lychee` is installed), repository lint tests, and, on Linux or with `--timing`, the
+100 ms unit budget. The timing gate measures the unit lane's JUnit reports when
+source or runtime inputs changed; changed test files alone are still re-run
+individually. Changed mode without reports uses the timing validator's own
+affected-test selection. The separate repository lint gate runs only
+`test/lint/*.integration.test.ts` in full mode (unit files already run in the unit
+lane); `--changed` runs the whole `test/lint/` directory only when branch,
+worktree, or untracked paths touch `src/`, `test/`, `scripts/`, `oxlint-plugins/`,
+`android/`, `ios/`, `docs/`, `skills/`, `schemas/`, `.claude/`, `.github/`, or root
+`.oxlintrc.json`, `package.json`, `bun.lock`, `bunfig.toml`, `turbo.json`, or
+`tsconfig*.json`. After that directory runs, affected unit and integration extras
+omit `test/lint/` files already covered. Always-run unit extras still run when
+that gate skips. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
 matrix lanes are not covered: use `scripts/prepush-shell.sh` and the platform
 gates, and expect CI to be the only Windows run. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 `eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and
@@ -136,10 +149,12 @@ Before pushing a contract or fake/interface change, also run
 Classify every new integration test `safe` or `unsafe` in `test/integration-safe-tier.txt`
 in the PR that adds it (a unit test enforces this), and `unsafe` files stay CI-only.
 
-Known Node-lane flakes this week: a 100ms unit timing overage on a loaded Linux
-runner may be rerun rather than “fixed” when its isolated recheck is clean. Do
-not treat repeated cross-platform failures as a flake; refresh against main and
-identify the shared failure first.
+A 100ms unit timing overage on a loaded Linux runner may be rerun rather than
+“fixed” when its isolated recheck is clean. Whether a given failure is a known
+flake is decided by `scripts/ci/known-flakes.txt` (via
+`bash scripts/ci/classify-failure.sh <run-id>`), not by this file. Do not treat
+repeated cross-platform failures as a flake; refresh against main and identify
+the shared failure first.
 
 ## Toolchain: TypeScript 7 (tsgo) + oxlint + oxfmt
 
@@ -156,25 +171,24 @@ the legacy `node10` that `"node"` aliased to; bundler also matches how bun
 resolves this repo's extensionless imports and is the config `tsgolint` reads for
 oxlint's `--type-aware` rules).
 
-## Typecheck baseline gate
+## Typecheck gates
 
 Bun's bundler skips type-checking, so `build`/`test` do NOT catch type errors.
-A scoped gate (issue #3001) runs `tsgo --noEmit` and fails CI only on errors NOT
-already in the committed baseline (`scripts/typecheck-baseline.txt`, 6
-tolerated errors):
+Two `tsgo --noEmit` passes run in CI (`scripts/typecheck-baseline.sh`):
 
 ```bash
-bun run typecheck             # gate: fail on NEW type errors (CI runs this)
-bun run typecheck:update      # regenerate the baseline after fixing errors
+bun run typecheck             # src (tsconfig.json): NO baseline, any error fails
+bun run typecheck:test        # every test/**/*.ts (tsconfig.test.json): NO baseline, any error fails
 ```
 
-When you FIX type errors, run `bun run typecheck:update` and commit the smaller
-baseline — it is a one-way ratchet (`--update` refuses to grow it without
-`-- --allow-grow`). When you INTRODUCE a new error the gate prints it; fix it, or
-(rarely) record it with `typecheck:update`. The baseline is version-sensitive:
-`@typescript/native-preview` is a dated preview build, so regenerate the baseline
-in the same PR that bumps it (the `# generated-with:` header records the version
-and the gate warns on drift).
+Both baselines reached zero and were deleted (issues #3001, #11787): there is no
+type-error baseline and no `--update` path, so any type error in `src/` or `test/` fails.
+Both projects resolve `bun:*` modules and the `Bun` global from `@types/bun` via the
+`types` list in their tsconfig; if it is missing the gate exits 4 on TS2688 / unresolved
+`bun:` modules, so a broken install cannot pass silently. Run time is about 2 s (src) and
+6 s (test). `as any` and `as unknown as` in `test/` are hard `oxlint` errors
+(`auto-mobile/no-as-any`, `auto-mobile/no-unknown-cast`); the former test cast baselines
+are deleted too. Fix the code (typed fakes, `Pick<>` views, `satisfies`, type guards).
 
 ## oxlint ratchet baseline
 
@@ -192,12 +206,26 @@ bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 
 Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
-exit non-zero). The ratchet only gates the rules set to `warn` because they carry
-pre-existing violations: `complexity`, `max-depth`, `max-params`,
-`max-lines-per-function`, `auto-mobile/catch-convention`,
-`auto-mobile/no-unknown-cast`,
-`auto-mobile/no-caught-error-interpolation`, and the two type-aware promise rules
-(`typescript/no-floating-promises`, `typescript/no-misused-promises`). The baseline
+exit non-zero). `complexity`, `max-depth`, `max-params`, `max-lines-per-function`,
+`max-classes-per-file`, `auto-mobile/max-class-lines` (1000 non-blank lines), and
+`auto-mobile/catch-convention` are fully burned down and are `error` too, so the ratchet's
+violation counts no longer cover them.
+`typescript/no-floating-promises` and `typescript/no-misused-promises` are fully
+burned down and are `error` in `.oxlintrc.json`, but they need type information and
+the fast stage is not type-aware, so they are enforced by the ratchet stage
+(`oxlint --type-aware`), which keeps them in its gated codes at a zero baseline: any
+diagnostic is a new violation and fails the gate (`--update` refuses to record one
+without `--allow-grow`).
+`auto-mobile/no-unknown-cast` and `auto-mobile/no-caught-error-interpolation` are
+fully burned down and are `error` in `.oxlintrc.json`. Inline suppressions of ANY rule are ratcheted too: a
+TypeScript-scanner comment scan (`scripts/lib/oxlintDisableScan.ts`) of every
+file oxlint lints (repo-wide via `git ls-files`, TypeScript extensions only,
+minus the `.oxlintrc.json` `ignorePatterns`) adds
+`oxlint-disable(<rule>)` rows (`oxlint-disable-line(<rule>)` for the `-line` form; `oxlint-disable-block(<rule>)` for an unbounded disable a later enable closes, `oxlint-disable-partial(*)` for a bare disable only named enables partly re-enable, and `oxlint-disable-file(<rule>)` for one left open, so widening a suppression or dropping its closer is a new row (narrowing a baselined one, `-file` to `-partial` to `-block`, is a permitted shrink); and `oxlint-disable-no-reason(<rule>)` for
+directives lacking a `-- reason`) to the same baseline, so a new
+`oxlint-disable*`/`eslint-disable*` comment fails like a new violation and needs
+`--allow-grow` even when it carries a `-- reason`; a new directive without a
+reason additionally trips the no-reason row, so always write one. The baseline
 is keyed per file + per rule with only a **count**, so it does not churn on line
 shifts. Because the type-aware rules need type info, the ratchet script runs
 `oxlint --type-aware` (tsgolint) — which is why the initial oxlint stage does not,
@@ -222,15 +250,33 @@ ratchet rule as its own rule (the custom plugin already does) rather than foldin
 selectors into a shared one, so a baselined violation cannot be silently traded
 for a genuinely-dangerous one.
 
-Rules with a numeric threshold: `complexity` 12, `max-depth` 3, `max-params` 6,
-`max-lines-per-function` 150 (blank lines and comments excluded),
-`max-nested-callbacks` 3 (0 baselined), and
-`auto-mobile/no-accumulator-foreach` (src/ only, 0 baselined). The full set the
-ratchet gates is listed above.
+Numeric thresholds (`complexity`, `max-depth`, `max-params`,
+`max-lines-per-function` with blank lines and comments excluded,
+`max-nested-callbacks`) live in `.oxlintrc.json`; read them there. `max-nested-callbacks`
+and `auto-mobile/no-accumulator-foreach` (src/ only) must stay at zero baselined
+violations. The full set the ratchet gates is listed above.
 
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form
 exists; it does not outlaw iteration.
+
+## Zero baselines are deleted, not kept
+
+When a ratchet baseline reaches zero, delete its baseline file, its regeneration
+path (`UPDATE_*` env var, `--update`) and any allow-list plumbing, and make the guard
+assert "no violations" outright (a warn-level oxlint rule becomes `error` and leaves
+the ratchet's rule list in `scripts/oxlint-baseline.sh`). Named `EXEMPT_*` lists that
+encode deliberate, reasoned exceptions are not baselines and stay. Import-direction
+tiers follow the same rule: only tiers marked `baselined: true` in
+`scripts/check-tier-import-direction.ts` keep a file under
+`scripts/import-direction-baselines/`; `scripts/check-utils-import-direction.ts` has
+no baseline at all.
+
+## DaemonState.getInstance() guard
+
+`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and fails on any
+`DaemonState.getInstance(` call outside its named `EXEMPT_FILES` (#11806). The
+baseline reached zero and was deleted; pass the daemon state in as a dependency.
 
 ## File-backed DB lifecycle tests
 
@@ -257,24 +303,31 @@ shellcheck scripts/**/*.sh  # Lint shell scripts
 
 # MCP Tools Reference
 
-This is a high-level summary of core MCP tools exposed by the server.
+The tool list is generated, not hand-copied: `schemas/tool-definitions.json` is the
+authoritative set of MCP tool names and schemas (regenerate it with
+`bash scripts/update-tool-definitions.sh`). Tool families: observation (`observe`),
+interaction (tap/swipe/drag/pinch, key and text input, clipboard), app management
+(launch/terminate/install/uninstall), and device management (list/provision/kill
+devices, set the active device).
 
-## Observation
+## Android Lint
 
-- `observe` - Capture screen state and view hierarchy
-
-## Interaction
-
-- `tapOn`, `swipeOn`, `dragAndDrop`, `pinchOn`
-- `sendKeys`, `pressButton`, `selectAllText`, `clipboard`
-
-## App Management
-
-- `launchApp`, `terminateApp`, `installApp`, `uninstallApp`
-
-## Device Management
-
-- `listDevices`, `startDevice`, `killDevice`, `setActiveDevice`
+Run `cd android && ./gradlew lintDebug --continue`. The Android pre-push gate
+runs lint for affected modules (all modules for Gradle/build-logic changes);
+the CI Detekt job runs it for every Android module. New warnings fail the build.
+Remaining findings live in each module's `lint-baseline.xml`; clean modules have
+no baseline. Baselines may only shrink, both in total and for each issue id per
+module. After fixing a module, remove its baseline and regenerate with
+`./gradlew :<module>:lintDebug -Dlint.baselines.continue=true`. Keep the generated
+file only if nonempty, then run `./gradlew :<module>:lintDebug --rerun-tasks` once
+to refresh AGP's cached baseline creation result. Never use `--allow-grow` when
+updating baselines. `scripts/android/check-lint-baseline-shrink.sh` checks
+HEAD against the merge-base with origin/main; pre-push includes local edits too.
+Checks that compare against what is published upstream (AndroidGradlePluginVersion,
+GradleDependency, NewerVersionAvailable, OldTargetApi) are disabled in the
+convention plugins: their findings change over time and cannot be baselined.
+Lint must never rewrite files (no autofix); a clean `git status` after a lint run
+is the check.
 
 # Android Notification Group Handling (Hard-Won Knowledge)
 
@@ -316,7 +369,8 @@ present in the shade; ignoring this flag keeps those children matchable.
 
 # CI failure triage
 
-The `green-main` ruleset requires 22 status checks to merge, not just the three
+The `green-main` ruleset requires more status checks than the three
+roll-up gates to merge, not just the three
 roll-up gates. The ruleset is the only authoritative list (deliberately not
 copied here, so it cannot rot): `gh api repos/kaeawc/auto-mobile/rulesets`, then
 `.../rulesets/<id>` and its `required_status_checks` rule. The roll-up gates
@@ -326,7 +380,9 @@ that reports directly, so read that job. "Advisory" means not in the ruleset: it
 never blocks a merge. Runs from before the `iOS`, `Android`, `Node Tests`, and
 `WebRTC` roll-ups were removed may still show them red.
 `bun scripts/ci/ci-time-to-green.ts` reports time-to-green against the live
-required list. Run
+required list. The `CI time-to-green report` workflow
+(`ci-time-to-green-report.yml`) publishes the last 24 hours of PR runs daily as
+its job summary and a 90-day artifact. Run
 `bash scripts/ci/classify-failure.sh <run-id>` before retrying or changing code;
 it identifies the specific upstream job and consults
 `scripts/ci/known-flakes.txt`. Do not re-fix documented non-fixes. Before
@@ -363,13 +419,12 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 ## iOS/Swift CI
 
 - Before pushing a Swift change, run `scripts/prepush-ios.sh` (pinned
-  SwiftFormat 0.54.6, SwiftLint error rules, XCTestRunner build, and pure unit
+  SwiftFormat at the version pinned in `scripts/swiftformat/swiftformat_version.sh`, SwiftLint error rules, XCTestRunner build, and pure unit
   tests).
 - `XCTestRunner Simulator Tests` is advisory, not required, and runs nightly or
   on a PR labelled `run-ios-sim` (`xctestrunner-simulator-tests.yml`). Read the exact job
-  log and classify before rerunning. Known 2026-09-07–13 signatures: five-minute
-  CtrlProxy UI-test timeout, CtrlProxy surviving forced teardown, `simctl list`
-  timing out during video recording, and a hierarchy UI test exceeding 90s.
+  log and classify before rerunning (`bash scripts/ci/classify-failure.sh <run-id>`);
+  known simulator-lane flake signatures live only in `scripts/ci/known-flakes.txt`.
 - A simulator UDID belongs to exactly one CI job and is used serially there;
   never share a simulator between parallel runners or jobs.
 - Re-run CI on the latest main base before merge; stale-base runs can mask a
@@ -382,3 +437,11 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
   simulator-free filter as `prepush-ios.sh` via
   `scripts/ios/xctestrunner_test_filter.sh`. Run locally with
   `bash scripts/ci/xctestrunner-tsan.sh`; logs are in `scratch/xctestrunner-tsan/`.
+
+## Manual Linux qualification
+
+`.github/workflows/linux-qualification.yml` is a manual-only Linux research run
+for real procfs fixtures and the emulator SIGSEGV GPU/workload matrix. Its tested
+bash entrypoints live in `scripts/ci/linux-qualification/`; see
+`scripts/README.md` for evidence formats and bounds. Never dispatch it as part of
+local validation; use `test/bats/linux-qualification-*.bats` with stubs instead.

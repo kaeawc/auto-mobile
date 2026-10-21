@@ -1,10 +1,10 @@
-import { CtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
+import type { AndroidCtrlProxyManagerHandle } from "../../src/ctrlProxy/AndroidCtrlProxyManagerHandle";
 
 /**
  * Fake implementation of CtrlProxyManager for testing
  * Allows configuring service state and asserting operations
  */
-export class FakeCtrlProxyManager implements CtrlProxyManager {
+export class FakeCtrlProxyManager implements AndroidCtrlProxyManagerHandle {
   private installedState: boolean = false;
   private enabledState: boolean = false;
   private availableState: boolean = false;
@@ -18,6 +18,13 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
   private installedSha256: string | null = null;
   private versionCompatible: boolean = true;
   private enabledForUsers: Map<number, boolean> = new Map();
+
+  /** A manager whose accessibility service is (un)available, for stubbing `getInstance`. */
+  static withAvailability(available: boolean): FakeCtrlProxyManager {
+    const manager = new FakeCtrlProxyManager();
+    manager.setAvailable(available);
+    return manager;
+  }
 
   /**
    * Set whether the accessibility service is installed
@@ -212,6 +219,26 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
     };
   }
 
+  async isAccessibilityServiceHealthy(): Promise<boolean> {
+    this.executedOperations.push("isAccessibilityServiceHealthy");
+    return this.availableState;
+  }
+
+  async waitForAccessibilityServiceBinding(): Promise<"already-bound" | "recovered" | "unhealthy"> {
+    this.executedOperations.push("waitForAccessibilityServiceBinding");
+    return this.availableState ? "already-bound" : "unhealthy";
+  }
+
+  async rebindIfUnhealthy(): Promise<boolean> {
+    this.executedOperations.push("rebindIfUnhealthy");
+    return false;
+  }
+
+  async forceRestartProcess(): Promise<boolean> {
+    this.executedOperations.push("forceRestartProcess");
+    return false;
+  }
+
   clearAvailabilityCache(): void {
     this.executedOperations.push("clearAvailabilityCache");
   }
@@ -219,6 +246,10 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
   resetSetupState(): void {
     this.executedOperations.push("resetSetupState");
     this.clearAvailabilityCache();
+  }
+
+  reopenSetupGate(): ReturnType<AndroidCtrlProxyManagerHandle["reopenSetupGate"]> {
+    this.executedOperations.push("reopenSetupGate");
   }
 
   async downloadApk(): Promise<string> {

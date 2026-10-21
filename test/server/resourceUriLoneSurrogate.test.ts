@@ -1,9 +1,11 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "fs";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { parseGuardSource } from "../lint/astGuard";
+import { collectSourceFacts } from "../lint/sourceFacts";
 import { buildAppFileResourceUri } from "../../src/server/appFileContract";
-import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { encodeUriSegment } from "../../src/utils/encodeUriSegment";
 import { buildNavigationNodeScreenshotUri } from "../../src/utils/navigationResourceUri";
@@ -32,12 +34,12 @@ describe("resource URI encoders accept lone surrogates (#10135)", () => {
     const uri = buildAppFileResourceUri({
       deviceId: "emulator-5554",
       appId: "com.example",
-      container: "files",
+      container: "documents",
       path: `docs/na${LONE_SURROGATE}me.txt`,
     });
 
     expect(uri).toBe(
-      "automobile:devices/emulator-5554/apps/com.example/files/files/docs/na%EF%BF%BDme.txt",
+      "automobile:devices/emulator-5554/apps/com.example/files/documents/docs/na%EF%BF%BDme.txt",
     );
   });
 
@@ -55,14 +57,18 @@ describe("resource URI encoders accept lone surrogates (#10135)", () => {
   let offenders: string[] = [];
   beforeAll(() => {
     const roots = [
-      ...readdirSync(`${import.meta.dir}/../../src/server`).map((name) => `src/server/${name}`),
+      ...readdirSync(`${import.meta.dir}/../../src/server`, {
+        recursive: true,
+        encoding: "utf8",
+      }).map((name) => `src/server/${name}`),
       "src/utils/navigationResourceUri.ts",
     ].filter((path) => path.endsWith(".ts"));
-    offenders = roots.filter((path) =>
-      /(?<![`\w.])encodeURIComponent\(/.test(
-        readFileSync(`${import.meta.dir}/../../${path}`, "utf8"),
-      ),
-    );
+    offenders = roots.filter((path) => {
+      const file = `${import.meta.dir}/../../${path}`;
+      return collectSourceFacts(
+        parseGuardSource(file, readFileSync(file, "utf8")),
+      ).calledNames.includes("encodeURIComponent");
+    });
   });
 
   test("no resource URI builder calls encodeURIComponent directly", () => {
@@ -90,8 +96,8 @@ describe("the registry backstop blames the client only for its own URI (#10135)"
       async (params) => ({ uri: "automobile:test", text: decodeURIComponent(params.name) }),
     );
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
-    const handler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    ResourceRegistry.registerWithServer(server, () => ({}));
+    const handler = server.server.handlersBySchema.get("resources/read");
     if (!handler) {
       throw new Error("read handler not registered");
     }
@@ -104,7 +110,7 @@ describe("the registry backstop blames the client only for its own URI (#10135)"
   });
 
   function failureOf(uri: string): Promise<unknown> {
-    return readHandler({ params: { uri } }, {}).then(
+    return readHandler({ params: { uri } }, fakeServerContext()).then(
       () => undefined,
       (caught: unknown) => caught,
     );

@@ -3,9 +3,10 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DeepLinkManager } from "../utility/DeepLinkManager";
 import { BootedDevice, IntentChooserResult, ObserveResult } from "../../models";
-import { BaseVisualChange } from "./BaseVisualChange";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 export class HandleIntentChooser extends BaseVisualChange {
   private readonly deepLinkManagerFactory: (
@@ -15,28 +16,19 @@ export class HandleIntentChooser extends BaseVisualChange {
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
-   * @param adb - Optional AdbClient instance for testing
+   * @param adb - Optional AdbExecutor instance for testing
    */
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     deepLinkManagerFactory: (
       signal?: AbortSignal,
     ) => Pick<DeepLinkManager, "handleIntentChooser"> = (signal) =>
-      new DeepLinkManager(
-        device,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        timer,
-        signal,
-      ),
+      new DeepLinkManager(device, undefined, { timer, chooserSignal: signal }),
     timer: Timer = defaultTimer,
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, undefined, collaborators);
     this.device = device;
     this.deepLinkManagerFactory = deepLinkManagerFactory;
   }
@@ -58,11 +50,11 @@ export class HandleIntentChooser extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("handleIntentChooser");
 
-    return this.observedInteraction(
+    return this.observedInteraction<IntentChooserResult>(
       async (observeResult: ObserveResult) => {
         const viewHierarchy = observeResult.viewHierarchy;
         if (!viewHierarchy) {
-          return { success: false, error: "View hierarchy not found" };
+          return { success: false, detected: false, error: "View hierarchy not found" };
         }
 
         throwIfAborted(signal);
@@ -73,7 +65,7 @@ export class HandleIntentChooser extends BaseVisualChange {
       {
         signal,
         changeExpected: false,
-        timeoutMs: 500,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         perf,
       },
     );

@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "data": "orders",
+        "equals": 1
+      }
+    },
+    "data": {
+      "n": 1
+    }
+  },
+  "expectedPath": "root.visibleWhen.data",
+  "expectedMessage": "Invalid pointer value"
+}

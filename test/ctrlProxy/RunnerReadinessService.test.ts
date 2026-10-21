@@ -1,8 +1,11 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, test, spyOn } from "bun:test";
 import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
 import { logger } from "../../src/utils/logger";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, ViewHierarchyResult } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 import {
   RunnerReadinessError,
   RunnerReadinessService,
@@ -14,10 +17,17 @@ import {
   type ReadinessIosManager,
 } from "../../src/ctrlProxy/RunnerReadinessService";
 import {
+  IOS_POST_SETUP_FIRST_PROBE_TIMEOUT_MS,
+  IOS_POST_SETUP_RESTART_MIN_FAILED_PROBES,
+} from "../../src/ctrlProxy/RunnerReadinessPolicy";
+import { READINESS_PROBE_TIMEOUT_MS } from "../../src/ctrlProxy/ReadinessPhaseRunner";
+import {
   acquireDeviceReadinessLock,
   deviceReadinessLockKey,
 } from "../../src/utils/deviceReadinessLock";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 
 const androidDevice = (deviceId = "emulator-5554"): BootedDevice => ({
   deviceId,
@@ -32,14 +42,37 @@ const iosDevice: BootedDevice = {
 };
 
 class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
+  closed = false;
+  holds = 0;
+  onConnect?: () => void;
+  getForwardFailureCause?: () => string | undefined;
+
+  isClosed(): boolean {
+    return this.closed;
+  }
+  beginReadinessHold(): () => void {
+    this.holds++;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        this.holds--;
+      }
+    };
+  }
+
   connected = true;
   healthResults: boolean[] = [true];
   connectionResults: boolean[] = [true];
   healthCalls = 0;
+  healthTimeouts: Array<number | undefined> = [];
+  onHealth?: (timeoutMs?: number) => Promise<void>;
   connectionCalls = 0;
   resetConnectionBudgetCalls = 0;
   accessibilityHierarchies: Array<ViewHierarchyResult | null> = [];
-  tapResult = { success: true };
+  tapResult: Awaited<ReturnType<NonNullable<ReadinessClient["requestTapCoordinates"]>>> = {
+    success: true,
+  };
   tapCoordinates: Array<{ x: number; y: number }> = [];
   onTap?: () => Promise<void> | void;
   getLastConnectionFailureMessage?: () => string | undefined;
@@ -52,6 +85,7 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
 
   async waitForConnection(): Promise<boolean> {
     this.connectionCalls++;
+    this.onConnect?.();
     const connected = this.connectionResults.shift() ?? false;
     this.connected = connected;
     return connected;
@@ -66,8 +100,14 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
     return await this.waitForConnection();
   }
 
-  async verifyServiceReady(): Promise<boolean> {
+  async verifyServiceReady(
+    _attempts?: number,
+    _delayMs?: number,
+    timeoutMs?: number,
+  ): Promise<boolean> {
     this.healthCalls++;
+    this.healthTimeouts.push(timeoutMs);
+    await this.onHealth?.(timeoutMs);
     return this.healthResults.shift() ?? false;
   }
 
@@ -75,7 +115,11 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
     return this.accessibilityHierarchies.shift() ?? null;
   }
 
-  async requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }> {
+  async requestTapCoordinates(
+    request: TapCoordinatesRequest,
+  ): Promise<{ success: boolean; error?: string }> {
+    const { x, y } = request;
+
     this.tapCoordinates.push({ x, y });
     await this.onTap?.();
     return this.tapResult;
@@ -95,6 +139,7 @@ class FakeAndroidManager implements ReadinessAndroidManager {
   restartResult = true;
   onRestart?: () => Promise<void> | void;
   resetSetupStateCalls = 0;
+  reopenSetupGateCalls = 0;
   private setupAttempted = false;
   compatibilityResult: Awaited<ReturnType<ReadinessAndroidManager["ensureCompatibleVersion"]>> = {
     status: "compatible",
@@ -104,7 +149,7 @@ class FakeAndroidManager implements ReadinessAndroidManager {
     return this.installed;
   }
 
-  async isEnabled(): Promise<boolean> {
+  async isEnabled(..._args: Parameters<ReadinessAndroidManager["isEnabled"]>): Promise<boolean> {
     return this.enabled;
   }
 
@@ -137,7 +182,9 @@ class FakeAndroidManager implements ReadinessAndroidManager {
     return this.compatibilityResult;
   }
 
-  async setup() {
+  async setup(
+    ..._args: Parameters<ReadinessAndroidManager["setup"]>
+  ): ReturnType<ReadinessAndroidManager["setup"]> {
     this.setupCalls++;
     if (this.setupAttempted) {
       return { success: false, message: "Setup already attempted" };
@@ -152,12 +199,39 @@ class FakeAndroidManager implements ReadinessAndroidManager {
     this.resetSetupStateCalls++;
     this.setupAttempted = false;
   }
+
+  reopenSetupGate(): ReturnType<ReadinessAndroidManager["reopenSetupGate"]> {
+    this.reopenSetupGateCalls++;
+    this.setupAttempted = false;
+  }
 }
 
 class FakeIosManager implements ReadinessIosManager {
+  endpointHealth: Awaited<ReturnType<NonNullable<ReadinessIosManager["checkRunningWithReason"]>>> =
+    {
+      ok: true,
+    };
+  endpointHealthCalls = 0;
+  runnerChild: ReturnType<NonNullable<ReadinessIosManager["runnerSnapshot"]>>["xcTestProcess"] = {
+    exitCode: null,
+    signalCode: null,
+  };
+
+  async checkRunningWithReason() {
+    this.endpointHealthCalls++;
+    return this.endpointHealth;
+  }
+
+  runnerSnapshot() {
+    return { xcTestProcess: this.runnerChild };
+  }
+
   installed = true;
   servicePort = 8765;
-  setupResult = { success: true, message: "ready" };
+  setupResult: Awaited<ReturnType<ReadinessIosManager["setup"]>> = {
+    success: true,
+    message: "ready",
+  };
   setupCalls = 0;
   startCalls = 0;
   forceRestartCalls = 0;
@@ -210,7 +284,7 @@ class FakeIosManager implements ReadinessIosManager {
 
   async setup(
     _force?: boolean,
-    _perf?: unknown,
+    _perf?: PerformanceTracker,
     signal?: AbortSignal,
     minimumHealthPollDurationMs?: number,
   ) {
@@ -232,12 +306,15 @@ class FakeIosManager implements ReadinessIosManager {
 function createService(
   options: {
     timer?: FakeTimer;
+    iosSetupMaxAttempts?: number;
     androidManager?: FakeAndroidManager;
     androidClient?: FakeReadinessClient;
     iosManager?: FakeIosManager;
     iosClient?: FakeReadinessClient;
+    getAndroidClient?: (device: BootedDevice) => FakeReadinessClient;
     getIosClient?: (device: BootedDevice, port: number) => FakeReadinessClient;
     autoAdvance?: boolean;
+    iosPostSetupRestartMinFailedProbes?: number;
     awaitIosStartupMaintenance?: () => Promise<void>;
     getAndroidFrameworkReadiness?: (
       device: BootedDevice,
@@ -271,9 +348,11 @@ function createService(
     iosClient,
     service: new RunnerReadinessService({
       timer,
+      iosSetupMaxAttempts: options.iosSetupMaxAttempts,
+      iosPostSetupRestartMinFailedProbes: options.iosPostSetupRestartMinFailedProbes,
       getAndroidFrameworkReadiness: options.getAndroidFrameworkReadiness,
       getAndroidManager: () => androidManager,
-      getAndroidClient: () => androidClient,
+      getAndroidClient: options.getAndroidClient ?? (() => androidClient),
       getIosManager: () => iosManager,
       getIosClient: options.getIosClient ?? (() => iosClient),
       checkIosOverride: async () => ({ present: false, usable: true }),
@@ -299,7 +378,7 @@ function systemUiAnrHierarchy(): ViewHierarchyResult {
           node: [
             { text: "System UI isn't responding" },
             { text: "Close app" },
-            { text: "Wait", bounds: "[100,200][300,260]" },
+            { text: "Wait", bounds: { left: 100, top: 200, right: 300, bottom: 260 } },
           ],
         },
       },
@@ -328,7 +407,7 @@ function localizedSystemUiAnrHierarchy(windowType = 3): ViewHierarchyResult {
             {
               text: "Warten",
               "resource-id": "android:id/button2",
-              bounds: "[100,200][300,260]",
+              bounds: { left: 100, top: 200, right: 300, bottom: 260 },
             },
           ],
         },
@@ -349,7 +428,7 @@ function appScreenMimickingEnglishSystemUiAnr(): ViewHierarchyResult {
           node: [
             { text: "System UI isn't responding" },
             { text: "Close app" },
-            { text: "Wait", bounds: "[100,200][300,260]" },
+            { text: "Wait", bounds: { left: 100, top: 200, right: 300, bottom: 260 } },
           ],
         },
       },
@@ -508,7 +587,8 @@ describe("RunnerReadinessService", () => {
       readinessTimeoutMs: 500,
     });
     expect(manager.setupCalls).toBe(2);
-    expect(manager.resetSetupStateCalls).toBeGreaterThanOrEqual(2);
+    expect(manager.resetSetupStateCalls).toBe(1);
+    expect(manager.reopenSetupGateCalls).toBe(2);
   });
 
   test("accepts delayed CtrlProxy enablement after setup", async () => {
@@ -533,6 +613,87 @@ describe("RunnerReadinessService", () => {
     expect(timer.now()).toBe(500);
     expect(bypassedCacheReads).toBe(2);
   });
+
+  test.each([1, 3])(
+    "repairs lost CtrlProxy enablement after setup with %i writes",
+    async (requiredWrites) => {
+      const manager = new FakeAndroidManager();
+      manager.enabled = false;
+      manager.setup = async () => {
+        manager.setupCalls++;
+        // Android can clear enablement after setup has reported successful writes.
+        return { success: true, message: "enabled" };
+      };
+      manager.enable = async () => {
+        manager.enableCalls++;
+        manager.enabled = manager.enableCalls >= requiredWrites;
+      };
+      const { service, timer, androidClient } = createService({ androidManager: manager });
+
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+      });
+
+      expect(manager.setupCalls).toBe(1);
+      expect(manager.enableCalls).toBe(requiredWrites);
+      expect(androidClient.healthCalls).toBe(1);
+      expect(timer.now()).toBe(requiredWrites * 250);
+    },
+  );
+
+  test.each(["caller", "deadline"])(
+    "aborts and joins CtrlProxy enablement repair on %s cancellation",
+    async (cancellation) => {
+      const controller = new AbortController();
+      const reason = new Error("caller cancelled enablement repair");
+      const manager = new FakeAndroidManager();
+      manager.enabled = false;
+      manager.setup = async () => ({ success: true, message: "enabled" });
+      let repairSignal: AbortSignal | undefined;
+      let settled = false;
+      manager.enable = async () => {
+        repairSignal = getAbortSignal();
+        if (!repairSignal) {
+          throw new Error("enablement repair has no cancellation signal");
+        }
+        try {
+          repairSignal.throwIfAborted();
+          await new Promise<void>((_resolve, reject) => {
+            repairSignal?.addEventListener("abort", () => reject(repairSignal?.reason), {
+              once: true,
+            });
+            if (cancellation === "caller") {
+              controller.abort(reason);
+            }
+          });
+        } finally {
+          settled = true;
+        }
+      };
+      const { service, timer, androidClient } = createService({ androidManager: manager });
+      const readiness = service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+        signal: controller.signal,
+      });
+
+      if (cancellation === "caller") {
+        await expect(readiness).rejects.toBe(reason);
+        expect(timer.now()).toBe(250);
+      } else {
+        await expect(readiness).rejects.toThrow(/readiness phase exceeded/);
+        expect(timer.now()).toBe(5_000);
+      }
+      expect(repairSignal?.aborted).toBe(true);
+      expect(settled).toBe(true);
+      expect(androidClient.healthCalls).toBe(0);
+    },
+  );
 
   test("fails bounded verification when CtrlProxy remains disabled", async () => {
     const manager = new FakeAndroidManager();
@@ -676,6 +837,30 @@ describe("RunnerReadinessService", () => {
       expect(error).toBeInstanceOf(RunnerReadinessError);
       expect((error as RunnerReadinessError).diagnosticCause).toBe(loss);
     }
+  });
+
+  test("#12220 preserves typed foreign owner cause without retrying runner setup", async () => {
+    const manager = new FakeAndroidManager();
+    const refusal = new DeviceOwnedByOtherDaemonError("emulator-5554", 4242);
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      return { status: "failed", error: refusal.message, cause: refusal };
+    };
+    const { service, timer } = createService({ androidManager: manager });
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+      })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).diagnosticCause).toBe(refusal);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(false);
+    expect(attempts).toBe(1);
+    expect(timer.now()).toBe(0);
   });
 
   test("classifies the setup failure without treating device names as diagnostics", async () => {
@@ -1184,7 +1369,8 @@ describe("RunnerReadinessService", () => {
     await expect(service.ensureReady(readinessRequest)).resolves.toBeUndefined();
 
     expect(androidManager.setupCalls).toBe(2);
-    expect(androidManager.resetSetupStateCalls).toBe(2);
+    expect(androidManager.resetSetupStateCalls).toBe(0);
+    expect(androidManager.reopenSetupGateCalls).toBe(2);
   });
 
   test("honors disabled downloads while still enabling an installed compatible runner", async () => {
@@ -1289,6 +1475,187 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 30_000,
       }),
     ).rejects.toThrow(/phase=runner-setup.*xcodebuild exited 65/);
+    expect(iosManager.setupCalls).toBe(1);
+  });
+
+  test("retries typed iOS runner-exited startup failure and succeeds on attempt two", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosManager.onSetup = async () => {
+      iosManager.setupResult =
+        iosManager.setupCalls === 1
+          ? {
+              success: false,
+              message: "runner exited during startup",
+              retryableStartupFailure: true,
+            }
+          : { success: true, message: "ready" };
+    };
+    const { service } = createService({ iosManager, iosClient });
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+    expect(iosManager.setupCalls).toBe(2);
+    expect(iosManager.resetSetupStateCalls).toBe(2);
+  });
+
+  test("marks an exhausted iOS transient startup budget as a deadline failure", async () => {
+    const timer = new FakeTimer();
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosManager.setupResult = {
+      success: false,
+      message: "runner exited",
+      retryableStartupFailure: true,
+    };
+    const { service } = createService({ timer, iosManager, iosClient });
+    const error = await service
+      .ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios",
+        totalDeadlineMs: 30,
+        readinessTimeoutMs: 30,
+        onRunnerSetup: () => timer.advanceTime(30),
+      })
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect(error).toMatchObject({ deadlineExhausted: true, phase: "runner-setup", attempts: 1 });
+    expect(iosManager.setupCalls).toBe(1);
+  });
+
+  test.each([
+    [undefined, 3],
+    [2, 2],
+    [0, 1],
+    [-2, 1],
+    [Number.NaN, 1],
+    [2.9, 2],
+    [50, 3],
+    [Number.POSITIVE_INFINITY, 3],
+    [Number.NEGATIVE_INFINITY, 1],
+  ] as const)(
+    "bounds iOS transient setup attempts with limit %s to %s",
+    async (limit, expectedAttempts) => {
+      const iosManager = new FakeIosManager();
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosManager.setupResult = {
+        success: false,
+        message: "runner exited",
+        retryableStartupFailure: true,
+      };
+      const { service } = createService({ iosManager, iosClient, iosSetupMaxAttempts: limit });
+      await expect(
+        service.ensureReady({
+          device: iosDevice,
+          requestedIdentity: "platform=ios",
+          totalDeadlineMs: 30_000,
+          readinessTimeoutMs: 30_000,
+        }),
+      ).rejects.toMatchObject({ deadlineExhausted: false, attempts: expectedAttempts });
+      expect(iosManager.setupCalls).toBe(expectedAttempts);
+    },
+  );
+
+  test.each(["failure", "throw", "timeout"] as const)(
+    "retains bounded prior iOS setup errors on final %s",
+    async (outcome) => {
+      const iosManager = new FakeIosManager();
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      const finalFailure = new Error("final setup fault");
+      iosManager.onSetup = async () => {
+        if (iosManager.setupCalls === 3) {
+          if (outcome === "throw") {
+            throw finalFailure;
+          }
+          if (outcome === "timeout") {
+            await new Promise<never>((_resolve, reject) => {
+              iosManager.setupSignal?.addEventListener(
+                "abort",
+                () => reject(iosManager.setupSignal?.reason),
+                { once: true },
+              );
+            });
+          }
+        }
+        iosManager.setupResult = {
+          success: false,
+          message: "startup failed",
+          error:
+            iosManager.setupCalls === 1
+              ? "first runner exited token=top-secret"
+              : iosManager.setupCalls === 2
+                ? `second runner exited ${"x".repeat(1_000)}`
+                : "final setup fault",
+          retryableStartupFailure: true,
+        };
+      };
+      const { service, timer } = createService({ iosManager, iosClient });
+      const error = await service
+        .ensureReady({
+          device: iosDevice,
+          requestedIdentity: "platform=ios",
+          totalDeadlineMs: 30,
+          readinessTimeoutMs: 30,
+        })
+        .then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+      expect(error).toBeInstanceOf(RunnerReadinessError);
+      if (!(error instanceof RunnerReadinessError)) {
+        throw new Error("Expected final setup failure");
+      }
+      expect(error).toMatchObject({
+        phase: "runner-setup",
+        attempts: 3,
+        deadlineExhausted: outcome === "timeout",
+      });
+      expect(error.message).toContain("startDevice automation runner readiness failed:");
+      expect(error.message).toContain("phase=runner-setup attempts=3");
+      expect(error.message).toContain("attempt 1/3: first runner exited token=[REDACTED]");
+      expect(error.message).toContain("attempt 2/3: second runner exited");
+      expect(error.message).not.toContain("top-secret");
+      expect(error.message).not.toContain("x".repeat(501));
+      expect(error.diagnosticCause).toBe(
+        outcome === "throw"
+          ? finalFailure
+          : outcome === "timeout"
+            ? iosManager.setupSignal?.reason
+            : "final setup fault",
+      );
+      expect(iosManager.setupCalls).toBe(3);
+      expect(timer.now()).toBe(outcome === "timeout" ? 30 : 0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("does not retry a non-retryable iOS setup failure even at the deadline", async () => {
+    const timer = new FakeTimer();
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosManager.setupResult = { success: false, message: "missing runner artifact" };
+    const { service } = createService({ timer, iosManager, iosClient });
+    await expect(
+      service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios",
+        totalDeadlineMs: 30,
+        readinessTimeoutMs: 30,
+        onRunnerSetup: () => timer.advanceTime(30),
+      }),
+    ).rejects.toMatchObject({ deadlineExhausted: false, attempts: 1 });
+    expect(iosManager.setupCalls).toBe(1);
   });
 
   test("passes the remaining readiness budget to iOS CtrlProxy setup", async () => {
@@ -1314,6 +1681,202 @@ describe("RunnerReadinessService", () => {
 
     expect(iosManager.setupMinimumHealthPollDurationMs).toBe(110_000);
     expect(iosManager.setupSignal).toBeDefined();
+  });
+
+  for (const skipCtrlProxyDownload of [false, true]) {
+    test(`post-setup slow first iOS probe retries without restart (${skipCtrlProxyDownload ? "cached start" : "setup"})`, async () => {
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [false, true];
+      const { service, timer, iosManager } = createService({ iosClient });
+      iosClient.onHealth = async (timeoutMs) => {
+        if (iosClient.healthCalls === 1) {
+          await timer.sleep(timeoutMs ?? 0);
+        }
+      };
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup slow snapshot",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+        skipCtrlProxyDownload,
+      });
+
+      expect(iosManager.forceRestartCalls).toBe(0);
+      expect(iosClient.healthCalls).toBe(2);
+      expect(iosClient.healthTimeouts).toEqual([
+        IOS_POST_SETUP_FIRST_PROBE_TIMEOUT_MS,
+        READINESS_PROBE_TIMEOUT_MS,
+      ]);
+      expect(timer.now()).toBe(8_250);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+  }
+
+  test.each([undefined, 2])(
+    "post-setup restarts once after the failure threshold %s",
+    async (threshold) => {
+      const failures = threshold ?? IOS_POST_SETUP_RESTART_MIN_FAILED_PROBES;
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [...Array.from({ length: failures }, () => false), true];
+      const { service, iosManager } = createService({
+        iosClient,
+        iosPostSetupRestartMinFailedProbes: threshold,
+      });
+      let callsBeforeRestart = 0;
+      iosManager.onForceRestart = async () => {
+        callsBeforeRestart = iosClient.healthCalls;
+      };
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup unresponsive hierarchy",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+      });
+
+      expect(callsBeforeRestart).toBe(failures);
+      expect(iosManager.forceRestartCalls).toBe(1);
+      expect(iosClient.healthCalls).toBe(failures + 1);
+    },
+  );
+
+  test.each(["refused", "exit", "signal", "exit-during-probe"] as const)(
+    "post-setup restarts immediately on %s evidence",
+    async (evidence) => {
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [false, true];
+      const { service, iosManager, timer } = createService({ iosClient, autoAdvance: false });
+      if (evidence === "refused") {
+        iosManager.endpointHealth = { ok: false, reason: "refused" };
+        iosClient.connectionResults = [false, true];
+        iosClient.healthResults = [true];
+      } else if (evidence === "exit-during-probe") {
+        const child: { exitCode: number | null; signalCode: NodeJS.Signals | null } = {
+          exitCode: null,
+          signalCode: null,
+        };
+        iosManager.runnerChild = child;
+        iosClient.onHealth = async () => {
+          if (iosClient.healthCalls === 1) {
+            child.exitCode = 65;
+            iosManager.runnerChild = null;
+          }
+        };
+      } else {
+        iosManager.runnerChild = {
+          exitCode: evidence === "exit" ? 65 : null,
+          signalCode: evidence === "signal" ? "SIGTERM" : null,
+        };
+      }
+      let probesBeforeRestart = 0;
+      iosManager.onForceRestart = async () => {
+        probesBeforeRestart = iosClient.healthCalls;
+      };
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup dead runner",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+      });
+
+      expect(iosManager.forceRestartCalls).toBe(1);
+      expect(probesBeforeRestart).toBe(evidence === "refused" ? 0 : 1);
+      expect(timer.now()).toBe(0);
+    },
+  );
+
+  test.each(["timeout", "reset", "unhealthy", "unknown"] as const)(
+    "post-setup tolerates one %s health result and an untracked child",
+    async (reason) => {
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [false, true];
+      const { service, iosManager } = createService({ iosClient });
+      iosManager.endpointHealth = { ok: false, reason };
+      iosManager.runnerChild = null;
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup inconclusive liveness",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+      });
+
+      expect(iosManager.forceRestartCalls).toBe(0);
+      expect(iosClient.healthCalls).toBe(2);
+    },
+  );
+
+  test("post-setup cold restart takes 95 seconds and receives a fresh health window", async () => {
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.healthResults = [false, false, true];
+    const { service, timer, iosManager } = createService({ iosClient });
+    iosManager.endpointHealth = { ok: false, reason: "refused" };
+    iosManager.onForceRestart = async () => {
+      await timer.sleep(95_000);
+    };
+    iosClient.onHealth = async (timeoutMs) => {
+      if (iosClient.healthCalls !== 3) {
+        await timer.sleep(timeoutMs ?? 0);
+      }
+    };
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "post-setup cold restart",
+      totalDeadlineMs: 180_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(iosManager.forceRestartOptions?.minimumHealthPollDurationMs).toBe(172_000);
+    expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(false);
+    expect(iosClient.healthCalls).toBe(3);
+    expect(timer.now()).toBe(105_250);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("post-setup restart is aborted at the runner-setup deadline", async () => {
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.healthResults = [false];
+    const { service, timer, iosManager } = createService({ iosClient });
+    iosManager.endpointHealth = { ok: false, reason: "refused" };
+    iosManager.onForceRestart = async (options) =>
+      await new Promise<void>((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+          once: true,
+        });
+      });
+
+    const error = await service
+      .ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup bounded restart",
+        totalDeadlineMs: 90_000,
+        readinessTimeoutMs: 30_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    if (!(error instanceof RunnerReadinessError)) {
+      throw new Error("Expected a runner readiness deadline failure");
+    }
+    expect(error.phase).toBe("runner-setup");
+    expect(error.deadlineExhausted).toBe(true);
+    expect(error.code).toBe("timeout");
+    expect(error.retryable).toBe(true);
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(iosManager.forceRestartOptions?.minimumHealthPollDurationMs).toBe(90_000);
+    expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(true);
+    expect(timer.now()).toBe(90_000);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("force-restarts an iOS runner whose live launcher has no listening endpoint", async () => {
@@ -2547,3 +3110,146 @@ test.each(["android", "ios"] as const)(
     release();
   },
 );
+
+describe("Android readiness client lifetime", () => {
+  test("moves the readiness hold when a client closes mid-readiness", async () => {
+    const old = new FakeReadinessClient();
+    old.connected = false;
+    old.connectionResults = [];
+    old.onConnect = () => {
+      expect(old.holds).toBe(1);
+      old.closed = true;
+    };
+    const replacement = new FakeReadinessClient();
+    replacement.connected = false;
+    replacement.onConnect = () => expect(replacement.holds).toBe(1);
+    let resolutions = 0;
+    const { service, timer } = createService({
+      getAndroidClient: () => (++resolutions === 1 ? old : replacement),
+    });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+    expect(resolutions).toBe(2);
+    expect(old.connectionCalls).toBe(1);
+    expect(replacement.connectionCalls).toBe(1);
+    expect(timer.now()).toBeLessThan(1_000);
+    expect(old.holds).toBe(0);
+    expect(replacement.holds).toBe(0);
+  });
+
+  test("fails promptly when resolving again still returns a closed client", async () => {
+    const client = new FakeReadinessClient();
+    client.closed = true;
+    client.connected = false;
+    const cause = "CtrlProxy client was closed before an adb forward was established";
+    client.getForwardFailureCause = () => cause;
+    let resolutions = 0;
+    const { service, timer } = createService({
+      getAndroidClient: () => {
+        resolutions++;
+        return client;
+      },
+    });
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 10_000,
+        readinessTimeoutMs: 10_000,
+      })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    const failure = error as RunnerReadinessError;
+    expect(failure.failureKind).toBe("ctrlproxy_forward_unavailable");
+    expect(failure.message.startsWith(cause)).toBe(true);
+    expect(failure.message).not.toContain("crashed or unbound");
+    expect(failure.deadlineExhausted).toBe(false);
+    expect(timer.now()).toBeLessThan(1_000);
+    expect(client.connectionCalls).toBe(0);
+    expect(resolutions).toBe(2);
+    expect(client.holds).toBe(0);
+  });
+
+  test("iOS readiness does not acquire an Android readiness hold or re-resolve its client", async () => {
+    const client = new FakeReadinessClient();
+    client.closed = true;
+    client.connected = false;
+    client.onConnect = () => expect(client.holds).toBe(0);
+    const { service } = createService({
+      iosClient: client,
+      getAndroidClient: () => {
+        throw new Error("unexpected Android resolution");
+      },
+    });
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 1_000,
+    });
+    expect(client.connectionCalls).toBe(1);
+    expect(client.holds).toBe(0);
+  });
+
+  test("forwarding lease conflict keeps priority over the forward setup diagnostic", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getForwardFailureCause = () => "Failed to establish adb forward";
+    client.getLastConnectionFailureMessage = () => "Another daemon owns CtrlProxy forwarding";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    const failure = error as RunnerReadinessError;
+    expect(failure.message).toContain("Another daemon owns CtrlProxy forwarding");
+    expect(failure.failureKind).toBeUndefined();
+    expect(failure.deadlineExhausted).toBe(false);
+    expect(client.holds).toBe(0);
+  });
+
+  for (const forwardCause of [undefined, "Failed to establish adb forward for emulator-5554"]) {
+    test(`deadline diagnostic preserves the forward cause: ${forwardCause !== undefined}`, async () => {
+      const client = new FakeReadinessClient();
+      client.connected = false;
+      client.connectionResults = [];
+      client.getForwardFailureCause = () => forwardCause;
+      const manager = new FakeAndroidManager();
+      manager.accessibilityServiceHealthy = false;
+      const { service } = createService({ androidClient: client, androidManager: manager });
+      const error = await service
+        .ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "platform=android",
+          totalDeadlineMs: 1_000,
+          readinessTimeoutMs: 1_000,
+        })
+        .catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(RunnerReadinessError);
+      const failure = error as RunnerReadinessError;
+      expect(failure.deadlineExhausted).toBe(true);
+      expect(failure.code).toBe("timeout");
+      expect(failure.retryable).toBe(true);
+      expect(failure.failureKind).toBe(forwardCause ? "ctrlproxy_forward_unavailable" : undefined);
+      if (forwardCause) {
+        expect(failure.message.startsWith(forwardCause)).toBe(true);
+      } else {
+        expect(failure.message).toContain(
+          "accessibility service was crashed or unbound; rebind attempted",
+        );
+      }
+      expect(client.holds).toBe(0);
+    });
+  }
+});

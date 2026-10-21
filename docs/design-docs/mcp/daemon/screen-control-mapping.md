@@ -433,7 +433,7 @@ platforms and marks every per-keystroke request as append.
 
 **Only printable ASCII is forwarded, because that is exactly what append can
 type.** Append works by injecting real Android key events, and the daemon's
-character→keycode table (`src/features/action/asciiKeyEvents.ts`) covers
+character→keycode table (`src/utils/android-cmdline-tools/asciiKeyEvents.ts`) covers
 `U+0020`–`U+007E` and nothing else. Forwarding a character outside that range
 would lose the keystroke _twice_: consumed at the host, then rejected by the
 device. So a non-ASCII character is declined and left unconsumed — never

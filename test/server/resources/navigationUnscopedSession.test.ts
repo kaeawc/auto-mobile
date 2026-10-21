@@ -1,3 +1,5 @@
+import { z } from "zod/v4";
+import { fakeServerContext } from "../../helpers/fakeServerContext";
 import {
   afterAll,
   afterEach,
@@ -8,11 +10,6 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../../src/db/navigationRepository";
@@ -23,7 +20,7 @@ import {
   type ResourceContent,
   type ResourceReadContext,
 } from "../../../src/server/resourceRegistry";
-import { ResourceUpdatedBroadcaster } from "../../../src/server/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../../src/daemon/listChangedBroadcast";
 import {
   registerNavigationResources,
   setNavigationGraphProvider,
@@ -66,9 +63,9 @@ async function payload(uri: string, context: ResourceReadContext = {}) {
 
 async function connect(context: ResourceReadContext): Promise<FakeMcpServer> {
   const server = new FakeMcpServer();
-  ResourceRegistry.registerWithServer(server as unknown as McpServer, () => context);
+  ResourceRegistry.registerWithServer(server, () => context);
   for (const uri of [graphUri, "automobile:navigation/history", "automobile:navigation/apps"]) {
-    await server.server.handlersBySchema.get(SubscribeRequestSchema)!({ params: { uri } });
+    await server.server.handlersBySchema.get("resources/subscribe")!({ params: { uri } });
   }
   return server;
 }
@@ -89,7 +86,7 @@ describe("navigation resource session resolution", () => {
     const make = (id: string) =>
       NavigationGraphManager.createForTesting(
         new NavigationRepository(harness.db),
-        new TestCoverageRepository(undefined, harness.db),
+        new TestCoverageRepository(harness.db),
         new FakeTimer(),
         id,
       );
@@ -165,9 +162,9 @@ describe("navigation resource session resolution", () => {
 
   test("registry forwards the connection binding to the graph handler", async () => {
     const server = await connect({ sessionUuid: "B" });
-    const result = (await server.server.handlersBySchema.get(ReadResourceRequestSchema)!(
+    const result = (await server.server.handlersBySchema.get("resources/read")!(
       { params: { uri: graphUri } },
-      { signal: new AbortController().signal },
+      fakeServerContext({ signal: new AbortController().signal }),
     )) as { contents: ResourceContent[] };
     expect(JSON.parse(result.contents[0]!.text!).currentScreen).toBe("HomeB");
   });
@@ -310,7 +307,9 @@ describe("navigation resource session resolution", () => {
     await a.setCurrentApp("app.a.sole-update");
     await timer.advanceTimeAsync(1000);
     expect(
-      server.server.notifications.map((notification) => notification.params?.uri).sort(),
+      server.server.notifications
+        .map((notification) => z.object({ uri: z.string() }).parse(notification.params).uri)
+        .sort(),
     ).toEqual([graphUri, "automobile:navigation/history", "automobile:navigation/apps"].sort());
     server.server.notifications.length = 0;
     sessions.sessionIds = ["A", "B"];

@@ -1,0 +1,33 @@
+{
+  "id": "checks",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "value": ""
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "textField",
+        "stateKey": "value",
+        "checks": [
+          {
+            "required": true,
+            "message": "Required"
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "enabledWhen": {
+          "valid": "value"
+        },
+        "label": "Save"
+      }
+    ]
+  }
+}

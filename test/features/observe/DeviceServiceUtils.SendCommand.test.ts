@@ -1,5 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
-import type WebSocket from "ws";
+import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import {
   sendCommand,
   type SendCommandOptions,
@@ -9,6 +8,8 @@ import { RequestManager } from "../../../src/utils/RequestManager";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
+
+afterEach(() => mock.restore());
 
 function harness(overrides: Partial<DelegateContext> = {}) {
   const timer = new FakeTimer();
@@ -24,7 +25,7 @@ function harness(overrides: Partial<DelegateContext> = {}) {
   const context: DelegateContext = {
     timer,
     requestManager,
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => socket,
     ensureConnected: async () => {
       order.push("connect");
       return true;
@@ -49,6 +50,42 @@ async function flushDispatch(): Promise<void> {
 }
 
 describe("sendCommand lifecycle", () => {
+  test("creates a caller-owned wire ID after connecting and uses it for response correlation", async () => {
+    const h = harness();
+    let defaultIds = 0;
+    h.context.requestManager.generateId = (prefix) => `${prefix}_${++defaultIds}`;
+    const pending = sendCommand(h.context, {
+      ...h.options,
+      createRequestId: () => {
+        h.order.push("id");
+        return `tap_${h.timer.now()}_caller`;
+      },
+    });
+    expect(h.order).toEqual(["cancel", "connect"]);
+    h.timer.advanceTime(12);
+    await flushDispatch();
+    expect(h.order).toEqual(["cancel", "connect", "id", "send"]);
+    expect(h.sent).toEqual(['{"type":"request_tap","requestId":"tap_12_caller"}']);
+    h.context.requestManager.resolve("tap_12_caller", { success: true, totalTimeMs: 3 });
+    expect(await pending).toEqual({ success: true, totalTimeMs: 3 });
+    expect(h.context.requestManager.getPendingCount()).toBe(0);
+    // Supplying a hook does not consume the manager's default ID generator.
+    expect(defaultIds).toBe(0);
+    expect(h.context.requestManager.generateId("next")).toBe("next_1");
+  });
+
+  test("does not create a caller-owned ID when connecting fails", async () => {
+    const h = harness({ ensureConnected: async () => false });
+    const result = await sendCommand(h.context, {
+      ...h.options,
+      createRequestId: () => {
+        throw new Error("must not generate an ID before connecting");
+      },
+    });
+    expect(result.error).toBe("Not connected");
+    expect(h.context.requestManager.getPendingCount()).toBe(0);
+  });
+
   test("preserves cancellation, connection, serialization, fence, send and dispatch order", async () => {
     const h = harness();
     const controller = new AbortController();
@@ -190,7 +227,7 @@ describe("sendCommand lifecycle", () => {
 
   test("rechecks the required capability immediately before the fence and send", async () => {
     const h = harness({ isCommandSupported: (type) => type !== "atomic" });
-    const pending = sendCommand(h.context, {
+    const pending = sendCommand<BaseResult & { unsupportedCapability?: string }>(h.context, {
       ...h.options,
       requiredCapability: "atomic",
       beforeSend: () => {
@@ -271,8 +308,8 @@ describe("sendCommand lifecycle", () => {
     const controller = new AbortController();
     const register = h.context.requestManager.register.bind(h.context.requestManager);
     spyOn(h.context.requestManager, "register").mockImplementation(
-      (...args: Parameters<RequestManager["register"]>) => {
-        const pending = register(...args);
+      <T>(...args: Parameters<typeof register<T>>) => {
+        const pending = register<T>(...args);
         controller.abort(new Error("registration abort"));
         return pending;
       },

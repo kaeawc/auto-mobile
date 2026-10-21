@@ -9,6 +9,8 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { VisionFallbackConfig } from "../../../../src/vision/VisionTypes";
 import type { ObserveResult } from "../../../../src/models";
+import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 
 const enabledVisionConfig: VisionFallbackConfig = {
   enabled: true,
@@ -22,10 +24,12 @@ const enabledVisionConfig: VisionFallbackConfig = {
 const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
 
 const createObserveResult = (): ObserveResult => ({
-  timestamp: Date.now(),
+  updatedAt: Date.now(),
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy: { hierarchy: { node: [] } } as any,
+  viewHierarchy: { hierarchy: {} },
 });
 
 describe("SwipeOn vision fallback", () => {
@@ -33,15 +37,14 @@ describe("SwipeOn vision fallback", () => {
   let fakeGesture: FakeGestureExecutor;
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
   let fakeTimer: FakeTimer;
-  let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+  let getInstanceSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(false);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      getAccessibilityHierarchy: async () => null,
-      clearAccessibilityFocus: async () => {},
-    } as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      new FakeCtrlProxy(),
+    );
     fakeObserveScreen = new FakeObserveScreen();
     fakeObserveScreen.setObserveResult(createObserveResult());
     fakeGesture = new FakeGestureExecutor();
@@ -50,11 +53,12 @@ describe("SwipeOn vision fallback", () => {
   });
 
   afterEach(() => {
-    getInstanceSpy?.mockRestore();
+    getInstanceSpy.mockRestore();
   });
 
   const createSwipeOn = (capturer: FakeScreenshotCapturer, analyzer: FakeVisionAnalyzer) => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
@@ -62,8 +66,6 @@ describe("SwipeOn vision fallback", () => {
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
     });
-    // Patch the inner scrollUntilVisible timer so retries are fast
-    (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
     return swipeOn;
   };
 
@@ -126,7 +128,8 @@ describe("SwipeOn vision fallback", () => {
     capturer.setPaths(["/screenshot.png"]);
     const analyzer = new FakeVisionAnalyzer();
 
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
@@ -134,7 +137,6 @@ describe("SwipeOn vision fallback", () => {
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
     });
-    (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
 
     const result = await swipeOn.execute({
       direction: "up",

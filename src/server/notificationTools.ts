@@ -1,28 +1,30 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, Platform } from "../models";
-import { createJSONToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import {
+  getNotificationPolicyResultSchema,
+  postNotificationResultSchema,
+  setNotificationPolicyResultSchema,
+} from "./notificationToolOutputSchemas";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import {
   ANDROID_PACKAGE_NAME_PATTERN,
   PostNotification,
-  PostNotificationOptions,
 } from "../features/utility/PostNotification";
 import {
   NotificationPolicy,
   type NotificationPolicyResult,
 } from "../features/utility/NotificationPolicy";
 
-export interface PostNotificationArgs extends PostNotificationOptions {
-  // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: Platform;
-}
+export type PostNotificationArgs = z.output<typeof postNotificationSchema>;
 
 const iosAppIdRequiredMessage = "appId is required when platform is ios";
 
@@ -61,7 +63,7 @@ const androidAppIdInvalidMessage = "appId must be an Android package name";
  */
 export function checkPostNotificationPlatformConstraints(
   platform: Platform | undefined,
-  args: Pick<PostNotificationArgs, "appId">,
+  args: { appId?: string },
 ): { path: "appId"; message: string } | null {
   if (platform === "ios" && !args.appId) {
     return { path: "appId", message: iosAppIdRequiredMessage };
@@ -132,66 +134,58 @@ export type GetNotificationPolicyArgs = z.infer<typeof getNotificationPolicySche
 
 export type SetNotificationPolicyArgs = z.infer<typeof setNotificationPolicySchema>;
 
-// Injection seam for the postNotification handler (mirrors the tapAny factory
-// seam in interactionTools.ts). Lets a unit test exercise the registered
-// handler wiring with a fake PostNotification whose execute() returns a
-// chosen success/failure result, instead of spying on the class prototype
-// (#6251 review — a prototype spy is a process-global patch that can leak
-// into unrelated tests running in the same process).
+// Narrow executor interface for per-handler dependency injection.
 export type PostNotificationLike = Pick<PostNotification, "execute">;
 
-let postNotificationFactory: (device: BootedDevice) => PostNotificationLike = (device) =>
-  new PostNotification(device);
-
-export function setPostNotificationFactory(
-  factory: (device: BootedDevice) => PostNotificationLike,
-): void {
-  postNotificationFactory = factory;
+export interface NotificationToolDependencies {
+  postNotificationFactory?: (device: BootedDevice) => PostNotificationLike;
 }
 
-export function resetPostNotificationFactory(): void {
-  postNotificationFactory = (device) => new PostNotification(device);
+export function createPostNotificationHandler({
+  postNotificationFactory = (device) => new PostNotification(device),
+}: NotificationToolDependencies = {}) {
+  return async (device: BootedDevice, args: PostNotificationArgs) => {
+    // #6154 follow-up: `platform` is optional on the wire, so the schema's
+    // per-platform appId checks (raw request platform) are skipped entirely
+    // when the caller omitted it. Re-validate against the resolved
+    // `device.platform`, before the try/catch below so the actionable message
+    // isn't re-wrapped as a generic execution failure.
+    const violation = checkPostNotificationPlatformConstraints(device.platform, args);
+    if (violation) {
+      throw new ActionableError(violation.message);
+    }
+
+    try {
+      const postNotification = postNotificationFactory(device);
+      const result = await postNotification.execute({
+        title: args.title,
+        body: args.body,
+        imageType: args.imageType,
+        imagePath: args.imagePath,
+        actions: args.actions,
+        channelId: args.channelId,
+        appId: args.appId,
+      });
+
+      const message = result.success
+        ? `Posted notification${result.method ? ` via ${result.method}` : ""}${result.warning ? ` (warning: ${result.warning})` : ""}`
+        : `Failed to post notification${result.error ? `: ${result.error}` : ""}`;
+
+      const response = createStructuredToolResponse({
+        message,
+        ...result,
+      });
+      // A receiver-reported failure means the notification was never delivered
+      // — the primary operation did not succeed, so the MCP envelope must say
+      // so too, exactly as tapOn/sendKeys do (#6200, #6251).
+      return result.success ? response : { ...response, isError: true as const };
+    } catch (error) {
+      throw toActionableError(error, `Failed to post notification`);
+    }
+  };
 }
 
-export const postNotificationHandler = async (device: BootedDevice, args: PostNotificationArgs) => {
-  // #6154 follow-up: `platform` is optional on the wire, so the schema's
-  // per-platform appId checks (raw request platform) are skipped entirely
-  // when the caller omitted it. Re-validate against the resolved
-  // `device.platform`, before the try/catch below so the actionable message
-  // isn't re-wrapped as a generic execution failure.
-  const violation = checkPostNotificationPlatformConstraints(device.platform, args);
-  if (violation) {
-    throw new ActionableError(violation.message);
-  }
-
-  try {
-    const postNotification = postNotificationFactory(device);
-    const result = await postNotification.execute({
-      title: args.title,
-      body: args.body,
-      imageType: args.imageType,
-      imagePath: args.imagePath,
-      actions: args.actions,
-      channelId: args.channelId,
-      appId: args.appId,
-    });
-
-    const message = result.success
-      ? `Posted notification${result.method ? ` via ${result.method}` : ""}${result.warning ? ` (warning: ${result.warning})` : ""}`
-      : `Failed to post notification${result.error ? `: ${result.error}` : ""}`;
-
-    const response = createJSONToolResponse({
-      message,
-      ...result,
-    });
-    // A receiver-reported failure means the notification was never delivered
-    // — the primary operation did not succeed, so the MCP envelope must say
-    // so too, exactly as tapOn/sendKeys do (#6200, #6251).
-    return result.success ? response : { ...response, isError: true as const };
-  } catch (error) {
-    throw toActionableError(error, `Failed to post notification`);
-  }
-};
+export const postNotificationHandler = createPostNotificationHandler();
 
 /** Say "Allowed/Revoked" only when the read-back confirmed it; otherwise say it is unverified. */
 function describeSetPolicySuccess(
@@ -206,7 +200,7 @@ function describeSetPolicySuccess(
   return `Requested notification policy access be ${verb} for ${args.appId}, but the resulting state was not verified${detail}`;
 }
 
-export function registerNotificationTools() {
+export function registerNotificationTools(deps: NotificationToolDependencies = {}) {
   const getNotificationPolicyHandler = async (
     device: BootedDevice,
     args: GetNotificationPolicyArgs,
@@ -214,7 +208,7 @@ export function registerNotificationTools() {
     const notificationPolicy = new NotificationPolicy(device);
     const result = await notificationPolicy.getPolicy(args.appId);
 
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: result.success
         ? `Read notification policy for ${args.appId}`
         : (result.error ?? `Failed to read notification policy for ${args.appId}`),
@@ -232,7 +226,7 @@ export function registerNotificationTools() {
       policyAccess: args.policyAccess,
     });
 
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: result.success
         ? describeSetPolicySuccess(args, result)
         : (result.error ?? `Failed to set notification policy for ${args.appId}`),
@@ -245,8 +239,8 @@ export function registerNotificationTools() {
     "postNotification",
     "Post notification via Android SDK hooks or iOS Simulator simctl push.",
     postNotificationSchema,
-    postNotificationHandler,
-    { defaultEnabled: false },
+    createPostNotificationHandler(deps),
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: postNotificationResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -255,7 +249,11 @@ export function registerNotificationTools() {
     getNotificationPolicySchema,
     getNotificationPolicyHandler,
     // Reads only; read-only access never requires a session (#10965).
-    { defaultEnabled: false, deviceReadOnly: true },
+    {
+      defaultEnabled: false,
+      deviceReadOnly: true,
+      outputSchema: getNotificationPolicyResultSchema,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -263,6 +261,6 @@ export function registerNotificationTools() {
     "Set app notification/DND policy state",
     setNotificationPolicySchema,
     setNotificationPolicyHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setNotificationPolicyResultSchema },
   );
 }

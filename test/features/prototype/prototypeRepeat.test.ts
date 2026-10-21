@@ -5,12 +5,15 @@ import {
   repeatErrors,
   repeatFieldReferences,
 } from "../../../src/features/prototype/prototypeRepeat";
-import { BOUND_STATE_KEY_PATTERN } from "../../../src/features/prototype/prototypeTemplate";
+import {
+  BOUND_STATE_KEY_PATTERN,
+  bindNodeFields,
+} from "../../../src/features/prototype/prototypeTemplate";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const spec = (root: unknown) => ({
   id: "r",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root,
 });
 const list = (children: unknown[], items: unknown[] = [{ a: 1 }], as = "item") => ({
@@ -34,6 +37,52 @@ describe("repeatFieldReferences", () => {
 });
 
 describe("repeatErrors", () => {
+  test("searchBar binds placeholder, result child, trailing labels and actions", () => {
+    const search = {
+      type: "searchBar",
+      stateKey: "query_{item.x}",
+      activeKey: "active_{item.x}",
+      placeholder: "Find {item.x}",
+      trailingActions: [
+        {
+          icon: "close",
+          label: "Clear {item.x}",
+          onTap: [{ type: "setState", key: "query_{item.x}", value: "" }],
+        },
+      ],
+      onSubmit: [{ type: "emit", name: "submit_{item.x}" }],
+      child: { type: "text", text: "Result {item.x}" },
+    };
+    const candidate = {
+      ...spec(list([search], [{ x: "one" }])),
+      state: { query_one: "", active_one: true },
+    };
+    expect(validatePrototypeSpec(candidate).success).toBe(true);
+    const instance = { binding: { alias: "item", index: true }, values: { x: "one" }, index: 0 };
+    expect(bindNodeFields(search, "root.children[0]", instance)).toMatchObject({
+      stateKey: "query_one",
+      activeKey: "active_one",
+      placeholder: "Find one",
+      trailingActions: [{ label: "Clear one", onTap: [{ key: "query_one" }] }],
+      onSubmit: [{ name: "submit_one" }],
+    });
+    expect(bindNodeFields(search.child, "root.children[0].child", instance)).toMatchObject({
+      text: "Result one",
+    });
+    for (const [field, node] of [
+      ["placeholder", { ...search, placeholder: "{item.nope}" }],
+      [
+        "trailingActions[0].label",
+        { ...search, trailingActions: [{ icon: "close", label: "{item.nope}" }] },
+      ],
+      ["child.text", { ...search, child: { type: "text", text: "{item.nope}" } }],
+      ["onSubmit[0].name", { ...search, onSubmit: [{ type: "emit", name: "{item.nope}" }] }],
+    ] as const) {
+      expect(repeatErrors({ ...candidate, root: list([node], [{ x: "one" }]) })?.path).toBe(
+        `root.children[0].${field}`,
+      );
+    }
+  });
   test("specs without repeat have no repeat errors", () => {
     expect(repeatErrors(spec({ type: "spacer" }))).toBeUndefined();
     expect(repeatErrors("not a spec")).toBeUndefined();
@@ -235,6 +284,358 @@ describe("bound state keys (#11051)", () => {
     expect(repeatErrors(spec(toggle("liked_{item.id}")))).toEqual({
       path: "root.onTap[0].key",
       message: "State key placeholder outside a repeat template",
+    });
+  });
+});
+
+describe("data-bound repeats", () => {
+  const dataSpec = (
+    items: unknown,
+    extra: Record<string, unknown> = {},
+    children: unknown[] = [{ type: "text", text: "{item.title}" }],
+  ) => ({
+    ...spec({
+      type: "column",
+      repeat: { items: { path: "/orders" }, as: "item", ...extra },
+      children,
+    }),
+    data: { orders: items },
+  });
+  test.each([
+    [undefined, "Repeat path does not resolve to an array"],
+    [1, "Repeat path does not resolve to an array"],
+    [
+      Array.from({ length: 129 }, () => ({ title: "x" })),
+      "Repeat path resolves to more than 128 items",
+    ],
+    [[{ title: "x" }, 1], "Repeat path item 1 is not an object"],
+  ])("path resolution %p", (items, message) => {
+    expect(repeatErrors(dataSpec(items))).toEqual({ path: "root.repeat.items.path", message });
+  });
+  test("empty arrays instantiate zero children", () => {
+    expect(validatePrototypeSpec(dataSpec([]))).toMatchObject({ success: true });
+  });
+  test("key fields must exist after projection; duplicates use rendered text", () => {
+    expect(repeatErrors(dataSpec([{ title: "a", id: {} }], { key: "id" }))).toEqual({
+      path: "root.repeat.key",
+      message: 'Unknown repeat field "id"',
+    });
+    expect(
+      repeatErrors(
+        dataSpec(
+          [
+            { title: "a", id: 7 },
+            { title: "b", id: "7" },
+          ],
+          { key: "id" },
+        ),
+      ),
+    ).toEqual({ path: "root.repeat.key", message: 'Duplicate repeat key "7" (items 0 and 1)' });
+    expect(repeatErrors(spec(list([{ type: "spacer" }], [{ id: 1 }, { id: 1 }])))).toBeUndefined();
+    const literal = {
+      ...list([{ type: "spacer" }], [{ id: 1 }, { id: 1 }]),
+      repeat: { as: "item", items: [{ id: 1 }, { id: 1 }], key: "id" },
+    };
+    expect(repeatErrors(spec(literal))).toEqual({
+      path: "root.repeat.key",
+      message: 'Duplicate repeat key "1" (items 0 and 1)',
+    });
+  });
+  test("path-bound invalid keys have a path location and item suffix; literals keep their location", () => {
+    const child = { type: "switch", stateKey: "liked_{item.id}" };
+    expect(repeatErrors(dataSpec([{ id: "bad-key" }], {}, [child]))).toEqual({
+      path: "root.repeat.items.path",
+      message: 'Bound state key "liked_bad-key" is invalid (repeat item 0)',
+    });
+    expect(repeatErrors(spec(list([child], [{ id: "bad-key" }])))).toEqual({
+      path: "root.repeat.items[0]",
+      message: 'Bound state key "liked_bad-key" is invalid',
+    });
+    expect(validatePrototypeSpec(dataSpec([{ id: 7 }], {}, [child]))).toEqual({
+      success: false,
+      error: {
+        path: "root.children[0].stateKey",
+        message: "Toggle control requires a boolean state key (repeat item 0)",
+      },
+    });
+  });
+  test("non-scalar item members are absent to templates", () => {
+    expect(repeatErrors(dataSpec([{ title: { text: "a" } }]))).toEqual({
+      path: "root.children[0].text",
+      message: 'Unknown repeat field "title"',
+    });
+  });
+  test("path-bound expansion overflow points to the repeat", () => {
+    expect(
+      repeatErrors(
+        dataSpec(
+          Array.from({ length: 128 }, () => ({})),
+          {},
+          Array.from({ length: 16 }, () => ({ type: "spacer" })),
+        ),
+      ),
+    ).toEqual({ path: "root.repeat", message: "Expanded node limit exceeded" });
+  });
+  test.each(["equals", "notEquals"])(
+    "data %s operands cannot contain repeat placeholders",
+    (comparison) => {
+      const child = {
+        type: "text",
+        text: "x",
+        visibleWhen: { data: "/n", [comparison]: "{item.id}" },
+      };
+      expect(repeatErrors(dataSpec([{ id: 7 }], {}, [child]))).toEqual({
+        path: `root.children[0].visibleWhen.${comparison}`,
+        message: "Repeat placeholder in a data condition operand is not supported",
+      });
+      expect(
+        repeatErrors(
+          dataSpec([{ id: 7 }], {}, [
+            { ...child, visibleWhen: { key: "n", [comparison]: "{item.id}" } },
+          ]),
+        ),
+      ).toBeUndefined();
+      expect(
+        repeatErrors(
+          dataSpec([{ id: 7 }], {}, [
+            { ...child, visibleWhen: { data: "/n", [comparison]: "{index}" } },
+          ]),
+        )?.message,
+      ).toBe("Repeat placeholder in a data condition operand is not supported");
+    },
+  );
+  test("data operands are checked in the bindable walk order", () => {
+    const child = {
+      type: "text",
+      text: "{item.missing}",
+      visibleWhen: { data: "/n", equals: "{index}" },
+    };
+    expect(repeatErrors(dataSpec([{}], {}, [child]))).toEqual({
+      path: "root.children[0].text",
+      message: 'Unknown repeat field "missing"',
+    });
+  });
+});
+
+describe("substituted text length", () => {
+  const error = (path: string) => ({
+    success: false,
+    error: { path, message: "Substituted text length limit exceeded" },
+  });
+  const text = (value: string) => ({ type: "text", text: value });
+  test("data amplification is rejected without building the replacement", () => {
+    const input = { ...spec(text("{data:/b}".repeat(80_000))), data: { b: "x".repeat(200_000) } };
+    expect<unknown>(validatePrototypeSpec(input)).toEqual(error("root.text"));
+  });
+  test.each([16_384, 16_385])("data boundary %i", (length) => {
+    const input = { ...spec(text("{data:/b}")), data: { b: "x".repeat(length) } };
+    expect(validatePrototypeSpec(input)).toEqual(
+      length === 16_384 ? expect.objectContaining({ success: true }) : error("root.text"),
+    );
+  });
+  test.each([
+    ["text", text("{item.b}{item.b}"), "text"],
+    [
+      "emit",
+      { ...text("tap"), onTap: [{ type: "emit", name: "{item.b}{item.b}" }] },
+      "onTap[0].name",
+    ],
+    [
+      "operand",
+      { ...text("tap"), onTap: [{ type: "setState", key: "k", value: "{item.b}{item.b}" }] },
+      "onTap[0].value",
+    ],
+  ] as const)("repeat %s is capped", (_name, child, field) => {
+    expect<unknown>(
+      validatePrototypeSpec({
+        ...spec(list([child], [{ b: "x".repeat(8193) }])),
+        state: { k: "" },
+      }),
+    ).toEqual(error(`root.children[0].${field}`));
+  });
+  test("repeat key amplification uses the fixed error before binding", () => {
+    const child = { ...text("tap"), onTap: [{ type: "toggle", key: "{item.b}".repeat(2000) }] };
+    expect<unknown>(
+      validatePrototypeSpec(spec(list([child], [{ b: "x".repeat(100_000) }]))),
+    ).toEqual(error("root.children[0].onTap[0].key"));
+  });
+  test("repeat counts index and each item's own rendered length", () => {
+    expect<unknown>(
+      validatePrototypeSpec(
+        spec(
+          list(
+            [text("{index}".repeat(8193))],
+            Array.from({ length: 11 }, () => ({})),
+          ),
+        ),
+      ),
+    ).toEqual(error("root.children[0].text"));
+    expect<unknown>(
+      validatePrototypeSpec(
+        spec(list([text("{item.b}{item.b}")], [{ b: "s" }, { b: "x".repeat(8193) }])),
+      ),
+    ).toEqual(error("root.children[0].text"));
+  });
+  test("data cascades into repeat and path items use the same bound", () => {
+    const root = list([text("{data:/t}")], [{ b: "x".repeat(8193) }]);
+    expect<unknown>(
+      validatePrototypeSpec({ ...spec(root), data: { t: "{item.b}{item.b}" } }),
+    ).toEqual(error("root.children[0].text"));
+    expect<unknown>(
+      validatePrototypeSpec({
+        ...spec({
+          ...root,
+          repeat: { items: { path: "/rows" }, as: "item" },
+          children: [text("{item.b}{item.b}")],
+        }),
+        data: { rows: [{ b: "x".repeat(8193) }] },
+      }),
+    ).toEqual(error("root.children[0].text"));
+  });
+  test("literal characters and mutable state replacements do not count", () => {
+    for (const input of [
+      spec(text("x".repeat(20_000))),
+      { ...spec(text("x".repeat(20_000) + "{data:/s}")), data: { s: "short" } },
+      { ...spec(text("{b}".repeat(1000))), state: { b: "x".repeat(100_000) } },
+    ]) {
+      expect(validatePrototypeSpec(input).success).toBe(true);
+    }
+  });
+  test("unknown authored repeat fields win before the length error", () => {
+    expect(
+      validatePrototypeSpec({
+        ...spec(list([text("{item.missing}{data:/b}")], [{}])),
+        data: { b: "x".repeat(16_385) },
+      }),
+    ).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: 'Unknown repeat field "missing"' },
+    });
+  });
+});
+
+describe("substituted text total", () => {
+  const text = (value: string) => ({ type: "text", text: value });
+  const totalError = (path: string) => ({
+    success: false,
+    error: { path, message: "Substituted text total limit exceeded" },
+  });
+  test.each([1, 2])("data-resolved text is charged per repeat item with %i fields", (count) => {
+    const input = {
+      ...spec(
+        list(
+          Array.from({ length: count }, () => text("{data:/b}")),
+          Array.from({ length: 128 }, () => ({})),
+          "i",
+        ),
+      ),
+      data: { b: "x".repeat(16375) },
+    };
+    const result = validatePrototypeSpec(input);
+    if (count === 1) {
+      expect(result.success).toBe(true);
+    } else {
+      expect<unknown>(result).toEqual(totalError("root.children[1].text"));
+    }
+  });
+  test("literal text inside a repeat is not charged", () => {
+    const input = spec(
+      list(
+        [text("x".repeat(16384)), text("x".repeat(16384))],
+        Array.from({ length: 128 }, () => ({})),
+        "i",
+      ),
+    );
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
+  test("data outside a repeat is charged once at the exact total", () => {
+    const input = JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../fixtures/prototype-spec/valid/substituted-text-total-exact.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
+  test("condition operands reach exactly the total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = { ...spec(list([child], [{ b: "x".repeat(16375) }])), state: { k: "" } };
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
+  test("condition operands share the running total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = {
+      ...spec(list([child, { ...text("t"), visibleWhen: operand }], [{ b: "x".repeat(16375) }])),
+      state: { k: "" },
+    };
+    expect<unknown>(validatePrototypeSpec(input)).toEqual(
+      totalError("root.children[1].visibleWhen.equals"),
+    );
+  });
+  test.each([64, 65])("repeat total charges each item in order with %i fields", (count) => {
+    const input = spec(
+      list(
+        Array.from({ length: count }, () => text("{i.b}")),
+        Array.from({ length: 4 }, () => ({ b: "x".repeat(16379) })),
+        "i",
+      ),
+    );
+    // {i.b} is five units; each field/item charges exactly 16384.
+    const result = validatePrototypeSpec(input);
+    if (count === 64) {
+      expect(result.success).toBe(true);
+    } else {
+      expect<unknown>(result).toEqual(totalError("root.children[64].text"));
+    }
+  });
+  test("per-field error wins on the first item before its total charge", () => {
+    const input = spec(list([text("{item.b}{item.b}")], [{ b: "x".repeat(8193) }]));
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: "Substituted text length limit exceeded" },
+    });
+  });
+  test("unknown field wins before both substitution limits", () => {
+    const input = {
+      ...spec(list([text("{item.missing}{data:/b}")], [{}])),
+      data: { b: "x".repeat(16385) },
+    };
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: 'Unknown repeat field "missing"' },
+    });
+  });
+  test("unknown field wins before crossing the total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = {
+      ...spec(list([child, text("{item.missing}{data:/s}")], [{ b: "x".repeat(16375) }])),
+      state: { k: "" },
+      data: { s: "" },
+    };
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[1].text", message: 'Unknown repeat field "missing"' },
     });
   });
 });

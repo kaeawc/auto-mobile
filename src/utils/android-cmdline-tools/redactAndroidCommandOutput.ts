@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { StringDecoder } from "node:string_decoder";
 import { redactHomeDir } from "../redactPath";
 
 const CREDENTIAL_KEY = String.raw`(?:(?:[A-Za-z0-9]+[._-])*(?:token|password|secret|api[_-]?key)|access[_-]?token|client[_-]?secret)`;
@@ -29,6 +30,7 @@ export function redactAndroidCommandOutput(value: string, home: string = homedir
  * a line break inside a quoted value can leak data into the emitted output.
  */
 export class AndroidCommandOutputStreamRedactor {
+  private readonly decoder = new StringDecoder("utf8");
   private pending = "";
   private credentialValueState: CredentialValueState | undefined;
   private readonly pendingPrefixLength: number;
@@ -37,12 +39,17 @@ export class AndroidCommandOutputStreamRedactor {
     this.pendingPrefixLength = Math.max(128, home.length);
   }
 
-  append(value: string): string {
-    this.pending += value;
+  decode(chunk: Buffer | string): string {
+    return typeof chunk === "string" ? chunk : this.decoder.write(chunk);
+  }
+
+  append(value: string | Buffer): string {
+    this.pending += this.decode(value);
     return this.consume(false);
   }
 
   flush(): string {
+    this.pending += this.decoder.end();
     return this.consume(true);
   }
 

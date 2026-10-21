@@ -9,11 +9,13 @@
 # external gate -- exactly like scripts/typecheck-baseline.sh does for `tsc`.
 #
 # The rules gated here are the ones .oxlintrc.json sets to "warn" because they
-# carry pre-existing violations (complexity, max-depth, max-params,
-# max-lines-per-function,
-# auto-mobile/catch-convention, auto-mobile/no-unknown-cast, and the two
-# type-aware promise rules). Every OTHER rule is "error" in the config and is
-# gated directly by `oxlint` (a non-zero exit), so it does not belong here. The
+# carry pre-existing violations (historically complexity, max-depth, max-params,
+# max-lines-per-function, auto-mobile/catch-convention, ...), plus the two
+# type-aware promise rules. Those are "error" in the config with a zero baseline,
+# but they only run under `--type-aware`, which the fast `oxlint` stage does not
+# use, so this gate is what enforces them (any diagnostic is a new violation).
+# Every OTHER rule is "error" in the config and is gated directly by `oxlint` (a
+# non-zero exit), so it does not belong here. The
 # promise rules need type information, so this gate runs oxlint with
 # `--type-aware` (tsgolint) -- which is why the main `oxlint --fix` does not, and
 # CI type-checks only once. As these are burned down the baseline shrinks; it is
@@ -23,6 +25,31 @@
 #     larger baseline unless `--allow-grow` is passed.
 #   * When you FIX violations the gate stays green and reminds you to `--update`
 #     so the baseline shrinks. It is expected to trend toward zero.
+#
+# Inline suppressions are ratcheted too. An `oxlint-disable*` / `eslint-disable*`
+# directive removes the diagnostic from oxlint's report, so without this a new
+# violation could be hidden instead of failing. scripts/lib/oxlintDisableScan.ts
+# scans the comments of every file oxlint lints (repo-wide via git ls-files, minus
+# the .oxlintrc.json ignorePatterns; it fails closed when none are found) with the
+# TypeScript scanner, and this script merges its rows into the same baseline and
+# the same new_or_increased compare:
+#   <count>  <file>  oxlint-disable(<rule>)            every -next-line directive, per rule
+#   <count>  <file>  oxlint-disable-line(<rule>)       every -line directive, per rule
+#   <count>  <file>  oxlint-disable-block(<rule>)      every unbounded directive a later enable closes
+#   <count>  <file>  oxlint-disable-partial(*)         a bare unbounded disable only named enables partly re-enable
+#   <count>  <file>  oxlint-disable-file(<rule>)       every unbounded directive left open to end of file
+#   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`
+# A new suppression therefore fails like a new violation and needs --allow-grow,
+# and removing one shrinks the baseline via --update. Narrowing a baselined
+# unbounded directive (-file to -partial to -block, e.g. adding the enable that
+# closes it) moves its count to a narrower row of the same file+rule; the
+# compare treats that as a shrink (no --allow-grow), while the reverse (dropping
+# a closer) is still growth. A directive listing several
+# rules counts once per rule; `eslint/<rule>` is normalised to `<rule>`. The
+# no-reason row has no tolerance beyond the baseline: pre-existing reason-less
+# directives are recorded, but a NEW one grows that row and fails even if an
+# equal number of reasoned ones were removed. Write
+# `// oxlint-disable-next-line <rule> -- <why>`.
 #
 # The baseline is keyed per (file, rule) with only a COUNT -- the same granularity
 # as eslint-suppressions.json -- so it does not churn on unrelated line shifts.
@@ -40,6 +67,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # never touch the committed baseline).
 BASELINE="${OXLINT_BASELINE:-$ROOT/scripts/oxlint-baseline.txt}"
 cd "$ROOT"
+
+# shellcheck source=scripts/lib/host-heavy-run.sh
+source "$ROOT/scripts/lib/host-heavy-run.sh"
 
 MODE="check"
 ALLOW_GROW="false"
@@ -59,18 +89,27 @@ if [[ "$ALLOW_GROW" == "true" && "$MODE" != "update" ]]; then
 fi
 
 # The oxlint rule codes gated by this ratchet (including max-params and
-# max-lines-per-function). Kept in lock-step with the "warn"
-# rules in .oxlintrc.json.
-RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) typescript(no-floating-promises) typescript(no-misused-promises)"
+# max-lines-per-function). Kept in lock-step with the burned-down
+# rules in .oxlintrc.json. The two typescript(no-*-promises) codes are "error" with
+# a zero baseline; they stay here because only this stage runs `--type-aware`,
+# so removing them would leave them unenforced.
+RATCHET_CODES="typescript(no-floating-promises) typescript(no-misused-promises)"
 
 # Emit the JSON report. OXLINT_JSON_CMD overrides the invocation -- used by the
 # BATS tests to inject a canned report. It is `eval`ed, so treat it as TRUSTED
 # input only (never wire it from an untrusted source).
 run_oxlint_json() {
+  # oxlint exits non-zero whenever it reports an error-level diagnostic (including
+  # a parse error). That must not abort here under `set -e` with no message:
+  # extract_counts names the failing file, or reports unparseable output.
   if [[ -n "${OXLINT_JSON_CMD:-}" ]]; then
-    eval "$OXLINT_JSON_CMD"
+    eval "$OXLINT_JSON_CMD" || true
   else
-    bunx oxlint --type-aware --format json 2>/dev/null
+    # The exit status is deliberately ignored (see above). `set +e` instead of `|| true` keeps
+    # errexit from being disabled inside host_heavy_run.
+    set +e
+    host_heavy_run host_heavy_oxlint_type_aware
+    set -e
   fi
 }
 
@@ -87,6 +126,16 @@ extract_counts() {
       try { report = JSON.parse(raw); }
       catch { process.stderr.write("oxlint did not emit parseable JSON\n"); process.exit(3); }
       const counts = new Map();
+      // A file oxlint could not parse yields an error diagnostic with no rule code.
+      const parseErrors = (report.diagnostics || []).filter(d => !d.code);
+      if (parseErrors.length) {
+        for (const d of parseErrors) {
+          const at = d.labels && d.labels[0] && d.labels[0].span;
+          const loc = at ? ":" + at.line + ":" + at.column : "";
+          process.stderr.write("oxlint parse error in " + String(d.filename).replace(/\\/g, "/") + loc + ": " + d.message + "\n");
+        }
+        process.exit(3);
+      }
       for (const d of (report.diagnostics || [])) {
         if (!codes.has(d.code)) { continue; }
         // Normalize path separators so the committed baseline (forward slashes)
@@ -129,9 +178,35 @@ new_or_increased() {
       const base = parse(baseText);
       const cur = parse(curText);
       const news = [];
+      // Unbounded disables narrow in one direction: -file (open to EOF), then
+      // -partial (a bare disable some named enables re-enable), then -block
+      // (closed). A count that leaves a wider row may land on a narrower row of
+      // the same file+rule without counting as growth; the reverse (dropping a
+      // closer) is a new row. Each freed count is spent once, widest first.
+      const SCOPES = ["file", "partial", "block"];
+      const scopeOf = (key) => /\toxlint-disable-(file|partial|block)\((.*)\)$/.exec(key);
+      const grouped = new Set();
       for (const [key, n] of cur) {
+        const m = scopeOf(key);
+        if (m) {
+          grouped.add(key.slice(0, m.index) + "\t" + m[2]);
+          continue;
+        }
         const allowed = base.get(key) || 0;
         if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
+      }
+      for (const group of grouped) {
+        const tab = group.lastIndexOf("\t");
+        const file = group.slice(0, tab);
+        const rule = group.slice(tab + 1);
+        let freed = 0;
+        for (const scope of SCOPES) {
+          const key = file + "\toxlint-disable-" + scope + "(" + rule + ")";
+          const allowed = (base.get(key) || 0) + freed;
+          const n = cur.get(key) || 0;
+          if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
+          freed = Math.max(0, allowed - n);
+        }
       }
       process.stdout.write(news.join("\n"));
     });
@@ -143,9 +218,19 @@ compare_counts() {
   printf '%s\n@@@OXLINT_SEP@@@\n%s' "$1" "$2" | new_or_increased
 }
 
+# Suppression rows. OXLINT_SCAN_ROOT overrides the scanned root (BATS fixtures).
+scan_suppressions() {
+  bun "$ROOT/scripts/lib/oxlintDisableScan.ts" "${OXLINT_SCAN_ROOT:-$ROOT}"
+}
+
 report_json="$(run_oxlint_json)"
-current="$(printf '%s' "$report_json" | extract_counts)"
-current_total="$(printf '%s' "$current" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"
+violations="$(printf '%s' "$report_json" | extract_counts)"
+suppressions="$(scan_suppressions)"
+current="$(printf '%s\n%s\n' "$violations" "$suppressions" | grep -v '^$' | sort || true)"
+violation_total="$(printf '%s' "$violations" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"
+# Directives only; the no-reason rows are a subset and would double count.
+suppression_total="$(printf '%s' "$suppressions" | awk -F'\t' 'NF && $3 !~ /^oxlint-disable-no-reason/ {s+=$1} END{print s+0}')"
+summary="$violation_total gated violation(s), $suppression_total suppression row(s)"
 
 if [[ "$MODE" == "update" ]]; then
   if [[ -f "$BASELINE" && "$ALLOW_GROW" != "true" ]]; then
@@ -155,7 +240,7 @@ if [[ "$MODE" == "update" ]]; then
     prev_counts="$(grep -vE '^#|^$' "$BASELINE" || true)"
     grew="$(compare_counts "$prev_counts" "$current")"
     if [[ -n "$grew" ]]; then
-      echo "refusing to grow the baseline: a (file, rule) count increased or a new pair appeared:" >&2
+      echo "refusing to grow the baseline: a (file, rule) count (violation or oxlint-disable suppression) increased or a new pair appeared:" >&2
       printf '%s\n' "$grew" >&2
       echo "The oxlint ratchet is a one-way ratchet. If this growth is truly" >&2
       echo "intended, re-run with:  bun run lint:prune -- --allow-grow" >&2
@@ -165,9 +250,10 @@ if [[ "$MODE" == "update" ]]; then
   {
     echo "# AutoMobile oxlint ratchet baseline -- see scripts/oxlint-baseline.sh"
     echo "# Gated rules: $RATCHET_CODES"
+    echo "# Also counted: oxlint-disable(<rule>) and oxlint-disable-no-reason(<rule>) rows from the comment scan"
     printf '%s\n' "$current"
   } > "$BASELINE"
-  echo "Updated $BASELINE ($current_total gated violation(s))."
+  echo "Updated $BASELINE ($summary)."
   exit 0
 fi
 
@@ -184,10 +270,10 @@ baseline_counts="$(grep -vE '^#|^$' "$BASELINE" || true)"
 new_violations="$(compare_counts "$baseline_counts" "$current")"
 
 if [[ -n "$new_violations" ]]; then
-  echo "oxlint ratchet: NEW violation(s) of a gated rule -- fix them or (rarely) record with --update:" >&2
+  echo "oxlint ratchet: NEW violation(s) or oxlint-disable suppression(s) -- fix them or (rarely) record with --update --allow-grow:" >&2
   printf '%s\n' "$new_violations" >&2
   exit 1
 fi
 
-echo "oxlint ratchet gate: no new violations ($current_total gated violation(s) in baseline)."
+echo "oxlint ratchet gate: no new violations ($summary in baseline)."
 exit 0

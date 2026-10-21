@@ -1,9 +1,10 @@
+import { EmulatorProcessOutputTail } from "./EmulatorProcessOutputTail";
+import { holderOf } from "./deviceBinding";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
-import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
-import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
+
 import type { BootedDevice } from "../models";
 import type {
   DeviceAutolockChildProcess as ChildProcess,
@@ -16,8 +17,8 @@ export interface EmulatorProcessLifecyclePoolPort {
   getTimer(): Timer;
   getStartedDeviceProcesses(): Map<string, ChildProcess>;
   getStartedDeviceProcessOutput(): Map<string, EmulatorProcessOutputTail>;
-  getDevices(): Map<string, PooledDevice>;
-  getSessionManager(): SessionManager;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
+  getSessionManager(): Pick<SessionManager, "getSession">;
   isReservedForShutdown(device: PooledDevice): boolean;
   prepareSessionPreservingRecovery(
     deviceId: string,
@@ -43,71 +44,6 @@ export interface EmulatorProcessLifecyclePoolPort {
     incidentCaptureComplete: boolean,
     recoveryPreparation: SessionRecoveryPreparation | undefined,
   ): Promise<void>;
-}
-
-/**
- * A process can emit output after readiness. Capture its redacted bounded tail
- * so a later unexpected exit has the same useful evidence as an early launch
- * failure without retaining unbounded process output.
- */
-export class EmulatorProcessOutputTail {
-  private output = "";
-  private readonly stdoutRedactor = new AndroidCommandOutputStreamRedactor();
-  private readonly stderrRedactor = new AndroidCommandOutputStreamRedactor();
-  private readonly streamsClosed: Promise<void>;
-
-  constructor(
-    childProcess: ChildProcess,
-    private readonly timer: Timer,
-  ) {
-    const hasStreams =
-      (childProcess.stdout !== null && childProcess.stdout !== undefined) ||
-      (childProcess.stderr !== null && childProcess.stderr !== undefined);
-    this.streamsClosed = hasStreams
-      ? new Promise((resolve) => childProcess.once("close", resolve))
-      : Promise.resolve();
-    childProcess.stdout?.on("data", (value) => this.append(value, this.stdoutRedactor));
-    childProcess.stderr?.on("data", (value) => this.append(value, this.stderrRedactor));
-  }
-
-  snapshot(): string | undefined {
-    const output = boundedEmulatorOutputTail(
-      this.output + this.stdoutRedactor.snapshot() + this.stderrRedactor.snapshot(),
-    );
-    return output.length > 0 ? output : undefined;
-  }
-
-  async finalize(): Promise<string | undefined> {
-    await this.waitForStreamClose();
-    this.output = boundedEmulatorOutputTail(
-      this.output + this.stdoutRedactor.flush() + this.stderrRedactor.flush(),
-    );
-    return this.output.length > 0 ? this.output : undefined;
-  }
-
-  private append(value: unknown, redactor: AndroidCommandOutputStreamRedactor): void {
-    const text = typeof value === "string" ? value : Buffer.isBuffer(value) ? value.toString() : "";
-    if (!text) {
-      return;
-    }
-    this.output = boundedEmulatorOutputTail(this.output + redactor.append(text));
-  }
-
-  private async waitForStreamClose(): Promise<void> {
-    const timedOut = Symbol("stream-close-timeout");
-    try {
-      await raceWithDeadline(this.streamsClosed, {
-        timer: this.timer,
-        timeoutMs: 1_000,
-        label: "Emulator output streams",
-        timeoutError: () => timedOut,
-      });
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-    }
-  }
 }
 
 // Diagnostic sharing must not hold another handler's dead-device cleanup indefinitely.
@@ -332,7 +268,7 @@ export class EmulatorProcessLifecycle {
     }
 
     const assignmentCountAtExit = device.assignmentCount;
-    const sessionIdAtExit = device.sessionId;
+    const sessionIdAtExit = holderOf(device);
     const sessionAtExit = sessionIdAtExit
       ? this.pool.getSessionManager().getSession(sessionIdAtExit)
       : null;
@@ -347,7 +283,7 @@ export class EmulatorProcessLifecycle {
           if (
             this.pool.getDevices().get(deviceId) !== device ||
             device.assignmentCount !== assignmentCountAtExit ||
-            device.sessionId !== sessionIdAtExit ||
+            holderOf(device) !== sessionIdAtExit ||
             (sessionAtExit !== null &&
               this.pool.getSessionManager().getSession(sessionAtExit.sessionId) !== sessionAtExit)
           ) {

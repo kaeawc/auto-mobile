@@ -3,15 +3,21 @@ import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import {
   EmulatorProcessLifecycle,
-  EmulatorProcessOutputTail,
   type EmulatorProcessLifecyclePoolPort,
 } from "../../src/daemon/emulatorProcessLifecycle";
+import { EmulatorProcessOutputTail } from "../../src/daemon/EmulatorProcessOutputTail";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
+
+import { AndroidCommandOutputStreamRedactor } from "../../src/utils/android-cmdline-tools/redactAndroidCommandOutput";
+import { recordEmulatorLaunchOutputSource } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { EmulatorLossIncidentLedger } from "../../src/daemon/emulatorLossIncidentLedger";
+import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 const deviceId = "emulator-5554";
 const booted = { deviceId, name: "Pixel", platform: "android" as const };
@@ -26,11 +32,14 @@ async function flushUntil(condition: () => boolean): Promise<void> {
   throw new Error("Condition did not settle within 100 microtasks");
 }
 
-function child(): ChildProcess & { exitCode: number | null; signalCode: NodeJS.Signals | null } {
-  const process = new EventEmitter() as ChildProcess & {
-    exitCode: number | null;
-    signalCode: NodeJS.Signals | null;
-  };
+type MutableChild = ChildProcess & {
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  pid: number | undefined;
+};
+
+function child(): MutableChild {
+  const process = new EventEmitter() as MutableChild;
   process.exitCode = null;
   process.signalCode = null;
   process.stdout = null;
@@ -72,7 +81,7 @@ function harness() {
     getStartedDeviceProcesses: () => processes,
     getStartedDeviceProcessOutput: () => outputs,
     getDevices: () => devices,
-    getSessionManager: () => ({ getSession: () => null }) as unknown as SessionManager,
+    getSessionManager: () => ({ getSession: () => null }),
     isReservedForShutdown: () => reserved,
     prepareSessionPreservingRecovery: () => {
       calls.push("prepare");
@@ -107,6 +116,7 @@ function harness() {
     },
   };
   return {
+    port,
     lifecycle: new EmulatorProcessLifecycle(port),
     timer,
     processes,
@@ -360,7 +370,9 @@ describe("EmulatorProcessLifecycle", () => {
   test("settles incident when pool ownership changes during record", async () => {
     const h = harness();
     h.devices.set(deviceId, pooled());
-    h.onRecord(() => h.devices.set(deviceId, pooled()));
+    h.onRecord(() => {
+      h.devices.set(deviceId, pooled());
+    });
     const process = child();
     await h.lifecycle.trackStartedDeviceProcess(booted, process);
     process.emit("exit", 1, null);
@@ -590,5 +602,146 @@ describe("EmulatorProcessLifecycle", () => {
     } finally {
       sessions.stopCleanupTimer();
     }
+  });
+});
+
+describe("launch output handoff", () => {
+  function registerSource(process: ChildProcess) {
+    const redactor = new AndroidCommandOutputStreamRedactor();
+    let output = "";
+    const snapshot = () => output + redactor.snapshot();
+    const source = {
+      snapshot,
+      flush: () => (output += redactor.flush()),
+    };
+    process.stdout!.on("data", (value: string) => {
+      output += redactor.append(value);
+    });
+    recordEmulatorLaunchOutputSource(process, source);
+    return source;
+  }
+
+  test("tail decodes split UTF-8 bytes from child stdout", () => {
+    const process = child();
+    process.stdout = new EventEmitter() as ChildProcess["stdout"];
+    process.stderr = new EventEmitter() as ChildProcess["stderr"];
+    const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
+    process.stdout!.emit("data", Buffer.from([0xe2]));
+    process.stdout!.emit("data", Buffer.from([0x82, 0xac]));
+    expect(tail.snapshot()).toContain("€");
+  });
+
+  for (const [launch, later] of [
+    ["auth token=abc", "defSECRET rest\n"],
+    ["auth tok", "en=SECRETVALUE rest\n"],
+  ]) {
+    test(`redacts a credential split at tracking: ${launch}`, async () => {
+      const process = child();
+      process.stdout = new EventEmitter() as ChildProcess["stdout"];
+      registerSource(process);
+      process.stdout!.emit("data", launch);
+      const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
+      process.stdout!.emit("data", later);
+      expect(tail.snapshot()).toBe("auth token=[REDACTED] rest\n");
+      process.emit("close");
+      expect(await tail.finalize()).toBe("auth token=[REDACTED] rest\n");
+    });
+  }
+
+  test("uses the live source without attaching data listeners", async () => {
+    const process = child();
+    process.stdout = new EventEmitter() as ChildProcess["stdout"];
+    const source = registerSource(process);
+    process.stdout!.emit("data", "launch\n");
+    const listeners = process.stdout!.listenerCount("data");
+    const timer = new FakeTimer();
+    const tail = new EmulatorProcessOutputTail(process, timer);
+    expect(process.stdout!.listenerCount("data")).toBe(listeners);
+    process.stdout!.emit("data", "post-ready\n");
+    expect(tail.snapshot()).toBe(source.snapshot());
+    const finalized = tail.finalize();
+    process.stdout!.emit("data", "drained\n");
+    process.emit("close");
+    expect(await finalized).toBe("launch\npost-ready\ndrained\n");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("flushes the source after the fake stream-close deadline", async () => {
+    const process = child();
+    process.stdout = new EventEmitter() as ChildProcess["stdout"];
+    let flushed = false;
+    const snapshot = () => "";
+    recordEmulatorLaunchOutputSource(process, {
+      snapshot,
+      flush: () => {
+        flushed = true;
+        return "drained";
+      },
+    });
+    const timer = new FakeTimer();
+    const tail = new EmulatorProcessOutputTail(process, timer);
+    const finalized = tail.finalize();
+    expect(flushed).toBe(false);
+    await timer.advanceTimeAsync(1_000);
+    expect(await finalized).toBe("drained");
+    expect(flushed).toBe(true);
+  });
+
+  test("records launch and post-ready output with a later SIGSEGV incident", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+    const store = new InMemoryEmulatorLossIncidentStore(
+      h.timer,
+      new CountingIdGenerator("incident"),
+    );
+    const ledger = new EmulatorLossIncidentLedger(
+      {
+        getDevice: (id) => h.devices.get(id) ?? null,
+        getRecoveryPolicy: () => ({ onLoss: true, maxAttempts: 2 }),
+        getSessionForDevice: () => null,
+        getSession: () => null,
+        sessionClockToWall: (time) => time,
+        getProcessOutputTail: (id) => h.outputs.get(id),
+      },
+      store,
+      h.timer,
+      {
+        execute: async () => {
+          throw new Error("Unused");
+        },
+        executeOrThrow: async (operation) => operation(1),
+      },
+    );
+    h.port.recordEmulatorLossIncident = (id, path, exit) =>
+      ledger.recordEmulatorLossIncident(id, path, exit);
+    h.port.evictMissingPooledDevice = async () => {
+      h.calls.push("evict");
+    };
+    const process = child();
+    process.stdout = new EventEmitter() as ChildProcess["stdout"];
+    process.stderr = new EventEmitter() as ChildProcess["stderr"];
+    registerSource(process);
+    process.stdout!.emit("data", "GPU renderer launch\n");
+    process.stdout!.emit("data", "before tracking\n");
+    await h.lifecycle.trackStartedDeviceProcess(booted, process);
+    process.stdout!.emit("data", "post-ready token=private\n");
+    process.emit("exit", null, "SIGSEGV");
+    process.emit("close", null, "SIGSEGV");
+    await flushUntil(() => h.calls.includes("finish"));
+    const [incident] = await store.list();
+    expect(incident.detectionPath).toBe("watched-process-exit");
+    expect(incident.processExit).toEqual({ code: null, signal: "SIGSEGV" });
+    expect(incident.outputTail).toBe(
+      "GPU renderer launch\nbefore tracking\npost-ready token=[REDACTED]\n",
+    );
+    expect(incident.outputUnavailable).toBeUndefined();
+  });
+
+  test("an empty launch source returns no output", async () => {
+    const process = child();
+    recordEmulatorLaunchOutputSource(process, { snapshot: () => "", flush: () => "" });
+    const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
+    expect(tail.snapshot()).toBeUndefined();
+    expect(await tail.finalize()).toBeUndefined();
   });
 });

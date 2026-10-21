@@ -1,4 +1,5 @@
-import type { ViewHierarchy as ViewHierarchyReader } from "./interfaces/ViewHierarchy";
+import { holderOf } from "../../daemon/deviceBinding";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -21,7 +22,7 @@ import {
   type HierarchyCaptureRequest,
 } from "./HierarchyCapture";
 import { ViewHierarchyCaptureReader } from "./ViewHierarchyCaptureReader";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import {
   filterOffscreenNodes,
   normalizeIosHierarchy,
@@ -71,8 +72,10 @@ export interface HierarchySyncClient {
 export interface DeviceHierarchyCaptureDependencies {
   adbFactory?: AdbClientFactory;
   syncClientFactory?: (device: BootedDevice) => HierarchySyncClient;
+  /** Where Android clients come from when no `syncClientFactory` is injected. */
+  androidClients?: AndroidHierarchyClients;
   settle?: SettleObserve;
-  viewHierarchy?: Pick<ViewHierarchyReader, "getViewHierarchy">;
+  viewHierarchy?: ViewHierarchyRequestReader;
   timer?: Timer;
   ids?: IdGenerator;
   observationServiceStart?: Pick<ObservationReadServiceStart, "start">;
@@ -139,24 +142,36 @@ async function requestSyncHierarchy(
   return synced;
 }
 
+/** The Android client lookups a capture uses; `AndroidCtrlProxyClient`'s statics satisfy it. */
+export interface AndroidHierarchyClients {
+  getInstance(device: BootedDevice, adbFactory?: AdbClientFactory): HierarchySyncClient;
+  createForObservationRead(
+    device: BootedDevice,
+    adbFactory?: AdbClientFactory,
+    existing?: AndroidCtrlProxyClient,
+  ): HierarchySyncClient;
+}
+
 function newHierarchyClient(
   device: BootedDevice,
-  adbFactory?: AdbClientFactory,
+  dependencies: DeviceHierarchyCaptureDependencies,
   transient = false,
   existing?: AndroidCtrlProxyClient | IOSCtrlProxyClient | null,
 ): HierarchySyncClient {
+  const { adbFactory } = dependencies;
+  const clients = dependencies.androidClients ?? AndroidCtrlProxyClient;
   if (device.platform === "ios") {
     return transient
       ? IOSCtrlProxyClient.createForObservationRead(device)
       : IOSCtrlProxyClient.getInstance(device);
   }
   return transient
-    ? AndroidCtrlProxyClient.createForObservationRead(
+    ? clients.createForObservationRead(
         device,
         adbFactory,
         existing instanceof AndroidCtrlProxyClient ? existing : undefined,
       )
-    : AndroidCtrlProxyClient.getInstance(device, adbFactory);
+    : clients.getInstance(device, adbFactory);
 }
 
 function resolveHierarchyClient(
@@ -170,15 +185,13 @@ function resolveHierarchyClient(
   const existing = existingHierarchyClient(device);
   if (!observerMode) {
     return {
-      syncClient: existing ?? newHierarchyClient(device, dependencies.adbFactory),
+      syncClient: existing ?? newHierarchyClient(device, dependencies),
       transient: false,
       owned: false,
     };
   }
-  const daemon = DaemonState.getInstance();
-  const owned = daemon.isInitialized()
-    ? !!daemon.getDevicePool().getDevice(device.deviceId)?.sessionId
-    : false;
+  const pool = defaultDaemonContext.devicePool();
+  const owned = pool ? !!holderOf(pool.getDevice(device.deviceId)) : false;
   if (owned && !existing?.isConnected()) {
     throw new ActionableError(
       `Device ${device.deviceId} is session-owned and has no connected hierarchy service: the owning session's hierarchy client is disconnected. Run a session observe as the owner to reconnect it; a deviceId read only connects to an already-running service.`,
@@ -188,7 +201,7 @@ function resolveHierarchyClient(
     return { syncClient: existing, transient: false, owned };
   }
   return {
-    syncClient: newHierarchyClient(device, dependencies.adbFactory, true, existing),
+    syncClient: newHierarchyClient(device, dependencies, true, existing),
     transient: true,
     owned: false,
   };
@@ -364,11 +377,12 @@ export function createDeviceHierarchyCapture(
 ): HierarchyCapture {
   const reader = new ViewHierarchyCaptureReader(
     {
-      getViewHierarchy: (...args) =>
-        (
+      getViewHierarchy: (queryOptions, request) => {
+        const hierarchy: ViewHierarchyRequestReader =
           dependencies.viewHierarchy ??
-          new ViewHierarchy(device, dependencies.adbFactory, null, dependencies.timer)
-        ).getViewHierarchy(...args),
+          new ViewHierarchy(device, dependencies.adbFactory, null, dependencies.timer);
+        return hierarchy.getViewHierarchy(queryOptions, request);
+      },
       filterOffscreenNodes,
     },
     async (request) => {

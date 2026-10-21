@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": false
+    },
+    "root": {
+      "type": "switch",
+      "stateKey": "value",
+      "checks": [
+        {
+          "message": "Bad",
+          "minLength": 1
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.checks[0].minLength"
+}

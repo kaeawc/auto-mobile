@@ -1,15 +1,17 @@
+import { clearDeviceError, markDeviceError, holderOf, isIdle } from "./deviceBinding";
 import { logger } from "../utils/logger";
-import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
-import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
-import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
+import {
+  resetBootedDevicesResourceCache,
+  resetAndroidDeviceImageResourceCache,
+} from "./deviceResourceInvalidation";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import type { PooledDevice, RemoveDeviceOptions, SessionRecoveryPreparation } from "./devicePool";
 import type { IdentityComparison } from "../devices/deviceIdentityEvidence";
 
-/** Consecutive successful discovery sweeps required to confirm absence. */
+/** Missing observations required to confirm absence without intervening presence. */
 export const MISSING_DEVICE_MISS_THRESHOLD = 3;
 
 export function classifyMissingDeviceObservation(
@@ -19,13 +21,16 @@ export function classifyMissingDeviceObservation(
   return !sourceSucceeded ? "source-unavailable" : devicePresent ? "present" : "missing";
 }
 
-/** A failed source supplies no evidence of absence and breaks the miss streak. */
+/** A failed source supplies no evidence either way: hold until presence or another miss. */
 export function observeMissingDevice(
   missesByDevice: Map<string, number>,
   deviceId: string,
   observation: "present" | "missing" | "source-unavailable",
 ): { misses: number; confirmedGone: boolean } {
-  if (observation !== "missing") {
+  if (observation === "source-unavailable") {
+    return { misses: missesByDevice.get(deviceId) ?? 0, confirmedGone: false };
+  }
+  if (observation === "present") {
     missesByDevice.delete(deviceId);
     return { misses: 0, confirmedGone: false };
   }
@@ -54,9 +59,9 @@ export interface MissingDeviceLivenessPoolPort {
   needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
   mapAndroidDiscovery?(devices: readonly BootedDevice[]): BootedDevice[];
   isTransportEmulator?(deviceId: string): boolean;
-  getDevices(): Map<string, PooledDevice>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   getRefreshMissingDeviceMisses(): Map<string, number>;
-  getAssignmentMutex(): Mutex;
+  withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getDeviceManager(): PlatformDeviceManager;
   getRefreshGeneration(): number;
   shouldRebootDisconnectedAndroidDevice(device: PooledDevice): boolean;
@@ -133,9 +138,9 @@ export class MissingDeviceLiveness {
         observeMissingDevice(this.pool.getRefreshMissingDeviceMisses(), device.id, "present");
         continue;
       }
-      if (device.sessionId) {
+      if (holderOf(device)) {
         logger.warn(
-          `Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`,
+          `Device ${device.id} is no longer booted but is assigned to session ${holderOf(device)}; keeping until session cleanup`,
         );
         continue;
       }
@@ -210,7 +215,7 @@ export class MissingDeviceLiveness {
     };
     return assignmentLockHeld
       ? await removeMissingDevices()
-      : await this.pool.getAssignmentMutex().runExclusive(removeMissingDevices);
+      : await this.pool.withAssignmentLock(removeMissingDevices);
   }
 
   /**
@@ -286,17 +291,17 @@ export class MissingDeviceLiveness {
       return false;
     }
     if (idleEviction) {
-      const claimed = await this.pool.getAssignmentMutex().runExclusive(() => {
+      const claimed = await this.pool.withAssignmentLock(() => {
         // The discovery ran without the lock. A newer bind or incarnation wins
         // over its absent snapshot; claim before any other bind can select it.
         if (
           this.pool.getDevices().get(device.id) !== device ||
-          device.status !== "idle" ||
-          device.sessionId !== null
+          !isIdle(device) ||
+          holderOf(device) !== null
         ) {
           return false;
         }
-        device.status = "error";
+        markDeviceError(device);
         return true;
       });
       if (!claimed) {
@@ -345,7 +350,7 @@ export class MissingDeviceLiveness {
    * either the pooled entry is the runtime that answered, or a different one
    * has taken the serial and the entry must be replaced.
    */
-  private async reconcileDiscoveredPooledDevice(
+  async reconcileDiscoveredPooledDevice(
     device: PooledDevice,
     bootedDevice: BootedDevice,
     assignmentLockHeld: boolean,
@@ -390,8 +395,8 @@ export class MissingDeviceLiveness {
     const replaceIfStillIdle = async () => {
       if (
         this.pool.getDevices().get(device.id) !== device ||
-        device.status !== "idle" ||
-        device.sessionId !== null
+        !isIdle(device) ||
+        holderOf(device) !== null
       ) {
         return false;
       }
@@ -402,7 +407,7 @@ export class MissingDeviceLiveness {
     };
     return assignmentLockHeld
       ? await replaceIfStillIdle()
-      : await this.pool.getAssignmentMutex().runExclusive(replaceIfStillIdle);
+      : await this.pool.withAssignmentLock(replaceIfStillIdle);
   }
 
   /**
@@ -417,7 +422,7 @@ export class MissingDeviceLiveness {
       attemptDeviceLossRecovery: true,
     });
     if (this.pool.getDevices().get(device.id) === device) {
-      device.status = "error";
+      markDeviceError(device);
       this.noteStateChanged(device);
     }
     void eviction.catch((error) => {
@@ -464,7 +469,7 @@ export class MissingDeviceLiveness {
       return;
     }
     if (
-      device.sessionId &&
+      holderOf(device) &&
       !(await this.releaseSessionForEviction(device, correlatedIncidentId, identityObservation))
     ) {
       return;
@@ -562,16 +567,16 @@ export class MissingDeviceLiveness {
     }
     // Incident and recovery I/O completed before assignmentMutex. Only the
     // compare-and-delete runs under the lock, after any lifecycle lease settles.
-    await this.pool
-      .getAssignmentMutex()
-      .runExclusive(() => this.pool.removeDevice(device.id, false, device, LIVENESS_MISS_REMOVAL));
+    await this.pool.withAssignmentLock(() =>
+      this.pool.removeDevice(device.id, false, device, LIVENESS_MISS_REMOVAL),
+    );
   }
 
   private prepareEvictedDeviceForRemoval(device: PooledDevice, lockPoolRemoval?: boolean): void {
     // An idle preallocation eviction already claimed this entry as error under
     // assignmentMutex; keep it unavailable until its guarded removal completes.
     if (!lockPoolRemoval) {
-      device.status = "idle";
+      clearDeviceError(device);
       this.noteStateChanged(device);
     }
   }
@@ -610,7 +615,7 @@ export class MissingDeviceLiveness {
     return true;
   }
 
-  private async resolveMissingDeviceIncident(
+  async resolveMissingDeviceIncident(
     device: PooledDevice,
     attemptDeviceLossRecovery: boolean,
     incidentId: string | undefined,

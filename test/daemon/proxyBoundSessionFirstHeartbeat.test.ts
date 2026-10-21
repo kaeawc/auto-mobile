@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
 import {
@@ -11,7 +12,7 @@ import {
 } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,
@@ -98,16 +99,10 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   });
 
   test("does not bind or heartbeat an awaiting-owner session from listDevices", async () => {
-    await sessionManager.createSession(
-      BOUND_SESSION,
-      "emulator-5554",
-      "android",
-      60_000,
-      undefined,
-      undefined,
-      undefined,
-      "awaiting-owner",
-    );
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+      initialOwnership: "awaiting-owner",
+    });
     const fakeClient = new FakeDaemonClient({
       toolResultFor: (toolName) =>
         toolName === "listDevices"
@@ -116,9 +111,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
               structuredContent: { devices: [] },
             }
           : undefined,
-      onCallDaemonMethod: (method, params) => {
+      onCallDaemonMethod: async (method, params) => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -151,16 +146,10 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     "does not bind or heartbeat listDevices after an %s",
     async (failureKind) => {
       const sessionId = `${BOUND_SESSION}-${failureKind.replace(" ", "-")}`;
-      await sessionManager.createSession(
-        sessionId,
-        "emulator-5554",
-        "android",
-        60_000,
-        undefined,
-        undefined,
-        undefined,
-        "awaiting-owner",
-      );
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        initialOwnership: "awaiting-owner",
+      });
       const fakeClient = new FakeDaemonClient({
         toolResult:
           failureKind === "error result"
@@ -171,9 +160,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
             throw new Error("inventory failed");
           }
         },
-        onCallDaemonMethod: (method, params) => {
+        onCallDaemonMethod: async (method, params) => {
           if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
-            sessionManager.recordHeartbeat(params.sessionId);
+            await deliverDaemonHeartbeat(sessionManager, params.sessionId);
           }
         },
       });
@@ -207,16 +196,10 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   );
 
   test("forwards an args-named awaiting-owner session without claiming or heartbeating it (#10664)", async () => {
-    await sessionManager.createSession(
-      BOUND_SESSION,
-      "emulator-5554",
-      "android",
-      60_000,
-      undefined,
-      undefined,
-      undefined,
-      "awaiting-owner",
-    );
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+      initialOwnership: "awaiting-owner",
+    });
     const fakeClient = heartbeatForwardingClient(sessionManager);
     const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const proxy = new DaemonMcpProxy({
@@ -254,7 +237,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // the proxy starts survives because the first heartbeat is delivered as part of
   // connection establishment.
   test("delivers the first heartbeat during establishment for a default-timeout session", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     monitor.start();
     // Some time passes before the client actually starts its proxy, but still
     // within the daemon's pre-first-heartbeat grace.
@@ -293,7 +278,10 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // AC1 + AC2 (constrained timeout path): the same guarantee holds when the proxy
   // and session carry a small, explicit heartbeat timeout.
   test("delivers the first heartbeat during establishment for a constrained-timeout session", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000, 1_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+      heartbeatTimeoutMs: 1_000,
+    });
     monitor.start();
     timer.advanceTime(400);
 
@@ -331,7 +319,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // guarantee — a fire-and-forget dispatch that merely races the pre-first
   // reclaim is what regresses.
   test("does not resolve establishment until the first heartbeat is delivered", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     const released = Promise.withResolvers<void>();
     let heartbeatObserved = false;
@@ -340,7 +330,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           heartbeatObserved = true;
           await released.promise;
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -390,7 +380,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // recorded the first ownership heartbeat. The establishment guarantee must hold
   // for concurrent callers, not just the one that triggered doConnect().
   test("holds a concurrent ensureConnected() until the first heartbeat is recorded", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     const released = Promise.withResolvers<void>();
     let heartbeatObserved = false;
@@ -399,7 +391,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           heartbeatObserved = true;
           await released.promise;
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -452,7 +444,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // undone. doConnect() re-checks `closing` before the flip, so the proxy stays
   // disconnected instead of resuming with a stale connected flag over a nulled client.
   test("does not resurrect the connected flag when close() lands during the first heartbeat", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     const released = Promise.withResolvers<void>();
     let heartbeatObserved = false;
@@ -461,7 +455,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           heartbeatObserved = true;
           await released.promise;
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -513,7 +507,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   } {
     let attempts = 0;
     const client: FakeDaemonClient = new FakeDaemonClient({
-      onCallDaemonMethod: (method, params) => {
+      onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat" || typeof params.sessionId !== "string") {
           return;
         }
@@ -522,7 +516,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
           client.emitConnectionClosed();
           throw new DaemonUnavailableError("Daemon socket connection lost: connection closed");
         }
-        sessionManager.recordHeartbeat(params.sessionId);
+        await deliverDaemonHeartbeat(sessionManager, params.sessionId);
       },
     });
     const ownershipClaims = () =>
@@ -533,7 +527,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   }
 
   test("does not report connected when the socket closes during the first heartbeat (#6389)", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     const { client: fakeClient, ownershipClaims } = closingOnFirstHeartbeatClient();
     const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const proxy = new DaemonMcpProxy({
@@ -565,7 +561,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   });
 
   test("reconnects and retries a call whose establishment loses the socket mid-heartbeat (#6389)", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     const { client: fakeClient, ownershipClaims } = closingOnFirstHeartbeatClient();
     const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const proxy = new DaemonMcpProxy({
@@ -592,7 +590,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // AC3: connection establishment delivers exactly one first heartbeat — a
   // reconnect must not compound duplicates onto a fresh transport.
   test("delivers exactly one heartbeat on a single establishment", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     const fakeClient = heartbeatForwardingClient(sessionManager);
     const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -707,7 +707,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   });
 
   test("retries the ownership claim when the establishment heartbeat is not delivered", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     let heartbeatAttempts = 0;
     const fakeClient = new FakeDaemonClient({
@@ -719,8 +721,8 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         if (heartbeatAttempts === 1) {
           throw new Error("transport closed before delivery");
         }
-        sessionManager.recordHeartbeat(params.sessionId, {
-          livenessOwnerToken: params.livenessOwnerToken as string,
+        await deliverDaemonHeartbeat(sessionManager, params.sessionId, {
+          livenessOwnerToken: params.livenessOwnerToken,
           claimLivenessOwnership: params.claimLivenessOwnership === true,
         });
       },
@@ -753,7 +755,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // AC3: a terminally released session is never resurrected by an establishment
   // heartbeat, and shutdown emits no further heartbeats.
   test("does not resurrect a terminally released session on establishment", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     const fakeClient = heartbeatForwardingClient(sessionManager);
     const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -795,7 +799,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // heartbeat must terminally fence the binding without leaving a leaked keeper
   // interval running against the fenced session.
   test("does not start the keeper when the session is released mid-establishment", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     const released = Promise.withResolvers<void>();
     const clientRef: { current: FakeDaemonClient | null } = { current: null };
@@ -848,7 +854,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // stale transport) must not compound a duplicate heartbeat onto the fresh
   // transport — the reconnect defers to the keeper's own coalescing run().
   test("does not duplicate the heartbeat on a keeper-driven reconnect", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     let staleHeartbeats = 0;
     const staleClient = new FakeDaemonClient({
@@ -857,7 +865,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
           staleHeartbeats += 1;
           if (staleHeartbeats === 1) {
             // Establishment heartbeat succeeds.
-            sessionManager.recordHeartbeat(params.sessionId);
+            await deliverDaemonHeartbeat(sessionManager, params.sessionId);
             return;
           }
           // The keeper's next tick finds the transport gone, forcing a reconnect.
@@ -907,7 +915,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   });
 
   test("a timed-out reconnect leaves the keeper free to heartbeat inside the leash", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     const firstClient = heartbeatForwardingClient(sessionManager);
     const recoveredClient = heartbeatForwardingClient(sessionManager);
     let finishConnect!: () => void;
@@ -952,7 +962,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   });
 
   test("a reconnect that stays stuck exhausts three recovery attempts and hands over daemon_stalled", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     const firstClient = heartbeatForwardingClient(sessionManager);
     const unreachableClient = heartbeatForwardingClient(sessionManager);
     let finishConnect!: () => void;
@@ -1027,7 +1039,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
 
     test("the first tick after a dropped socket reconnects and heartbeats instead of fencing", async () => {
-      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       const firstClient = heartbeatForwardingClient(sessionManager);
       const recoveredClient = heartbeatForwardingClient(sessionManager);
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -1056,7 +1070,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     });
 
     test("a daemon that stays unreachable hands over daemon_stalled after three recovery attempts", async () => {
-      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       const firstClient = heartbeatForwardingClient(sessionManager);
       const unreachableClient = heartbeatForwardingClient(sessionManager);
       let connectAttempts = 0;
@@ -1095,7 +1111,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     });
 
     test("a stall after a clean daemon-shutdown release is not logged at error level (#11189)", async () => {
-      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       const firstClient = heartbeatForwardingClient(sessionManager);
       const makeRefusingClient = (): FakeDaemonClient => {
         const client = heartbeatForwardingClient(sessionManager);
@@ -1134,7 +1152,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     });
 
     test("a stall with no daemon-shutdown release is still logged at error level", async () => {
-      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       const firstClient = heartbeatForwardingClient(sessionManager);
       const makeRefusingClient = (): FakeDaemonClient => {
         const client = heartbeatForwardingClient(sessionManager);
@@ -1164,7 +1184,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     });
 
     test("a reconnect that fails fast is retried three times, spread over the budget, before the handover", async () => {
-      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       const firstClient = heartbeatForwardingClient(sessionManager);
       let connectAttempts = 0;
       const makeRefusingClient = (): FakeDaemonClient => {
@@ -1201,16 +1223,18 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   });
 
   test("a connected socket with unanswered heartbeats hands over daemon_stalled inside lease plus grace", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     let attempts = 0;
     const client = new FakeDaemonClient({
-      onCallDaemonMethod: (method, params) => {
+      onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat" || typeof params.sessionId !== "string") {
           return;
         }
         attempts++;
         if (attempts === 1) {
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
           return;
         }
         return new Promise<void>(() => {});
@@ -1249,18 +1273,20 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // potentially-stalled subscription before dispatching the time-critical
   // heartbeat.
   test("starts notification subscription without delaying the first heartbeat", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     const releaseSubscription = Promise.withResolvers<void>();
     let subscriptionStarted = false;
     let subscriptionStartedAtHeartbeat = false;
     let heartbeatObserved = false;
     const fakeClient = new FakeDaemonClient({
-      onCallDaemonMethod: (method, params) => {
+      onCallDaemonMethod: async (method, params) => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           heartbeatObserved = true;
           subscriptionStartedAtHeartbeat = subscriptionStarted;
-          sessionManager.recordHeartbeat(params.sessionId);
+          await deliverDaemonHeartbeat(sessionManager, params.sessionId);
         }
       },
     });
@@ -1304,7 +1330,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   });
 
   test("captures initial-binding shutdown during the first heartbeat and waits for EOF (#6336)", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     let subscriptionStarted = false;
     const oldDaemonRef: { current: FakeDaemonClient | null } = { current: null };
@@ -1477,7 +1505,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
   // AC4: a bound session whose proxy never connects still expires under the
   // existing pre-first-heartbeat reclaim policy from #2443.
   test("still expires a bound session whose proxy never connects", async () => {
-    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
 
     // No proxy ever connects: past the pre-first-heartbeat grace, the session is
     // reaped exactly as the existing cleanup policy dictates.

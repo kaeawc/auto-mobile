@@ -29,6 +29,11 @@ data class WindowInfo(
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypePlacement: String? = null,
   /**
+   * Only on CtrlProxy's own prototype window: the id of the prototype that window draws. Absent for
+   * older APKs and for an untitled legacy window.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeId: String? = null,
+  /**
    * Only alongside [prototypePlacement]: true when the prototype's rendered surface is fully opaque
    * (window opacity 100 and an opaque root or scrim).
    */

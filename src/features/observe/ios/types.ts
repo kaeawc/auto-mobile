@@ -68,6 +68,25 @@ export interface CtrlProxyNode {
 }
 
 /**
+ * A node exactly as the iOS runner serializes it on the wire: Android-style dashed keys and
+ * `[left, top, right, bottom]` tuple bounds. `CtrlProxyHierarchy.convertToViewHierarchyResult`
+ * accepts both spellings; the in-memory {@link CtrlProxyNode} model is not widened for this.
+ */
+export interface IosRunnerWireNode extends Omit<CtrlProxyNode, "bounds" | "node"> {
+  bounds?: [number, number, number, number];
+  "content-desc"?: string;
+  "resource-id"?: string;
+  "view-id"?: string;
+  "test-tag"?: string;
+  "accessibility-focused"?: string;
+  "long-clickable"?: string;
+  "state-description"?: string;
+  "error-message"?: string;
+  "hint-text"?: string;
+  node?: IosRunnerWireNode | IosRunnerWireNode[];
+}
+
+/**
  * Interface for iOS view hierarchy (matching Android format)
  */
 export interface XCTestHierarchy {
@@ -102,7 +121,17 @@ export interface XCTestHierarchy {
   error?: string;
 }
 
-export type CtrlProxyHierarchyShape = XCTestHierarchy;
+/** A runner hierarchy whose nodes are still in wire spelling (see {@link IosRunnerWireNode}). */
+export interface IosRunnerWireHierarchy extends Omit<XCTestHierarchy, "hierarchy"> {
+  hierarchy: IosRunnerWireNode;
+}
+
+/** A node in either in-memory model or runner wire spelling. */
+export type ConvertibleNode = CtrlProxyNode | IosRunnerWireNode;
+
+/** A hierarchy in either in-memory model or runner wire spelling. */
+export type ConvertibleHierarchy = XCTestHierarchy | IosRunnerWireHierarchy;
+
 export type CtrlProxyHierarchy = XCTestHierarchy;
 
 /**

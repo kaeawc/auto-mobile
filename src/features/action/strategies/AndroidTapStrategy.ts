@@ -1,16 +1,22 @@
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
+import type {
+  BootedDevice,
+  Element,
+  ElementBounds,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
+import type { TapBoundsClip, TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
   type AccessibilityDetector,
-} from "../../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
+} from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../../ctrlProxy/accessibility/AccessibilityDetector";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 
 /**
  * Android implementation of {@link TapStrategy}. Filters the response
@@ -20,12 +26,22 @@ import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 export class AndroidTapStrategy implements TapStrategy {
   readonly longPressDurationMs = 500;
   readonly retryTapIfNoChange = true;
+  readonly warnsOnDisabledElement = true;
+  readonly settlesPostTapChange = true;
+  readonly verifiesRefreshedDisplay = true;
+  readonly promotesClickableAncestor = true;
+  readonly settlesFocusChangeAfterTap = false;
+  readonly rethrowsKeyboardOcclusion = true;
+
+  applyRefreshedObservationRotation(): void {
+    // Android observations carry no hierarchy-derived rotation to restamp.
+  }
 
   constructor(
     private readonly device: BootedDevice,
     private readonly adb: AdbExecutor,
     private readonly accessibilityDetector: AccessibilityDetector = defaultAccessibilityDetector,
-    private readonly featureFlags?: FeatureFlagService,
+    private readonly featureFlags?: FeatureFlagReader,
   ) {}
 
   prepareViewHierarchyForResponse(
@@ -36,6 +52,15 @@ export class AndroidTapStrategy implements TapStrategy {
     const filtered = viewHierarchy.filterViewHierarchy(rawHierarchy);
     attachRawViewHierarchy(filtered, rawHierarchy);
     return filtered;
+  }
+
+  clipNavigationTapBounds(
+    bounds: ElementBounds,
+    _hierarchy: ViewHierarchyResult,
+    _screenSize: ObserveResult["screenSize"] | undefined,
+    _elements: readonly Element[],
+  ): TapBoundsClip {
+    return { bounds };
   }
 
   async isAccessibilityServiceEnabled(onWarning?: (warning: string) => void): Promise<boolean> {

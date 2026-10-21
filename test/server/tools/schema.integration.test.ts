@@ -1,3 +1,4 @@
+import { parseJsonSchemaNode } from "../../helpers/jsonSchemaNode";
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
@@ -26,17 +27,31 @@ createMcpServer();
 const ADVERTISED_TOOLS = ToolRegistry.getToolDefinitions();
 
 describe("MCP Tools inputSchema compiles under Ajv 2020 (issue #4181 rank 5)", () => {
+  const compilationErrors = new Map<string, unknown>();
+  beforeAll(() => {
+    // Schema compilation is fixture setup; retain each failure for its own table assertion.
+    for (const tool of ADVERTISED_TOOLS) {
+      try {
+        compileJsonSchema(tool.inputSchema);
+      } catch (error) {
+        compilationErrors.set(tool.name, error);
+      }
+    }
+  });
   test("the advertised roster is non-empty (guards against a zero-test table)", () => {
     expect(ADVERTISED_TOOLS.length).toBeGreaterThan(0);
   });
 
   test.each(ADVERTISED_TOOLS.map((tool) => [tool.name, tool.inputSchema] as const))(
     "%s inputSchema is a valid JSON Schema Ajv 2020 can compile",
-    (_name, inputSchema) => {
-      // A malformed/invalid schema throws here; the old `typeof`/`hasType ||
-      // hasCombinator` loop (with hasCombinator provably always false, #16)
-      // could not detect an Ajv-invalid schema.
-      expect(() => compileJsonSchema(inputSchema)).not.toThrow();
+    (name) => {
+      // A malformed/invalid schema still fails its own test, without charging compilation
+      // against the unit-test timing budget.
+      expect(() => {
+        if (compilationErrors.has(name)) {
+          throw compilationErrors.get(name);
+        }
+      }).not.toThrow();
     },
   );
 });
@@ -81,9 +96,9 @@ describe("MCP Tools Schema", () => {
       // provably-dead second operand — the "should not publish top-level schema
       // combinators" test below asserts every top-level anyOf/oneOf/allOf is
       // undefined, so hasCombinator was always false. Assert `type` directly.
-      const schema = tool.inputSchema as any;
+      const schema = tool.inputSchema;
       expect(Object.prototype.hasOwnProperty.call(schema, "type")).toBe(true);
-      if (schema.type === "object") {
+      if (parseJsonSchemaNode(schema).type === "object") {
         expect(schema).toHaveProperty("properties");
       }
     });
@@ -95,7 +110,7 @@ describe("MCP Tools Schema", () => {
   test.each(["tapOn", "tapAny"])("%s advertises duration minimum 0", (toolName) => {
     const tool = ToolRegistry.getToolDefinitions().find((t) => t.name === toolName);
     expect(tool, `${toolName} should be advertised`).toBeDefined();
-    const duration = (tool!.inputSchema as any).properties?.duration;
+    const duration = parseJsonSchemaNode(tool!.inputSchema).properties?.duration;
     expect(duration?.type).toBe("number");
     expect(duration?.minimum).toBe(0);
   });
@@ -104,7 +119,7 @@ describe("MCP Tools Schema", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
     for (const tool of toolDefinitions) {
-      const schema = tool.inputSchema as any;
+      const schema = parseJsonSchemaNode(tool.inputSchema);
       expect(schema.anyOf, `${tool.name} should not publish top-level anyOf`).toBeUndefined();
       expect(schema.oneOf, `${tool.name} should not publish top-level oneOf`).toBeUndefined();
       expect(schema.allOf, `${tool.name} should not publish top-level allOf`).toBeUndefined();
@@ -185,7 +200,7 @@ describe("MCP Tools Schema", () => {
         },
         z.any(),
       );
-      expect.fail("Should have thrown an error for incorrect type");
+      throw new Error("Should have thrown an error for incorrect type");
     } catch (error: any) {
       expect(error.message).toContain("Invalid parameters");
     }
@@ -209,7 +224,7 @@ describe("MCP Tools Schema", () => {
         },
         z.any(),
       );
-      expect.fail("Should have thrown an error for invalid container");
+      throw new Error("Should have thrown an error for invalid container");
     } catch (error: any) {
       expect(error.message).toContain("container expected object");
     }
@@ -246,7 +261,7 @@ describe("MCP Tools Schema", () => {
   ])("%s advertises the raw/project response-shape control", async (toolName) => {
     const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
     expect(tool).toBeDefined();
-    const props = (tool!.inputSchema as any).properties ?? {};
+    const props = parseJsonSchemaNode(tool!.inputSchema).properties ?? {};
     expect(props.raw).toBeDefined();
     expect(props.project).toBeDefined();
   });
@@ -256,14 +271,14 @@ describe("MCP Tools Schema", () => {
   // observation by default but cannot be asked for the raw tree is a silent
   // one-way door (the footgun PR #5885 avoided). Every tool the finalize step
   // skeletonizes by default MUST therefore advertise the opt-out.
-  test("every SKELETON_DEFAULT_ACTION_TOOLS member advertises the raw/project opt-out", async () => {
-    const { SKELETON_DEFAULT_ACTION_TOOLS } =
-      await import("../../../src/server/finalizeToolResponse");
+  test("every defaultsToSkeletonObservation tool advertises the raw/project opt-out", async () => {
+    const { skeletonDefaultActionTools } = await import("../../helpers/skeletonDefaultTools");
+    const SKELETON_DEFAULT_ACTION_TOOLS = skeletonDefaultActionTools();
     expect(SKELETON_DEFAULT_ACTION_TOOLS.size).toBeGreaterThan(0);
     for (const toolName of SKELETON_DEFAULT_ACTION_TOOLS) {
       const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
       expect(tool, `${toolName} should be an advertised tool`).toBeDefined();
-      const props = (tool!.inputSchema as any).properties ?? {};
+      const props = parseJsonSchemaNode(tool!.inputSchema).properties ?? {};
       expect(props.raw, `${toolName} must advertise raw`).toBeDefined();
       expect(props.project, `${toolName} must advertise project`).toBeDefined();
     }
@@ -308,7 +323,7 @@ describe("MCP Tools Schema", () => {
         },
         z.any(),
       );
-      expect.fail("Should have thrown an error for unknown tool");
+      throw new Error("Should have thrown an error for unknown tool");
     } catch (error: any) {
       // This should fail because the tool doesn't exist
       expect(error.message).toContain("Unknown tool");

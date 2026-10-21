@@ -1,10 +1,8 @@
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import { FakeSocket } from "../fakes/FakeNetServer";
+import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { expect, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -21,39 +19,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
  * other socket-frame refusals (socket-frame.daemon_session_suspect) carry `code` and `retryable`
  * at the top level of the frame.
  */
-class FrameSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-
-  setTimeout(_ms: number): this {
-    return this;
-  }
-
-  write(payload: string, callback: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(payload) as DaemonResponse);
-    callback();
-    return true;
-  }
-
-  end(): this {
-    this.destroy();
-    return this;
-  }
-
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-
-  send(frame: object): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(frame)}\n`));
-  }
-}
-
 test("a tools/call refused at shutdown carries the typed code and retryable at the top of the frame", async () => {
   const timer = new FakeTimer();
   const started = Promise.withResolvers<void>();
@@ -76,20 +41,17 @@ test("a tools/call refused at shutdown carries the typed code and retryable at t
     }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
-  const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, timer);
-  const internals = server as unknown as {
-    acceptingRequests: boolean;
-    handleConnection(socket: Socket): void;
-  };
-  const socket = new FrameSocket();
-  internals.acceptingRequests = true;
-  internals.handleConnection(socket as unknown as Socket);
+  const server = createHarnessServer("unused", state, timer);
+  const socket = new FakeSocket();
+  server.allowRequests();
+  server.connect(socket);
   socket.send({
     id: "subscribe",
     type: "mcp_request",
     method: DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+    params: {},
   });
-  socket.send({ id: "running", type: "mcp_request", method: "daemon/refreshDevices" });
+  socket.send({ id: "running", type: "mcp_request", method: "daemon/refreshDevices", params: {} });
   await started.promise;
   socket.send({
     id: "queued",

@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "menus",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": false,
+      "choice": "a"
+    },
+    "root": {
+      "type": "menu",
+      "testTag": "overflow",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "items": [
+        {
+          "label": "x",
+          "unknown": true
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.items[0].unknown",
+  "expectedMessage": "Unknown property"
+}

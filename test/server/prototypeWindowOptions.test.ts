@@ -1,3 +1,5 @@
+import { createExecResult } from "../../src/utils/execResult";
+import { toolStructured } from "../helpers/toolResponse";
 import { event } from "../helpers/prototypeTestEvent";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -17,6 +19,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { capturedAppLayerPrototypeHierarchy } from "../helpers/prototypeWindowCapture";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
@@ -48,6 +51,18 @@ describe("prototype window.layer and window.persistence", () => {
       subscribeDeviceUnbound: () => () => {},
     };
     unsubscribe = registerPrototypeTools({
+      anchorHierarchyCaptureFactory: () => ({
+        async capture(request) {
+          return {
+            captureId: "capture",
+            platform: "android",
+            requestedFreshness: request.freshness,
+            receivedAt: 0,
+            hierarchy: capturedAppLayerPrototypeHierarchy(),
+            nodes: [],
+          };
+        },
+      }),
       clientFactory: () => client,
       adbFactory: new FakeAdbClientFactory(adb),
       lastRenderedObservation: () => undefined,
@@ -64,7 +79,7 @@ describe("prototype window.layer and window.persistence", () => {
   async function call(input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
 
   test("the spec schema and the shared contract accept both fields and reject unknown values", () => {
@@ -99,10 +114,10 @@ describe("prototype window.layer and window.persistence", () => {
   });
 
   test("a failed appop grant is logged and the device decides", async () => {
-    adb.setCommandResponse(PROTOTYPE_APP_LAYER_APPOP_COMMAND, {
-      stdout: "",
-      stderr: "Error: Unknown package",
-    });
+    adb.setCommandResponse(
+      PROTOTYPE_APP_LAYER_APPOP_COMMAND,
+      createExecResult("", "Error: Unknown package"),
+    );
     const payload = await call({ action: "show", spec: spec({ layer: "app" }) });
     expect(payload.success).toBe(true);
     expect(client.getPrototypeHistory()).toHaveLength(1);

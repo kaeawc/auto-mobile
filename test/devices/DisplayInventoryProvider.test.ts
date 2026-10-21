@@ -71,7 +71,7 @@ describe("CachingDisplayInventoryProvider", () => {
       reason: "source offline",
     });
     const matcher = new DefaultDeviceMatcher();
-    for (const requires of [{ panels: 1 }, { panels: 2 }, { posture: "default" }]) {
+    for (const requires of [{ panels: 1 }, { panels: 2 }, { posture: "opened" as const }]) {
       expect(
         matcher.matchBootedDevice({ platform: "android", requires }, [fold], "LATEST"),
       ).toBeNull();
@@ -442,4 +442,18 @@ describe("CachingDisplayInventoryProvider", () => {
     expect((await provider.hydrate(device, "1")).displays).toBe(displays);
     expect(reads).toBe(1);
   });
+});
+
+test("cached panels are synchronous, settled only, and disappear on invalidation", async () => {
+  const source = new FakeDisplayInventorySource({ displays, degraded: false });
+  const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+  expect(provider.cachedPanels(device.deviceId)).toBeUndefined();
+  const pending = provider.hydrate(device, "fingerprint");
+  expect(provider.cachedPanels(device.deviceId)).toBeUndefined();
+  await pending;
+  expect(provider.cachedPanels(device.deviceId)).toEqual(displays.panels);
+  expect(source.reads).toBe(1);
+  provider.invalidate(device.deviceId);
+  expect(provider.cachedPanels(device.deviceId)).toBeUndefined();
+  expect(source.reads).toBe(1);
 });

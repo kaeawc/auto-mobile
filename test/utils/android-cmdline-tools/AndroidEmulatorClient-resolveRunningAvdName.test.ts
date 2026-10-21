@@ -5,6 +5,10 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult } from "../../../src/models";
+import {
+  executeCommandOptionsOf,
+  type ExecuteCommandRest,
+} from "../../fakes/executeCommandOptionsOf";
 
 /**
  * Burns wall-clock (fake) time on every adb command and then fails it, the way
@@ -21,7 +25,8 @@ class StallingAdbExecutor extends FakeAdbExecutor {
     super();
   }
 
-  override async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
+  override async executeCommand(command: string, ...rest: ExecuteCommandRest): Promise<ExecResult> {
+    const { timeoutMs } = executeCommandOptionsOf([command, ...rest]);
     this.calls.push({ command, timeoutMs });
     this.timer.advanceTime(this.elapsePerCommandMs);
     throw new Error("adb command timed out");
@@ -44,7 +49,7 @@ describe("AndroidEmulatorClient.resolveRunningAvdName", () => {
   test("shares one deadline between the console probe and the property fallback", async () => {
     const timer = new FakeTimer();
     const adb = new StallingAdbExecutor(timer, 2_000);
-    const client = new AndroidEmulatorClient(null, null, timer, new FakeAdbClientFactory(adb));
+    const client = new AndroidEmulatorClient({ timer, adbFactory: new FakeAdbClientFactory(adb) });
 
     await expect(client.resolveRunningAvdName(device, 3_000)).resolves.toBeUndefined();
 
@@ -60,7 +65,7 @@ describe("AndroidEmulatorClient.resolveRunningAvdName", () => {
   test("skips the fallback entirely once the shared deadline is spent", async () => {
     const timer = new FakeTimer();
     const adb = new StallingAdbExecutor(timer, 3_500);
-    const client = new AndroidEmulatorClient(null, null, timer, new FakeAdbClientFactory(adb));
+    const client = new AndroidEmulatorClient({ timer, adbFactory: new FakeAdbClientFactory(adb) });
 
     await expect(client.resolveRunningAvdName(device, 3_000)).resolves.toBeUndefined();
 

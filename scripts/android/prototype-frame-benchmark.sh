@@ -78,15 +78,16 @@ run_command() {
   if $dry; then printf '%q ' "$@"; printf '\n'; else "$@"; fi
 }
 run_cli() { run_command "${cli[@]}" ${session[@]+"${session[@]}"} "$@" --deviceId "${device:-<device>}"; }
-# shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap.
 cleanup() {
   local exit_status=$?
   set +e
   if $dry; then run_cli prototype --action dismiss --id "$id"; else run_cli prototype --action dismiss --id "$id" >&2; fi
   exit "$exit_status"
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then cleanup "$@"; fi
 # Install cleanup before show, including a partially successful show.
-trap cleanup EXIT
+trap 'cleanup' EXIT
 if $dry; then run_cli prototype --action show --specPath "$spec"; else run_cli prototype --action show --specPath "$spec" >&2; fi
 if [[ "$show_settle_ms" =~ [1-9] ]]; then
   run_command sleep "$(awk -v ms="$show_settle_ms" 'BEGIN { print ms / 1000 }')"

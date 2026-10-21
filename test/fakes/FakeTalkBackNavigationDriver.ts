@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type { TalkBackNavigationDriver } from "../../src/features/talkback/TalkBackNavigationDriver";
 import type {
   A11yActionResult,
@@ -54,12 +55,9 @@ export class FakeTalkBackNavigationDriver
     return this.actionHistory.length;
   }
 
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    durationMs: number,
-    onDispatch?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
+    const { x, y, duration: durationMs = 10, onDispatch } = request;
+
     this.tapHistory.push({ x, y, durationMs });
 
     const result = this.tapOverrides.shift() ?? this.tapResult;

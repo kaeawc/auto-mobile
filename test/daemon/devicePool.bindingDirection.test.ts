@@ -1,18 +1,19 @@
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 
 async function createContext(cancelDeviceExecutions?: () => Promise<number>) {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const devices = ["emulator-5554", "emulator-5556"].map((deviceId) => ({
     deviceId,
     name: deviceId,
@@ -20,17 +21,15 @@ async function createContext(cancelDeviceExecutions?: () => Promise<number>) {
   }));
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", devices);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "binding-daemon", {
-      timer,
-      deviceManager: utils,
-      idGenerator: new FakeIdGenerator(["owner"]),
-      deviceSessionRepository: { markAutolockSession: async () => {} },
-      cancelDeviceSessionExecutions: Object.assign(async () => 0, {
-        cancelDeviceExecutions,
-      }),
+  const pool = makePool(manager, "binding-daemon", {
+    timer,
+    deviceManager: utils,
+    idGenerator: new FakeIdGenerator(["owner"]),
+    deviceSessionRepository: { markAutolockSession: async () => {} },
+    cancelDeviceSessionExecutions: Object.assign(async () => 0, {
+      cancelDeviceExecutions,
     }),
-  );
+  });
   await pool.initializeWithDevices(devices);
   return { pool, manager, persistence, utils };
 }
@@ -51,18 +50,19 @@ for (const autolock of [false, true]) {
       if (autolock) {
         expect(await pool.autolockDevice("emulator-5554", "android", "client")).toBe("owner");
       } else {
-        await pool.bindOrReuseDeviceSession("owner", "emulator-5554", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "emulator-5554",
+          platform: "android",
+        });
       }
       const session = manager.getSession("owner");
-      const rebind = pool.bindOrReuseDeviceSession(
-        "owner",
-        "emulator-5556",
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
+      const rebind = pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: "emulator-5556",
+        platform: "android",
+        allowSessionRebind: true,
+      });
       await started.promise;
       expect(manager.getSession("owner")).toBe(session);
       expect(manager.getDeviceForSession("owner")).toBe("emulator-5556");
@@ -72,7 +72,7 @@ for (const autolock of [false, true]) {
         expect(pool.getDevice(id)).toMatchObject({ sessionId: "owner", status: "busy" });
       }
       expect(pool.getAvailableDeviceCount()).toBe(0);
-      expect(await persistence.getSession?.("owner")).toMatchObject({
+      expect(await persistence.getSession("owner")).toMatchObject({
         device_id: "emulator-5556",
         status: "active",
         released_at_ms: null,
@@ -88,7 +88,11 @@ for (const autolock of [false, true]) {
       // the old entry while rebind owns the assignment mutex.
       const acquisition = autolock
         ? pool.autolockDevice("emulator-5554", "android", "client")
-        : pool.bindOrReuseDeviceSession("next-owner", "emulator-5554", "android");
+        : pool.bindOrReuseDeviceSession({
+            sessionId: "next-owner",
+            deviceId: "emulator-5554",
+            platform: "android",
+          });
       drain.resolve(1);
       expect(await rebind).toBe("owner");
       const nextOwner = await acquisition;
@@ -103,12 +107,12 @@ for (const autolock of [false, true]) {
         status: "busy",
       });
       expect(manager.getDeviceForSession("owner")).toBe("emulator-5556");
-      expect(await persistence.getSession?.("owner")).toMatchObject({
+      expect(await persistence.getSession("owner")).toMatchObject({
         device_id: "emulator-5556",
         status: "active",
         released_at_ms: null,
       });
-      expect(await persistence.getSession?.(nextOwner!)).toMatchObject({
+      expect(await persistence.getSession(nextOwner!)).toMatchObject({
         device_id: "emulator-5554",
         status: "active",
       });
@@ -132,7 +136,11 @@ for (const autolock of [false, true]) {
 test("idle assignment restores a tentative claim when the session already holds another device", async () => {
   const { pool, manager, persistence } = await createContext();
   try {
-    await pool.bindOrReuseDeviceSession("owner", "emulator-5554", "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner",
+      deviceId: "emulator-5554",
+      platform: "android",
+    });
     const session = manager.getSession("owner");
     const result = await pool.assignDeviceToSession("owner", "android");
     expect(result).toBe("emulator-5554");
@@ -141,7 +149,7 @@ test("idle assignment restores a tentative claim when the session already holds 
     expect(pool.getAvailableDeviceCount()).toBe(1);
     expect(manager.getSession("owner")).toBe(session);
     expect(manager.getDeviceForSession("owner")).toBe("emulator-5554");
-    expect(await persistence.getSession?.("owner")).toMatchObject({
+    expect(await persistence.getSession("owner")).toMatchObject({
       device_id: "emulator-5554",
       status: "active",
       released_at_ms: null,
@@ -168,21 +176,18 @@ test("public rebind cannot cross warm autolock's activity-refresh assignment fen
     const warm = pool.autolockDevice("emulator-5554", "android", "client");
     await refreshStarted.promise;
     const discoveries = utils.getBootedDevicesDetailedCalls().length;
-    const rebind = pool.bindOrReuseDeviceSession(
-      "owner",
-      "emulator-5556",
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      true,
-    );
+    const rebind = pool.bindOrReuseDeviceSession({
+      sessionId: "owner",
+      deviceId: "emulator-5556",
+      platform: "android",
+      allowSessionRebind: true,
+    });
     await drainUntil(() => utils.getBootedDevicesDetailedCalls().length > discoveries, {
       description: "queued rebind discovery",
     });
     expect(manager.getDeviceForSession("owner")).toBe("emulator-5554");
     expect(pool.getDevice("emulator-5556")).toMatchObject({ sessionId: null, status: "idle" });
-    expect(await persistence.getSession?.("owner")).toMatchObject({
+    expect(await persistence.getSession("owner")).toMatchObject({
       device_id: "emulator-5554",
       status: "active",
     });
@@ -193,7 +198,7 @@ test("public rebind cannot cross warm autolock's activity-refresh assignment fen
     expect(pool.getDevice("emulator-5556")).toMatchObject({ sessionId: "owner", status: "busy" });
     expect(manager.getDeviceForSession("owner")).toBe("emulator-5556");
     expect(pool.getAvailableDeviceCount()).toBe(1);
-    expect(await persistence.getSession?.("owner")).toMatchObject({
+    expect(await persistence.getSession("owner")).toMatchObject({
       device_id: "emulator-5556",
       status: "active",
       released_at_ms: null,

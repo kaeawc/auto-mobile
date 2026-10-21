@@ -21,11 +21,9 @@ const test = warmedTests(() => {
 });
 function setup() {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   managers.push(manager);
   const heartbeat = (sessionId: string) =>

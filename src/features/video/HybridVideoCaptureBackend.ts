@@ -1,9 +1,11 @@
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
+import { ENV, readEnvRaw } from "../../config/env";
 import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
   type ForceStopOptions,
   type VideoCaptureTeardownDescriptor,
+  type OrphanCaptureStopOptions,
   VideoCaptureStartCleanupError,
   type RecordingHandle,
   type RecordingResult,
@@ -80,6 +82,26 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     return this.backendFor(hybridHandle.backend).describeCaptureTeardown?.(hybridHandle.handle);
   }
 
+  async forceStopOrphanedCapture(
+    device: BootedDevice | undefined,
+    descriptor: VideoCaptureTeardownDescriptor,
+    options?: OrphanCaptureStopOptions,
+  ): Promise<void> {
+    const backend =
+      descriptor.kind === "ios-host-recorder" ? this.ffmpegBackend : this.platformBackend;
+    if (descriptor.kind === "android-screenrecord" && !device) {
+      throw new ActionableError("Device is required to stop an orphan Android recorder.");
+    }
+    if (!backend.forceStopOrphanedCapture) {
+      throw new ActionableError("Selected backend does not support orphan capture teardown.");
+    }
+    if (options) {
+      await backend.forceStopOrphanedCapture(device, descriptor, options);
+    } else {
+      await backend.forceStopOrphanedCapture(device, descriptor);
+    }
+  }
+
   async stop(handle: RecordingHandle): Promise<RecordingResult> {
     const hybridHandle = handle.backendHandle as HybridBackendHandle | undefined;
     if (!hybridHandle || hybridHandle.kind !== "hybrid") {
@@ -124,9 +146,8 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     if (device.platform === "android") {
-      const useFfmpegPipe =
-        process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE === "1" ||
-        process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE === "true";
+      const ffmpegPipe = readEnvRaw(ENV.ANDROID_VIDEO_USE_FFMPEG_PIPE);
+      const useFfmpegPipe = ffmpegPipe === "1" || ffmpegPipe === "true";
       if (useFfmpegPipe) {
         logger.info(
           "[VideoCapture] Android: using exec-out screenrecord → ffmpeg (AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE)",

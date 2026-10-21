@@ -1,8 +1,10 @@
-import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
-import type { NetworkFilterBridge } from "../features/network-filter/NetworkFilterBridge";
-import { createSetActiveDeviceHandler } from "./setActiveDevice";
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
+import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
+import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
+import { createSetActiveDeviceHandler, type SetActiveDeviceSeams } from "./setActiveDevice";
 export type { SetActiveDeviceArgs } from "./setActiveDevice";
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
+import { deviceStateMessage } from "./deviceStateMessage";
 import { deviceClockInputSchema, validateDeviceClockInput } from "../features/utility/DeviceClock";
 import { runSessionClockMutation } from "./sessionClock";
 import {
@@ -11,14 +13,17 @@ import {
   runSessionLocationMutation,
 } from "./sessionLocation";
 import { z } from "zod/v4";
+import {
+  changeLocalizationResultSchema,
+  displayConfigResultSchema,
+  setActiveDeviceResultSchema,
+} from "./utilityToolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
 import { isIosSimulatorDevice } from "../features/action/IosSimulatorPermissions";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
-import {
-  recordDeviceSettingDefaultsBeforeChange,
-  type DeviceSettingKey,
-} from "../features/utility/DeviceSettingDefaults";
+import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
+import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import {
   DeviceState,
   biometricEnrollmentSchema,
@@ -35,16 +40,12 @@ import {
 } from "../features/utility/DeviceState";
 import {
   DisplayConfig,
+  MAX_ANDROID_DENSITY_DPI,
+  MIN_ANDROID_DENSITY_DPI,
   type DisplayConfigResult,
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
-import {
-  createJSONToolResponse,
-  createStructuredToolResponse,
-  withIsErrorOnFailure,
-} from "../utils/toolUtils";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { BootedDevice, Platform } from "../models";
 import {
   addDeviceTargetingToSchema,
@@ -52,8 +53,8 @@ import {
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
-import { DaemonState } from "../daemon/daemonState";
+} from "../utils/schemaHelpers";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { SessionManager } from "../daemon/sessionManager";
 import {
@@ -61,7 +62,7 @@ import {
   runSessionBiometricMutation,
 } from "./sessionBiometricEnrollment";
 import { runSessionNetworkMutation, type IosAppNetworkRulePlan } from "./sessionNetworkCondition";
-import type { IosAppNetworkRuleCommandContext } from "../features/network-filter/IosAppNetworkRuleClient";
+import type { IosAppNetworkRuleCommandContext } from "../features/networkFilter/IosAppNetworkRuleClient";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 
 async function resumeCtrlProxyIfCurrentlyBooted(
@@ -76,17 +77,10 @@ async function resumeCtrlProxyIfCurrentlyBooted(
   if (!bootedDevices.some((device) => device.deviceId === deviceId)) {
     return;
   }
-  if (
-    DaemonState.getInstance().isInitialized() &&
-    (await DaemonState.getInstance().getDevicePool().isShutdownReserved(deviceId))
-  ) {
+  if (await defaultDaemonContext.devicePool()?.isShutdownReserved(deviceId)) {
     return;
   }
-  if (platform === "android") {
-    AndroidCtrlProxyClient.resumeAfterDeviceStart(deviceId);
-  } else {
-    IOSCtrlProxyClient.resumeAfterDeviceStart(deviceId);
-  }
+  ctrlProxyClientLifecycle.resumeAfterDeviceStart(platform, deviceId);
 }
 
 // Schema definitions
@@ -390,12 +384,15 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
             "its inherited default. Android only. Omit to leave unchanged.",
         ),
       density: z
-        .union([z.number().min(72), z.enum(["smaller", "default", "larger"])])
+        .union([
+          z.number().min(MIN_ANDROID_DENSITY_DPI).max(MAX_ANDROID_DENSITY_DPI),
+          z.enum(["smaller", "default", "larger"]),
+        ])
         .optional()
         .describe(
           "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
-            "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
-            "leave unchanged.",
+            `(smaller/default/larger). Numeric values must be ${MIN_ANDROID_DENSITY_DPI}-${MAX_ANDROID_DENSITY_DPI} dpi. ` +
+            "Android only; best-effort on physical devices. Omit to leave unchanged.",
         ),
       theme: z
         .enum(["light", "dark", "system", "custom"])
@@ -532,17 +529,7 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
 );
 
 // Export interfaces for type safety
-export interface ChangeLocalizationArgs {
-  // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: Platform;
-  appId?: string;
-  locale?: string;
-  timeZone?: string;
-  textDirection?: "ltr" | "rtl";
-  timeFormat?: "12" | "24";
-  calendarSystem?: string;
-  restartApp?: string;
-}
+export type ChangeLocalizationArgs = z.output<typeof changeLocalizationSchema>;
 
 /**
  * #6154 follow-up: `platform` is optional on the wire (resolved from
@@ -594,56 +581,6 @@ function displayConfigMessage(result: DisplayConfigResult): string {
   return result.error ?? "Failed to apply display configuration";
 }
 
-function deviceStateMessage(result: DeviceStateResult): string {
-  if (!result.success) {
-    return result.error ?? "Failed to read device state";
-  }
-
-  const sections = [
-    doNotDisturbMessage(result),
-    connectivityMessage(result),
-    biometricsMessage(result),
-    networkConditionMessage(result),
-  ].filter((section): section is string => section !== undefined);
-  return sections.length > 0 ? sections.join("; ") : "Read device state";
-}
-
-function doNotDisturbMessage(result: DeviceStateResult): string | undefined {
-  if (!result.doNotDisturb?.supported) {
-    return undefined;
-  }
-  const { enabled, mode } = result.doNotDisturb;
-  return enabled === false ? "DND off" : mode ? `DND on (${mode})` : "DND on";
-}
-
-function connectivityMessage(result: DeviceStateResult): string | undefined {
-  if (!result.connectivity?.supported) {
-    return undefined;
-  }
-  const { airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled } = result.connectivity;
-  const connectivity = [
-    connectivityStateMessage("Wi-Fi", wifiEnabled),
-    connectivityStateMessage("Bluetooth", bluetoothEnabled),
-    connectivityStateMessage("Location", locationEnabled),
-    connectivityStateMessage("Airplane", airplaneMode),
-  ].filter((state): state is string => state !== undefined);
-  return connectivity.length > 0 ? connectivity.join(", ") : undefined;
-}
-
-function connectivityStateMessage(name: string, enabled: boolean | undefined): string | undefined {
-  return enabled === undefined ? undefined : `${name} ${enabled ? "on" : "off"}`;
-}
-
-function biometricsMessage(result: DeviceStateResult): string | undefined {
-  const enrollment = result.biometrics?.supported ? result.biometrics.enrollment : undefined;
-  return enrollment === undefined ? undefined : `Biometrics ${enrollment}`;
-}
-
-function networkConditionMessage(result: DeviceStateResult): string | undefined {
-  const profile = result.networkCondition?.supported ? result.networkCondition.profile : undefined;
-  return profile === undefined ? undefined : `Network ${profile}`;
-}
-
 export type GetDeviceStateArgs = z.infer<typeof getDeviceStateSchema>;
 
 export type SetDeviceStateArgs = z.infer<typeof setDeviceStateSchema>;
@@ -658,11 +595,12 @@ async function captureBiometricEnrollment(
   device: BootedDevice,
   args: SetDeviceStateArgs,
   deviceState: DeviceState,
+  daemon: DaemonContext = defaultDaemonContext,
 ): Promise<BiometricEnrollmentCapture> {
-  if (!args.biometrics || !args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
+  const sessionManager = args.biometrics && args.sessionUuid ? daemon.sessionManager() : undefined;
+  if (!sessionManager || !args.sessionUuid) {
     return {};
   }
-  const sessionManager = DaemonState.getInstance().getSessionManager();
   if (sessionManager.getBiometricEnrollment(args.sessionUuid)) {
     return { sessionManager };
   }
@@ -834,7 +772,7 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
   }
 
   return withIsErrorOnFailure(
-    createJSONToolResponse({
+    createStructuredToolResponse({
       success,
       changes,
       intentBroadcast,
@@ -851,6 +789,14 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
 function isDisplayConfigRead(args: DisplayConfigArgs): boolean {
   return !displayConfigArgsAreSet(args);
 }
+
+const displayConfigToolOptions = {
+  ...PLAN_RELEVANT,
+  defaultEnabled: false,
+  deviceReadOnly: isDisplayConfigRead,
+  deviceReadOnlyArgs: [{ absentArguments: ["reset", "fontScale", "density", "theme"] }],
+  outputSchema: displayConfigResultSchema,
+};
 
 /** The device settings a displayConfig call may change (#11145). */
 function displayConfigChangedSettings(args: DisplayConfigArgs): DeviceSettingKey[] {
@@ -872,7 +818,7 @@ const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArg
   const result = displayConfigArgsAreSet(args)
     ? await displayConfig.setConfig(displayConfigSetInput(args))
     : await displayConfig.getConfig();
-  const response = createJSONToolResponse({
+  const response = createStructuredToolResponse({
     message: displayConfigMessage(result),
     ...result,
   });
@@ -933,14 +879,14 @@ const createGetDeviceStateHandler =
 
 // Register tools
 export function registerUtilityTools(
-  options: {
-    displayInventory?: DisplayInventoryProvider;
+  options: SetActiveDeviceSeams & {
     /** iOS Simulator network-extension controller; defaults to the installed one. */
     networkFilterBridge?: NetworkFilterBridge;
   } = {},
 ) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
     displayInventory: options.displayInventory,
+    legacyDeviceSelection: options.legacyDeviceSelection,
     resumeCtrlProxy: resumeCtrlProxyIfCurrentlyBooted,
   });
 
@@ -948,10 +894,7 @@ export function registerUtilityTools(
     if (args.clock !== undefined) {
       validateDeviceClockInput(args.clock);
     }
-    const sessionManager =
-      args.sessionUuid && DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined;
+    const sessionManager = args.sessionUuid ? defaultDaemonContext.sessionManager() : undefined;
     const { deviceState, useIosAppNetworkRule } = createSessionDeviceState(
       device,
       args.sessionUuid,
@@ -1066,7 +1009,7 @@ export function registerUtilityTools(
     "Set active device using existing session binding or legacy global selection. With a daemon session, display pins a display key or role (inner/cover/rear/external); null clears, omission preserves. Explicit display arguments (including active) bypass the pin; otherwise pin beats focus/posture. On single-display devices, active resolves to the sole key; on multi-display devices active cannot be pinned. all cannot be pinned. Missing or inactive pinned panels fail without dispatch; clear with display: null. Pins clear on release/rebind and are unsupported in direct mode. Returns a text JSON result with message, deviceId, optional sessionUuid, and displayPin (string or null) when display was passed or a pin is present/cleared; never-pinned calls omit displayPin.",
     setActiveDeviceSchema,
     setActiveDeviceHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: setActiveDeviceResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1074,7 +1017,7 @@ export function registerUtilityTools(
     "Change locale, time zone, text direction, time format, and calendar system",
     changeLocalizationSchema,
     changeLocalizationHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: changeLocalizationResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1082,7 +1025,7 @@ export function registerUtilityTools(
     "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance.",
     displayConfigSchema,
     displayConfigHandler,
-    { defaultEnabled: false, deviceReadOnly: isDisplayConfigRead },
+    displayConfigToolOptions,
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1105,6 +1048,6 @@ export function registerUtilityTools(
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     setDeviceStateSchema,
     setDeviceStateHandler,
-    { defaultEnabled: false, outputSchema: setDeviceStateResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setDeviceStateResultSchema },
   );
 }

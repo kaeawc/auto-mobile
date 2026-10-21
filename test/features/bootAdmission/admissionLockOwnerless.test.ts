@@ -32,6 +32,7 @@ function registry(): FileHostBootAdmissionRegistry {
     pid: 100,
     timer,
     isProcessRunning: (owner) => owner === 100,
+    readProcessGenerationToken: () => undefined,
     idGenerator: new FakeIdGenerator(),
   });
 }

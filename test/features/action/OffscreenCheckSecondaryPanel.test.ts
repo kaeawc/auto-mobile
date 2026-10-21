@@ -1,3 +1,6 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
@@ -30,7 +33,7 @@ const cover = { width: 1080, height: 2364 };
 const defaultDisplay = { width: 2076, height: 2152 };
 const display = { displayId: 3, panelUniqueId: "cover" };
 // Centre x=1500 lies inside the default display but outside the cover panel.
-const target: Element = {
+const target = {
   bounds: { left: 1400, right: 1600, top: 100, bottom: 200 },
   text: "Panel target",
   clickable: true,
@@ -45,7 +48,7 @@ const options: ScreenSizeForOffscreenCheckOptions = {
 
 function coverHierarchy(overrides: Partial<ViewHierarchyResult> = {}): ViewHierarchyResult {
   return {
-    hierarchy: { node: [{ ...target }] },
+    hierarchy: { node: createFlatNodeForTest({ node: [createFlatNodeForTest({ ...target })] }) },
     screenWidth: cover.width,
     screenHeight: cover.height,
     ...display,
@@ -103,7 +106,7 @@ const wrongSizeOptions: ScreenSizeForOffscreenCheckOptions = {
   ...options,
   observationScreenSize: defaultDisplay,
 };
-const inside: Element = { ...target, bounds: { left: 100, right: 200, top: 100, bottom: 200 } };
+const inside = { ...target, bounds: { left: 100, right: 200, top: 100, bottom: 200 } };
 
 test("resolver selector path rejects a centre outside the targeted panel", () => {
   // ResolverElementSelector is the selector tapOn and tapAny construct by default.
@@ -111,7 +114,9 @@ test("resolver selector path rejects a centre outside the targeted panel", () =>
   expect(selector.selectByText(coverHierarchy(), target.text!).element).toBeNull();
   // Positive control: same hierarchy shape and text, centre inside the panel.
   const found = selector.selectByText(
-    coverHierarchy({ hierarchy: { node: [{ ...inside }] } }),
+    coverHierarchy({
+      hierarchy: { node: createFlatNodeForTest({ node: [createFlatNodeForTest({ ...inside })] }) },
+    }),
     target.text!,
   ).element;
   expect(found?.bounds).toEqual(inside.bounds);
@@ -153,20 +158,19 @@ async function runTapOn(bounds: Element["bounds"]) {
     screenHeight: cover.height,
     hierarchy: {
       bounds: { left: 0, top: 0, right: cover.width, bottom: cover.height },
-      node: { ...target, bounds },
+      node: createFlatNodeForTest({ ...target, bounds }),
     },
   };
-  const observation: ObserveResult = {
+  const observation: ObserveResult = buildObserveResult({
     observationId: "straddle",
     updatedAt: 1,
     // Wrong on purpose: the default display's size must not win over the capture.
     screenSize: defaultDisplay,
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: capture,
-  };
+  });
   const points: Array<{ x: number; y: number }> = [];
-  tapOn.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tapOn.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tapOn.refreshViewHierarchy = async () => capture;
@@ -175,9 +179,10 @@ async function runTapOn(bounds: Element["bounds"]) {
   };
   tapOn.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
     observation: current,
+    effect: undefined,
   });
-  tapOn.captureTerminalObservationScreenshot = async () => {};
-  tapOn.recordDeferredPredictionOutcome = async () => {};
+  tapOn.testHooks.setTerminalScreenshotCapture(async () => {});
+  tapOn.testHooks.setDeferredPredictionRecorder(async () => {});
   tapOn.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tapOn.execute({ text: target.text, action: "tap" });
   return { result, points };
@@ -196,7 +201,11 @@ test("tapOn end to end taps the visible part of an element straddling the panel 
 });
 
 test("tapAt path refuses a coordinate outside the targeted panel's observation size", () => {
-  const observation = { screenSize: cover } as ObserveResult;
+  const observation = buildObserveResult({
+    updatedAt: 0,
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    screenSize: cover,
+  });
   expect("error" in resolveTapAtCoordinates({ x: 1500, y: 150 }, observation, "android")).toBe(
     true,
   );

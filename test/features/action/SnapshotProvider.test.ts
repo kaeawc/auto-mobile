@@ -3,7 +3,7 @@ import { FakeSnapshotProvider } from "../../fakes/FakeSnapshotProvider";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import {
@@ -90,26 +90,28 @@ describe("SnapshotProvider interfaces", () => {
     platform: "android",
   };
   const iosDevice: BootedDevice = { deviceId: "ios-device-1", name: "iPhone 15", platform: "ios" };
-  const fakeAdbFactory: AdbClientFactory = { create: () => new FakeAdbClient() as any };
+  const fakeAdbFactory: AdbClientFactory = { create: () => new FakeAdbClient() };
   const store = () =>
     new DeviceSnapshotStore("/tmp/no-op", noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
   const captureCases: ReadonlyArray<[string, () => SnapshotCaptureProvider]> = [
     [
       "Android CaptureSnapshot",
-      () => new CaptureSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store()),
+      () =>
+        new CaptureSnapshot(androidDevice, {
+          adbFactory: fakeAdbFactory,
+          timer: new FakeTimer(),
+          store: store(),
+        }),
     ],
     [
       "iOS CaptureSnapshot",
       () =>
-        new CaptureSnapshot(
-          iosDevice,
-          undefined,
-          undefined,
-          new FakeTimer(),
-          store(),
-          new FakeSimCtlClient(),
-        ),
+        new CaptureSnapshot(iosDevice, {
+          timer: new FakeTimer(),
+          store: store(),
+          simctl: new FakeSimctl(),
+        }),
     ],
   ];
   for (const [name, build] of captureCases) {
@@ -122,19 +124,21 @@ describe("SnapshotProvider interfaces", () => {
   const restoreCases: ReadonlyArray<[string, () => SnapshotRestoreProvider]> = [
     [
       "Android RestoreSnapshot",
-      () => new RestoreSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store()),
+      () =>
+        new RestoreSnapshot(androidDevice, {
+          adbFactory: fakeAdbFactory,
+          timer: new FakeTimer(),
+          store: store(),
+        }),
     ],
     [
       "iOS RestoreSnapshot",
       () =>
-        new RestoreSnapshot(
-          iosDevice,
-          undefined,
-          undefined,
-          new FakeTimer(),
-          store(),
-          new FakeSimCtlClient(),
-        ),
+        new RestoreSnapshot(iosDevice, {
+          timer: new FakeTimer(),
+          store: store(),
+          simctl: new FakeSimctl(),
+        }),
     ],
   ];
   for (const [name, build] of restoreCases) {

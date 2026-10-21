@@ -1,5 +1,5 @@
 import type { BootedDevice } from "../../models";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../utils/SystemTimer";
 import {
   sessionRenderedObservation,
@@ -9,7 +9,7 @@ import { resolveTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 
 export interface PrototypeDisplayDependencies {
-  adb: Pick<AdbExecutor, "executeCommand">;
+  adb: AdbCommandRunner;
   lastRenderedObservation?: RenderedObservationReader;
   signal?: AbortSignal;
 }

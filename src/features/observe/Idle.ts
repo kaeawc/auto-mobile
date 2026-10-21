@@ -14,6 +14,8 @@ import {
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
+import { QuietTreeStability } from "./androidLauncherPackages";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { shellQuote } from "../../utils/shellQuote";
 
 /**
@@ -23,9 +25,24 @@ import { shellQuote } from "../../utils/shellQuote";
  */
 export const ROTATION_READ_FLOOR_MS = 1000;
 
+/** Frame counters carried between stability checks; null when none were recorded yet. */
+export interface UiStabilityBaseline {
+  missedVsync: number | null;
+  slowUiThread: number | null;
+  frameDeadlineMissed: number | null;
+  totalFrames: number | null;
+}
+
 export class Idle {
   private adb: AdbExecutor;
   private timer: Timer;
+  private quietTree: QuietTreeStability;
+
+  /** Typed unit-test view of the launcher classification, which has no public entry point. */
+  readonly testHooks = {
+    isSystemLauncher: (packageName: string | null | undefined): boolean =>
+      this.isSystemLauncher(packageName),
+  };
 
   /**
    * Create an Idle instance
@@ -36,9 +53,11 @@ export class Idle {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    hierarchyReader?: ViewHierarchyRequestReader,
   ) {
     this.adb = adbFactory.create(device);
     this.timer = timer;
+    this.quietTree = new QuietTreeStability(device, adbFactory, timer, hierarchyReader);
   }
 
   /**
@@ -46,7 +65,7 @@ export class Idle {
    * @param packageName - Package name to check
    * @returns True if this is likely a system package
    */
-  private isSystemLauncher(packageName: string | null): boolean {
+  private isSystemLauncher(packageName: string | null | undefined): boolean {
     // Handle null, undefined, or empty package names
     if (!packageName) {
       return false;
@@ -62,7 +81,6 @@ export class Idle {
       "com.oneplus.launcher",
       "com.huawei.android.launcher",
       "com.sec.android.app.launcher",
-      "com.android.settings",
     ];
 
     // Match by prefix, not substring. Reverse containment
@@ -76,6 +94,19 @@ export class Idle {
         (sysPackage) => packageName === sysPackage || packageName.startsWith(`${sysPackage}.`),
       )
     );
+  }
+
+  /** Packages without useful gfxinfo use fresh trees within the same stability budget. */
+  async waitForQuietTreeStability(
+    packageName: string,
+    startTime: number,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ) {
+    if (!this.isSystemLauncher(packageName)) {
+      return null;
+    }
+    return this.quietTree.metrics(packageName, startTime, timeoutMs, signal);
   }
 
   /**
@@ -191,11 +222,9 @@ export class Idle {
     try {
       // Reset the gfxinfo stats for the package
       await perf.track("adbGfxinfoReset", () =>
-        this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
-          undefined,
-          DUMPSYS_MAX_BUFFER,
-        ),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`, {
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+        }),
       );
 
       // Wait for measurement period to accumulate data. Use the injected timer
@@ -206,10 +235,8 @@ export class Idle {
       // Take immediate measurement with no previous state
       return await this.getUiStability(
         packageName,
-        null, // No previous missed vsync
-        null, // No previous slow UI thread
-        null, // No previous frame deadline missed
-        null, // No previous total frames
+        // No previous frame counters
+        { missedVsync: null, slowUiThread: null, frameDeadlineMissed: null, totalFrames: null },
         false, // Not first log since we just reset
         perf,
       );
@@ -242,13 +269,11 @@ export class Idle {
   ): Promise<string | null> {
     try {
       const { stdout } = await perf.track("adbGfxinfo", () =>
-        this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-          options.timeoutMs,
-          DUMPSYS_MAX_BUFFER,
-          undefined,
-          options.signal,
-        ),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
+          timeoutMs: options.timeoutMs,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          signal: options.signal,
+        }),
       );
       if (firstGfxInfoLog) {
         logger.info(`[AwaitIdle] Initial gfxinfo stdout for ${packageName}:\n${stdout}`);
@@ -383,6 +408,7 @@ export class Idle {
     prevTotalFrames: number | null,
   ): {
     isStable: boolean;
+    noFrameData?: boolean;
     shouldUpdateLastNonIdleTime: boolean;
     updatedPrevMissedVsync: number | null;
     updatedPrevSlowUiThread: number | null;
@@ -399,6 +425,7 @@ export class Idle {
       );
       return {
         isStable: false,
+        noFrameData: true,
         shouldUpdateLastNonIdleTime: true,
         updatedPrevMissedVsync: prevMissedVsync,
         updatedPrevSlowUiThread: prevSlowUiThread,
@@ -574,29 +601,27 @@ export class Idle {
   /**
    * Check UI stability metrics and return calculation results
    * @param packageName - Package name of the app to monitor
-   * @param prevMissedVsync - Previous missed vsync count
-   * @param prevSlowUiThread - Previous slow UI thread count
-   * @param prevFrameDeadlineMissed - Previous frame deadline missed count
+   * @param baseline - Previous frame counters (null when none recorded)
    * @param firstGfxInfoLog - Whether this is the first gfx info log
    * @param perf - Optional performance tracker
    * @returns Object containing stability check results and updated state
    */
   async getUiStability(
     packageName: string,
-    prevMissedVsync: number | null,
-    prevSlowUiThread: number | null,
-    prevFrameDeadlineMissed: number | null,
-    prevTotalFrames: number | null,
+    baseline: UiStabilityBaseline,
     firstGfxInfoLog: boolean,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<UiStabilityResult> {
+    const {
+      missedVsync: prevMissedVsync,
+      slowUiThread: prevSlowUiThread,
+      frameDeadlineMissed: prevFrameDeadlineMissed,
+      totalFrames: prevTotalFrames,
+    } = baseline;
     try {
-      // For system packages, use a simpler approach
       if (this.isSystemLauncher(packageName)) {
-        logger.info(
-          `[AwaitIdle] ${packageName} is a system package, using simplified stability check`,
-        );
+        await this.quietTree.wait(options.timeoutMs ?? 1000, options.signal);
         return {
           isStable: true,
           shouldUpdateLastNonIdleTime: false,
@@ -614,6 +639,7 @@ export class Idle {
       if (stdout === null) {
         return {
           isStable: false,
+          frameStatsUnavailable: true,
           shouldUpdateLastNonIdleTime: true,
           updatedPrevMissedVsync: prevMissedVsync,
           updatedPrevSlowUiThread: prevSlowUiThread,
@@ -648,6 +674,7 @@ export class Idle {
 
       return {
         isStable: result.isStable,
+        ...(result.noFrameData ? { noFrameData: true } : {}),
         shouldUpdateLastNonIdleTime: result.shouldUpdateLastNonIdleTime,
         updatedPrevMissedVsync: result.updatedPrevMissedVsync,
         updatedPrevSlowUiThread: result.updatedPrevSlowUiThread,
@@ -657,10 +684,11 @@ export class Idle {
       };
     } catch (err) {
       options.signal?.throwIfAborted();
-      // Just continue polling on error
+      // A diagnostic read failure supplies no stability evidence; continue polling.
       logger.info(`[AwaitIdle] Error checking frame stats: ${err}`);
       return {
         isStable: false,
+        frameStatsUnavailable: true,
         shouldUpdateLastNonIdleTime: true,
         updatedPrevMissedVsync: prevMissedVsync,
         updatedPrevSlowUiThread: prevSlowUiThread,

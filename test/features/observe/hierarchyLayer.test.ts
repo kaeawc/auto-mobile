@@ -1,7 +1,13 @@
+import { wireCapture } from "../../helpers/wireCapture";
+import { PrototypeHiddenError } from "../../../src/features/prototype/prototypeHidden";
+import { PrototypeSuspendedError } from "../../../src/features/prototype/prototypeSuspended";
 import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   assertAppGestureNotUnderPrototype,
+  assertGestureOnLayer,
+  layerGestureRefusal,
+  focusedFieldLayerRefusal,
   hasOwnPrototype,
   ownPrototypeCoversPoint,
   scopeHierarchyForSelector,
@@ -61,6 +67,43 @@ function selectSettings(hierarchy: ViewHierarchyResult): number | undefined {
 }
 
 describe("scopeHierarchyToLayer (#9305)", () => {
+  test("three prototype windows are all scoped by window id", () => {
+    const hierarchy = capturedPrototypeHierarchy({
+      prototypeId: "a",
+      prototypePlacement: "fullscreen",
+    });
+    const prototype = hierarchy.windows!.find((window) => window.id === PROTOTYPE_WINDOW_ID)!;
+    const root = windowRoot(hierarchy, PROTOTYPE_WINDOW_ID);
+    const extra = [
+      { id: 9001, prototypeId: "b", prototypePlacement: "sheet" as const },
+      { id: 9002, prototypeId: "c", prototypePlacement: "floating" as const },
+    ];
+    hierarchy.windows = [
+      ...hierarchy.windows!.filter(
+        (window) => window.id === APP_WINDOW_ID || window.id === PROTOTYPE_WINDOW_ID,
+      ),
+      ...extra.map((window) => ({ ...prototype, ...window })),
+    ];
+    hierarchy.hierarchy = wireCapture({
+      hierarchy: {
+        ...hierarchy.hierarchy,
+        node: [
+          ...windowRoots(hierarchy).filter(
+            (window) =>
+              window.windowId === APP_WINDOW_ID || window.windowId === PROTOTYPE_WINDOW_ID,
+          ),
+          ...extra.map((window) => ({ ...root, windowId: window.id })),
+        ],
+      },
+    }).hierarchy;
+    const prototypeLayer = scopeHierarchyToLayer(hierarchy, "prototype");
+    expect(rootWindowIds(prototypeLayer)).toEqual([PROTOTYPE_WINDOW_ID, 9001, 9002]);
+    expect(prototypeLayer.windows!.map((window) => window.prototypeId)).toEqual(["a", "b", "c"]);
+    const appLayer = scopeHierarchyToLayer(hierarchy, "app");
+    expect(rootWindowIds(appLayer)).toEqual([APP_WINDOW_ID]);
+    expect(appLayer.windows!.map((window) => window.id)).toEqual([APP_WINDOW_ID]);
+  });
+
   test("the relabelled capture is recognized as having the prototype", () => {
     expect(hasOwnPrototype(captureWithPrototype())).toBe(true);
     expect(hasOwnPrototype(convertedCapture())).toBe(false);
@@ -331,4 +374,98 @@ describe("a highlight window with no prototype (#11346)", () => {
     expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(hierarchy);
     expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(ActionableError);
   });
+});
+
+describe("suspended prototype pins", () => {
+  test("an existing prototype window wins over the suspended flag", () => {
+    const hierarchy = capturedPrototypeHierarchy({ fullScreen: true });
+    hierarchy.prototypeSuspended = true;
+    expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).not.toThrow();
+    expect(() =>
+      assertGestureOnLayer(hierarchy, "prototype", [{ x: 10, y: 10 }], "swipe"),
+    ).not.toThrow();
+  });
+  test("no prototype stays an untyped ActionableError with the original text", () => {
+    try {
+      scopeHierarchyForSelector(convertedCapture(), "prototype");
+      throw new Error("expected refusal");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as Error).message).toBe(
+        'layer "prototype" was requested, but no AutoMobile prototype is showing. Show the prototype first, or omit layer to search the whole screen.',
+      );
+      expect("code" in (error as ActionableError)).toBe(false);
+    }
+  });
+});
+
+// Both string-returning consumers keep their existing result contract (#12204).
+test("gesture and focused-field string refusals describe suspension", () => {
+  const hierarchy = convertedCapture();
+  hierarchy.prototypeSuspended = true;
+  for (const refusal of [
+    layerGestureRefusal(hierarchy, "prototype", [{ x: 10, y: 10 }], "tap"),
+    focusedFieldLayerRefusal(hierarchy, "prototype", "select all text"),
+  ]) {
+    expect(refusal).toContain(
+      "the AutoMobile prototype is hidden because the app it was shown over is not in front",
+    );
+    expect(refusal).toContain("Bring that app back to the foreground");
+  }
+});
+
+for (const reason of ["app_layer_window_hidden", "device_blocked"] as const) {
+  test(`hidden ${reason} refuses selectors and gestures, with suspension and visible precedence`, () => {
+    const hierarchy = { ...convertedCapture(), prototypeHiddenReason: reason };
+    const expected = new PrototypeHiddenError(reason);
+    for (const refuse of [
+      (frame: ViewHierarchyResult) => scopeHierarchyForSelector(frame, "prototype"),
+      (frame: ViewHierarchyResult) =>
+        assertGestureOnLayer(frame, "prototype", [{ x: 10, y: 10 }], "swipe"),
+    ]) {
+      expect(() => refuse(hierarchy)).toThrow(expected.message);
+      expect(() => refuse(hierarchy)).toThrow(PrototypeHiddenError);
+      try {
+        refuse(hierarchy);
+      } catch (error) {
+        if (!(error instanceof PrototypeHiddenError)) {
+          throw error;
+        }
+        expect(error.code).toBe("prototype_hidden");
+        expect(error.retryable).toBe(false);
+        expect(error.details).toEqual({ prototypeHiddenReason: reason });
+        expect(error.nextAction).toBe(expected.nextAction);
+      }
+      expect(() => refuse({ ...hierarchy, prototypeSuspended: true })).toThrow(
+        PrototypeSuspendedError,
+      );
+    }
+    expect(expected.code).toBe("prototype_hidden");
+    expect(expected.retryable).toBe(false);
+    expect(expected.details).toEqual({ prototypeHiddenReason: reason });
+    const visible = { ...captureWithPrototype(), prototypeHiddenReason: reason };
+    expect(scopeHierarchyForSelector(visible, "prototype")).toBeDefined();
+    const bounds = visible.windows!.find((window) => window.id === PROTOTYPE_WINDOW_ID)!.bounds!;
+    expect(() =>
+      assertGestureOnLayer(visible, "prototype", [{ x: bounds.left, y: bounds.top }], "swipe"),
+    ).not.toThrow();
+  });
+}
+test("older-device selector and gesture refusals retain exact text", () => {
+  const frame = convertedCapture();
+  expect(() => scopeHierarchyForSelector(frame, "prototype")).toThrow(
+    'layer "prototype" was requested, but no AutoMobile prototype is showing. Show the prototype first, or omit layer to search the whole screen.',
+  );
+  expect(layerGestureRefusal(frame, "prototype", [{ x: 1, y: 1 }], "swipe")).toBe(
+    'layer "prototype" was requested, but no AutoMobile prototype is showing. Show the prototype first, or omit layer to search the whole screen.',
+  );
+});
+
+test("hidden refusals pin both reason sentences and advice", () => {
+  expect(new PrototypeHiddenError("app_layer_window_hidden").message).toBe(
+    'layer "prototype" was requested, but the AutoMobile prototype is hidden: it was shown with window.layer "app" and the app in front hides app-layer windows drawn over it (system apps such as Settings do). Show it again without window.layer (the default layer draws over every app) or over a different app, or omit layer.',
+  );
+  expect(new PrototypeHiddenError("device_blocked").message).toBe(
+    'layer "prototype" was requested, but the AutoMobile prototype is hidden: the device is locked or its screen is off. Wake and unlock the device (the prototype returns with its state), or omit layer.',
+  );
 });

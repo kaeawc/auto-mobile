@@ -55,6 +55,7 @@ function gate(pid: number, daemonEnv: NodeJS.ProcessEnv): AndroidBootAdmissionGa
       pid,
       timer,
       isProcessRunning: (p) => live.has(p),
+      readProcessGenerationToken: () => undefined,
       idGenerator: new FakeIdGenerator(),
     }),
   });

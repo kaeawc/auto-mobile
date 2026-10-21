@@ -3,11 +3,7 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
-import {
-  SessionManager,
-  type Session,
-  type SessionReleaseSnapshot,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -41,12 +37,12 @@ class DeferredPersistence extends FakeDeviceSessionPersistence {
 
   override async upsertActiveSession(
     ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
-  ) {
+  ): Promise<number> {
     if (this.deferUpsert) {
       this.upsertStarted.resolve();
       await this.finishUpsert.promise;
     }
-    await super.upsertActiveSession(...args);
+    return super.upsertActiveSession(...args);
   }
 }
 
@@ -59,18 +55,17 @@ export function releasingSessionHarness() {
   const finishRestore = Promise.withResolvers<void>();
   const restores: string[] = [];
   const poolReleases: Array<[string, string]> = [];
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => barrier,
-    (device) => ({
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => barrier,
+    keepScreenAwakeRestorer: (device) => ({
       restore: async () => {
         restores.push(device.deviceId);
         restoreStarted.resolve();
         await finishRestore.promise;
+        return { status: "restored" as const };
       },
     }),
-  );
+  });
   const observers = new ObserverSessionRegistry(timer, 10000);
   manager.setObserverSessionRegistry(observers);
   const state: DaemonStateAccess = {
@@ -121,10 +116,7 @@ export function releasingSessionHarness() {
     },
     holdTerminalFence(session: Session) {
       // Model a failed terminal persistence attempt awaiting retry, with no release in flight.
-      const internals = manager as unknown as {
-        terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot>;
-      };
-      internals.terminalReleaseSnapshots.set(session.sessionId, {
+      manager["sessionSlots"].setTerminalSnapshot(session.sessionId, {
         sessionId: session.sessionId,
         deviceId: session.assignedDevice!,
         releaseReason: "heartbeat-timeout",
@@ -166,7 +158,7 @@ export function releasingSessionHarness() {
         expect(restores).toEqual([releasingDeviceId]);
         expect(poolReleases).toEqual([[releasingDeviceId, releasingSessionId]]);
         expect(persistence.releaseWrites).toBe(1);
-        expect(await persistence.getSession?.(releasingSessionId)).toMatchObject({
+        expect(await persistence.getSession(releasingSessionId)).toMatchObject({
           status: "released",
           release_reason: "explicit-release",
         });

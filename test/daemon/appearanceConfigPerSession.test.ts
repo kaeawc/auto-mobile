@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { Socket } from "node:net";
-import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
+import type {
+  AppearanceConfig,
+  AppearanceConfigInput,
+  AppearanceMode,
+  BootedDevice,
+} from "../../src/models";
+import { parseAppearanceConfig } from "../../src/features/appearance/AppearanceConfig";
 import {
   AppearanceSyncScheduler,
   type AppearanceSyncTarget,
@@ -9,14 +14,14 @@ import {
   AppearanceSocketServer,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
-import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import { appearanceSocketResponseSchema } from "../helpers/wireMessageSchemas";
 import {
   ObserverAdmittingStreamAuthenticator,
   SessionScopedStreamAuthenticator,
   type StreamAuthSessionManager,
 } from "../../src/daemon/streamSocketAuth";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * #10976: appearance and sync config is per session. A session's choice reaches only the devices
@@ -37,10 +42,10 @@ class FakeConfigStore {
     this.rows.get(sessionKey ?? "") ?? DEFAULTS;
 
   update = async (
-    update: Partial<AppearanceConfig> | null,
+    update: AppearanceConfigInput | null,
     sessionKey?: string,
   ): Promise<AppearanceConfig> => {
-    const next = { ...(await this.get(sessionKey)), ...update } as AppearanceConfig;
+    const next = parseAppearanceConfig({ ...(await this.get(sessionKey)), ...update });
     this.rows.set(sessionKey ?? "", next);
     return next;
   };
@@ -126,15 +131,14 @@ describe("AppearanceSocketServer with per-session config", () => {
   );
 
   class Harness extends AppearanceSocketServer {
+    markListening(): void {
+      this.server = new FakeListeningNetServer();
+    }
+
     async send(socket: FakeSocket, request: Record<string, unknown>) {
-      await (this as unknown as { processLine(s: Socket, l: string): Promise<void> }).processLine(
-        socket as unknown as Socket,
-        JSON.stringify(request),
-      );
-      await (
-        this as unknown as { pendingBySocket: Map<unknown, Promise<void>> }
-      ).pendingBySocket.get(socket);
-      return socket.getWrittenMessages<AppearanceSocketResponse>().at(-1)!;
+      await this.processLine(socket, JSON.stringify(request));
+      await this.pendingBySocket.get(socket);
+      return socket.getWrittenMessages(appearanceSocketResponseSchema).at(-1)!;
     }
   }
 
@@ -168,7 +172,7 @@ describe("AppearanceSocketServer with per-session config", () => {
       },
       dependencies,
     );
-    (server as unknown as { server: object }).server = { listening: true };
+    server.markListening();
     return { server, store, applied, keys };
   }
 
@@ -218,9 +222,12 @@ describe("AppearanceSocketServer with per-session config", () => {
   });
 
   test("the production server admits observer sessions on its authenticator", () => {
-    const authenticator = (
-      new AppearanceSocketServer("/fake/appearance.sock") as unknown as { authenticator: unknown }
-    ).authenticator;
+    class Probe extends AppearanceSocketServer {
+      get admittingAuthenticator(): unknown {
+        return this.authenticator;
+      }
+    }
+    const authenticator = new Probe("/fake/appearance.sock").admittingAuthenticator;
     expect(authenticator).toBeInstanceOf(ObserverAdmittingStreamAuthenticator);
   });
 });

@@ -1,6 +1,7 @@
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import type { ProxiedToolDefinition } from "./daemonMcpProxy";
 import type { DaemonOptions } from "./types";
+import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
 
 /**
  * The committed, static MCP tool surface.
@@ -60,7 +61,7 @@ function isConnectedFallbackAvailable(
 function toolDefinitions(
   connectedDaemonOptions: DaemonOptions | undefined | false,
 ): ProxiedToolDefinition[] {
-  const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
+  const alwaysLoad = isAlwaysLoadToolsEnabled();
   return RAW_DEFINITIONS.filter(
     (tool) =>
       connectedDaemonOptions === false ||

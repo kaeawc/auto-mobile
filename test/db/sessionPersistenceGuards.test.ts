@@ -63,6 +63,7 @@ class RacingRepository extends DeviceSessionRepository {
 class LateReleaseWritePersistence extends FakeDeviceSessionPersistence {
   park: Promise<void> | undefined;
   afterReleaseWrite: (() => void) | undefined;
+  failPlainUpserts = 0;
 
   override async markReleased(
     sessionUuid: string,
@@ -84,6 +85,10 @@ class LateReleaseWritePersistence extends FakeDeviceSessionPersistence {
     options: UpsertActiveSessionOptions = {},
   ): Promise<number> {
     if (!options.unlessTerminal) {
+      if (this.failPlainUpserts > 0) {
+        this.failPlainUpserts--;
+        throw new Error("SQLITE_BUSY: eager live rewrite failed");
+      }
       await settleMicrotasks(20);
     }
     return await super.upsertActiveSession(record, nowMs, options);
@@ -123,23 +128,20 @@ describe("session persistence guards live in the statement, not in a prior read"
     manager: SessionManager;
     pool: SessionDeviceAssigner;
   } {
-    const manager = new SessionManager(timer, racing, () => new FakeDbWriteBarrier());
+    const manager = new SessionManager(timer, racing, { barrier: () => new FakeDbWriteBarrier() });
     managers.push(manager);
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId(daemonSessionId);
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-a", "daemon-b"]));
     const pool: SessionDeviceAssigner = {
       async assignDeviceToSession(id, _platform, target): Promise<string> {
-        const session = await manager.createSession(
-          id,
-          DEVICE,
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await manager.createSession(id, DEVICE, "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -312,14 +314,10 @@ describe("session persistence guards live in the statement, not in a prior read"
       manager.onSessionRelease((_sessionId, deviceId, reason, _snapshot, options) => {
         releases.push({ reason, deviceId, expiryOrigin: options.expiryOrigin });
       });
-      await manager.createSession(
-        SESSION,
-        DEVICE,
-        "android",
-        IDLE_WINDOW_MS,
-        undefined,
-        STABLE_DEVICE,
-      );
+      await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+        stableDeviceId: STABLE_DEVICE,
+      });
       expect(await peer.getSession(SESSION)).toMatchObject({ status: "active" });
       await peer.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
       timer.advanceTime(1_000);
@@ -412,16 +410,15 @@ describe("session persistence guards live in the statement, not in a prior read"
       expect(releases.map((release) => release.reason)).toEqual(["explicit-release"]);
     });
 
-    // #11206: a superseded release's terminal write can land late, under a session that lives
-    // on, and is then rewritten live. That row is this daemon's own, not the end of the UUID.
+    // #11206: a late superseded terminal write is rewritten live, rather than ending its UUID.
     test("a late terminal write of this daemon's superseded release does not end the session it left alive", async () => {
       const store = new LateReleaseWritePersistence();
-      const manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
       managers.push(manager);
       manager.stopCleanupTimer();
       const releases: string[] = [];
       manager.onSessionRelease((_sessionId, _deviceId, reason) => releases.push(reason));
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
       let landReleaseWrite!: () => void;
       store.park = new Promise<void>((resolve) => {
         landReleaseWrite = resolve;
@@ -430,9 +427,11 @@ describe("session persistence guards live in the statement, not in a prior read"
       const release = manager.releaseSessionUnlessSuperseded(
         SESSION,
         `device-disconnected:${DEVICE}`,
-        () => !superseded,
+        { commitFence: () => !superseded },
       );
       await settleMicrotasks(100);
+      // Fail the eager rewrite so the late terminal write drives the original activity race.
+      store.failPlainUpserts = 1;
       // The serial is re-observed with a newer identity; the terminal write is still parked.
       superseded = true;
       await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
@@ -451,12 +450,13 @@ describe("session persistence guards live in the statement, not in a prior read"
       landReleaseWrite();
       await settleMicrotasks(200);
 
-      // The scenario was driven: the activity write found no active row and was not persisted.
+      // The activity write found the late terminal row before its live rewrite landed.
       expect(outcome).toBe("SessionActivityPersistenceError");
+      expect(store.afterReleaseWrite).toBeUndefined();
       // The session the supersede kept is still held, and its row is live again.
       expect(manager.getSession(SESSION)).not.toBeNull();
       expect(releases).toEqual([]);
-      expect(await store.getSession?.(SESSION)).toMatchObject({
+      expect(await store.getSession(SESSION)).toMatchObject({
         status: "active",
         release_reason: null,
       });
@@ -465,17 +465,17 @@ describe("session persistence guards live in the statement, not in a prior read"
 
     test("a manager on the fake persistence is refused like one on SQLite", async () => {
       const fake = new FakeDeviceSessionPersistence();
-      const manager = new SessionManager(timer, fake, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(timer, fake, { barrier: () => new FakeDbWriteBarrier() });
       managers.push(manager);
       manager.stopCleanupTimer();
       manager.attachDaemonSessionId("daemon-a");
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
       await fake.markReleased(SESSION, "released", timer.now(), "explicit-release");
       timer.advanceTime(1_000);
 
       expect(await refresh(manager)).toBe("TerminalSessionError");
 
-      expect(await fake.getSession?.(SESSION)).toMatchObject({
+      expect(await fake.getSession(SESSION)).toMatchObject({
         status: "released",
         release_reason: "explicit-release",
       });

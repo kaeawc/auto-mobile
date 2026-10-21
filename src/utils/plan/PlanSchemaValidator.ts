@@ -8,6 +8,7 @@ import { logger } from "../logger";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
 import { clockInstantTextInWindow } from "../../models/DeviceClock";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 /**
  * Result of plan validation
@@ -56,7 +57,7 @@ async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanS
   logger.info(`[PlanSchemaValidator] Loading schema from: ${__dirname}`);
   logger.info(`[PlanSchemaValidator] Current working directory: ${process.cwd()}`);
   logger.info(
-    `[PlanSchemaValidator] GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
+    `[PlanSchemaValidator] GITHUB_WORKSPACE: ${readEnvRaw(AMBIENT_ENV.GITHUB_WORKSPACE) || "not set"}`,
   );
 
   // Try multiple paths to support different execution contexts:
@@ -80,7 +81,7 @@ async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanS
         path.join(process.cwd(), "../../../schemas/test-plan.schema.json"),
         path.join(process.cwd(), "../../../../schemas/test-plan.schema.json"),
         // From GitHub Actions workspace
-        path.join(process.env.GITHUB_WORKSPACE || "", "schemas/test-plan.schema.json"),
+        path.join(readEnvRaw(AMBIENT_ENV.GITHUB_WORKSPACE) || "", "schemas/test-plan.schema.json"),
         // From package root (when installed as npm package)
         path.join(__dirname, "../../../../../schemas/test-plan.schema.json"),
       ].map((candidate) => path.resolve(candidate)),
@@ -112,7 +113,7 @@ async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanS
       "Could not find test-plan.schema.json.",
       `Current working directory: ${process.cwd()}`,
       `Module directory: ${__dirname}`,
-      `GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
+      `GITHUB_WORKSPACE: ${readEnvRaw(AMBIENT_ENV.GITHUB_WORKSPACE) || "not set"}`,
       "Tried paths:",
       ...attemptedPaths.map((p) => `  - ${p}`),
     ].join("\n");
@@ -123,11 +124,7 @@ async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanS
 
   const schema = JSON.parse(schemaContent);
   const ajv = new Ajv({ allErrors: true, verbose: true, strict: false });
-  // Bun installs ajv-formats' compatible Ajv v8 dependency separately from
-  // our direct v8 dependency. They share the runtime plugin contract, but
-  // TypeScript treats their class identities as distinct package instances.
-  // eslint-disable-next-line auto-mobile/no-unknown-cast -- ajv-formats bundles a second compatible Ajv v8 type identity.
-  addFormats(ajv as unknown as Parameters<typeof addFormats>[0]);
+  addFormats(ajv);
   ajv.addSchema(schema);
   return { schema, ajv };
 }

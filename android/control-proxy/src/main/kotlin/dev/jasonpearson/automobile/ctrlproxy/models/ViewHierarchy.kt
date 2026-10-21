@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.models
 
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
@@ -20,6 +21,7 @@ constructor(
   val userId: Int? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val displayId: Int? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val panelUniqueId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val panelFingerprint: PanelFingerprintInfo? = null,
   val hierarchy: UIElementInfo? = null,
   val windowInfo: WindowInfo? = null,
   val windows: List<WindowInfo>? = null,
@@ -53,14 +55,17 @@ constructor(
   val nativeScale: Float? = null,
   val pixelWidth: Int? = null, // Physical screenshot pixel width (== screenWidth on Android)
   val pixelHeight: Int? = null, // Physical screenshot pixel height (== screenHeight on Android)
-  /** Structured reasons why this snapshot is partial or unavailable. */
-  val truncationReasons: List<String>? = null,
+  /**
+   * Structured reasons why this snapshot is partial or unavailable; omitted for a complete capture.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val truncationReasons: List<String>? = null,
   /**
    * True only while an AutoMobile prototype exists but is hidden because its app is not in front,
    * so a `layer: "prototype"` call can say so instead of "no prototype is showing". Omitted
    * otherwise.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeSuspended: Boolean? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeHiddenReason: PrototypeHiddenReason? = null,
 )
 
 @Serializable

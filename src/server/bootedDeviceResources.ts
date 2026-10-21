@@ -1,9 +1,13 @@
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import { BOOTED_DEVICE_RESOURCE_URIS } from "../constants/deviceResourceUris";
+export { BOOTED_DEVICE_RESOURCE_URIS };
+import { holderOf } from "../daemon/deviceBinding";
+import { registerDeviceResourceInvalidation } from "../daemon/deviceResourceInvalidation";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../daemon/adbOfflineHeldDevices";
 import {
   describeInventoryDevice,
   type AdbOfflineHold,
   type SimulatorTransitionHold,
-} from "./inventoryDeviceDescription";
+} from "../daemon/inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -11,6 +15,11 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import type {
+  DeviceLockStateInfo,
+  DeviceLockStatesResourceContent,
+} from "./deviceLockStatesResourceContent";
+export type { DeviceLockStatesResourceContent } from "./deviceLockStatesResourceContent";
 import {
   type BootedDeviceDiscovery,
   type DeviceDiscoveryError,
@@ -23,7 +32,7 @@ import {
 } from "../utils/configuredDeviceInventory";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { Session } from "../daemon/sessionManager";
 import type {
@@ -41,7 +50,7 @@ import {
   poolHoldFor,
   type BootedDeviceDescription,
   type DeviceDescription,
-} from "./deviceDescription";
+} from "../daemon/deviceDescription";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -82,9 +91,9 @@ import {
 import { withRemainingBudget } from "../utils/withRemainingBudget";
 import {
   AndroidOrientationReader,
-  IosOrientationReader,
   type OrientationReader,
 } from "../features/action/OrientationReader";
+import { IosOrientationReader } from "../features/action/IosOrientationReader";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { TTLCache } from "../utils/cache/Cache";
@@ -95,10 +104,6 @@ import {
 } from "../devices/deviceBootService";
 
 // Resource URIs
-export const BOOTED_DEVICE_RESOURCE_URIS = {
-  ALL_BOOTED: "automobile:devices/booted",
-  PLATFORM_TEMPLATE: "automobile:devices/booted/{platform}",
-} as const;
 
 // A lightweight per-device lock-state resource. The full booted-devices resource also carries
 // `locked`, but computing it there recomputes service status (isInstalled/isEnabled/sha256) for
@@ -129,22 +134,6 @@ export function resetBootedDevicesResourceCache(): void {
   bootedDevicesResourceCache = null;
   bootedDevicesResourceSingleFlight = new SingleFlight();
   bootedDevicesResourcePublishedGeneration = ++bootedDevicesResourceGeneration;
-}
-
-// Per-device lock state for Android and iOS simulators. Omitted for physical iOS devices or
-// when the advisory probe could not read the state.
-interface DeviceLockStateInfo {
-  deviceId: string;
-  locked?: boolean;
-}
-
-export interface DeviceLockStatesResourceContent {
-  lastUpdated: string; // ISO 8601
-  lockStates: DeviceLockStateInfo[];
-  /** True only when both platform discovery sweeps completed. */
-  observationComplete: boolean;
-  /** Platform-specific discovery failures; an empty object means both sweeps completed. */
-  discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
 }
 
 export interface CtrlProxyVersionInfo {
@@ -356,9 +345,9 @@ export function setInFlightAndroidColdBootReader(
 let serviceStatusEnabled = true;
 
 // A fake factory opts resource tests into the same narrow probe without touching real adb.
-let injectedBootCompletionAdbFactory: AdbClientFactory | null = null;
-export function setBootCompletionAdbFactory(factory: AdbClientFactory | null): void {
-  injectedBootCompletionAdbFactory = factory;
+export interface BootedDeviceResourceDependencies {
+  injectedBootCompletionAdbFactory?: AdbClientFactory | null;
+  injectedOrientationReaderFactory?: OrientationReaderFactory | null;
 }
 
 /** Probes a device's lock state; returns `undefined` when it can't be determined. */
@@ -412,21 +401,18 @@ function activeLockProbe(): DeviceLockProbe | null {
 
 export type OrientationReaderFactory = (device: BootedDevice) => OrientationReader;
 
-let injectedOrientationReaderFactory: OrientationReaderFactory | null = null;
-
-/** Inject deterministic orientation readers for resource tests (or null to restore production). */
-export function setOrientationReaderFactory(factory: OrientationReaderFactory | null): void {
-  injectedOrientationReaderFactory = factory;
-}
-
 function realOrientationReader(device: BootedDevice): OrientationReader {
   return device.platform === "android"
     ? new AndroidOrientationReader(defaultAdbClientFactory.create(device))
     : new IosOrientationReader();
 }
 
-function activeOrientationReaderFactory(): OrientationReaderFactory | null {
-  return injectedOrientationReaderFactory ?? (serviceStatusEnabled ? realOrientationReader : null);
+function activeOrientationReaderFactory(
+  deps: BootedDeviceResourceDependencies = {},
+): OrientationReaderFactory | null {
+  return (
+    deps.injectedOrientationReaderFactory ?? (serviceStatusEnabled ? realOrientationReader : null)
+  );
 }
 
 /**
@@ -669,13 +655,7 @@ interface AdbOfflineHeldInput {
 async function adbOfflineHeldDeviceDescriptions(
   input: AdbOfflineHeldInput,
 ): Promise<BootedDeviceInfo[]> {
-  const held = await adbOfflineHeldDevices({
-    platform: input.platform,
-    discovered: input.discovered,
-    devicePool: input.devicePool,
-    deviceManager: input.deviceManager,
-    onProbeFailure: input.onProbeFailure,
-  });
+  const held = await adbOfflineHeldDevices({ ...input, signal: getAbortSignal() });
   return held.map(({ device, avdName, adbState }) =>
     toBootedDeviceInfo(
       device,
@@ -837,7 +817,7 @@ function resolvePoolDeviceContext(
     poolInfo: {
       poolStatus,
       unhealthy: devicePool.getDeviceHealthMarker(device.deviceId),
-      assignedSession: pooledDevice.sessionId || undefined,
+      assignedSession: holderOf(pooledDevice) || undefined,
       recoveryEligibility: devicePool.getRecoveryEligibility(device.deviceId),
       avdName: pooledDevice.avdName,
       incarnation: pooledDevice.incarnation,
@@ -913,7 +893,7 @@ function summarizePoolStatus(
             ?.observationComplete !== true),
     );
   for (const pooled of unknown) {
-    // Whether an unlisted, unverified entry is free is unknown (it may be gone, or slot-held:
+    // Whether an unlisted, unverified entry is free is unknown (it may be gone, or broker-held:
     // #11455), so it is never tallied idle. Assigned/error are the pool's own facts and stay.
     const status = devicePool.poolBucket(pooled.id) ?? "idle";
     if (!listed.has(pooled.id) && status !== "idle") {
@@ -940,8 +920,10 @@ function summarizePoolStatus(
 }
 
 // Handler to get all booted devices (both platforms)
-async function getAllBootedDevices(): Promise<ResourceContent> {
-  const result = await getBootedDevicesForPlatforms(["android", "ios"]);
+async function getAllBootedDevices(
+  deps: BootedDeviceResourceDependencies = {},
+): Promise<ResourceContent> {
+  const result = await getBootedDevicesForPlatforms(["android", "ios"], undefined, deps);
   return {
     uri: BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
     mimeType: "application/json",
@@ -952,6 +934,7 @@ async function getAllBootedDevices(): Promise<ResourceContent> {
 // Handler to get booted devices for a specific platform
 async function getBootedDevicesByPlatform(
   params: Record<string, string>,
+  deps: BootedDeviceResourceDependencies = {},
 ): Promise<ResourceContent> {
   const platform = params.platform;
 
@@ -970,7 +953,7 @@ async function getBootedDevicesByPlatform(
     };
   }
 
-  const result = await getBootedDevicesForPlatforms([platform as Platform]);
+  const result = await getBootedDevicesForPlatforms([platform as Platform], undefined, deps);
   return {
     uri: `automobile:devices/booted/${platform}`,
     mimeType: "application/json",
@@ -1065,7 +1048,7 @@ async function discoverBootedDevicesForPlatform(
     // resolver -- still trusting the stale label
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
-    // Refresh the managed-slot snapshot so held devices are not reported as free, as listDevices does.
+    // Refresh the broker binding snapshot so held devices are not reported as free, as listDevices does.
     await devicePool?.refreshInventoryOwnership();
     options.onDiscovery(
       discovery.devices.map((device) =>
@@ -1161,8 +1144,8 @@ interface DaemonDeviceContext {
 }
 
 function readDaemonDeviceContext(): DaemonDeviceContext {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const daemon = defaultDaemonContext;
+  if (!daemon.isInitialized()) {
     return {
       devicePool: null,
       sessionsById: null,
@@ -1175,7 +1158,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   let sessionsById: Map<string, Session> | null = null;
   let resolveDeviceSessionUuid: (deviceId: string) => string | null = () => null;
   try {
-    devicePool = daemonState.getDevicePool();
+    devicePool = daemon.requireFullDevicePool();
     poolStatus = {
       enabled: true,
       idle: 0,
@@ -1189,14 +1172,14 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   }
 
   try {
-    const sessions = daemonState.getSessionManager().getAllSessions();
+    const sessions = daemon.requireSessionManager().getAllSessions();
     sessionsById = new Map(sessions.map((session) => [session.sessionId, session]));
   } catch (error) {
     logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
 
   try {
-    const registry = daemonState.getDeviceSessionRegistry();
+    const registry = daemon.requireDeviceSessionRegistry();
     resolveDeviceSessionUuid = (deviceId) =>
       registry.getByDeviceId(deviceId)?.deviceSessionUuid ?? null;
   } catch (error) {
@@ -1263,13 +1246,11 @@ async function probeBootCompletionWithBudget(
         await raceWithDeadline(
           factory
             .create(probeTarget(device))
-            .executeCommand(
-              "shell getprop sys.boot_completed",
-              remainingMs,
-              undefined,
-              true,
-              combineWithAmbientAbort(controller.signal),
-            )
+            .executeCommand("shell getprop sys.boot_completed", {
+              timeoutMs: remainingMs,
+              noRetry: true,
+              signal: combineWithAmbientAbort(controller.signal),
+            })
             .then((result) => result.stdout.trim()),
           {
             timer,
@@ -1299,9 +1280,11 @@ async function probeBootCompletionWithBudget(
 async function enrichDeviceBootCompletion(
   devices: BootedDeviceInfo[],
   timer: Timer,
+  deps: BootedDeviceResourceDependencies = {},
 ): Promise<void> {
   const factory =
-    injectedBootCompletionAdbFactory ?? (serviceStatusEnabled ? defaultAdbClientFactory : null);
+    deps.injectedBootCompletionAdbFactory ??
+    (serviceStatusEnabled ? defaultAdbClientFactory : null);
   const deadlineMs = timer.now() + BOOT_COMPLETION_TIMEOUT_MS;
   const results = await Promise.all(
     devices.map((device) =>
@@ -1567,8 +1550,9 @@ export async function probeDeviceOrientation(
 async function enrichDeviceOrientations(
   devices: BootedDeviceInfo[],
   timer: Timer = defaultTimer,
+  deps: BootedDeviceResourceDependencies = {},
 ): Promise<void> {
-  const readerFactory = activeOrientationReaderFactory();
+  const readerFactory = activeOrientationReaderFactory(deps);
   if (!readerFactory) {
     return;
   }
@@ -1598,6 +1582,7 @@ async function enrichDeviceOrientations(
 async function computeBootedDevicesForPlatforms(
   platforms: Platform[],
   timer: Timer,
+  deps: BootedDeviceResourceDependencies = {},
 ): Promise<BootedDevicesResourceContent> {
   const devices: BootedDeviceInfo[] = [];
   const daemonContext = readDaemonDeviceContext();
@@ -1640,10 +1625,10 @@ async function computeBootedDevicesForPlatforms(
     }
     pending.clear();
     const probes = [
-      ["bootCompletion", () => enrichDeviceBootCompletion(devices, timer)],
+      ["bootCompletion", () => enrichDeviceBootCompletion(devices, timer, deps)],
       ["serviceStatus", () => enrichDeviceServiceStatuses(devices, timer)],
       ["lock", () => enrichDeviceLockStates(devices, { timer })],
-      ["orientation", () => enrichDeviceOrientations(devices, timer)],
+      ["orientation", () => enrichDeviceOrientations(devices, timer, deps)],
     ] as const;
     for (const [name] of probes) {
       pending.add(name);
@@ -1711,6 +1696,7 @@ async function computeBootedDevicesForPlatforms(
 export async function getBootedDevicesForPlatforms(
   platforms: Platform[],
   timer: Timer = defaultTimer,
+  deps: BootedDeviceResourceDependencies = {},
 ): Promise<BootedDevicesResourceContent> {
   const canonicalPlatforms = [...new Set(platforms)].sort();
   const cacheKey = canonicalPlatforms.join(",");
@@ -1724,7 +1710,7 @@ export async function getBootedDevicesForPlatforms(
     () =>
       runWithAbortSignal(undefined, async () => {
         const generation = ++bootedDevicesResourceGeneration;
-        const result = await computeBootedDevicesForPlatforms(canonicalPlatforms, timer);
+        const result = await computeBootedDevicesForPlatforms(canonicalPlatforms, timer, deps);
         if (generation >= bootedDevicesResourcePublishedGeneration && !result.enrichment) {
           bootedDevicesResourcePublishedGeneration = generation;
           getBootedDevicesResourceCache(timer).set(cacheKey, result);
@@ -2065,14 +2051,14 @@ export async function queryDeviceServiceStatus(
 }
 
 // Register all booted device resources
-export function registerBootedDeviceResources(): void {
+export function registerBootedDeviceResources(deps: BootedDeviceResourceDependencies = {}): void {
   // Register the all-booted-devices resource
   ResourceRegistry.register(
     BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
     "Booted Devices",
     "List of all currently booted/running devices for both Android and iOS platforms.",
     "application/json",
-    getAllBootedDevices,
+    () => getAllBootedDevices(deps),
   );
 
   // Register the platform-specific template
@@ -2081,7 +2067,7 @@ export function registerBootedDeviceResources(): void {
     "Platform-specific Booted Devices",
     "List of booted/running devices for a specific platform (android or ios).",
     "application/json",
-    getBootedDevicesByPlatform,
+    (params: Record<string, string>) => getBootedDevicesByPlatform(params, deps),
   );
 
   // Register the lightweight per-device lock-state resource (issue #5056).
@@ -2108,3 +2094,8 @@ export async function notifyBootedDeviceResourcesUpdated(): Promise<void> {
     DEVICE_LOCK_STATES_RESOURCE_URI,
   ]);
 }
+
+registerDeviceResourceInvalidation({
+  resetBootedDevicesResourceCache,
+  notifyBootedDeviceResourcesUpdated,
+});

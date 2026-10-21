@@ -53,6 +53,9 @@ function snapshotProblems(
       .filter((kind) => !snapshot.completeKinds.includes(kind))
       .map((kind) => `${label}: incomplete ${kind} inventory`),
     ...snapshot.unobservable.map((kind) => `${label}: unobservable ${kind}`),
+    ...snapshot.observations
+      .filter((observation) => observation.value.state === "unobservable")
+      .map((observation) => `${label}: unobservable ${observation.kind}:${observation.key}`),
     ...snapshot.completeKinds
       .filter((kind) => !knownKinds.has(kind))
       .map((kind) => `${label}: unknown inventory ${kind}`),
@@ -100,8 +103,8 @@ export function genericBaselineRevert(change: BaselineChange): DeviceMutationInp
   const emptyClipboard =
     change.kind === "clipboard" &&
     (change.priorValue.state === "absent" ||
-      change.priorValue.value === "" ||
-      change.priorValue.value === null);
+      (change.priorValue.state === "present" &&
+        (change.priorValue.value === "" || change.priorValue.value === null)));
   return addedApp || emptyClipboard
     ? {
         kind: change.kind,

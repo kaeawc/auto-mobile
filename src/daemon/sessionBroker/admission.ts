@@ -121,6 +121,14 @@ function newestCompatibleIdle(snapshot: BrokerSnapshot): ResourceView | undefine
 }
 
 /**
+ * A zero total cap admits nothing (#14462): its idle resources are evicted rather than handed to a
+ * new session, so there is nothing to reuse.
+ */
+function reusableIdle(snapshot: BrokerSnapshot, limits: BrokerLimits): ResourceView | undefined {
+  return limits.totalDeviceCap === 0 ? undefined : newestCompatibleIdle(snapshot);
+}
+
+/**
  * Selects the next admission action from one immutable view and returns immediately.
  *
  * These decisions are not reservations. The durable broker owner must evaluate this function
@@ -136,13 +144,16 @@ export function selectAdmission(snapshot: BrokerSnapshot, limits: BrokerLimits):
     return { kind: "refuse", reason: "session-cap-reached" };
   }
 
-  // Reuse does not increase the total, including after a cap reduction. A zero cap still admits
-  // nothing (#14462): an idle resource is evicted below rather than handed to a new session.
-  const reusable = limits.totalDeviceCap === 0 ? undefined : newestCompatibleIdle(snapshot);
+  // Reuse does not increase the total, including after a cap reduction.
+  const reusable = reusableIdle(snapshot, limits);
   if (reusable) {
     return { kind: "reuse", resourceId: reusable.id };
   }
+  return totalCapDecision(snapshot, limits);
+}
 
+/** Without a reusable resource: create under the total cap, else evict the oldest idle one. */
+function totalCapDecision(snapshot: BrokerSnapshot, limits: BrokerLimits): AdmissionDecision {
   const total = snapshot.resources.length;
   if (limits.totalDeviceCap !== undefined && total > limits.totalDeviceCap) {
     const candidate = oldestIdle(snapshot);

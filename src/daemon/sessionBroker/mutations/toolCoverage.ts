@@ -32,6 +32,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "killProfile",
       "network",
       "openLink",
+      "persona",
       "postNotification",
       "putAppFile",
       "resetKeychain",

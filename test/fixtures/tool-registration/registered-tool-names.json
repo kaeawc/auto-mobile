@@ -103,6 +103,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -206,6 +207,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "setToolEnabled"
   ],
   "cli": [
@@ -295,6 +297,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "getPreference",
     "setPreference",
     "deviceSnapshot",

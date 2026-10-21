@@ -122,6 +122,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "multiTouch",
   "observe",
   "openLink",
+  "persona",
   "phoneCall",
   "pinchOn",
   "postNotification",

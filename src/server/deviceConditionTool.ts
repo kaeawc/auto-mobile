@@ -109,7 +109,7 @@ export async function handleDeviceConditionCall(
   }
   const registry = deps.registry ?? defaultDeviceConditionRegistry;
   const result = await registry.apply(
-    { deviceId: device.deviceId, sessionUuid: args.sessionUuid },
+    { deviceId: device.deviceId, sessionUuid: args.sessionUuid, device },
     input,
   );
   return createStructuredToolResponse({

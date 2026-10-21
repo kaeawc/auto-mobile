@@ -54,21 +54,21 @@ describe("DeviceConditionController (#14050)", () => {
   });
 
   test("reset undoes applied conditions newest-first and verifies clean", async () => {
-    const first = new FakeInjector("faults.a");
-    const second = new FakeInjector("faults.b");
+    const first = new FakeInjector("faults.battery");
+    const second = new FakeInjector("faults.lowPower");
     const controller = controllerWith(
       new Map<DeviceConditionKey, DeviceConditionInjector>([
-        ["faults.a", first],
-        ["faults.b", second],
+        ["faults.battery", first],
+        ["faults.lowPower", second],
       ]),
     );
     // Two separate applies so both register a reset.
-    await controller.apply({ faults: { a: "on" } });
-    await controller.apply({ faults: { b: "on" } });
-    expect(controller.activeKeys()).toEqual(["faults.a", "faults.b"]);
+    await controller.apply({ faults: { battery: "unplug" } });
+    await controller.apply({ faults: { lowPower: "on" } });
+    expect(controller.activeKeys()).toEqual(["faults.battery", "faults.lowPower"]);
 
     const report = await controller.restore();
-    expect(report.restored).toEqual(["faults.b", "faults.a"]);
+    expect(report.restored).toEqual(["faults.lowPower", "faults.battery"]);
     expect(report.verifiedClean).toBe(true);
     expect(controller.hasActiveConditions()).toBe(false);
     expect(first.resetCount).toBe(1);
@@ -76,24 +76,24 @@ describe("DeviceConditionController (#14050)", () => {
   });
 
   test("a failed reset keeps the condition active and is reported as a failure", async () => {
-    const injector = new FakeInjector("faults.a");
+    const injector = new FakeInjector("faults.battery");
     injector.failReset = true;
     const controller = controllerWith(
-      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.a", injector]]),
+      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.battery", injector]]),
     );
-    await controller.apply({ faults: { a: "on" } });
+    await controller.apply({ faults: { battery: "unplug" } });
     const report = await controller.restore();
     expect(report.verifiedClean).toBe(false);
-    expect(report.failures[0]?.key).toBe("faults.a");
+    expect(report.failures[0]?.key).toBe("faults.battery");
     expect(controller.hasActiveConditions()).toBe(true);
   });
 
   test("a reset that runs but does not read clean is a verified-clean failure", async () => {
-    const injector = new FakeInjector("faults.a");
+    const injector = new FakeInjector("faults.battery");
     const controller = controllerWith(
-      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.a", injector]]),
+      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.battery", injector]]),
     );
-    await controller.apply({ faults: { a: "on" } });
+    await controller.apply({ faults: { battery: "unplug" } });
     // Reset runs but the device still reads dirty.
     injector.clean = false;
     (injector as { clean: boolean }).clean = false;
@@ -104,37 +104,37 @@ describe("DeviceConditionController (#14050)", () => {
   });
 
   test("an injector that throws on apply surfaces as unsupported and registers no reset", async () => {
-    const injector = new FakeInjector("faults.a");
+    const injector = new FakeInjector("faults.battery");
     injector.failApply = true;
     const controller = controllerWith(
-      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.a", injector]]),
+      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.battery", injector]]),
     );
-    const result = await controller.apply({ faults: { a: "on" } });
+    const result = await controller.apply({ faults: { battery: "unplug" } });
     expect(result.success).toBe(false);
-    expect(result.changes[0]).toMatchObject({ key: "faults.a", status: "unsupported" });
+    expect(result.changes[0]).toMatchObject({ key: "faults.battery", status: "unsupported" });
     expect(controller.hasActiveConditions()).toBe(false);
   });
 
   test("unset clears just one key's reset", async () => {
-    const injector = new FakeInjector("faults.a");
+    const injector = new FakeInjector("faults.battery");
     const controller = controllerWith(
-      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.a", injector]]),
+      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.battery", injector]]),
     );
-    await controller.apply({ faults: { a: "on" } });
-    const cleared = await controller.apply({ faults: { a: "unset" } });
-    expect(cleared.changes[0]).toMatchObject({ key: "faults.a", status: "cleared" });
+    await controller.apply({ faults: { battery: "unplug" } });
+    const cleared = await controller.apply({ faults: { battery: "unset" } });
+    expect(cleared.changes[0]).toMatchObject({ key: "faults.battery", status: "cleared" });
     expect(injector.resetCount).toBe(1);
     expect(controller.hasActiveConditions()).toBe(false);
   });
 
   test("reset:true restores everything before applying the same request's new fields", async () => {
-    const injector = new FakeInjector("faults.a");
+    const injector = new FakeInjector("faults.battery");
     const controller = controllerWith(
-      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.a", injector]]),
+      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.battery", injector]]),
     );
-    await controller.apply({ faults: { a: "on" } });
+    await controller.apply({ faults: { battery: "unplug" } });
     const result = await controller.apply({ reset: true });
-    expect(result.restore?.restored).toEqual(["faults.a"]);
+    expect(result.restore?.restored).toEqual(["faults.battery"]);
     expect(controller.hasActiveConditions()).toBe(false);
   });
 });

@@ -26076,9 +26076,30 @@
             },
             "faults": {
               "type": "object",
-              "properties": {},
+              "properties": {
+                "battery": {
+                  "type": "string",
+                  "enum": ["unplug", "low", "full", "unset"],
+                  "description": "Battery fault via `dumpsys battery` (unplug / low 15% / full), or unset."
+                },
+                "lowPower": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Toggle `settings global low_power`, restored to its prior value, or unset."
+                },
+                "doze": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Force deep Doze via `dumpsys deviceidle force-idle`, or unset."
+                },
+                "thermal": {
+                  "type": "string",
+                  "enum": ["throttling", "critical", "unset"],
+                  "description": "Override thermal status via `cmd thermalservice override-status`, or unset."
+                }
+              },
               "additionalProperties": false,
-              "description": "Fault injectors keyed by name. None are available yet."
+              "description": "Power-domain fault injectors (Android only, behind the feature flag)."
             },
             "expiresInSeconds": {
               "type": "integer",

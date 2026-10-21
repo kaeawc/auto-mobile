@@ -91,7 +91,7 @@ const packageSignerOutputSchema = z
   .passthrough();
 
 /** Read failures throw; an unreadable package is reported as `presence:"unknown"`, never as an error. */
-export const inspectPackageSigningResultSchema = z
+const androidInspectPackageSigningResultSchema = z
   .object({
     appId: z.string(),
     platform: z.literal("android"),
@@ -141,6 +141,62 @@ export const inspectPackageSigningResultSchema = z
       .passthrough(),
   })
   .passthrough();
+
+const iosProvisioningProfileOutputSchema = z
+  .object({
+    name: z.string(),
+    uuid: z.string(),
+    teamIds: z.array(z.string()),
+    teamName: z.string().optional(),
+    expirationDate: z.string().nullable(),
+    expired: z.boolean().nullable(),
+    provisionedDeviceCount: z.number().nullable(),
+    provisionsAllDevices: z.boolean(),
+  })
+  .passthrough();
+
+/** iOS variant (#14099); the Android shape above is unchanged. */
+const iosInspectPackageSigningResultSchema = z
+  .object({
+    appId: z.string(),
+    platform: z.literal("ios"),
+    deviceId: z.string(),
+    deviceKind: z.enum(["simulator", "physical"]),
+    presence: z.enum(["installed", "absent", "unknown"]),
+    unknownReason: z.string().optional(),
+    signing: z.discriminatedUnion("status", [
+      z
+        .object({
+          status: z.literal("available"),
+          cdHash: z.string().nullable(),
+          identifier: z.string().nullable(),
+          teamId: z.string().nullable(),
+          signingIdentity: z.string().nullable(),
+          adHoc: z.boolean(),
+          authorities: z.array(z.string()),
+          entitlements: z.record(z.string(), z.unknown()).nullable(),
+          provisioningProfile: iosProvisioningProfileOutputSchema.nullable(),
+          warnings: z.array(z.string()).optional(),
+        })
+        .passthrough(),
+      z.object({ status: z.literal("unsigned"), reason: z.string() }).passthrough(),
+      z.object({ status: z.literal("unavailable"), reason: z.string() }).passthrough(),
+    ]),
+    observation: z
+      .object({
+        source: z.enum(["simctl-app-container+codesign", "devicectl-copy+codesign"]),
+        fresh: z.literal(true),
+        observedAt: z.string(),
+        scope: z.object({ deviceId: z.string(), appId: z.string() }).passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export const inspectPackageSigningResultSchema = z.union([
+  androidInspectPackageSigningResultSchema,
+  iosInspectPackageSigningResultSchema,
+]);
 
 export const appLifecycleResultSchema = z.object({
   message: z.string(),

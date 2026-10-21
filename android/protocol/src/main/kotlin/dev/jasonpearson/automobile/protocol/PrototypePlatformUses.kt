@@ -24,11 +24,11 @@ internal object PrototypePlatformUses {
   /** Handlers, then the scan of each node root, then text placeholders: TypeScript's order. */
   fun uses(root: JsonObject, context: Context): List<Use> {
     val found = mutableListOf<Use>()
-    val handlers = root.member("platform")?.member("on")
-    for (event in handlers?.keys.orEmpty().sorted()) {
+    val handlers = root.member("platform")?.member("on").orEmpty()
+    for ((event, handler) in handlers.entries.sortedBy { it.key }) {
       val at = "platform.on[${PrototypeSpecInput.canonicalString(event)}]"
       found.add(Use.Handler(at, event))
-      scan(handlers!!.getValue(event), at, true, found)
+      scan(handler, at, true, found)
     }
     root["root"]?.let { scan(it, "root", false, found) }
     for ((node, path) in context.nodes) {

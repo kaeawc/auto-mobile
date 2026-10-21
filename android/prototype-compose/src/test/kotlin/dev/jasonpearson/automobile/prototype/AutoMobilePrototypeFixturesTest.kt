@@ -17,9 +17,7 @@ class AutoMobilePrototypeFixturesTest(private val name: String, private val inpu
   private val host = EmbeddedPrototypeTestHost()
 
   companion object {
-    // One fixture per test avoids a large render loop inside the 100 ms test budget. Sorting then
-    // selecting every fifth fixture gives stable coverage across feature families without
-    // randomness.
+    // One fixture per test keeps each render isolated; every valid fixture is covered (#13725).
     @JvmStatic
     @Parameters(name = "{0}")
     fun fixtures(): List<Array<Any>> =
@@ -28,7 +26,6 @@ class AutoMobilePrototypeFixturesTest(private val name: String, private val inpu
         .orEmpty()
         .filter { it.extension == "json" }
         .sortedBy { it.name }
-        .filterIndexed { index, _ -> index % 5 == 4 }
         .map { arrayOf<Any>(it.name, it.readText()) }
 
     @JvmStatic @BeforeClass fun warmValidator() = warmEmbeddedValidator()

@@ -1,3 +1,4 @@
+import type { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { Socket } from "node:net";
 import {
   canRetainSharedCapture,
@@ -1010,8 +1011,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 }
 
-export async function startVideoStreamSocketServer(): Promise<void> {
-  await socketServer.start(() => new VideoStreamSocketServer(defaultDependencies()));
+export async function startVideoStreamSocketServer(
+  readiness?: Pick<DeviceReadiness, "getPlatformDeviceManager">,
+): Promise<void> {
+  await socketServer.start(
+    () => new VideoStreamSocketServer(defaultDependencies(readiness?.getPlatformDeviceManager())),
+  );
 }
 
 export async function stopVideoStreamSocketServer(): Promise<void> {
@@ -1025,5 +1030,4 @@ export {
   validateCaptureHints,
   type DeviceOwnershipChanges,
   type VideoStreamSocketServerDependencies,
-  type CaptureSourceFactory,
 } from "./videoStreamSocketDefaults";

@@ -30,7 +30,6 @@ run_with_timeout() {
   local secs="$1"
   local status=0
   local pgid_file="${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}"
-  unset AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE
   shift
   if [ -z "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}$pgid_file" ] && command -v timeout > /dev/null 2>&1; then
     timeout -k 2 "${secs}" "$@" || status=$?
@@ -44,7 +43,9 @@ run_with_timeout() {
     # requires a trailing XXXXXX and hard-errors on a bare prefix, which made
     # every fallback call return 125 on Ubuntu.
     local fired_marker
-    fired_marker="$(mktemp "${TMPDIR:-/tmp}/run_with_timeout.XXXXXX")" || return 125
+    fired_marker="$(mktemp "${TMPDIR:-/tmp}/run_with_timeout.XXXXXX")" || {
+      return 125
+    }
 
     # Monitor mode puts the child in its own process group (pgid == its pid),
     # which is what lets the group-directed kill below reach descendants.
@@ -57,12 +58,15 @@ run_with_timeout() {
     # child reports the actual caller's PID, which disappears when it is killed.
     caller_pid="$(exec sh -c 'printf "%s\n" "$PPID"')"
     set -m
-    "$@" 3>&- &
+    # Hide the coordination variable from the timed command (so a nested call
+    # does not reuse it) in a subshell: this function runs in the caller's
+    # shell, so unsetting it here would drop it for every later call (#14497).
+    ( unset -v AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE; "$@" ) 3>&- &
     local cmd_pid=$!
 
     (
       if [[ "$secs" =~ ^[0-9]+$ ]]; then
-        local deadline=$((SECONDS + secs))
+        local deadline=$((SECONDS + 10#$secs))
         while ((SECONDS < deadline)); do
           if ! kill -0 "$caller_pid" 2>/dev/null; then
             kill -TERM -"${cmd_pid}" 2>/dev/null || true

@@ -65,6 +65,12 @@ export const DEVICES_ENV = {
     default: "off",
     doc: "Forbid the prototype-viewer release download (1/true).",
   },
+  BUNDLETOOL_JAR: {
+    name: "AUTOMOBILE_BUNDLETOOL_JAR",
+    kind: "path",
+    default: "unset",
+    doc: "Path to a bundletool-all jar run with java for .aab/.apks installs; else bundletool on PATH.",
+  },
   MANAGED_ADB_SERVER: {
     name: "AUTOMOBILE_MANAGED_ADB_SERVER",
     legacyName: "AUTO_MOBILE_MANAGED_ADB_SERVER",
@@ -222,27 +228,27 @@ export const DEVICES_ENV = {
   SKIP_ACCESSIBILITY_CHECKSUM: {
     name: "AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM",
     legacyName: "AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK",
-    kind: "string",
+    kind: "bool",
     default: "off",
     doc: "Skip Android APK checksum enforcement (1/true).",
   },
   SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED: {
     name: "AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED",
-    kind: "string",
+    kind: "bool",
     default: "off",
     doc: "Accept an installed APK unchecked outside readiness (1/true).",
   },
   IOS_SKIP_CTRL_PROXY_APP_HASH: {
     name: "AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH",
-    kind: "string",
+    kind: "bool",
     default: "off",
     doc: "Skip iOS CtrlProxy app hash verification (true/1).",
   },
   CTRLPROXY_VERBOSE: {
     name: "AUTOMOBILE_CTRLPROXY_VERBOSE",
-    kind: "string",
+    kind: "bool",
     default: "off",
-    doc: "Promote all iOS CtrlProxy output to info logs when exactly true.",
+    doc: "Promote all iOS CtrlProxy output to info logs (1/true).",
   },
   CTRL_PROXY_HEALTH_MAX_ATTEMPTS: {
     name: "AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",
@@ -254,7 +260,7 @@ export const DEVICES_ENV = {
   },
   IOS_HELPER_REQUIRE_CODESIGN: {
     name: "AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN",
-    kind: "string",
+    kind: "bool",
     default: "off",
     doc: "Refuse to launch an iOS helper that fails codesign inspection.",
   },

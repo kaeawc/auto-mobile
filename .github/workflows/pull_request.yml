@@ -335,6 +335,18 @@ jobs:
               - 'test/fixtures/desktop-wire/**'
               # Replayed by the protocol serializer descriptor contract test.
               - 'test/fixtures/android-contract/**'
+              # Read by AutoMobilePrototypeCapabilitiesTest.
+              - 'test/fixtures/prototype-capabilities/**'
+              - 'test/fixtures/prototype-embedded-routing/**'
+              # Shared fixtures read by renderer, protocol, runner, and CtrlProxy tests.
+              - 'test/fixtures/prototype-spec/**'
+              - 'test/fixtures/prototype/**'
+              - 'test/fixtures/refusal-wire/**'
+              - 'test/fixtures/refusal-wire-hints/**'
+              - 'test/fixtures/daemon-http-endpoints.json'
+              - 'test/fixtures/daemon-isolation-paths.json'
+              - 'test/fixtures/ime-commit-contract.json'
+              - 'test/fixtures/plan-schedule-feasibility/**'
               # The emulator jobs are exactly what this composite action drives,
               # so an edit to it must exercise them rather than skip them. #4199
               # rewired this action and only ran the emulator jobs incidentally,
@@ -398,6 +410,22 @@ jobs:
               - 'scripts/ios/**'
               - 'test/fixtures/ios-contract/**'
               - 'test/fixtures/ios-ctrlproxy-request-snapshots.json'
+              # Shared fixtures read by prototype, runner, wire, and capture tests.
+              - 'test/fixtures/prototype-capabilities/**'
+              - 'test/fixtures/prototype-embedded-routing/**'
+              - 'test/fixtures/prototype-spec/**'
+              - 'test/fixtures/prototype/**'
+              - 'test/fixtures/prototype-saved-layout/**'
+              - 'test/fixtures/desktop-wire/**'
+              - 'test/fixtures/refusal-wire/**'
+              - 'test/fixtures/refusal-wire-hints/**'
+              - 'test/fixtures/daemon-http-endpoints.json'
+              - 'test/fixtures/daemon-isolation-paths.json'
+              - 'test/fixtures/ios/**'
+              - 'test/fixtures/observe-output/ios-prototype-sheet/**'
+              - 'test/fixtures/network-filter-controller/**'
+              - 'test/fixtures/h264-level42-scale-golden-vectors.json'
+              - 'test/fixtures/encoded-h264-golden-vectors.json'
               - '.swiftformat'
               - '.swiftlint.yml'
 
@@ -1095,8 +1123,8 @@ jobs:
       # finding in a consumer, so scoping would land it on main and redden the
       # next unrelated PR. The Gradle build cache, not a shorter task list, is
       # what makes this fast.
-      # Android Lint, unlike Detekt, only looks at one module's own inputs
-      # (checkDependencies = false), so a PR lints just the modules it changes.
+      # Lint checks each module independently (checkDependencies = false), so
+      # include changed modules and transitive consumers of their API contracts.
       # Build-logic/Gradle/lint-gate/workflow changes select every module. The
       # selection is shared with scripts/prepush-android.sh; merge.yml still
       # lints every module on each push to main.
@@ -1106,7 +1134,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if selection="$(git diff --name-only "${BASE_SHA}...HEAD" | bash scripts/android/select-lint-modules.sh)"; then
+          if selection="$(git diff --no-renames --name-only "${BASE_SHA}...HEAD" | bash scripts/android/select-lint-modules.sh)"; then
             :
           else
             echo "Could not select lint modules; linting all."
@@ -1141,7 +1169,12 @@ jobs:
 
       - name: "Check Android lint baselines only shrink"
         if: success() || failure()
-        run: bash scripts/android/check-lint-baseline-shrink.sh --base-ref origin/main
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Fetch the actual target explicitly, including for stacked PRs.
+          git fetch origin "${BASE_REF}" "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          bash scripts/android/check-lint-baseline-shrink.sh --base-ref "origin/${BASE_REF}"
 
       - name: "Upload Android Lint Reports"
         if: failure()
@@ -2376,7 +2409,7 @@ jobs:
       # tested here.
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
+          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

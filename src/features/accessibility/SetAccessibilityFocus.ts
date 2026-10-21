@@ -17,18 +17,15 @@ import {
   Element,
   SetAccessibilityFocusOptions,
   SetAccessibilityFocusResult,
-  ViewHierarchyResult,
 } from "../../models";
-import { ElementResolver, type ElementResolution } from "../utility/ElementResolver";
-import { normalizeQuotes } from "../utility/TextMatcher";
-import { SearchableHierarchy } from "../utility/SearchableNode";
+import type { ElementResolver } from "../utility/ElementResolver";
+import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
-import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { FocusActionOutcome } from "../observe/android/CtrlProxyFocus";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
-import { BaseVisualChange } from "../action/BaseVisualChange";
+import { AccessibilityTargetResolver } from "./AccessibilityTargetResolver";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
 /** The accessibility service reports focus asynchronously, so the read-back can lag the action. */
@@ -36,8 +33,7 @@ const FOCUS_READBACK_ATTEMPTS = 5;
 const FOCUS_READBACK_INTERVAL_MS = 100;
 
 function focusMatchesTarget(focused: Element | null | undefined, resourceId: string): boolean {
-  const id = focused?.["resource-id"];
-  return Boolean(id) && (id === resourceId || id?.endsWith(`:id/${resourceId}`) === true);
+  return matchesCtrlProxyResourceId(focused?.["resource-id"], resourceId);
 }
 
 /**
@@ -48,41 +44,6 @@ export interface AccessibilityFocusService {
   setAccessibilityFocus(resourceId: string): Promise<FocusActionOutcome | void>;
   clearAccessibilityFocus(resourceId: string): Promise<FocusActionOutcome | void>;
   requestCurrentFocus(): Promise<CurrentFocusResult>;
-}
-
-function matchedTextNativeId(
-  resolution: ElementResolution,
-  text: string,
-  contentDescription = false,
-): string | undefined {
-  const matched = resolution.matches.find(({ node }) => node === resolution.chosen);
-  const query = normalizeQuotes(text).trim().toLowerCase();
-  return matched?.sourceNodes?.find(
-    (node) =>
-      node.nativeId &&
-      (contentDescription
-        ? [node.textSources["content-desc"], node.accessibleLabel]
-        : Object.values(node.textSources)
-      ).some((value) => {
-        const source = value && normalizeQuotes(value).trim().toLowerCase();
-        return resolution.matchMode === "contains" ? source?.includes(query) : source === query;
-      }),
-  )?.nativeId;
-}
-
-function selectedNativeId(
-  resolution: ElementResolution,
-  options: SetAccessibilityFocusOptions,
-): string | undefined {
-  if (options.resourceId) {
-    return resolution.chosen?.nativeId;
-  }
-  if (options.text) {
-    return matchedTextNativeId(resolution, options.text);
-  }
-  return options.contentDesc
-    ? matchedTextNativeId(resolution, options.contentDesc, true)
-    : undefined;
 }
 
 function unconfirmedWarning(
@@ -109,17 +70,13 @@ export interface SetAccessibilityFocusDependencies {
 
 export class SetAccessibilityFocus {
   private readonly device: BootedDevice;
-  private readonly resolver: Pick<ElementResolver, "resolve">;
-  private readonly searchable = new SearchableHierarchy();
-  private readonly observeScreen: ObserveScreen;
+  private readonly target: AccessibilityTargetResolver;
   private readonly serviceFactory: (device: BootedDevice) => AccessibilityFocusService;
   private readonly timer: Timer;
 
   constructor(device: BootedDevice, deps: SetAccessibilityFocusDependencies = {}) {
     this.device = device;
-    this.resolver = deps.resolver ?? new ElementResolver();
-    this.observeScreen =
-      deps.observeScreen ?? new RealObserveScreen(device, defaultAdbClientFactory);
+    this.target = new AccessibilityTargetResolver(device, "accessibility focus", deps);
     this.timer = deps.timer ?? defaultTimer;
     this.serviceFactory =
       deps.serviceFactory ??
@@ -141,7 +98,7 @@ export class SetAccessibilityFocus {
       );
     }
 
-    const resourceId = await this.resolveResourceId(options);
+    const resourceId = await this.target.resolveResourceId(options);
     const service = this.serviceFactory(this.device);
 
     let alreadySatisfied = false;
@@ -224,84 +181,5 @@ export class SetAccessibilityFocus {
       logger.warn(`[accessibilityFocus] Failed to read current focus after ${action}: ${message}`);
       return { readError: message };
     }
-  }
-
-  /** Resolve observed identity locally; only a unique real native ID crosses the service boundary. */
-  private async resolveResourceId(options: SetAccessibilityFocusOptions): Promise<string> {
-    const hierarchy = await this.getViewHierarchy();
-    const nodes = this.searchable.project(hierarchy);
-    const selector = options.resourceId
-      ? { elementId: options.resourceId }
-      : options.text
-        ? { text: options.text, match: "exact" as const }
-        : { contentDescription: options.contentDesc, match: "exact" as const };
-    const resolution = this.resolver.resolve(
-      { id: String(hierarchy.updatedAt ?? "accessibility-focus"), nodes },
-      selector,
-      !options.resourceId && (options.text || options.contentDesc)
-        ? { action: "inspect", requireBounds: true }
-        : { action: "accessibility-focus", requireResourceId: true },
-    );
-    if (resolution.error) {
-      throw new ActionableError(resolution.error);
-    }
-    const resourceId = selectedNativeId(resolution, options);
-    if (!resourceId) {
-      if (
-        resolution.matches.some(({ node, sourceNodes }) =>
-          (sourceNodes ?? [node]).some((source) => !source.nativeId),
-        )
-      ) {
-        throw new ActionableError(
-          "Matched element has no resource-id; accessibility focus requires one.",
-        );
-      }
-      throw new ActionableError(
-        `Element not found for accessibility focus selector: ${JSON.stringify(selector)}`,
-      );
-    }
-    const sharing = new Set(
-      nodes
-        .filter(
-          (node) => node.nativeId === resourceId || node.nativeId?.endsWith(`:id/${resourceId}`),
-        )
-        .map((node) => node.source),
-    ).size;
-    if (sharing > 1) {
-      throw new ActionableError(
-        `Selected resource-id "${resourceId}" is shared by ${sharing} elements. Accessibility focus requires a unique native target.`,
-      );
-    }
-    return resourceId;
-  }
-
-  private async getViewHierarchy(): Promise<ViewHierarchyResult> {
-    let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
-    const hasUsableCache = Boolean(
-      observeResult.viewHierarchy && !observeResult.viewHierarchy.hierarchy.error,
-    );
-    const staleCachedRefetch =
-      hasUsableCache && BaseVisualChange.shouldRefetchCachedObservation(observeResult);
-    if (staleCachedRefetch) {
-      try {
-        observeResult = await this.observeScreen.execute({ freshness: "fresh" });
-      } catch (error) {
-        throw new ActionableError(
-          "Unable to observe screen to resolve accessibility focus target.",
-          {
-            cause: error,
-          },
-        );
-      }
-    } else if (!hasUsableCache) {
-      observeResult = await this.observeScreen.execute();
-    }
-    if (
-      !observeResult.viewHierarchy ||
-      (staleCachedRefetch && observeResult.viewHierarchy.hierarchy?.error)
-    ) {
-      throw new ActionableError("Unable to observe screen to resolve accessibility focus target.");
-    }
-    return observeResult.viewHierarchy;
   }
 }

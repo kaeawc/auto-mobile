@@ -572,6 +572,57 @@ describe("PressButton", () => {
     expect(result).toMatchObject({ code: "unsupported_button", retryable: false });
   });
 
+  // Issue #14100: XCUIDevice.Button.action / .camera, gated by hasHardwareButton.
+  test.each(["action", "camera"])(
+    "ios %s forwards to the CtrlProxy pressButton",
+    async (button) => {
+      const pressButtonCalls: string[] = [];
+      const getInstanceSpy = spyOnIosClientInstance({
+        requestPressButton: async (requested: string) => {
+          pressButtonCalls.push(requested);
+          return { success: true, totalTimeMs: 5 };
+        },
+      });
+      try {
+        const result = await dispatch(new PressButton(iosDevice), button.toUpperCase());
+        expect(result).toEqual({ success: true, button: button.toUpperCase(), keyCode: -1 });
+        expect(pressButtonCalls).toEqual([button]);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    },
+  );
+
+  test.each([
+    ["action", "Feature not supported: action button requires hardware with an Action button"],
+    ["camera", "Feature not supported: Button: camera"],
+  ])(
+    "ios %s on hardware without the button is a typed, non-retryable unsupported error",
+    async (button, runnerError) => {
+      const client = new FakeIOSCtrlProxy();
+      client.setPressButtonResult({
+        success: false,
+        dispatched: true,
+        acknowledged: true,
+        totalTimeMs: 0,
+        error: runnerError,
+      });
+      const getInstanceSpy = spyOnIosClientInstance(client);
+      try {
+        const result = await new PressButton(iosDevice).press(button);
+        expect(result).toMatchObject({
+          success: false,
+          code: "unsupported_button",
+          retryable: false,
+        });
+        expect(result.error).toContain(runnerError);
+        expect(result.error).toContain("Xcode 16.3");
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    },
+  );
+
   test("iOS dispatched without acknowledgement is typed indeterminate", async () => {
     const client = new FakeIOSCtrlProxy();
     client.setPressButtonResult({

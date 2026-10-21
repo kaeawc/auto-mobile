@@ -231,7 +231,7 @@ class RetrofitPrototypeHttpClient(
       }
       val sameOrigin =
         Triple(url.scheme, url.host, url.port) == Triple(next.scheme, next.host, next.port)
-      val toGet = response.code() in setOf(301, 302, 303) && request.method !in setOf("GET", "HEAD")
+      val toGet = redirectBecomesGet(response.code(), request.method)
       val remaining = initial.timeoutMs - (clock() - started)
       if (remaining <= 0) throw InterruptedIOException("Request timed out")
       request =
@@ -239,7 +239,11 @@ class RetrofitPrototypeHttpClient(
           url = next.toString(),
           method = if (toGet) "GET" else request.method,
           body = if (toGet) null else request.body,
-          headers = request.headers.filterKeys { sameOrigin || !it.equals("Authorization", true) },
+          headers =
+            request.headers.filterKeys {
+              (sameOrigin || !it.equals("Authorization", true)) &&
+                !(toGet && it.lowercase() in ENTITY_HEADERS)
+            },
           timeoutMs = remaining.coerceAtMost(initial.timeoutMs.toLong()).toInt(),
         )
       url = next
@@ -410,6 +414,22 @@ class RetrofitPrototypeHttpClient(
 
     private const val MAX_REDIRECTS = 5
     private val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
+    private val ENTITY_HEADERS =
+      setOf(
+        "content-type",
+        "content-length",
+        "content-encoding",
+        "content-language",
+        "content-location",
+      )
+
+    /**
+     * Fetch's redirect rule, matching the host executor: POST becomes GET on 301/302, any method
+     * but HEAD becomes GET on 303, and 307/308 keep the method and body.
+     */
+    internal fun redirectBecomesGet(status: Int, method: String): Boolean =
+      (status == 303 && method != "HEAD") || ((status == 301 || status == 302) && method == "POST")
+
     private val FORBIDDEN_HEADERS =
       setOf(
         "host",

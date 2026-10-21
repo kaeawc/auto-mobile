@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "root": {
+      "type": "spacer",
+      "visibleWhen": {
+        "platform": "/nope/x",
+        "equals": 1
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.platform",
+  "expectedMessage": "Unknown platform module nope"
+}

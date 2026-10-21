@@ -33,6 +33,16 @@
       }
     },
     {
+      "name": "request_accessibility_audit",
+      "builder": "requestAccessibilityAudit",
+      "wire": {
+        "type": "request_accessibility_audit",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.audited",
+        "checks": ["contrast", "hitRegion"]
+      }
+    },
+    {
       "name": "request_magic_tap",
       "builder": "CtrlProxyVoiceOver.requestMagicTap",
       "wire": {
@@ -379,6 +389,15 @@
         "type": "set_hinge_angle",
         "requestId": "fixture-request-id",
         "angle": 130
+      }
+    },
+    {
+      "name": "request_appearance",
+      "builder": "CtrlProxyNavigation.requestAppearance",
+      "wire": {
+        "type": "request_appearance",
+        "requestId": "fixture-request-id",
+        "appearance": "dark"
       }
     },
     {

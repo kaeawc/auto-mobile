@@ -75,8 +75,10 @@ isolateToolRegistry();
 const readArgs: Record<string, Record<string, unknown>> = {
   keyboard: { action: "detect" },
   clipboard: { action: "get" },
+  mediaSession: { action: "get" },
   sqlQuery: { query: "SELECT 1" },
   prototype: { action: "inspect" },
+  statusBar: { action: "get" },
 };
 // All handler bodies are stubbed, so even platform-specific reads can exercise resolution.
 const EXPECTED = [
@@ -98,10 +100,12 @@ const EXPECTED = [
   "keyboard",
   "listApps",
   "listDataStores",
+  "mediaSession",
   "observe",
   "prototype",
   "snapshotOf",
   "sqlQuery",
+  "statusBar",
 ];
 const deviceFor = (platform: Platform): BootedDevice => ({
   platform,
@@ -454,6 +458,7 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
   ios: [
     "accessibility",
@@ -475,17 +480,20 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
 };
 const READS_WITHOUT_UNHELD_READINESS = {
   android: [
     "inspectPackageSigning", // Declares booted readiness; no CtrlProxy setup.
     "listApps", // Declares booted readiness; no CtrlProxy setup.
+    "mediaSession", // Declares booted readiness; plain adb only.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
   ios: [
     "inspectPackageSigning", // Declares booted readiness; no runner setup.
     "listApps", // Declares booted readiness; no runner setup.
+    "mediaSession", // Declares booted readiness; no runner setup.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
 };
@@ -578,8 +586,8 @@ for (const platform of ["android", "ios"] as const) {
       observed.set(name, ran);
       observedReadiness.set(platform, observed);
       expect(daemon.sessions.getAllSessions()).toEqual([]);
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
-      expect(h.manager.getCurrentPlatform()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
       expect(h.manager.getExplicitDevicePin()).toBeUndefined();
       expect(h.apply).not.toHaveBeenCalled();
       expect(h.getConfig).not.toHaveBeenCalled();
@@ -906,8 +914,8 @@ for (const platform of ["android", "ios"] as const) {
             expect(h.detect).toHaveBeenCalledTimes(1);
             expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([h.device]);
           }
-          expect(h.manager.getCurrentDevice()).toBeUndefined();
-          expect(h.manager.getCurrentPlatform()).toBeUndefined();
+          expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+          expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
           expect(h.manager.getExplicitDevicePin()).toBeUndefined();
           expect(h.apply).not.toHaveBeenCalled();
           expect(h.getConfig).not.toHaveBeenCalled();
@@ -1106,8 +1114,8 @@ for (const column of probeColumns) {
       const probes = h.adb.getExecutedCommands().filter((c) => c === "emu avd name");
       expect(probes).toHaveLength(column === "probe-running-id" ? 0 : 1);
       expect(h.boots).toHaveLength(stopped ? 1 : 0);
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
-      expect(h.manager.getCurrentPlatform()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
       expect(h.manager.getExplicitDevicePin()).toBeUndefined();
       expect(h.apply).not.toHaveBeenCalled();
       expect(h.getConfig).not.toHaveBeenCalled();
@@ -1157,8 +1165,8 @@ test("a probed serial missing from the memoized raw scan is refreshed before rea
   expect(h.adb.getExecutedCommands().filter((c) => c === "emu avd name")).toHaveLength(1);
   expect(h.boots).toEqual([]);
   expect(daemon.sessions.getAllSessions()).toEqual([]);
-  expect(h.manager.getCurrentDevice()).toBeUndefined();
-  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
   expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   expect(h.apply).not.toHaveBeenCalled();
 });
@@ -1623,8 +1631,8 @@ async function onePlatformDecision(
     expect(h.ensure).toHaveBeenCalledTimes(name === "observe" && scenario === "running" ? 0 : 1);
   }
   expect(daemon.sessions.getAllSessions()).toEqual([]);
-  expect(h.manager.getCurrentDevice()).toBeUndefined();
-  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
   expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   expect(h.apply).not.toHaveBeenCalled();
   expect(h.getConfig).not.toHaveBeenCalled();
@@ -1992,7 +2000,7 @@ for (const platform of ["android", "ios"] as const) {
               .getExecutedCommands()
               .filter((c) => /settings (put|delete)|cmd uimode/.test(c)),
           ).toEqual([]);
-          expect(current.manager.getCurrentDevice()).toBeUndefined();
+          expect(current.manager.getExplicitDevicePin()).toBeUndefined();
         } finally {
           blocker?.release();
           executionTracker.endExecution(execution.id);

@@ -2,11 +2,10 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { ActionableError } from "../../models/ActionableError";
-import { isTruthyEnvValue } from "../../utils/ctrlProxyDownloadControl";
 import { logger } from "../../utils/logger";
 import { VideoServerJarProvider } from "./VideoServerJarProvider";
 import { WEBRTC_ENV } from "./webrtcStreamingConfig";
-import { ENV } from "../../config/env";
+import { ENV, readEnvBool } from "../../config/env";
 
 /**
  * Env override pointing at an explicit, already-built `automobile-video.jar`.
@@ -107,8 +106,8 @@ export async function resolveVideoServerJar(
     return override;
   }
 
-  const skip = isTruthyEnvValue(env[SKIP_VIDEO_SERVER_DOWNLOAD_ENV]);
-  const requireJar = isTruthyEnvValue(env[REQUIRE_VIDEO_SERVER_ENV]);
+  const skip = readEnvBool(ENV.SKIP_VIDEO_SERVER_DOWNLOAD, env);
+  const requireJar = readEnvBool(ENV.REQUIRE_VIDEO_SERVER, env);
 
   // 2 & 3. Cached-or-downloaded, verified jar — unless downloads are skipped.
   // A checksum mismatch/corruption throws here and is intentionally NOT caught:
@@ -177,7 +176,7 @@ export async function prefetchVideoServerJar(deps: PrefetchVideoServerJarDeps = 
   // Prefetch warms the DOWNLOAD cache specifically, so it re-derives the two
   // download-relevant gates from resolveVideoServerJar's precedence: an override
   // or SKIP means the download is never used, so there is nothing to warm.
-  if (isTruthyEnvValue(env[SKIP_VIDEO_SERVER_DOWNLOAD_ENV])) {
+  if (readEnvBool(ENV.SKIP_VIDEO_SERVER_DOWNLOAD, env)) {
     logger.debug(
       `[VIDEO_JAR] ${SKIP_VIDEO_SERVER_DOWNLOAD_ENV} set; skipping background jar prefetch`,
     );

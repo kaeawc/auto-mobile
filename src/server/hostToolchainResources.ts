@@ -5,6 +5,7 @@ import {
   checkAndroidCommandLineTools,
   checkEmulator,
 } from "../doctor/checks/android";
+import { checkBundletool } from "../doctor/checks/bundletool";
 import {
   checkSimctlAvailable,
   probeCoreDeviceVersion,
@@ -65,6 +66,7 @@ export interface HostToolchainResourceDependencies {
   checkAdbVersion: DoctorCheck;
   checkEmulator: DoctorCheck;
   checkAndroidCommandLineTools: DoctorCheck;
+  checkBundletool: DoctorCheck;
   checkXcodeInstallation: DoctorCheck;
   checkXcodeCommandLineTools: DoctorCheck;
   checkXcrunAvailable: DoctorCheck;
@@ -83,6 +85,7 @@ function createDefaultDependencies(options: {
     checkAdbVersion: (probe) => checkAdbVersion(undefined, probe),
     checkEmulator: (probe) => checkEmulator(probe),
     checkAndroidCommandLineTools: (probe) => checkAndroidCommandLineTools(probe),
+    checkBundletool: (probe) => checkBundletool(probe),
     // The iOS dependencies' execFile already bounds every command with
     // DOCTOR_EXEC_TIMEOUT_MS + SIGKILL, so these need no per-probe signal.
     checkXcodeInstallation: () => checkXcodeInstallation(undefined, iosDependencies),
@@ -233,6 +236,7 @@ export function createHostToolchainResourceHandler(
         adbVersion,
         emulator,
         commandLineTools,
+        bundletool,
         xcodebuild,
         xcodeSelect,
         xcrun,
@@ -243,6 +247,7 @@ export function createHostToolchainResourceHandler(
         probe("adb version", dependencies.checkAdbVersion, timer),
         probe("emulator", dependencies.checkEmulator, timer),
         probe("Android command line tools", dependencies.checkAndroidCommandLineTools, timer),
+        probe("bundletool", dependencies.checkBundletool, timer),
         probe("xcodebuild", dependencies.checkXcodeInstallation, timer),
         probe("xcode-select", dependencies.checkXcodeCommandLineTools, timer),
         probe("xcrun", dependencies.checkXcrunAvailable, timer),
@@ -270,6 +275,7 @@ export function createHostToolchainResourceHandler(
           entryFromCheck("emulator", emulator, { location: true }),
           commandLineToolEntry,
           { ...commandLineToolEntry, name: "avdmanager" },
+          entryFromCheck("bundletool", bundletool, { version: true, location: true }),
           entryFromCheck("xcodebuild", xcodebuild, { version: true }),
           entryFromCheck("xcode-select", xcodeSelect, { location: true }),
           entryFromCheck("xcrun", xcrun),

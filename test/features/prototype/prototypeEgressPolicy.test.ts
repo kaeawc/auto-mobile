@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import addresses from "../../fixtures/prototype-egress-policy/addresses.json";
 import {
   checkUrl,
   classifyAddress,
@@ -6,36 +7,34 @@ import {
   StrictEgressPolicy,
 } from "../../../src/features/prototype/prototypeEgressPolicy";
 
-const policy = new StrictEgressPolicy(new Set([3000, 4567, 8765]));
+const policy = new StrictEgressPolicy(new Set(addresses.daemonPorts));
+const classifiedAddresses = Object.entries(addresses.classes).flatMap(([kind, entries]) =>
+  entries.map((address) => ({ address, kind })),
+);
 
 describe("prototype egress policy", () => {
+  // Boundary representatives for the specified IANA special-purpose ranges and owner policy.
+  test.each(classifiedAddresses)(
+    "classifies special-purpose $address as $kind",
+    ({ address, kind }) => {
+      expect<string>(classifyAddress(address)).toBe(kind);
+      expect(policy.permitsAddress(address, addresses.ordinaryPort)).toBe(kind !== "blocked");
+      for (const port of addresses.daemonPorts) {
+        expect(policy.permitsAddress(address, port)).toBe(kind === "public");
+      }
+    },
+  );
+
   test.each(
-    ["::", "::ffff:", "::ffff:0:", "64:ff9b::", "64:ff9b:1::", "64:ff9b:1:abcd:1234:5678:"].flatMap(
-      (prefix) =>
-        [
-          { suffix: "808:808", kind: "public", ordinary: true, daemon: true },
-          { suffix: "a01:203", kind: "private", ordinary: true, daemon: false },
-          { suffix: "c0a8:10a", kind: "private", ordinary: true, daemon: false },
-          { suffix: "ac10:1", kind: "private", ordinary: true, daemon: false },
-          { suffix: "6440:1", kind: "private", ordinary: true, daemon: false },
-          { suffix: "a00:20f", kind: "private", ordinary: true, daemon: false },
-          { suffix: "0:0", kind: "blocked", ordinary: false, daemon: false },
-          { suffix: "1:203", kind: "blocked", ordinary: false, daemon: false },
-          { suffix: "7f00:1", kind: "blocked", ordinary: false, daemon: false },
-          { suffix: "a9fe:a9fe", kind: "blocked", ordinary: false, daemon: false },
-          ...[1, 2, 3, 4, 5, 6].map((last) => ({
-            suffix: `a00:20${last}`,
-            kind: "blocked",
-            ordinary: false,
-            daemon: false,
-          })),
-          { suffix: "a00:302", kind: "blocked", ordinary: false, daemon: false },
-        ].map((entry) => ({ ...entry, address: `${prefix}${entry.suffix}` })),
+    classifiedAddresses.filter(({ address }) =>
+      ["::", "64:ff9b::", "64:ff9b:1:abcd:1234:5678:"].some((prefix) => address.startsWith(prefix)),
     ),
-  )("classifies embedded IPv4 in $address", ({ address, kind, ordinary, daemon }) => {
+  )("classifies embedded IPv4 in $address", ({ address, kind }) => {
     expect<string>(classifyAddress(address)).toBe(kind);
-    expect(policy.permitsAddress(address, 8080)).toBe(ordinary);
-    expect(policy.permitsAddress(address, 3000)).toBe(daemon);
+    expect(policy.permitsAddress(address, addresses.ordinaryPort)).toBe(kind !== "blocked");
+    for (const port of addresses.daemonPorts) {
+      expect(policy.permitsAddress(address, port)).toBe(kind === "public");
+    }
   });
 
   test.each([
@@ -55,6 +54,9 @@ describe("prototype egress policy", () => {
     "[2002:7f00:1::]",
     "[::ffff:0:7f00:1]",
     "[64:ff9b:1::7f00:1]",
+    // Unknown translator length: /48 decodes 0.0.0.0, even with a public/private suffix.
+    "[64:ff9b:1::808:808]",
+    "[64:ff9b:1::c0a8:10a]",
     "[64:ff9b:1:abcd:1234:5678:a9fe:a9fe]",
     "[2001::808:808]",
     "[2001:0:ffff:ffff:ffff:ffff:ffff:ffff]",
@@ -92,7 +94,6 @@ describe("prototype egress policy", () => {
     "[2606:4700:4700::1111]",
     "[::ffff:808:808]",
     "[::ffff:0:808:808]",
-    "[64:ff9b:1::808:808]",
     "[64:ff9b:1:abcd:1234:5678:808:808]",
     "[fe7f:ffff::1]",
     "[2001:1::1]",
@@ -108,7 +109,6 @@ describe("prototype egress policy", () => {
     "10.1.2.3",
     "192.168.1.10",
     "::ffff:0:a01:203",
-    "64:ff9b:1::c0a8:10a",
     "64:ff9b:1:abcd:1234:5678:a00:20f",
     "172.16.0.1",
     "172.31.255.255",

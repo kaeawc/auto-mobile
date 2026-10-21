@@ -159,6 +159,17 @@ export interface CtrlProxyPerformanceSnapshot {
 /**
  * Interface for WebSocket message from CtrlProxy iOS
  */
+/** One issue the runner's XCUITest accessibility audit reported (#14086). */
+export interface RunnerAccessibilityAuditIssue {
+  check: string;
+  summary: string;
+  detail?: string;
+  /** The element's accessibility identifier, usable as a `tapOn`/`highlight` element id. */
+  elementId?: string;
+  label?: string;
+  bounds?: { left: number; top: number; right: number; bottom: number };
+}
+
 export interface WebSocketMessage {
   type: string;
   timestamp?: number;
@@ -169,6 +180,9 @@ export interface WebSocketMessage {
   handled?: boolean;
   unsupported?: boolean;
   requiresVoiceOver?: boolean;
+  /** accessibility_audit_result: the XCUITest audit's issues and the checks it could not run. */
+  issues?: RunnerAccessibilityAuditIssue[];
+  unsupportedChecks?: string[];
   available?: boolean;
   /** sdk_trigger_result: the SDK's HTTP status and structured error fields. */
   statusCode?: number;
@@ -357,6 +371,17 @@ export interface CtrlProxyRotateResult extends BaseResult {
 export interface CtrlProxyHingeAngleResult {
   success: boolean;
   angle?: number;
+  error?: string;
+  totalTimeMs: number;
+}
+
+/** System light/dark appearance read back by the runner (`XCUIDevice.appearance`, #14092). */
+export type CtrlProxyAppearance = "light" | "dark" | "unspecified";
+
+/** `request_appearance` result: the appearance read after any requested change. */
+export interface CtrlProxyAppearanceResult {
+  success: boolean;
+  appearance?: CtrlProxyAppearance;
   error?: string;
   totalTimeMs: number;
 }

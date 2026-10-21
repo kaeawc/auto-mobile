@@ -2,6 +2,8 @@ import { ActionableError } from "../../models/ActionableError";
 import type { Generated } from "kysely";
 import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import type { AdmissionRefusalReason, BrokerLimits, ResourceState } from "./admission";
+import type { SessionBrokerTiming } from "../../devices/sessionBrokerResult";
+import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
 
 export type BrokerRequestState = "acquiring" | "active" | "releasing" | "released" | "failed";
 
@@ -19,6 +21,8 @@ export interface BrokerRequestRecord {
   error: string | null;
   errorCode: string | null;
   retryable: boolean;
+  timing?: SessionBrokerTiming;
+  timingProfile?: SessionDeviceProfile;
 }
 
 export interface BrokerResourceRecord {
@@ -30,6 +34,7 @@ export interface BrokerResourceRecord {
   requestId: string | null;
   revision: number;
   idleOrder: number;
+  reuseCount?: number;
 }
 
 export interface BrokerRequestsTable {
@@ -45,6 +50,9 @@ export interface BrokerRequestsTable {
   retryable: number | null;
   /** Clock time the receipt became terminal; null while live or for an unstamped legacy row. */
   terminal_at_ms: number | null;
+  timing_json: Generated<string | null>;
+  timing_profile_json: Generated<string | null>;
+  timing_updated_at_ms: Generated<number | null>;
 }
 
 export interface BrokerResourcesTable {
@@ -56,6 +64,12 @@ export interface BrokerResourcesTable {
   request_id: string | null;
   revision: number;
   idle_order: number;
+  reuse_count: Generated<number>;
+}
+
+export interface BrokerTimingSample {
+  profile: SessionDeviceProfile;
+  timing: SessionBrokerTiming;
 }
 
 /** Maximum age of an unacknowledged export pin; receipt and cleanup guards still apply. */
@@ -95,6 +109,13 @@ export interface BrokerReceiptTables {
 }
 
 export interface BrokerAdmissionInput {
+  resetReadiness?: {
+    thresholdMs: number;
+    expectedReadyMs: ReadonlyMap<string, number>;
+    canWait?: (resourceId: string) => boolean;
+    reserveWait?: (requestId: string, resourceId: string) => void;
+  };
+  timingStartedAtMs?: number;
   export?: BrokerExportIdentity;
   requestId: string;
   /** Canonical requirements + initialization + consumer ownership, excluding transport details. */
@@ -110,6 +131,7 @@ export interface BrokerAdmissionInput {
 
 export type BrokerAdmission =
   | { kind: "existing"; request: BrokerRequestRecord }
+  | { kind: "wait"; request: BrokerRequestRecord; resourceId: string; waitMs: number }
   | {
       kind: "create" | "reuse" | "evict";
       request: BrokerRequestRecord;

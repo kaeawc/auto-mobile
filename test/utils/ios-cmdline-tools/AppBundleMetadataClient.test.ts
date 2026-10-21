@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExecResult } from "../../../src/models";
 import {
   AppBundleMetadataClient,
@@ -176,5 +178,59 @@ describe("AppBundleMetadataClient", () => {
 
     await expect(promise).rejects.toThrow("cancelled");
     expect(commandSignal?.aborted).toBe(true);
+  });
+
+  describe("readCodeSignature (#14099)", () => {
+    const fixture = readFileSync(
+      join(import.meta.dir, "../../fixtures/ios-signing/codesign-dvvv-development.txt"),
+      "utf8",
+    );
+    const plist: EntitlementPlistReader = { readJsonBytes: async () => ({}) };
+
+    test("runs codesign -d -vvv on the literal path and parses the stderr display", async () => {
+      const calls: Array<readonly string[]> = [];
+      const executor: CodesignExecutor = {
+        execute: async (args) => {
+          calls.push(args);
+          return { ...result(""), stderr: fixture };
+        },
+      };
+      const path = "/tmp/My $(unsafe); app.app";
+
+      const signature = await new AppBundleMetadataClient(executor, plist).readCodeSignature({
+        appBundlePath: path,
+      });
+
+      expect(calls).toEqual([["-d", "-vvv", path]]);
+      expect(signature).toMatchObject({
+        teamId: "ABCDE12345",
+        cdHash: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        adHoc: false,
+      });
+    });
+
+    test("an unsigned bundle reads as null", async () => {
+      const executor: CodesignExecutor = {
+        execute: async () => {
+          throw Object.assign(new Error("codesign exited unsuccessfully"), {
+            stderr: "code object is not signed at all",
+          });
+        },
+      };
+      await expect(
+        new AppBundleMetadataClient(executor, plist).readCodeSignature({ appBundlePath: "/a.app" }),
+      ).resolves.toBeNull();
+    });
+
+    test("any other codesign failure is an actionable error", async () => {
+      const executor: CodesignExecutor = {
+        execute: async () => {
+          throw new Error("spawn codesign ENOENT");
+        },
+      };
+      await expect(
+        new AppBundleMetadataClient(executor, plist).readCodeSignature({ appBundlePath: "/a.app" }),
+      ).rejects.toThrow("App-bundle code-signature inspection with codesign failed");
+    });
   });
 });

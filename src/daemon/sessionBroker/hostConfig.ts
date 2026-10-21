@@ -91,6 +91,7 @@ const hostConfig = z
         totalDeviceCap: cap.optional(),
         sessionCap: cap.optional(),
         idlePoolCap: cap.optional(),
+        maxConcurrentResetBoots: cap.positive().optional(),
       })
       .strict(),
     defaults: z
@@ -109,6 +110,7 @@ const hostConfig = z
       )
       .default([]),
     reuseCleanDevices: z.boolean().default(false),
+    reuseAndroidCleanDevices: z.boolean().default(false),
   })
   .strict()
   .refine((config) => config.defaults.ios !== undefined || config.defaults.android !== undefined, {

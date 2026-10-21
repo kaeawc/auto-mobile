@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "animate": {
+        "easing": "bounce"
+      }
+    }
+  },
+  "expectedPath": "root.animate.easing",
+  "expectedMessage": "Invalid enum value"
+}

@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.update
 internal val LocalPrototypeFontCache = compositionLocalOf<PrototypeFontCache?> { null }
 
 /** Turns a stored font file into a family. Throwing or returning null means "unusable font". */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeFontLoader {
   fun load(file: File): FontFamily?
 }
@@ -31,6 +32,7 @@ fun interface PrototypeFontLoader {
  * Android font parsing, so it is verified on a device; the caching and fallback logic around it is
  * unit tested with a fake loader.
  */
+@InternalAutoMobilePrototypeApi
 class ComposePrototypeFontLoader : PrototypeFontLoader {
   override fun load(file: File): FontFamily? {
     val typeface = Typeface.createFromFile(file)
@@ -48,6 +50,7 @@ class ComposePrototypeFontLoader : PrototypeFontLoader {
  *
  * The cache lock is never held while calling [source] or [loader].
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeFontCache(
   private val source: PrototypeAssetSource,
   private val loader: PrototypeFontLoader,

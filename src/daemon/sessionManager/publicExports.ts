@@ -54,7 +54,6 @@ export {
   BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
   CLOCK_RESTORE_TIMEOUT_MS,
   DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
-  DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF,
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
   getDefaultPreFirstHeartbeatGraceMs,
   getDefaultSessionHeartbeatTimeoutMs,
@@ -90,12 +89,9 @@ export type {
   SessionCacheData,
   SessionCreatedCallback,
   SessionLivenessPolicy,
-  SessionPersistenceMetadata,
 } from "./sessionTypes";
 
 export * from "../releaseErrors";
-
-export type { IosAppNetworkRuleSessionState } from "../sessionDeviceStateRestore";
 
 export { SessionActivityPersistenceError } from "./SessionActivityPersistenceError";
 
@@ -111,7 +107,6 @@ export {
 export { SessionRecoveryIdentityLossError } from "./SessionRecoveryIdentityLossError";
 
 export {
-  SESSION_HELD_BY_RECOVERY_CODE,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
 } from "../../models/deviceAcquisitionRefusals";
@@ -122,10 +117,7 @@ export type { AbandonablePendingDeviceCleanup } from "../deviceCleanupQuarantine
 // The superseded-row rewrite retry policy moved to the row writer's ledger (#11799 W3).
 export { UnissuedSessionError } from "./UnissuedSessionError";
 
-export {
-  DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF,
-  SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS,
-} from "../supersededRowReasserts";
+export { SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS } from "../supersededRowReasserts";
 
 /**
  * The CLI idle-timeout contract lives in `./constants` so the CLI-side proxy can
@@ -133,9 +125,4 @@ export {
  * (issue #6870 review). Re-exported here for the daemon-side callers and tests
  * that have always read it from this module.
  */
-export {
-  DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
-  getCliSessionIdleTimeoutMs,
-  MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
-  sanitizeCliSessionIdleTimeoutMs,
-} from "../constants";
+export { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS, getCliSessionIdleTimeoutMs } from "../constants";

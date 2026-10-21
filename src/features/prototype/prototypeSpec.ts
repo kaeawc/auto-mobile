@@ -37,13 +37,9 @@ import { bindPrototypeRequestFollowUps, requestActionSchema } from "./prototypeR
 import { prototypeStorageSchema } from "./prototypeStorageSchema";
 import { record } from "./prototypeTemplate";
 export {
-  anchorSchema,
-  placementSchema,
   PROTOTYPE_COLOR_ROLES,
   type PrototypeAnchor,
-  type PrototypeCondition,
   type PrototypeData,
-  type PrototypeDataValue,
 } from "./prototypePresentationSchemas";
 export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
 export const {

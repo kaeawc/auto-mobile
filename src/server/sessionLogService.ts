@@ -9,15 +9,11 @@ import {
 } from "./DefaultSessionLogService";
 import { AndroidSessionLogProvider } from "./AndroidSessionLogProvider";
 import { IosSimulatorSessionLogProvider } from "./IosSimulatorSessionLogProvider";
-export { AndroidSessionLogProvider } from "./AndroidSessionLogProvider";
-export { IosSimulatorSessionLogProvider } from "./IosSimulatorSessionLogProvider";
-export { SessionLogTimeoutError } from "./SessionLogTimeoutError";
 export type {
   SessionLogSimctl,
   SessionLogCollectRequest,
   ResetAppLogsRequest,
   SessionLogService,
-  SessionLogProvider,
   SessionLogServiceDependencies,
 } from "./DefaultSessionLogService";
 

@@ -92,4 +92,3 @@ export {
   type DeviceOwnershipChanges,
   type VideoStreamSocketServerDependencies,
 } from "./videoStreamSocketSupport";
-export type { CaptureSourceFactory } from "./videoStream/captureTypes";

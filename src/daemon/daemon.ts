@@ -71,8 +71,6 @@ import {
   type DaemonDependencies,
   type DaemonDeviceSessionStore,
   type ManagedAdbServerShutdown,
-  type DaemonProcessBirthTimeProvider,
-  type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
 import { DaemonHttpTokenLifecycle } from "./daemonCore/DaemonHttpTokenLifecycle";
 import type { DaemonDatabaseServices, DaemonProcessIdentity } from "./daemonCore/daemonFieldGroups";
@@ -100,7 +98,7 @@ import {
 } from "./daemonCore/daemonSessionServices";
 import { DaemonMcpServices } from "./daemonCore/DaemonMcpServices";
 import { defaultDaemonRecordingHost, type DaemonStartHost } from "./daemonStartHost";
-export type { DaemonRecordingHost, DaemonStartHost } from "./daemonStartHost";
+export type { DaemonStartHost } from "./daemonStartHost";
 
 export { findAvailableDaemonPort } from "./daemonPort";
 import {
@@ -114,11 +112,7 @@ export {
 import { warmConfirmedManagedExecution } from "./daemonCore/managedExecutionWarmup";
 import { persistedSessionReaders } from "./daemonCore/persistedSessionReaders";
 
-export type {
-  DaemonDependencies,
-  DaemonProcessBirthTimeProvider,
-  DaemonProcessGenerationTokenProvider,
-};
+export type { DaemonDependencies };
 
 export class Daemon {
   private readonly httpToken: DaemonHttpTokenLifecycle;

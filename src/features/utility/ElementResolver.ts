@@ -32,11 +32,8 @@ export type {
   MatchMode,
   ResolutionAction,
   ResolverSnapshot,
-  ElementReference,
   ResolutionIntent,
-  MatchKind,
   ContainerFailure,
-  ResolvedScope,
   ElementResolution,
 } from "./ElementResolverTypes";
 export { matchedSourceNode } from "./ElementResolverMatching";

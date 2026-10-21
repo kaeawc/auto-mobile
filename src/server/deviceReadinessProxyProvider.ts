@@ -7,10 +7,7 @@ import type {
   DeviceReadinessProxyDriver,
   DeviceReadinessProxyDriverProvider,
 } from "../utils/testOverrides";
-export type {
-  DeviceReadinessProxyDriver,
-  DeviceReadinessProxyDriverProvider,
-} from "../utils/testOverrides";
+export type { DeviceReadinessProxyDriver } from "../utils/testOverrides";
 
 const realProvider: DeviceReadinessProxyDriverProvider = (device) => {
   const manager = AndroidCtrlProxyManager.getInstance(device);

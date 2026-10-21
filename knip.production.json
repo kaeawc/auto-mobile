@@ -7,6 +7,7 @@
   },
   "ignore": [
     "src/daemon/sessionBroker/deviceNaming.ts",
+    "src/features/observe/android/ctrlProxyRequestWireManifest.ts",
     "src/features/observe/android/ctrlProxyWireManifest.ts",
     "src/features/observe/ios/ctrlProxyRequestTypes.ts",
     "src/features/prototype/prototypeChecks.ts",

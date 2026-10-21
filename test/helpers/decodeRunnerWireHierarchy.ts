@@ -3,7 +3,7 @@ import type {
   IosRunnerWireHierarchy,
   IosRunnerWireNode,
   XCTestHierarchy,
-} from "./types";
+} from "../../src/features/observe/ios/types";
 
 function decodeNode(wire: IosRunnerWireNode): CtrlProxyNode {
   const {

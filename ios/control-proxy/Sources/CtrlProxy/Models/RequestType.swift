@@ -42,6 +42,7 @@ public enum RequestType: String, CaseIterable, Sendable {
 
     /// Device control
     case requestRotate = "request_rotate"
+    case requestLocation = "request_location"
     case setHingeAngle = "set_hinge_angle"
     case requestAppearance = "request_appearance"
 
@@ -115,6 +116,7 @@ extension RequestType {
         case .requestLaunchApp: return .launchAppResult
         case .requestResetPermissions: return .resetPermissionsResult
         case .requestRotate: return .rotateResult
+        case .requestLocation: return .locationResult
         case .setHingeAngle: return .hingeAngleResult
         case .requestAppearance: return .appearanceResult
         case .requestClipboard: return .clipboardResult

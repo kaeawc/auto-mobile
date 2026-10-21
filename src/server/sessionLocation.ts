@@ -1,6 +1,7 @@
 import type { SessionManager, Session } from "../daemon/sessionManager";
 import { ActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
+import type { IosRunnerLocationClient } from "../features/utility/device-state/IosRunnerLocation";
 import { logger } from "../utils/logger";
 import {
   defaultMockLocationClearRegistry,
@@ -34,6 +35,8 @@ export function createSessionLocationAppliedCallback(
   options: Omit<SessionLocationScope, "deviceId"> & {
     device: BootedDevice;
     mockLocationClears?: MockLocationClears;
+    /** The runner a physical iOS fix went through, so release can clear it there (#14091). */
+    runnerLocation?: IosRunnerLocationClient;
   },
 ): (() => void) | undefined {
   const { sessionManager, sessionUuid } = options;
@@ -57,7 +60,7 @@ export function createSessionLocationAppliedCallback(
   const registry = options.mockLocationClears ?? defaultMockLocationClearRegistry;
   return () => {
     if (getLiveSessionLocationWrite(scope) === session) {
-      registry.markSet(session.sessionId, options.device);
+      registry.markSet(session.sessionId, options.device, options.runnerLocation);
       return;
     }
     const releasedOrUnbound =
@@ -73,7 +76,7 @@ export function createSessionLocationAppliedCallback(
       sessionManager.peekSession(holder) !== session &&
       sessionManager.getReleasingSession(holder) !== session;
     if (heldByAnother) {
-      registry.markSet(holder, options.device);
+      registry.markSet(holder, options.device, options.runnerLocation);
       logger.warn(
         `Released session ${session.sessionId}'s late location write landed on device ` +
           `${options.device.deviceId} now held by ${holder}; it will be cleared when that session releases`,
@@ -82,7 +85,11 @@ export function createSessionLocationAppliedCallback(
     }
     // Setup drain is bounded: a successful late set can follow its lifecycle hook.
     // Publish its clear before setup settles, extending the existing quarantine.
-    const clear = registry.clearLateSet({ sessionId: session.sessionId, device: options.device });
+    const clear = registry.clearLateSet({
+      sessionId: session.sessionId,
+      device: options.device,
+      runner: options.runnerLocation,
+    });
     if (clear) {
       sessionManager.registerPendingDeviceCleanup(options.device.deviceId, clear, {
         name: "clear mock location",

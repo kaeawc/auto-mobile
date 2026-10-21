@@ -22,7 +22,11 @@ import {
   bindingRegistryFileExists,
   type SqliteBindingRegistry,
 } from "../sessionBroker/registry/sqliteBindingRegistry";
-import { openSessionBrokerService, type SessionBrokerService } from "../sessionBroker/service";
+import {
+  openSessionBrokerService,
+  type OpenSessionBrokerServiceOptions,
+  type SessionBrokerService,
+} from "../sessionBroker/service";
 import {
   readSessionBrokerHostConfig,
   type SessionBrokerHostConfig,
@@ -56,6 +60,7 @@ export interface DaemonBrokerHost {
   services: Pick<
     DaemonCoreServices,
     | "iosDeviceVerifier"
+    | "deviceReadiness"
     | "sessionManager"
     | "devicePool"
     | "deviceSessionRepository"
@@ -82,6 +87,18 @@ export interface DaemonBrokerHost {
   setBrokerDeviceAcquisition: (value: DaemonBrokerDeviceAcquisitionHandle | undefined) => void;
   openBindingRegistry: DaemonBroker["openBindingRegistry"];
   cancelAndReleaseSession: DaemonSessions["cancelAndReleaseSession"];
+}
+
+export function sessionBrokerAndroidResetPorts(
+  readiness: () => Pick<
+    ReturnType<DaemonBrokerHost["services"]["deviceReadiness"]>,
+    "listBootedAndroidDevices" | "verifyAndroidCtrlProxyServiceReady"
+  >,
+): NonNullable<OpenSessionBrokerServiceOptions["androidReset"]> {
+  return {
+    inventory: (options) => readiness().listBootedAndroidDevices(options),
+    ctrlProxyReady: (device) => readiness().verifyAndroidCtrlProxyServiceReady(device),
+  };
 }
 
 /** Owns broker bindings, execution ownership, registry upgrades and settlement lifetimes. */
@@ -391,6 +408,7 @@ export class DaemonBroker {
           .map((session) =>
             this.host.services.sessionManager().ownershipSessionUuid(session.sessionId),
           ),
+      androidReset: sessionBrokerAndroidResetPorts(() => this.host.services.deviceReadiness()),
     });
     this.host.services.daemonState().setSessionBrokerService(this.sessionBrokerService);
     // No generic journal work starts before the exclusive host lock and inventory checks.

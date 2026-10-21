@@ -11,6 +11,7 @@ import { shellQuote } from "../../../utils/shellQuote";
 import type { Timer } from "../../../utils/SystemTimer";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
+import { PressButton } from "../../action/PressButton";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import type { ObserveScreenExecuteOptions } from "../../observe/interfaces/ObserveScreen";
 import { IOSCtrlProxyClient } from "../../observe/ios";
@@ -58,6 +59,7 @@ export interface SystemTrayDependencies {
   observeScreenFactory: (device: BootedDevice) => SystemTrayObserver;
   adbFactory: (device: BootedDevice) => SystemTrayAdb;
   iosClientFactory?: (device: BootedDevice) => SystemTrayIosClient;
+  pressHomeFactory?: (device: BootedDevice, signal?: AbortSignal) => Promise<IosGestureResult>;
   timer: Timer;
 }
 
@@ -91,6 +93,10 @@ export const getSystemTrayDependencies = (): SystemTrayDependencies => {
       observeScreenFactory: (device) => new RealObserveScreen(device),
       adbFactory: (device) => defaultAdbClientFactory.create(device),
       iosClientFactory: defaultIosClientFactory,
+      pressHomeFactory: async (device, signal) => {
+        const result = await new PressButton(device).execute("home", { signal });
+        return { success: result.success, error: result.error };
+      },
       timer: defaultTimer,
       appInventoryFactory: (device) =>
         new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
@@ -106,6 +112,7 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
     observeScreenFactory: overrides.observeScreenFactory ?? current.observeScreenFactory,
     adbFactory: overrides.adbFactory ?? current.adbFactory,
     iosClientFactory: overrides.iosClientFactory ?? current.iosClientFactory,
+    pressHomeFactory: overrides.pressHomeFactory ?? current.pressHomeFactory,
     timer: overrides.timer ?? current.timer,
     appInventoryFactory: overrides.appInventoryFactory ?? current.appInventoryFactory,
     appLabelResolver: overrides.appLabelResolver ?? current.appLabelResolver,

@@ -30,6 +30,14 @@ export function createNotificationUIDetector(
 ): NotificationUIDetector {
   if (device.platform === "ios") {
     const deps: IosNotificationUIDetectorDeps = {
+      pressHome: () => {
+        throwIfAborted(signal);
+        const { pressHomeFactory } = getDependencies();
+        if (!pressHomeFactory) {
+          throw new ActionableError("Failed to close Notification Center: home press unavailable");
+        }
+        return awaitWhileRequestIsLive(pressHomeFactory(device, signal), signal);
+      },
       requestSwipe: (x1, y1, x2, y2, duration) => {
         throwIfAborted(signal);
         return awaitWhileRequestIsLive(

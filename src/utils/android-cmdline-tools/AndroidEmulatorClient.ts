@@ -541,6 +541,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       launchErrors: () => this.targets.launchErrors,
       launchErrorFinalizations: () => this.targets.launchErrorFinalizations,
       launchTargetDeviceIds: () => this.targets.launchTargetDeviceIds,
+      isEmulatorSerialListed: (serial, signal) => this.isEmulatorSerialListed(serial, signal),
       accelerationCheckCategory,
       adoptsExistingAvdLaunch: (avdName, perf, signal) =>
         this.coordinator.adoptsExistingAvdLaunch(avdName, perf, signal),
@@ -569,6 +570,21 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         this.coordinator.throwIfLaunchCancelled(avdName, isCancelled),
       validateAvdMemory,
     };
+  }
+
+  private async isEmulatorSerialListed(serial: string, signal?: AbortSignal): Promise<boolean> {
+    try {
+      const devices = await this.getBootedDevicesChecked(
+        true,
+        { bypassDeviceListCache: true },
+        signal,
+      );
+      return devices.some((device) => device.deviceId === serial);
+    } catch (error) {
+      // adb may be unavailable during startup; the stdout grace and fallback still validate it.
+      logger.debug(`Could not probe emulator startup serial '${serial}': ${errorMessage(error)}`);
+      return false;
+    }
   }
 
   private createInventoryDeps(): AndroidDeviceInventoryDeps {

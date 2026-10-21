@@ -725,4 +725,5 @@ export const DAEMON_HANDSHAKE_ENABLED = !(
  * Package version (read from package.json)
  * Used for version compatibility checks and PID file metadata
  */
+// Capture the startup (pre-dirty) stamp so background refinement cannot change daemon identity.
 export const DAEMON_VERSION = getMcpServerVersion();

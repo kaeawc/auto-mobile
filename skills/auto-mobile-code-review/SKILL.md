@@ -296,7 +296,7 @@ routinely ships nothing.
   referenced solely by nightly/prepare-release/release, so APK/IPA signing, jar reproducibility,
   and sha256 computation are **never** exercised pre-merge. Merge-only jobs with no PR
   counterpart: `publish-android-libraries-snapshot`, `deploy-docs`, the coverage jobs,
-  `benchmark-context-thresholds`, `update-readme-badges`; ktfmt and detekt run full-tree on merge
+  `benchmark-context-thresholds`; ktfmt and detekt run full-tree on merge
   but scoped or path-gated on PRs. When the diff touches `.github/**` or
   `scripts/(ci|android|ios)/**`, reason statically and confirm the destination leg is green
   (`gh run list --workflow=nightly.yml -L 5`) — landing on an already-red leg hides the

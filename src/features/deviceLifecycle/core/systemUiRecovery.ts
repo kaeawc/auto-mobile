@@ -20,10 +20,10 @@ import { type waitForDeviceShutdown } from "../teardown/shutdownDiscovery";
 import {
   type shouldClearIntentionalShutdownAfterFailure,
   type cancelUnownedColdBoot,
-} from "./bootSettlement";
+} from "../boot/bootSettlement";
 import { type isUnknownAndroidRuntimeName } from "./androidIdentity";
 import { type StartDeviceArgs } from "./contracts";
-import { type ColdBootSettlementCollector } from "./bootIdentity";
+import { type ColdBootSettlementCollector } from "../boot/bootIdentity";
 import { getShutdownInitiatingExecutionId } from "../teardown/shutdownPreparation";
 
 export interface SystemUiAnrRecoveryOperations {

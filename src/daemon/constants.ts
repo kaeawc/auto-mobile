@@ -9,7 +9,7 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
 } from "./sessionLivenessWindows";
-import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
+import { AMBIENT_ENV, ENV, readEnvBool, readEnvRaw } from "../config/env";
 export const DAEMON_LAUNCH_NONCE_ENV = ENV.DAEMON_LAUNCH_NONCE.name;
 export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
@@ -712,14 +712,7 @@ export const DAEMON_RELINQUISH_DEVICE_LEASE_METHOD = "daemon/relinquishDeviceLea
  * mismatched client must be allowed through during an incident. Clients that
  * declare no handshake fields are always allowed regardless of this flag.
  */
-const handshakeDisableOverride = (readEnvRaw(ENV.DAEMON_DISABLE_HANDSHAKE) ?? "")
-  .trim()
-  .toLowerCase();
-export const DAEMON_HANDSHAKE_ENABLED = !(
-  handshakeDisableOverride === "1" ||
-  handshakeDisableOverride === "true" ||
-  handshakeDisableOverride === "yes"
-);
+export const DAEMON_HANDSHAKE_ENABLED = !readEnvBool(ENV.DAEMON_DISABLE_HANDSHAKE);
 
 /**
  * Package version (read from package.json)

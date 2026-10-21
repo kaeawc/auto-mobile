@@ -43,6 +43,7 @@ object ValidTools {
         "installApp",
         "keyboard",
         "killDevice",
+        "killProfile",
         "launchApp",
         "listApps",
         "listDeviceImages",

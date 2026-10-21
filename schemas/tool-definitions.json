@@ -12397,14 +12397,24 @@
   },
   {
     "name": "pressButton",
-    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
+    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "button": {
           "type": "string",
-          "enum": ["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]
+          "enum": [
+            "home",
+            "back",
+            "menu",
+            "power",
+            "volume_up",
+            "volume_down",
+            "recent",
+            "action",
+            "camera"
+          ]
         },
         "platform": {
           "type": "string",

@@ -3177,6 +3177,17 @@ may throw.
 `warnings`, `staleDisplay`, `effect`, and finalized `observation`/`observationDiff`.
 Returned failures retain their structured payload and set MCP `isError`.
 
+`pressButton` `action` and `camera` press the iOS Action button and Camera Control
+through XCUITest's `XCUIDevice.Button.action` and `.camera` (#14100). Apple
+documents both cases, and `XCUIDevice.hasHardwareButton(_:)` (iOS 16+), in
+XCUIAutomation for Xcode 16.3 and later; the runner presses only when
+`hasHardwareButton` reports the button. Devices without the hardware (Action
+button: iPhone 15 Pro and later; Camera Control: iPhone 16 and later) and
+simulators whose runtime does not report it return `code: "unsupported_button"`
+with `retryable: false`. Android has no equivalent and refuses both with the same
+code. A press can launch the app or shortcut the user bound to the button, so
+both count as navigation buttons.
+
 `launchApp` reports `success` and `packageName`, with optional `activityName`,
 `userId`, `pid`, `alreadyForeground`, `foregroundActivityPackage`, `verifiedBy`,
 `verified`, `verifyFailureReason`, `observedAppId`, and action observation metadata.

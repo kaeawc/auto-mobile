@@ -148,6 +148,23 @@ before device requests when it is absent. The Android and iOS implementations sh
 iOS uses a drawn field with SF Symbol icons, not SwiftUI \`.searchable\`; these differences
 are reported in \`platformNotes\`.
 
+## Charts
+
+\`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
+\`ring\` chart (needs \`prototype_chart_v1\`). \`series\` holds 1-4 \`{path, x?, y, label, color?}\`
+entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most 500 items as
+for any data array), \`y\` names each point's numeric member and \`x\` its optional label member;
+\`color\` is a hex or theme role, or a \`{light, dark}\` pair. Points are drawn in array order, so
+\`appendData\`, a \`request\` \`into\` or a \`/data\` patch re-renders the chart. \`yRange {min, max}\`
+fixes the axis (max above min); otherwise it spans the values and the goal, and bars rise from zero.
+\`xLabels\` is \`none\` (default), \`ends\` or \`all\` of the first series' x labels. \`goal\` draws a
+dashed reference line; a \`ring\` takes exactly one series and a positive \`goal\`, and draws that
+series' latest value against it. The chart is one accessible node labelled with its summary, such as
+"Line chart, Heart rate, 24 points, min 58, max 141, latest 72" or "Ring chart, Steps, 6500 of
+10000"; \`observe\` reports it, and an authored \`contentDescription\` replaces it. A literal path that
+does not resolve to an array, a point that is not an object, or a point whose \`y\` is not a number
+fails at \`<path>.series[i].path\` or \`.y\`. The iOS agent does not draw charts yet (#14679).
+
 ## Rich text
 
 A text node has exactly one of \`text\` or \`spans\`; plain \`text: ""\` remains valid.

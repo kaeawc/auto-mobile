@@ -253,6 +253,8 @@ const INSTALLER_ERROR_EXEMPTION =
   "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.";
 
 const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/action/androidLaunchIntent":
+    "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
     INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,

@@ -1,3 +1,4 @@
+import type { DaemonHttpTokenLifecycle } from "./daemonCore/DaemonHttpTokenLifecycle";
 import { verifyBearerToken } from "./daemonHttpToken";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
@@ -73,7 +74,7 @@ export interface HttpListener {
 
 /** What the daemon's HTTP listener needs from the daemon; everything is read lazily. */
 export interface DaemonHttpIngressDeps {
-  httpToken: () => string | undefined;
+  httpToken: () => Pick<DaemonHttpTokenLifecycle, "value" | "isPublished">;
   httpServerFactory: () => HttpListener;
   timer: () => Timer;
   idGenerator: () => IdGenerator;
@@ -229,7 +230,7 @@ export class DaemonHttpIngress {
    * Start the HTTP MCP server (internal daemon transport, not exposed publicly)
    */
   async start(): Promise<void> {
-    if (!this.deps.httpToken()) {
+    if (!this.deps.httpToken().value) {
       throw new ActionableError("Daemon HTTP token is not configured");
     }
     const { host, port } = this.deps.address();
@@ -317,16 +318,22 @@ export class DaemonHttpIngress {
     return this.httpServerClosePromise;
   }
 
-  private async handleHttpRequest(
+  private admitHttpRequest(
     req: IncomingMessage,
     res: ServerResponse,
     allowedHosts: string[],
-  ): Promise<void> {
+  ): boolean {
     // Check every path before parsing the URL or handling preflight requests.
     if (!req.headers.host || !allowedHosts.includes(req.headers.host) || req.headers.origin) {
       res.writeHead(403, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Forbidden" }));
-      return;
+      return false;
+    }
+
+    if (!this.deps.httpToken().isPublished) {
+      res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "1" });
+      res.end(JSON.stringify({ error: "Service unavailable" }));
+      return false;
     }
 
     const authorization = req.headers.authorization;
@@ -337,13 +344,25 @@ export class DaemonHttpIngress {
         req.rawHeaders.splice(index, 2);
       }
     }
-    const expected = this.deps.httpToken();
+    const expected = this.deps.httpToken().value;
     if (!expected || !verifyBearerToken(authorization, expected)) {
       res.writeHead(401, {
         "Content-Type": "application/json",
         "WWW-Authenticate": "Bearer",
       });
       res.end(JSON.stringify({ error: "Unauthorized" }));
+      return false;
+    }
+
+    return true;
+  }
+
+  private async handleHttpRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+    allowedHosts: string[],
+  ): Promise<void> {
+    if (!this.admitHttpRequest(req, res, allowedHosts)) {
       return;
     }
 

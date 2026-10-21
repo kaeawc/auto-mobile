@@ -655,13 +655,7 @@ interface AdbOfflineHeldInput {
 async function adbOfflineHeldDeviceDescriptions(
   input: AdbOfflineHeldInput,
 ): Promise<BootedDeviceInfo[]> {
-  const held = await adbOfflineHeldDevices({
-    platform: input.platform,
-    discovered: input.discovered,
-    devicePool: input.devicePool,
-    deviceManager: input.deviceManager,
-    onProbeFailure: input.onProbeFailure,
-  });
+  const held = await adbOfflineHeldDevices({ ...input, signal: getAbortSignal() });
   return held.map(({ device, avdName, adbState }) =>
     toBootedDeviceInfo(
       device,

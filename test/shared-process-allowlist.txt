@@ -1734,6 +1734,7 @@ test/server/observeTools.raw.test.ts
 test/server/observeWaitForConditionDsl.test.ts
 test/server/observeWaitForMultiPanel.test.ts
 test/server/openLinkWaitFor.test.ts
+test/server/outputSchema.references.test.ts
 test/server/performanceMonitorSessionCleanup.test.ts
 test/server/ping.test.ts
 test/server/pipeline/ingress/callContext.test.ts

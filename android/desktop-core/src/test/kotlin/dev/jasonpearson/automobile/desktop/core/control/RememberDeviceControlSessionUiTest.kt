@@ -4,12 +4,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.PostInputRefreshState
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,10 +48,14 @@ internal class RememberDeviceControlSessionUiTest :
       setContent {
         session =
           rememberDeviceControlSession(
+            DesktopDaemonSessionState(
+              session = null,
+              boundDeviceId = null,
+              inputAllocation = allocation,
+            ),
             dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
               scope = scope,
               clientProvider = { client },
-              inputAllocation = { allocation },
               platform = { "android" },
               nowMs = { 1_000L },
               publishError = {},
@@ -79,10 +85,14 @@ internal class RememberDeviceControlSessionUiTest :
       setContent {
         session =
           rememberDeviceControlSession(
+            DesktopDaemonSessionState(
+              session = null,
+              boundDeviceId = null,
+              inputAllocation = allocation,
+            ),
             dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
               scope = scope,
               clientProvider = { client },
-              inputAllocation = { allocation },
               platform = { "android" },
               nowMs = { 1_000L },
               publishError = { errors += it },
@@ -110,17 +120,23 @@ internal class RememberDeviceControlSessionUiTest :
     val firstAllocation = RecordingAllocation()
     val secondAllocation = RecordingAllocation()
     val provider = mutableStateOf<() -> AutoMobileClient>({ first })
-    val allocation = mutableStateOf<DesktopInputAllocation>(firstAllocation)
+    val desktopSessionState =
+      mutableStateOf(
+        DesktopDaemonSessionState(
+          session = null,
+          boundDeviceId = null,
+          inputAllocation = firstAllocation,
+        ),
+      )
     lateinit var session: DeviceControlSession
     setContent {
       val currentProvider = provider.value
-      val currentAllocation = allocation.value
       session =
         rememberDeviceControlSession(
+          desktopSessionState.value,
           dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
             scope = scope,
             clientProvider = currentProvider,
-            inputAllocation = { currentAllocation },
             platform = { "android" },
             nowMs = { 1_000L },
             publishError = {},
@@ -133,7 +149,7 @@ internal class RememberDeviceControlSessionUiTest :
     val held = session
 
     provider.value = { second }
-    allocation.value = secondAllocation
+    desktopSessionState.value = desktopSessionState.value.copy(inputAllocation = secondAllocation)
     waitForIdle()
     held.tap(testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554")), point)
     waitForIdle()
@@ -145,17 +161,69 @@ internal class RememberDeviceControlSessionUiTest :
   }
 
   @Test
+  fun `a swapped allocation takes effect without replacing the provider or session`() =
+    runComposeUiTest {
+      val scope = CoroutineScope(testDispatcher)
+      val client = FakeAutoMobileClient()
+      val provider: () -> AutoMobileClient = { client }
+      val firstAllocation = RecordingAllocation()
+      val secondAllocation = RecordingAllocation(allowed = false)
+      val desktopSessionState =
+        mutableStateOf(
+          DesktopDaemonSessionState(
+            session = null,
+            boundDeviceId = null,
+            inputAllocation = firstAllocation,
+          ),
+        )
+      lateinit var session: DeviceControlSession
+      setContent {
+        session =
+          rememberDeviceControlSession(
+            desktopSessionState.value,
+            dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
+              scope = scope,
+              clientProvider = provider,
+              platform = { "android" },
+              nowMs = { 1_000L },
+              publishError = {},
+              streamingEnabled = false,
+              uiContext = testDispatcher,
+              ioDispatcher = testDispatcher,
+            ),
+          )
+      }
+      val held = session
+
+      desktopSessionState.value = desktopSessionState.value.copy(inputAllocation = secondAllocation)
+      waitForIdle()
+      assertSame(held, session)
+      held.tap(testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554")), point)
+      waitForIdle()
+
+      assertTrue(firstAllocation.requested.isEmpty())
+      assertEquals(listOf("emulator-5554"), secondAllocation.requested)
+      assertTrue(client.inputTapCalls.isEmpty(), "the replacement allocation refuses the tap")
+      scope.cancel()
+    }
+
+  @Test
   fun `swapping the provider resets what the previous one left pending`() = runComposeUiTest {
     val scope = CoroutineScope(testDispatcher)
     val provider = mutableStateOf<() -> AutoMobileClient>({ FakeAutoMobileClient() })
+    val allocation = RecordingAllocation()
     lateinit var session: DeviceControlSession
     setContent {
       session =
         rememberDeviceControlSession(
+          DesktopDaemonSessionState(
+            session = null,
+            boundDeviceId = null,
+            inputAllocation = allocation,
+          ),
           dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
             scope = scope,
             clientProvider = provider.value,
-            inputAllocation = { RecordingAllocation() },
             platform = { "android" },
             nowMs = { 1_000L },
             publishError = {},
@@ -184,7 +252,17 @@ internal class RememberDeviceControlSessionUiTest :
       java.io
         .File("src/main/kotlin/dev/jasonpearson/automobile/desktop/core/AutoMobileContent.kt")
         .readText()
-    assertTrue("rememberDeviceControlSession(" in host, "the host must use the shared wiring")
+    val normalizedHost = host.replace(Regex("\\s+"), " ")
+    assertTrue(
+      "rememberDeviceControlSession( desktopSessionState," in normalizedHost,
+      "the host must pass its desktop session state to the shared wiring",
+    )
+    val controlOptions =
+      normalizedHost.substringAfter("RememberDeviceControlOptions(").substringBefore("),")
+    assertTrue(
+      !Regex("inputAllocation\\s*=\\s*\\{").containsMatchIn(controlOptions),
+      "the host must not override the desktop session state's allocation through options",
+    )
     assertTrue("DeviceControlSession(" !in host.replace("rememberDeviceControlSession(", ""))
   }
 }

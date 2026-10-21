@@ -136,17 +136,12 @@ release_holder() {
   export AUTOMOBILE_UNIT_TEST_WORKERS=1 AUTOMOBILE_UNIT_SHARD_RETRIES=1 STUB_TIMEOUT_ONCE=1
   echo 9.25 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
   run bash scripts/test-ts.sh unit
-  # Diagnostic output for the GitHub-hosted-only failure.
-  printf 'status=%s\n%s\n' "$status" "$output"
-  cat "$STUB_CALLS" 2>/dev/null || true
-  nproc
   [[ "$status" -eq 124 ]]
   [[ "$output" == *'not retrying unit shard 0: host load 9.25 > cores 8'* ]]
   [[ "$(wc -l < "$STUB_CALLS")" -eq 1 ]]
   rm -f "$STUB_CALLS" "$STUB_CALLS.once"
   echo 8.0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
   run bash scripts/test-ts.sh unit
-  printf 'status=%s\n%s\n' "$status" "$output"
   [[ "$status" -eq 0 && "$output" == *'passed on its retry'* ]]
   [[ "$(wc -l < "$STUB_CALLS")" -eq 2 ]]
 }

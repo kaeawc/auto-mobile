@@ -81,6 +81,7 @@ run_validator() {
 
 @test "timing input measures an existing XML and never spawns test-ts.sh" {
   mkdir -p "${REPORT%.xml}.d"
+  : > "${REPORT%.xml}.d/.bun-test-timings-scratch"
   write_report "${REPORT%.xml}.d/stale.xml" stale 0.500
   run_validator "$REPORT"
   [ ! -e "$LANE_MARKER" ]
@@ -88,6 +89,44 @@ run_validator() {
   [ ! -e "$BUN_ARGS_FILE" ]
   [ ! -e "${REPORT%.xml}.d/stale.xml" ]
   cmp "$REPORT" "${REPORT%.xml}.d/report.xml"
+}
+
+@test "timing input never deletes a sibling directory it did not create (#14500)" {
+  sibling="${REPORT%.xml}.d"
+  mkdir -p "$sibling"
+  printf 'precious\n' > "$sibling/data.txt"
+  run_validator "$REPORT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Refusing to delete"* ]]
+  [ "$(cat "$sibling/data.txt")" = precious ]
+}
+
+@test "timing input never deletes a sibling recheck directory it did not create (#14500)" {
+  sibling="${REPORT%.xml}.recheck.d"
+  mkdir -p "$sibling"
+  printf 'precious\n' > "$sibling/data.txt"
+  run_validator "$REPORT"
+  [ "$status" -eq 2 ]
+  [ "$(cat "$sibling/data.txt")" = precious ]
+}
+
+@test "timing input reuses an empty pre-existing scratch directory and marks it (#14500)" {
+  mkdir -p "${REPORT%.xml}.d"
+  run_validator "$REPORT"
+  [ "$status" -eq 0 ]
+  [ -e "${REPORT%.xml}.d/.bun-test-timings-scratch" ]
+  # A second run recognises its own marked scratch and replaces it.
+  run_validator "$REPORT"
+  [ "$status" -eq 0 ]
+}
+
+@test "timing input refuses a symlinked scratch directory (#14500)" {
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+  printf 'precious\n' > "$BATS_TEST_TMPDIR/elsewhere/data.txt"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "${REPORT%.xml}.d"
+  run_validator "$REPORT"
+  [ "$status" -eq 2 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/elsewhere/data.txt")" = precious ]
 }
 
 @test "timing input stages a dot-prefixed XML into the visible report glob" {

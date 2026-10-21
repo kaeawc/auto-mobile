@@ -1,0 +1,2 @@
+acceleration = 0:9.77622:0
+OK

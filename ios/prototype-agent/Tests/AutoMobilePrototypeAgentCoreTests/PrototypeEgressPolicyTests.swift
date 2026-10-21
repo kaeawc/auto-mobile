@@ -24,15 +24,15 @@ final class PrototypeEgressPolicyTests: XCTestCase {
             ("::ffff:0:7f00:1", .block), ("::ffff:0:a9fe:a9fe", .block),
             ("::ffff:0:808:808", .allow), ("::ffff:0:a01:203", .allow),
             ("64:ff9b:1::7f00:1", .block), ("64:ff9b:1::a9fe:a9fe", .block),
-            ("64:ff9b:1::808:808", .allow), ("64:ff9b:1::c0a8:10a", .allow),
-            ("64:ff9b:1::800:0", .allow), ("64:ff9b:1::a00:0", .allow),
+            ("64:ff9b:1::808:808", .block), ("64:ff9b:1::c0a8:10a", .block),
+            ("64:ff9b:1::800:0", .block), ("64:ff9b:1::a00:0", .block),
             ("64:ff9b:1:7f00:0:100::", .block), ("64:ff9b:1:a9fe:a9:fe00::", .block),
-            ("64:ff9b:1:808:8:800::", .allow), ("64:ff9b:1:a01:2:300::", .allow),
-            ("64:ff9b:1:7f:0:1::", .block), ("64:ff9b:1:8:8:808::", .allow),
-            ("64:ff9b:1:0:7f:0:100:0", .block), ("64:ff9b:1:0:8:808:800:0", .allow),
+            ("64:ff9b:1:808:8:800::", .block), ("64:ff9b:1:a01:2:300::", .block),
+            ("64:ff9b:1:7f:0:1::", .block), ("64:ff9b:1:8:8:808::", .block),
+            ("64:ff9b:1:0:7f:0:100:0", .block), ("64:ff9b:1:0:8:808:800:0", .block),
             ("64:ff9b:2::7f00:1", .allow),
             ("fec0::1", .block), ("feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", .block),
-            ("fe00::1", .allow), ("ff00::1", .allow),
+            ("fe00::1", .allow), ("ff00::1", .block),
             ("2001::", .block), ("2001:0:ffff:ffff:ffff:ffff:ffff:ffff", .block),
             ("2000:ffff::1", .allow), ("2001:1::1", .allow), ("2001:4860::8888", .allow),
             ("10.0.2.1", .block), ("10.0.2.2", .block), ("10.0.2.3", .block),
@@ -48,7 +48,7 @@ final class PrototypeEgressPolicyTests: XCTestCase {
             XCTAssertEqual(policy.check(host: host, port: 80, addresses: []), expected, host)
             XCTAssertEqual(policy.check(host: "public.example", port: 80, addresses: [host]), expected, host)
         }
-        for host in ["::ffff:0:a01:203", "64:ff9b:1::c0a8:10a", "64:ff9b:1:a01:2:300::"] {
+        for host in ["::ffff:0:a01:203"] {
             XCTAssertEqual(policy.check(host: host, port: 3000, addresses: []), .block, host)
         }
     }
@@ -100,6 +100,30 @@ final class PrototypeEgressPolicyTests: XCTestCase {
         ] {
             XCTAssertEqual(PrototypeEgressPolicy().check(host: host, port: 80, addresses: []), .allow, host)
         }
+    }
+
+    func testCanonicalLiteralUsesPolicyLegacyIPv4AndHostNormalization() {
+        let examples = [
+            "134744072": "8.8.8.8",
+            "0x8080808": "8.8.8.8",
+            "010.010.010.010": "8.8.8.8",
+            "8.526344": "8.8.8.8",
+            "8.8.2056": "8.8.8.8",
+            "[2606:4700::1]": "2606:4700::1",
+            "8.8.8.8.": "8.8.8.8",
+        ]
+        for (raw, expected) in examples {
+            XCTAssertEqual(PrototypeEgressPolicy.canonicalLiteral(raw), expected, raw)
+        }
+        for raw in ["example.test", "1.2.3.256", "[::1", "[2606:4700::1].", "8.8.8.8\0junk", "::1\0junk"] {
+            XCTAssertNil(PrototypeEgressPolicy.canonicalLiteral(raw), raw)
+        }
+    }
+
+    func testEmbeddedNulCannotBypassResolvedAddressCheck() {
+        let policy = PrototypeEgressPolicy()
+        XCTAssertEqual(policy.check(host: "public.example", port: 443, addresses: ["8.8.8.8", "::1\0junk"]), .block)
+        XCTAssertEqual(policy.check(host: "::1\0junk", port: 443, addresses: []), .block)
     }
 
     func testAnyBlockedOrMalformedResolvedAddressRefusesTheName() {

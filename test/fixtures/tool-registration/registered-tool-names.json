@@ -95,6 +95,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -190,6 +191,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "setToolEnabled"
   ],
   "cli": [
@@ -274,6 +276,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "getPreference",
     "setPreference",
     "deviceSnapshot",

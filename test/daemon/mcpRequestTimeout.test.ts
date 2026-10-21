@@ -53,7 +53,6 @@ import {
   MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
   clampCallerMcpRequestTimeoutMs,
   resolveMcpRequestTimeoutMs,
-  resolveExplicitToolTimeoutOverrideMs,
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
   EXECUTE_PLAN_BUDGET_HEADROOM_MS,
@@ -61,6 +60,7 @@ import {
   MAX_EXECUTE_PLAN_BUDGET_STEPS,
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
 } from "../../src/daemon/mcpRequestTimeout";
+import { resolveExplicitToolTimeoutOverrideMs } from "../../src/daemon/clientMcpRequestTimeout";
 import {
   TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
   TAP_ANY_SEARCH_UNTIL_MAX_MS,

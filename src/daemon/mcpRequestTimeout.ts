@@ -39,7 +39,7 @@ import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { readEnvPositiveInteger, readOptionalEnvPositiveInteger } from "../utils/envNumbers";
+import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { DaemonRequest } from "./types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
@@ -344,37 +344,6 @@ function resolveToolTimeoutFloorMs(
       );
     default:
       return resolveFixedToolTimeoutFloorMs(toolName);
-  }
-}
-
-/**
- * An explicit operator override is more specific than the generic connection timeout (#13797).
- * Unset or unusable values retain the client's connection-timeout floor.
- */
-export function resolveExplicitToolTimeoutOverrideMs(
-  request: DaemonRequest,
-  env: NodeJS.ProcessEnv = process.env,
-): number | undefined {
-  if (request.method !== "tools/call") {
-    return undefined;
-  }
-  switch (request.params?.name) {
-    case "openLink":
-      return readOptionalEnvPositiveInteger(
-        OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-        LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-        {},
-        env,
-      );
-    case "observe":
-      return readOptionalEnvPositiveInteger(
-        OBSERVE_MCP_TIMEOUT_ENV_VAR,
-        LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
-        {},
-        env,
-      );
-    default:
-      return undefined;
   }
 }
 
@@ -964,18 +933,6 @@ export function resolveMcpRequestTimeoutMs(
     tapAnyLongPressBudget ?? 0,
     tapAnyOrdinaryTapBudget ?? 0,
   );
-}
-
-/** Apply the generic connection timeout unless an explicit tool override takes precedence. */
-export function resolveClientMcpRequestTimeoutMs(
-  request: DaemonRequest,
-  connectionTimeout: number,
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  const base = resolveMcpRequestTimeoutMs(request, env);
-  return resolveExplicitToolTimeoutOverrideMs(request, env) !== undefined
-    ? base
-    : Math.max(base, clampCallerMcpRequestTimeoutMs(connectionTimeout) ?? 0);
 }
 
 const resolvedTimeouts = new WeakMap<DaemonRequest, number>();

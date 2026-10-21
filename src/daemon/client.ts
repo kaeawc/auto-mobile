@@ -36,7 +36,8 @@ import {
 } from "./constants";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
-import { ProgressExtendableDeadline, resolveClientMcpRequestTimeoutMs } from "./mcpRequestTimeout";
+import { ProgressExtendableDeadline } from "./mcpRequestTimeout";
+import { resolveClientMcpRequestTimeoutMs } from "./clientMcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
 import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
@@ -789,8 +790,7 @@ export class DaemonClient {
       ...this.handshakeFields(),
     };
 
-    // Explicit per-tool env overrides bypass the generic connection-timeout floor (#13797).
-    // Only connectionTimeout is clamped; resolved tool budgets may exceed the cap.
+    // Explicit per-tool env overrides bypass the connection-timeout floor (#13797).
     const requestTimeoutMs = resolveClientMcpRequestTimeoutMs(
       request,
       this.connectionTimeout,

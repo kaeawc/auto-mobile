@@ -3731,6 +3731,7 @@
               "getDeepLinks",
               "getDeviceState",
               "getIosSimulatorCapabilities",
+              "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
               "getNotificationPolicy",
@@ -3875,6 +3876,7 @@
               "getDeepLinks",
               "getDeviceState",
               "getIosSimulatorCapabilities",
+              "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
               "getNotificationPolicy",
@@ -5090,6 +5092,185 @@
       },
       "required": ["deviceType", "runtime"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "getLogs",
+    "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS Simulator unified log by app subsystem. Bounded output.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Package or bundle id; on Android every process of the app, not one pid",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "since": {
+          "description": "Window start: \"lastAction\", \"sessionStart\", or {seconds} (default 300s)",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["lastAction", "sessionStart"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600
+                }
+              },
+              "required": ["seconds"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "tags": {
+          "description": "Android logcat tag filters, \"Tag\" or \"Tag:P\" (other tags are silenced)",
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "minPriority": {
+          "description": "Lowest priority shown (default V)",
+          "type": "string",
+          "enum": ["V", "D", "I", "W", "E", "F"]
+        },
+        "grep": {
+          "description": "Regular expression applied host-side to each line",
+          "type": "string",
+          "minLength": 1
+        },
+        "buffers": {
+          "description": "Android logcat buffers (default [\"main\",\"crash\"])",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["main", "system", "crash", "events"]
+          }
+        },
+        "includeSystem": {
+          "description": "Android: add ActivityManager/system lines that name appId (launch, death, ANR)",
+          "type": "boolean"
+        },
+        "maxLines": {
+          "description": "Newest lines kept (default 1000)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "sinceSeconds": {
+          "type": "number"
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "number"
+              },
+              "tid": {
+                "type": "number"
+              },
+              "priority": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              }
+            },
+            "required": ["timestamp", "message"],
+            "additionalProperties": {}
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "pids": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "attribution": {
+          "type": "string",
+          "enum": ["uid", "pid", "subsystem", "none"]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "deviceId",
+        "platform",
+        "sinceSeconds",
+        "lines",
+        "truncated",
+        "pids",
+        "attribution",
+        "warnings"
+      ],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -24208,6 +24389,7 @@
               "getDeepLinks",
               "getDeviceState",
               "getIosSimulatorCapabilities",
+              "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
               "getNotificationPolicy",
@@ -31323,6 +31505,7 @@
             "getDeepLinks",
             "getDeviceState",
             "getIosSimulatorCapabilities",
+            "getLogs",
             "getNavigationGraph",
             "getNetworkGraph",
             "getNotificationPolicy",
@@ -31433,6 +31616,7 @@
               "getDeepLinks",
               "getDeviceState",
               "getIosSimulatorCapabilities",
+              "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
               "getNotificationPolicy",

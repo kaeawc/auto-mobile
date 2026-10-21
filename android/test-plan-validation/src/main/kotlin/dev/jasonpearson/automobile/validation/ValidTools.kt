@@ -37,6 +37,7 @@ object ValidTools {
         "getAppPermissions",
         "getDeepLinks",
         "getDeviceState",
+        "getLogs",
         "getNavigationGraph",
         "getNetworkGraph",
         "getNotificationPolicy",

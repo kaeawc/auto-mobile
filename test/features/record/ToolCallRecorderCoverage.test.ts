@@ -116,6 +116,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "dragAndDrop",
   "dragPath",
   "homeScreen",
+  "getLogs",
   "keyboard",
   "killProfile",
   "launchApp",

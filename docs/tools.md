@@ -18,7 +18,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`,
 `compareScreenshot`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
-`executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
+`executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`, `getLogs`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
@@ -1917,6 +1917,7 @@ subtree, or the whole active-window tree when owner-less.
 | 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ✅ <code>setAppLinks</code>                                                                      | Android 12+: approves, resets, or re-verifies an app's App Links domains, or changes a user's domain selection, so https links open the app without a chooser. Returns what changed and a restore receipt; a daemon session restores the original state on release.                                                                                                                                                                                                                                                                                                                                      |
 | ⏱️ <code>measureStartup</code>                                                                   | Android: launches an app N times cold, warm or hot and reports time-to-initial-display (TTID) and, when the app calls `reportFullyDrawn`, time-to-full-display (TTFD) percentiles. Stored in `automobile:performance-results`.                                                                                                                                                                                                                                                                                                                                                                           |
+| 📜 <code>getLogs</code>                                                                          | Reads filtered device logs: Android logcat for every process of an app (crashes survive process death), with tag, priority, regex and buffer filters, since the last action or session start; iOS Simulator unified log by app subsystem.                                                                                                                                                                                                                                                                                                                                                                |
 
 <details class="note" markdown="1">
 <summary>Measuring startup with measureStartup</summary>
@@ -1974,6 +1975,38 @@ returns <code>supported: false</code> for both actions because no state-preservi
 termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 
 </details>
+
+### getLogs
+
+`getLogs` returns bounded, filtered log lines as structured data (#14082). Use it
+when a step fails and you want to know why. It reads the same sources as the
+`automobile:device-session/{sessionUuid}/apps/{appId}/logs` resource, without
+needing an MCP resource read.
+
+- `appId` scopes Android logcat to the app's **uid** (`logcat --uid`, Android 11+),
+  so lines from a process that crashed or restarted are still returned. Before
+  Android 11 it falls back to the app's currently running pids, with a warning
+  (`attribution: "pid"`). Without `appId`, every process is read.
+- `since` is `"lastAction"` (the start of the most recent control call on the
+  device), `"sessionStart"` (the caller's session creation), or `{ seconds }`. The
+  default is 300 seconds and the window is capped at 3600. An anchor that is not
+  known falls back to the default with a warning. The window is measured on the
+  device's own clock.
+- `tags` are logcat filterspecs, `"Tag"` or `"Tag:P"`. All other tags are silenced.
+  `minPriority` is one of `V`, `D`, `I`, `W`, `E`, `F` (default `V`).
+- `grep` is a regular expression matched host-side against `Tag: message`.
+- `buffers` picks logcat buffers from `main`, `system`, `crash` and `events`. The
+  default is `["main", "crash"]`, so a crash's stack trace is included.
+- `includeSystem` adds `ActivityManager`, `ActivityTaskManager` and `AndroidRuntime`
+  lines that name `appId` (launches, process deaths, ANRs).
+- `maxLines` (default 1000, at most 5000) and a 256 KiB byte bound keep the newest
+  lines; `truncated` reports that older lines were dropped.
+
+Each line has `timestamp`, `pid`, `tid`, `priority`, `tag` and `message`, and the
+result lists the `pids` seen. On the iOS Simulator, `getLogs` needs `appId`. It
+reads the unified log for the app's subsystem (`minPriority` `V`/`D` maps to
+debug, `I` to info), applies `grep`, and warns that the Android-only filters are
+ignored. iOS lines carry only `timestamp` and `message`.
 
 ### App launch, installation, links, and storage options
 

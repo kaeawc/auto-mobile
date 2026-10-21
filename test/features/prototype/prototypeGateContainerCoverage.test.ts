@@ -54,6 +54,11 @@ const fixtures: Record<string, Node> = {
     activeKey: "active",
     child: label,
   },
+  prototype_chart_v1: {
+    type: "chart",
+    variant: "line",
+    series: [{ path: "/points", y: "y", label: "Points" }],
+  },
   prototype_rich_text_v1: { type: "text", spans: [{ text: "Hello" }] },
   prototype_linkify_v1: {
     type: "text",

@@ -14,7 +14,11 @@ import {
 } from "../utils/deviceResourceSchemas";
 import type { BootedDevice } from "../models/DeviceInfo";
 import { ToolRegistry } from "./toolRegistry";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import {
+  reconcileDeviceResourcesResultSchema,
+  setDeviceResourcesResultSchema,
+} from "./deviceResourceToolOutputSchemas";
 import { getAbortSignal } from "../utils/AbortContext";
 import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
@@ -61,14 +65,14 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
             deadlineMs,
             signal: operationSignal,
           });
-          return {
-            ...createJSONToolResponse({ device, ...result }),
-            ...(result.success ? {} : { isError: true }),
-          };
+          return withIsErrorOnFailure(
+            createStructuredToolResponse({ device, ...result }),
+            result.success,
+          );
         },
       );
     },
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: setDeviceResourcesResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -100,14 +104,14 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
               signal: operationSignal,
             }),
           );
-          return {
-            ...createJSONToolResponse({ device, ...result }),
-            ...(result.success ? {} : { isError: true }),
-          };
+          return withIsErrorOnFailure(
+            createStructuredToolResponse({ device, ...result }),
+            result.success,
+          );
         },
       );
     },
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: reconcileDeviceResourcesResultSchema },
   );
 }
 

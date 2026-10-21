@@ -1141,6 +1141,36 @@
       "required": ["lock", "steps", "deviceCount"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "lock": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "executedSteps": {
+          "type": "number"
+        },
+        "totalSteps": {
+          "type": "number"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["success", "lock", "deviceId", "executedSteps", "totalSteps"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/planOnly": true
     }
@@ -21787,6 +21817,149 @@
       },
       "required": ["resources"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "device": {
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            }
+          },
+          "required": ["deviceId", "platform"],
+          "additionalProperties": {}
+        },
+        "identity": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "requested": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "profileFingerprint": {
+          "type": "string"
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        "remainingDrift": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        "applied": {
+          "type": "object",
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "requested": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "resources": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "changed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "verification": {
+              "type": "string",
+              "const": "current_boot"
+            },
+            "observed": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            },
+            "observationContradictions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "services": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "restore": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            }
+          },
+          "required": ["success", "requested", "resources", "changed", "verification"],
+          "additionalProperties": {}
+        },
+        "observed": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "verification": {
+          "type": "string",
+          "const": "current_boot"
+        }
+      },
+      "required": [
+        "success",
+        "device",
+        "identity",
+        "requested",
+        "profileFingerprint",
+        "drift",
+        "remainingDrift",
+        "observed",
+        "verification"
+      ],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "__schema1": {
+          "type": "object",
+          "properties": {
+            "resource": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["missingRequested", "ownedExtra", "unsupported", "commandFailure"]
+            },
+            "expected": {},
+            "observed": {}
+          },
+          "required": ["resource", "kind", "expected", "observed"],
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {
@@ -25295,6 +25468,81 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "device": {
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            }
+          },
+          "required": ["deviceId", "platform"],
+          "additionalProperties": {}
+        },
+        "requested": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "resources": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verification": {
+          "type": "string",
+          "const": "current_boot"
+        },
+        "observed": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "observationContradictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "services": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "restore": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "device", "requested", "resources", "changed", "verification"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {

@@ -25,6 +25,7 @@ object ValidTools {
         "clearKeyValueFile",
         "clearMockNetwork",
         "clipboard",
+        "compareScreenshot",
         "crashApp",
         "criticalSection",
         "deviceSnapshot",

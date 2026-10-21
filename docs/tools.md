@@ -15,6 +15,8 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 
 `accessibility`, `accessibilityAction`, `accessibilityAudit`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
+`changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`,
+`compareScreenshot`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
@@ -800,17 +802,46 @@ observation screenshot resource (remote clients) for the completed capture.
 Cancellation before or during delivery stops the response. The opt-in can substantially increase MCP
 response size, so use it only when the client needs image bytes in the tool result.
 
-| Tool                                 | What it does                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------- |
-| 📸 <code>snapshotOf</code>           | Saves a PNG crop of an element or screen rectangle (opt-in).              |
-| 👀 <code>observe</code>              | Gets screen hierarchy and screenshot, with optional PNG crop.             |
-| 🎯 <code>hitTest</code>              | Estimates hierarchy nodes beneath a coordinate without dispatching input. |
-| 🔍 <code>explore</code>              | Explores an app to build a navigation graph.                              |
-| 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
-| 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
-| 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, reports, saves, lists or deletes.        |
-| 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
+| Tool                                 | What it does                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------- |
+| 📸 <code>snapshotOf</code>           | Saves a PNG crop of an element or screen rectangle (opt-in).                 |
+| 🧪 <code>compareScreenshot</code>    | Records or compares a named screenshot baseline per device profile (opt-in). |
+| 👀 <code>observe</code>              | Gets screen hierarchy and screenshot, with optional PNG crop.                |
+| 🎯 <code>hitTest</code>              | Estimates hierarchy nodes beneath a coordinate without dispatching input.    |
+| 🔍 <code>explore</code>              | Explores an app to build a navigation graph.                                 |
+| 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                                |
+| 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                                |
+| 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                                |
+| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, reports, saves, lists or deletes.           |
+| 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                                |
+
+### compareScreenshot
+
+`compareScreenshot` is a visual-regression assertion (#14083). It catches theme, colour,
+clipping and missing-icon regressions that leave the view hierarchy unchanged. It
+captures the same fresh hierarchy and screenshot as `snapshotOf`, then:
+
+- `baseline` names a host-side baseline under `~/.auto-mobile/visual-baselines/<baseline>/`
+  (or the `AUTOMOBILE_DATA_DIR` equivalent).
+- `mode` is `record` (write or overwrite the baseline), `compare`, or `recordIfMissing`
+  (compare when this device profile has a baseline, record otherwise).
+- `target` limits the comparison to one element (`elementId`) or a platform-native
+  rectangle (`rect`: Android pixels, iOS points). It defaults to the full screen.
+- `mask` lists regions (`elementId` or `rect`) to leave out, such as a clock, an
+  avatar or an ad.
+- `ignoreSystemBars` (default `true`) also leaves out the visible status and
+  navigation bars reported by the hierarchy's insets.
+- `threshold.perPixelDelta` (0-1, default 0.1) is the per-pixel colour distance that
+  still counts as equal. `threshold.pixelRatio` (0-1, default 0) is the largest share
+  of compared pixels that may differ while still matching.
+
+Baselines are stored per device profile: platform, screenshot size, density, font
+scale and theme. A `compare` whose baseline exists only for another profile is
+refused with `errorCode: "baseline_profile_mismatch"`, naming the differing fields,
+instead of being compared. A missing baseline returns `errorCode: "baseline_missing"`,
+and a target whose size changed returns `errorCode: "size_mismatch"`. A mismatch
+returns `match: false`, `diffRatio`, and `diffImagePath`, a PNG that marks the
+differing pixels.
 
 ### prototype
 

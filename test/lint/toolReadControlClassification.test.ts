@@ -41,6 +41,7 @@ const PROTOTYPE_ARGS = {
 
 const CLASSIFICATION: Classification = {
   read: [
+    "compareScreenshot",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",

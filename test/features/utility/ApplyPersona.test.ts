@@ -234,9 +234,10 @@ describe("applyPersona / resetPersona (#14055)", () => {
       { facet: "display", action: "reset", owner: "session-1" },
       { facet: "kill", action: "reset", appId: APP, owner: "session-1" },
       { facet: "kill", action: "reset", appId: "com.other", owner: "session-1" },
-      { facet: "keyboard", action: "set", profile: "direct" },
+      { facet: "keyboard", action: "restore", profile: "direct" },
     ]);
     expect(registry.get(emulator.deviceId)).toBeUndefined();
+    expect(executors.keyboardRecorded).toBeUndefined();
   });
 
   test("applying a different persona resets the recorded one first, so its facets do not linger", async () => {
@@ -249,12 +250,11 @@ describe("applyPersona / resetPersona (#14055)", () => {
     expect(executors.calls).toEqual([
       { facet: "display", action: "reset", owner: undefined },
       { facet: "kill", action: "reset", appId: APP, owner: undefined },
-      { facet: "keyboard", action: "set", profile: "direct" },
+      { facet: "keyboard", action: "restore", profile: "direct" },
       { facet: "keyboard", action: "set", profile: "gboard" },
     ]);
     expect(registry.get(emulator.deviceId)).toEqual({
       personaId: "pixel-baseline",
-      keyboardProfileBefore: "direct",
       killAppIds: [],
     });
   });
@@ -299,7 +299,7 @@ describe("applyPersona / resetPersona (#14055)", () => {
     await resetPersona(emulator, {}, { executors, registry });
     expect(executors.calls.map((call) => `${call.facet}:${call.action}`)).toEqual([
       "display:reset",
-      "keyboard:set",
+      "keyboard:restore",
     ]);
     expect(registry.get(emulator.deviceId)).toBeUndefined();
   });
@@ -327,6 +327,6 @@ describe("applyPersona / resetPersona (#14055)", () => {
       "appops refused",
     );
     expect(registry.get(emulator.deviceId)?.killAppIds).toEqual([APP]);
-    expect(registry.get(emulator.deviceId)?.keyboardProfileBefore).toBeUndefined();
+    expect(executors.keyboardRecorded).toBeUndefined();
   });
 });

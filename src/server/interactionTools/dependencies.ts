@@ -1,3 +1,4 @@
+import type { SessionKeyboardProfileDependencies } from "../sessionKeyboardProfile";
 import type { Clipboard } from "../../features/action/Clipboard";
 import type { DragAndDrop } from "../../features/action/DragAndDrop";
 import type { HandleIntentChooser } from "../../features/action/HandleIntentChooser";
@@ -57,6 +58,8 @@ export interface InteractionToolDependencies {
   rotateFactory?: (device: BootedDevice, options?: RotateOptions) => RotateLike;
   setPostureFactory?: (device: BootedDevice) => SetPostureLike;
   keyboardFactory?: (device: BootedDevice) => Pick<Keyboard, "execute">;
+  /** `keyboard setProfile` session admission and restore record (#14705). */
+  keyboardProfile?: SessionKeyboardProfileDependencies;
   openUrlFactory?: (device: BootedDevice) => Pick<OpenURL, "execute">;
   openLinkChooserFactory?: (device: BootedDevice) => Pick<HandleIntentChooser, "execute">;
   shakeFactory?: (device: BootedDevice) => Pick<Shake, "execute">;

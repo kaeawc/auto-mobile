@@ -6,6 +6,7 @@ import { registerStatusBarSessionCleanup } from "./statusBarSessionCleanup";
 import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
 import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
 import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
+import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
 import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { executionTracker } from "./executionTracker";
@@ -104,6 +105,7 @@ export function wireSessionLifecycle(
   registerKillProfileSessionCleanup(sessionManager);
   registerEmulatorSensorSessionCleanup(sessionManager);
   registerDisplayProfileSessionCleanup(sessionManager);
+  registerKeyboardProfileSessionCleanup(sessionManager);
   registerDeviceConditionSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);

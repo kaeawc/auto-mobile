@@ -20,7 +20,6 @@ import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../features/obser
 import {
   KEYBOARD_PROFILE_CATALOG_ID,
   KEYBOARD_PROFILE_CATALOG_VERSIONS,
-  KEYBOARD_PROFILE_IDS,
   type KeyboardProfileCatalog,
 } from "../features/action/keyboardProfiles";
 import {
@@ -29,7 +28,6 @@ import {
   throwIfAborted,
   withIsErrorOnFailure,
 } from "../utils/toolUtils";
-import { withAndroidImeLock } from "../features/action/androidImeLock";
 import type {
   AcceptIosAppOpenAlertOptions,
   InteractionToolDependencies,
@@ -70,42 +68,10 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { displayWaitInventory } from "../utils/deviceMatcher";
 import { toActionableError } from "../models/ActionableError";
 import { HomeScreen } from "../features/action/HomeScreen";
+import { setKeyboardProfileForTool } from "../features/action/keyboardProfileControl";
+import { setKeyboardProfileForSession } from "./sessionKeyboardProfile";
 
-export async function setKeyboardProfileForTool(
-  device: BootedDevice,
-  profile: KeyboardArgs["profile"],
-  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">,
-  signal?: AbortSignal,
-): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
-  if (!profile) {
-    throw new ActionableError(
-      `keyboard setProfile requires profile: ${KEYBOARD_PROFILE_IDS.join(", ")}.`,
-    );
-  }
-  if (device.platform !== "android") {
-    throw new ActionableError("Keyboard profiles are Android-only; select an Android device.");
-  }
-  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
-  const supported = await profileClient.supportsCommand("request_set_keyboard_profile");
-  throwIfAborted(signal);
-  if (!supported) {
-    throw new ActionableError(
-      "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.",
-    );
-  }
-  const result = await withAndroidImeLock(
-    device.deviceId,
-    () => {
-      throwIfAborted(signal);
-      return profileClient.setKeyboardProfile(profile);
-    },
-    signal,
-  );
-  if (!result.success) {
-    throw new ActionableError(result.error ?? "Failed to set keyboard profile.");
-  }
-  return { activeProfileId: result.activeProfileId, previousProfileId: result.previousProfileId };
-}
+export { setKeyboardProfileForTool };
 
 export async function listKeyboardProfilesForTool(
   device: BootedDevice,
@@ -817,7 +783,13 @@ export const createKeyboardHandler =
       throwIfAborted(signal);
       if (args.action === "setProfile") {
         return createStructuredToolResponse(
-          await setKeyboardProfileForTool(device, args.profile, undefined, signal),
+          await setKeyboardProfileForSession(
+            device,
+            args.profile,
+            args.sessionUuid,
+            deps.keyboardProfile,
+            signal,
+          ),
         );
       }
       if (args.action === "listProfiles") {

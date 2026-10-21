@@ -23,9 +23,17 @@ import {
 } from "./OemPersonas";
 import { defaultPersonaRestoreRegistry, type PersonaRestoreRegistry } from "./PersonaRestore";
 
-/** Sets the AutoMobile IME's keyboard behaviour profile, as `keyboard setProfile`. */
+/**
+ * The AutoMobile IME's keyboard behaviour profile, as `keyboard setProfile`. The
+ * profile before the first change is recorded in the shared keyboard-profile
+ * record (#14705), so a session's release restores it as well as reset.
+ */
 export interface PersonaKeyboardExecutor {
-  set(profile: string, signal?: AbortSignal): Promise<{ previousProfileId?: string }>;
+  set(profile: string, signal?: AbortSignal, owner?: string): Promise<unknown>;
+  /** The profile recorded before the first change, while it is waiting to be restored. */
+  recorded(): string | undefined;
+  /** Put the recorded profile back and forget it. */
+  restore(signal?: AbortSignal): Promise<void>;
 }
 
 /** `killProfile` apply and reset for one package. */
@@ -182,10 +190,8 @@ async function runFacet(
   throwIfAborted(deps.signal);
   switch (facet) {
     case "keyboard": {
-      const result = await deps.executors.keyboard.set(persona.keyboardProfileId, deps.signal);
-      registry.recordApply(device.deviceId, persona.id, {
-        keyboardProfileBefore: result.previousProfileId,
-      });
+      await deps.executors.keyboard.set(persona.keyboardProfileId, deps.signal, deps.owner);
+      registry.recordApply(device.deviceId, persona.id, {});
       return { status: "applied", detail: `keyboard profile ${persona.keyboardProfileId}` };
     }
     case "kill": {
@@ -353,7 +359,7 @@ function resetSteps(
       ...(appId ? [appId] : []),
     ]),
   ];
-  const keyboardBefore = recorded?.keyboardProfileBefore;
+  const keyboardBefore = deps.executors.keyboard.recorded();
   return [
     {
       facet: "display",
@@ -375,8 +381,7 @@ function resetSteps(
           {
             facet: "keyboard" as const,
             run: async () => {
-              await deps.executors.keyboard.set(keyboardBefore, deps.signal);
-              registry.forgetKeyboard(device.deviceId);
+              await deps.executors.keyboard.restore(deps.signal);
               return { status: "applied" as const, detail: `keyboard profile ${keyboardBefore}` };
             },
           },

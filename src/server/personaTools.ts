@@ -4,7 +4,8 @@ import { defineDeviceTool, type DeviceToolHandler } from "./defineTool";
 import { personaResultSchema } from "./personaToolOutputSchemas";
 import { runSessionPersonaMutation, type SessionPersonaHost } from "./sessionPersona";
 import { changedSettings, type DisplayProfileToolDependencies } from "./displayProfileTools";
-import { setKeyboardProfileForTool } from "./interactionToolHandlers";
+import { setKeyboardProfileForTool } from "../features/action/keyboardProfileControl";
+import { defaultKeyboardProfileRestoreRegistry } from "../features/action/KeyboardProfileRestore";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { ActionableError } from "../models/ActionableError";
@@ -103,11 +104,21 @@ export const defaultPersonaExecutors = (
   });
   return {
     keyboard: {
-      set: (profile, setSignal) => {
+      set: async (profile, setSignal, owner) => {
         if (!isKeyboardProfileId(profile)) {
           throw new ActionableError(`Unknown keyboard profile '${profile}'.`);
         }
-        return setKeyboardProfileForTool(device, profile, undefined, setSignal);
+        const result = await setKeyboardProfileForTool(device, profile, undefined, setSignal);
+        defaultKeyboardProfileRestoreRegistry.record(device, result.previousProfileId, owner);
+        return result;
+      },
+      recorded: () => defaultKeyboardProfileRestoreRegistry.recorded(device.deviceId),
+      restore: async (restoreSignal) => {
+        const before = defaultKeyboardProfileRestoreRegistry.recorded(device.deviceId);
+        if (before) {
+          await setKeyboardProfileForTool(device, before, undefined, restoreSignal);
+          defaultKeyboardProfileRestoreRegistry.forget(device.deviceId);
+        }
       },
     },
     kill: {
@@ -200,7 +211,7 @@ const personaTool = defineDeviceTool({
     "experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those " +
     "returns route_to_real_device and changes nothing. applying a different persona resets the recorded one first; reset restores the display, kill " +
     "and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). " +
-    "The keyboard profile persists until reset, even across sessions. Simulates effects, " +
+    "In a daemon session, release or rebind restores the kill, display and keyboard facets. Simulates effects, " +
     "not firmware.",
   input: personaInput,
   options: {

@@ -13,6 +13,7 @@ import { KILL_PROFILES } from "../../src/features/utility/KillProfiles";
 
 export type FakeFacetCall =
   | { facet: "keyboard"; action: "set"; profile: string }
+  | { facet: "keyboard"; action: "restore"; profile: string }
   | { facet: "kill"; action: "apply"; appId: string; profile: string; owner?: string }
   | { facet: "kill"; action: "reset"; appId: string; owner?: string }
   | { facet: "display"; action: "apply"; input: object; owner?: string }
@@ -23,6 +24,8 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
   readonly calls: FakeFacetCall[] = [];
   /** The profile the fake keyboard reports as active before each set. */
   activeKeyboardProfile = "gboard";
+  /** The fake shared keyboard-profile record: the profile before the first change. */
+  keyboardRecorded?: string;
   keyboardError?: Error;
   killError?: Error;
   displayError?: Error;
@@ -38,8 +41,21 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
         throw this.keyboardError;
       }
       const previousProfileId = this.activeKeyboardProfile;
+      this.keyboardRecorded ??= previousProfileId;
       this.activeKeyboardProfile = profile;
       return { previousProfileId };
+    },
+    recorded: () => this.keyboardRecorded,
+    restore: async () => {
+      if (this.keyboardRecorded === undefined) {
+        return;
+      }
+      this.calls.push({ facet: "keyboard", action: "restore", profile: this.keyboardRecorded });
+      if (this.keyboardError) {
+        throw this.keyboardError;
+      }
+      this.activeKeyboardProfile = this.keyboardRecorded;
+      this.keyboardRecorded = undefined;
     },
   };
 

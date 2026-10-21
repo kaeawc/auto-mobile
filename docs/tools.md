@@ -1436,6 +1436,13 @@ for a key, the session reports focus loss and restores the original keyboard.
 Enabled-set drift is reported with bounded component IDs; the session never
 overwrites external enable/disable changes.
 
+`{"action":"setProfile","profile":"gboard"}` switches the AutoMobile IME's typing
+behaviour profile (`direct`, `gboard` or `samsung`); `listProfiles` returns the catalog.
+CtrlProxy persists the active profile on the device. In a daemon session (`sessionUuid`),
+the profile active before the session's first change is recorded, and release or rebind
+restores it before the next session can acquire the device (`restoresOnRelease: true` in
+the result). Sessionless changes persist.
+
 `tapOn` and `tapAny` accept recursive `container` selectors. The outermost
 container resolves first; every inner container and the target must be strict
 descendants of the previous level, including across anonymous wrappers:
@@ -2749,10 +2756,10 @@ persona({ action: "reset" });
   before the first persona. The display and kill records are shared with `displayProfile` and
   `killProfile`, so reset also restores direct `displayProfile` changes and the device-wide
   battery and Doze state. A facet the device refuses stays recorded and the reset is an error.
-- In a daemon session (`sessionUuid`), release or rebind restores the kill and display facets,
-  as with `killProfile` and `displayProfile`. The keyboard profile is restored only by `reset`,
-  as with `keyboard` `setProfile`, so it stays active for the device's next session until then. The record is in memory only. The shared `platform` and
-  `keepScreenAwake` device options apply as for other tools.
+- In a daemon session (`sessionUuid`), release or rebind restores the kill, display and
+  keyboard facets, as with `killProfile`, `displayProfile` and `keyboard` `setProfile`, which
+  share their records with `persona`. The records are in memory only. The shared `platform`
+  and `keepScreenAwake` device options apply as for other tools.
 
 ### Localization, display, and event options
 

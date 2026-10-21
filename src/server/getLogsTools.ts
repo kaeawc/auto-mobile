@@ -85,16 +85,20 @@ export const defaultGetLogsDependencies: GetLogsDependencyFactory = (device, arg
       UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
     );
     return {
-      collect: async (appId, lastSeconds, level, signal) =>
+      collect: async (appId, lastSeconds, level, signal, processName) =>
         (
           await provider.collectUnifiedLog(
             device,
             appId,
-            { lastSeconds, level },
+            { lastSeconds, level, processName },
             SESSION_LOG_MAX_BYTES_LIMIT,
             signal,
           )
         ).text,
+      resolveProcessName: async (appId, signal) => {
+        const apps = await new SimCtlClient(device).listAppsOrThrow(device.deviceId, { signal });
+        return executableOfApp(apps, appId);
+      },
     };
   },
 });
@@ -148,4 +152,16 @@ const getLogsTool = defineDeviceTool({
 
 export function registerGetLogsTools(dependencies?: GetLogsDependencyFactory): void {
   getLogsTool.register(undefined, createGetLogsHandler(dependencies));
+}
+
+/** CFBundleExecutable of `appId` from a `simctl listapps` listing. */
+export function executableOfApp(
+  apps: readonly Record<string, unknown>[],
+  appId: string,
+): string | undefined {
+  const app = apps.find(
+    (record) => record.bundleId === appId || record.CFBundleIdentifier === appId,
+  );
+  const executable = app?.CFBundleExecutable;
+  return typeof executable === "string" && executable.length > 0 ? executable : undefined;
 }

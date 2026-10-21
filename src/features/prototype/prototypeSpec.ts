@@ -14,6 +14,7 @@ import {
   prototypeJsonSchema,
   type PrototypeJson,
 } from "./prototypeJson";
+import { prototypeChartShape } from "./prototypeChartSchema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   anchorSchema,
@@ -533,26 +534,7 @@ const progressBaseSchema = z
     max: z.number().finite().optional(),
   })
   .strict();
-const chartSeriesSchema = z
-  .object({
-    path: pointerSchema,
-    x: keySchema.optional(),
-    y: keySchema,
-    label: z.string(),
-    color: colorValueSchema.optional(),
-  })
-  .strict();
-const chartBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    type: z.enum(["chart"]),
-    variant: z.enum(["line", "area", "bar", "ring"]),
-    series: z.array(chartSeriesSchema).min(1).max(4),
-    yRange: z.object({ min: z.number().finite(), max: z.number().finite() }).strict().optional(),
-    xLabels: z.enum(["none", "ends", "all"]).optional(),
-    goal: z.number().finite().optional(),
-  })
-  .strict();
+const chartBaseSchema = z.object({ ...commonNodeShape, ...prototypeChartShape }).strict();
 const dialogBaseSchema = z
   .object({
     ...commonNodeShape,

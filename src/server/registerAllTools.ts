@@ -18,6 +18,7 @@ import { registerSnapshotTools } from "./snapshotTools";
 import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
+import { registerMediaSessionTools } from "./mediaSessionTools";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
@@ -90,6 +91,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSnapshotOfTools();
   registerBiometricTools();
   registerTelephonyTools();
+  registerMediaSessionTools();
   registerWindowModeTools();
   registerHighlightTools();
   registerPrototypeTools({

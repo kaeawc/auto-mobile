@@ -3499,6 +3499,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
@@ -3638,6 +3639,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
@@ -10046,6 +10048,413 @@
     },
     "_meta": {
       "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "mediaSession",
+    "description": "Android media sessions: read playback state, position, speed, metadata and actions (dumpsys media_session); dispatch a transport key to the media button session like a headset, reporting which session handled it; or set a music/ring/alarm stream volume. Mutations return a restore receipt. waitFor polls get until a session reports a state.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Package. get: only its sessions. dispatch: refuse unless it is the media button session",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "action": {
+          "description": "\"get\" reads sessions; {dispatch} sends a media key like a headset; {volume} sets a stream index",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "get"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "dispatch": {
+                  "type": "string",
+                  "enum": [
+                    "play",
+                    "pause",
+                    "play-pause",
+                    "next",
+                    "previous",
+                    "stop",
+                    "fast-forward",
+                    "rewind"
+                  ]
+                }
+              },
+              "required": ["dispatch"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "volume": {
+                  "type": "object",
+                  "properties": {
+                    "stream": {
+                      "type": "string",
+                      "enum": ["music", "ring", "alarm"]
+                    },
+                    "level": {
+                      "description": "Volume index within the stream's range",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["stream", "level"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["volume"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "waitFor": {
+          "description": "get only: poll until a session (of appId, if given) reports this state",
+          "type": "object",
+          "properties": {
+            "mediaState": {
+              "type": "string",
+              "enum": [
+                "none",
+                "stopped",
+                "paused",
+                "playing",
+                "fast_forwarding",
+                "rewinding",
+                "buffering",
+                "error",
+                "connecting",
+                "skipping_to_previous",
+                "skipping_to_next",
+                "skipping_to_queue_item"
+              ]
+            },
+            "timeoutMs": {
+              "description": "Wait timeout ms (default: 5000)",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1770000
+            }
+          },
+          "required": ["mediaState"],
+          "additionalProperties": false
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["get", "dispatch", "volume"]
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "package": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "tag": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "userId": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "state": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "stateCode": {
+                "type": "number"
+              },
+              "positionMs": {
+                "type": "number"
+              },
+              "positionUpdatedAtMs": {
+                "type": "number"
+              },
+              "speed": {
+                "type": "number"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "artist": {
+                    "type": "string"
+                  },
+                  "album": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "isMediaButtonSession": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "package",
+              "tag",
+              "userId",
+              "active",
+              "state",
+              "actions",
+              "isMediaButtonSession"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "mediaButtonSession": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wait": {
+          "type": "object",
+          "properties": {
+            "mediaState": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "matched": {
+              "type": "boolean"
+            },
+            "waitMs": {
+              "type": "number"
+            },
+            "polls": {
+              "type": "number"
+            }
+          },
+          "required": ["mediaState", "matched", "waitMs", "polls"],
+          "additionalProperties": false
+        },
+        "awaitTimeout": {
+          "type": "boolean"
+        },
+        "awaitDuration": {
+          "type": "number"
+        },
+        "dispatch": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "handledBy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "previousState": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "state": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "stateChanged": {
+              "type": "boolean"
+            }
+          },
+          "required": ["key", "handledBy", "stateChanged"],
+          "additionalProperties": false
+        },
+        "volume": {
+          "type": "object",
+          "properties": {
+            "stream": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "previousLevel": {
+              "type": "number"
+            },
+            "level": {
+              "type": "number"
+            },
+            "requestedLevel": {
+              "type": "number"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "verified": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "stream",
+            "previousLevel",
+            "level",
+            "requestedLevel",
+            "min",
+            "max",
+            "changed",
+            "verified"
+          ],
+          "additionalProperties": false
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "dispatch": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "volume": {
+              "type": "object",
+              "properties": {
+                "stream": {
+                  "$ref": "#/$defs/__schema6"
+                },
+                "level": {
+                  "type": "number"
+                }
+              },
+              "required": ["stream", "level"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["success", "message", "action"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "string"
+        },
+        "__schema1": {
+          "type": "string"
+        },
+        "__schema2": {
+          "type": "number"
+        },
+        "__schema3": {
+          "type": "string",
+          "enum": [
+            "none",
+            "stopped",
+            "paused",
+            "playing",
+            "fast_forwarding",
+            "rewinding",
+            "buffering",
+            "error",
+            "connecting",
+            "skipping_to_previous",
+            "skipping_to_next",
+            "skipping_to_queue_item",
+            "unknown"
+          ]
+        },
+        "__schema4": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "tag": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "userId": {
+              "$ref": "#/$defs/__schema2"
+            }
+          },
+          "required": ["package", "tag", "userId"],
+          "additionalProperties": false
+        },
+        "__schema5": {
+          "type": "string",
+          "enum": [
+            "play",
+            "pause",
+            "play-pause",
+            "next",
+            "previous",
+            "stop",
+            "fast-forward",
+            "rewind"
+          ]
+        },
+        "__schema6": {
+          "type": "string",
+          "enum": ["music", "ring", "alarm"]
+        }
+      }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["get"]
+        }
+      ]
     }
   },
   {
@@ -22713,6 +23122,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
@@ -29823,6 +30233,7 @@
             "listDataStores",
             "listDeviceImages",
             "listDevices",
+            "mediaSession",
             "mockNetwork",
             "multiTouch",
             "navigateTo",
@@ -29928,6 +30339,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",

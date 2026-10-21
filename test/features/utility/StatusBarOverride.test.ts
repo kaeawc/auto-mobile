@@ -3,6 +3,7 @@ import {
   AndroidDemoModeStatusBarController,
   androidDemoClock,
 } from "../../../src/features/utility/AndroidDemoModeStatusBarController";
+import { InMemoryDemoAllowedReceipts } from "../../../src/features/utility/DemoAllowedReceipts";
 import { defaultStatusBarControllerFactory } from "../../../src/features/utility/StatusBarControllerFactory";
 import { SimctlStatusBarController } from "../../../src/features/utility/SimctlStatusBarController";
 import type { BootedDevice, ExecResult } from "../../../src/models";
@@ -123,7 +124,11 @@ describe("SimctlStatusBarController (#14105)", () => {
 describe("AndroidDemoModeStatusBarController (#14105)", () => {
   test("override allows demo mode, enters it, then sends one broadcast per command", async () => {
     const adb = new RecordingAdb();
-    const outcome = await new AndroidDemoModeStatusBarController(adb).override({
+    const outcome = await new AndroidDemoModeStatusBarController(
+      adb,
+      "d",
+      new InMemoryDemoAllowedReceipts(),
+    ).override({
       time: "9:41",
       batteryLevel: 100,
       batteryState: "charging",
@@ -133,6 +138,7 @@ describe("AndroidDemoModeStatusBarController (#14105)", () => {
       hideNotifications: true,
     });
     expect(adb.calls).toEqual([
+      ["shell", "settings", "get", "global", "sysui_demo_allowed"],
       ["shell", "settings", "put", "global", "sysui_demo_allowed", "1"],
       demo("-e", "command", "enter"),
       demo("-e", "command", "clock", "-e", "hhmm", "0941"),
@@ -169,9 +175,59 @@ describe("AndroidDemoModeStatusBarController (#14105)", () => {
     );
   });
 
+  test("clear restores the sysui_demo_allowed value captured before the first override (#14741)", async () => {
+    const adb = new RecordingAdb();
+    adb.stdout = "0\n";
+    const receipts = new InMemoryDemoAllowedReceipts();
+    await new AndroidDemoModeStatusBarController(adb, "emulator-5554", receipts).override({
+      time: "9:41",
+    });
+    expect(adb.calls.slice(0, 2)).toEqual([
+      ["shell", "settings", "get", "global", "sysui_demo_allowed"],
+      ["shell", "settings", "put", "global", "sysui_demo_allowed", "1"],
+    ]);
+    // A second override must not re-capture the "1" the first one wrote.
+    adb.stdout = "1\n";
+    await new AndroidDemoModeStatusBarController(adb, "emulator-5554", receipts).override({
+      time: "9:42",
+    });
+    expect(adb.calls.filter((c) => c[1] === "settings" && c[2] === "get")).toHaveLength(1);
+    adb.calls.length = 0;
+    // A fresh controller (a later tool call) still restores it.
+    await new AndroidDemoModeStatusBarController(adb, "emulator-5554", receipts).clear();
+    expect(adb.calls).toEqual([
+      demo("-e", "command", "exit"),
+      ["shell", "settings", "put", "global", "sysui_demo_allowed", "0"],
+    ]);
+  });
+
+  test("an unset prior setting is deleted on clear, and clear without an override restores nothing", async () => {
+    const adb = new RecordingAdb();
+    adb.stdout = "null\n";
+    const receipts = new InMemoryDemoAllowedReceipts();
+    const controller = new AndroidDemoModeStatusBarController(adb, "d1", receipts);
+    await controller.override({ time: "9:41" });
+    adb.calls.length = 0;
+    await controller.clear();
+    expect(adb.calls.at(-1)).toEqual([
+      "shell",
+      "settings",
+      "delete",
+      "global",
+      "sysui_demo_allowed",
+    ]);
+    adb.calls.length = 0;
+    await controller.clear();
+    expect(adb.calls).toEqual([demo("-e", "command", "exit")]);
+  });
+
   test("operatorName has no demo-mode command and is reported unsupported", async () => {
     const adb = new RecordingAdb();
-    const outcome = await new AndroidDemoModeStatusBarController(adb).override({
+    const outcome = await new AndroidDemoModeStatusBarController(
+      adb,
+      "d",
+      new InMemoryDemoAllowedReceipts(),
+    ).override({
       operatorName: "Carrier",
       dataNetwork: "wifi",
     });
@@ -182,7 +238,9 @@ describe("AndroidDemoModeStatusBarController (#14105)", () => {
   test("an unparseable Android time is refused before any device command", async () => {
     const adb = new RecordingAdb();
     await expect(
-      new AndroidDemoModeStatusBarController(adb).override({ time: "noon" }),
+      new AndroidDemoModeStatusBarController(adb, "d", new InMemoryDemoAllowedReceipts()).override({
+        time: "noon",
+      }),
     ).rejects.toThrow("H:MM or HH:MM");
     expect(adb.calls).toEqual([]);
   });
@@ -190,7 +248,11 @@ describe("AndroidDemoModeStatusBarController (#14105)", () => {
   test("clear exits demo mode and read reports the demo-allowed setting", async () => {
     const adb = new RecordingAdb();
     adb.stdout = "1\n";
-    const controller = new AndroidDemoModeStatusBarController(adb);
+    const controller = new AndroidDemoModeStatusBarController(
+      adb,
+      "d",
+      new InMemoryDemoAllowedReceipts(),
+    );
     await controller.clear();
     expect(await controller.read()).toBe("sysui_demo_allowed=1");
     expect(adb.calls).toEqual([

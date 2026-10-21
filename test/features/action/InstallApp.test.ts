@@ -29,6 +29,7 @@ import {
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
+import { FakeAndroidArtifactHost } from "../../fakes/FakeAndroidArtifactHost";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
@@ -868,7 +869,7 @@ describe("InstallApp", () => {
   // (no extension → ""). Rejections throw BEFORE any device I/O, so no host /
   // locator / simctl fakes are needed.
   describe("artifact extension routing rejects the wrong artifact", () => {
-    // Android accepts only .apk; the thrown message echoes the extracted ext.
+    // Android accepts .apk, .apks, .aab or a split directory; the message echoes the extracted ext.
     const androidRejections: Array<[string, string]> = [
       [".app bundle", "/tmp/MyApp.app"],
       [".ipa file", "/tmp/MyApp.ipa"],
@@ -894,11 +895,14 @@ describe("InstallApp", () => {
         hostExecutor: fakeHost,
         buildToolsLocator: fakeLocator,
         performanceTrackerFactory: () => perf,
+        // No path is a split-APK directory, so every one falls through to the extension check.
+        artifactHost: new FakeAndroidArtifactHost(),
       });
 
       await expect(installApp.execute(artifactPath)).rejects.toThrow(
-        `Android devices only support .apk files, but got "${androidExpectedExt[artifactPath]}" file. Use an .apk file for Android installation.`,
+        `Android devices support .apk, .apks (APK set), .aab (app bundle), or a directory of split APKs, but got "${androidExpectedExt[artifactPath]}" file.`,
       );
+      expect(fakeAdb.wasCommandExecuted("install")).toBe(false);
     });
 
     // iOS simulator accepts only .app; an .ipa gets a simulator-specific message,

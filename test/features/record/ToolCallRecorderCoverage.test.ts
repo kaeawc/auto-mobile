@@ -131,6 +131,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "setNotificationPolicy",
   "setPosture",
   "setPreference",
+  "setSensor",
   "setUIState",
   "shake",
   "stageSessionDownloads",

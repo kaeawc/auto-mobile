@@ -1,4 +1,5 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import type { BootedDevice } from "../../models/DeviceInfo";
 import {
   readAndroidSessionDeviceCatalog,
   readIosSessionDeviceCatalog,
@@ -14,6 +15,7 @@ import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileL
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultLockOwnerGenerationProbe } from "../lockOwnerGeneration";
 import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import { defaultBindingToolInvoker } from "./provisioning/daemonDeviceAcquisition";
@@ -32,6 +34,14 @@ import { IosBaselineReset } from "./iosBaselineReset";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import type { BrokerResourceRecord } from "./store";
 import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "./timing";
+import {
+  AndroidBaselineReset,
+  watchAndroidResetSession,
+  type AndroidBaselineResetDependencies,
+} from "./androidBaselineReset";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
+import { executionTracker } from "../executionTracker";
 
 export interface SessionBrokerHostLock {
   acquire(): void;
@@ -77,6 +87,10 @@ export interface OpenSessionBrokerServiceOptions {
   /** Tests supply a fake host lock; production shares the registry's physical namespace. */
   hostLock?: SessionBrokerHostLock;
   catalog?: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
+  androidReset?: {
+    inventory(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<BootedDevice[]>;
+    ctrlProxyReady: AndroidBaselineResetDependencies["ctrlProxyReady"];
+  };
 }
 
 function nativeCatalogReader(config: SessionBrokerHostConfig) {
@@ -121,7 +135,7 @@ export async function openSessionBrokerService(
       );
     }
     const store = options.registry.sessionBrokerStore(scopeKey);
-    const reset = options.config.reuseCleanDevices ? nativeIosBaselineReset() : undefined;
+    const reset = nativeBaselineReset(options.config, options.androidReset, options.timer);
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
@@ -131,7 +145,10 @@ export async function openSessionBrokerService(
       bindingJournal: options.journal,
       ...(reset
         ? {
-            resetIosBaseline: reset.resetWithTiming.bind(reset),
+            resetBaseline: {
+              ios: reset.ios?.resetWithTiming.bind(reset.ios),
+              android: reset.android,
+            },
             isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
           }
         : {}),
@@ -154,6 +171,7 @@ export async function openSessionBrokerService(
       },
       sessionDisposition: options.sessionDisposition,
       reuseCleanDevices: options.config.reuseCleanDevices,
+      reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,
     });
     await broker.recoverReceipts();
     const service = new SessionBrokerService(broker, scopeKey, lock, options.timer);
@@ -165,6 +183,25 @@ export async function openSessionBrokerService(
     lock.release();
     throw toActionableError(error, "Session broker startup failed");
   }
+}
+
+function nativeBaselineReset(
+  config: SessionBrokerHostConfig,
+  androidReset: OpenSessionBrokerServiceOptions["androidReset"],
+  timer: Timer,
+) {
+  if (config.reuseAndroidCleanDevices && config.defaults.android && !androidReset) {
+    throw new ActionableError("Android baseline reset requires the daemon readiness ports");
+  }
+  return config.reuseCleanDevices || config.reuseAndroidCleanDevices
+    ? {
+        ios: config.reuseCleanDevices ? nativeIosBaselineReset() : undefined,
+        android:
+          config.reuseAndroidCleanDevices && config.defaults.android
+            ? nativeAndroidBaselineReset(androidReset!, timer)
+            : undefined,
+      }
+    : undefined;
 }
 
 function nativeIosBaselineReset(): IosBaselineReset {
@@ -184,6 +221,56 @@ function nativeIosBaselineReset(): IosBaselineReset {
       }
     },
   });
+}
+
+function nativeAndroidBaselineReset(
+  ports: NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>,
+  timer: Timer,
+): AndroidBaselineReset {
+  const configReader = new FileAvdConfigReader();
+  const inventory = boundAndroidResetInventory(ports.inventory, timer);
+  return new AndroidBaselineReset({
+    inventory: async (options) => {
+      const devices = await inventory(options);
+      return Promise.all(
+        devices.map(async (device) => {
+          options?.signal?.throwIfAborted();
+          const config = await configReader.readConfig(device.name);
+          options?.signal?.throwIfAborted();
+          return {
+            ...device,
+            isRunning: true,
+            runtimeId: config?.systemImagePackage,
+            deviceType: config?.deviceName,
+            apiLevel: config?.apiLevel,
+          };
+        }),
+      );
+    },
+    adb: (device) => defaultAdbClientFactory.create(device),
+    watchSession: (sessionId) => watchAndroidResetSession(executionTracker, sessionId),
+    ctrlProxyReady: ports.ctrlProxyReady,
+  });
+}
+
+export function boundAndroidResetInventory(
+  inventory: NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>["inventory"],
+  timer: Timer,
+): NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>["inventory"] {
+  return (options) => {
+    options?.signal?.throwIfAborted();
+    const controller = new AbortController();
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    return raceWithDeadline(() => inventory({ ...options, signal }), {
+      timer,
+      timeoutMs: options?.timeoutMs ?? 2000,
+      signal: options?.signal,
+      label: "Android baseline reset inventory",
+      onTimeout: () => controller.abort(),
+    });
+  };
 }
 
 async function isCurrentReset(

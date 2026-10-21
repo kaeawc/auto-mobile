@@ -242,7 +242,13 @@ export const crashAppResultSchema = z.object({
   confirmed: z.boolean(),
   evidence: z
     .object({
-      source: z.enum(["android_logcat", "ios_unified_log", "android_dropbox", "ios_crash_report", "none"]),
+      source: z.enum([
+        "android_logcat",
+        "ios_unified_log",
+        "android_dropbox",
+        "ios_crash_report",
+        "none",
+      ]),
       summary: z.string(),
     })
     .optional(),

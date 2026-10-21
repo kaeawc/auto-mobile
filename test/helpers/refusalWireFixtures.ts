@@ -54,7 +54,6 @@ import {
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
 } from "../../src/daemon/daemonRestartPending";
-import { DaemonRestartOptionsUnknownError } from "../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -754,13 +753,6 @@ const BUILDERS: readonly FixtureEntry[] = [
       );
       return { isError, content };
     },
-  ],
-  // The proxy refuses to auto-start a default daemon in a private namespace whose lost daemon's
-  // startup options are unknown (#14742); proxyServer shapes it through shapeToolCallError.
-  [
-    "daemon_restart_options_unknown",
-    "DaemonRestartOptionsUnknownError via shapeToolCallError",
-    () => shaped(new DaemonRestartOptionsUnknownError()),
   ],
 ];
 

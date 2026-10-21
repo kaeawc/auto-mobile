@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { isAbsolute, normalize, sep } from "node:path";
 import { z } from "zod/v4";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";
@@ -14,10 +14,6 @@ import { looksLikeMissingIosDefault } from "../../../features/preferences/prefer
 import type { DeviceMutationResetContext, DeviceMutationResetPort } from "./reset";
 import { DEVICE_MUTATION_KINDS, type DeviceBaseline, type DeviceMutationInput } from "./types";
 import type { BaselineChange } from "./baseline";
-
-// Simulator container paths are macOS paths whatever host the daemon runs on, so they are
-// checked with POSIX rules (Windows `sep` would refuse every one).
-const { isAbsolute, normalize, sep } = posix;
 
 const IOS_SETTING_VALUE_SCHEMAS = {
   appearance: z.enum(["light", "dark"]),

@@ -196,7 +196,6 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/proxy/DaemonBuildMismatchError": nsDaemonBuildMismatchError,
   "daemon/proxy/DaemonRestartOptionsUnknownError": nsDaemonRestartOptionsUnknownError,
   "daemon/proxy/DaemonConnectionSessionReleasedError": nsDaemonConnectionSessionReleasedError,
-  "daemon/proxy/DaemonRestartOptionsUnknownError": nsDaemonRestartOptionsUnknownError,
   "daemon/proxy/DaemonSessionStalledError": nsDaemonSessionStalledError,
   "daemon/proxy/DaemonToolOutcomeUnknownError": nsDaemonToolOutcomeUnknownError,
   "daemon/proxy/DaemonToolUnavailableError": nsDaemonToolUnavailableError,
@@ -256,8 +255,6 @@ const INSTALLER_ERROR_EXEMPTION =
   "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.";
 
 const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
-  "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":
-    "Excluded emulator console port refusal (#14743) carries no retryable flag, so shapeToolCallError and the daemon failure frame emit only 'Error: ...' message text, and provisionDevice wraps it as platform_command_failed; emulator_console_port_excluded never reaches a client as a structured wire field.",
   "features/action/androidLaunchIntent":
     "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":

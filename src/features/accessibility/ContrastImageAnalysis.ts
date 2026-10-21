@@ -39,6 +39,8 @@ const LARGE_TEXT_BOX_INFERENCE_MAX_HEIGHT_DP = 40;
 const INK_MIN_DISTANCE = 40;
 /** A sampled pixel this close to a cluster colour belongs to that cluster's stroke. */
 const STROKE_MAX_DISTANCE = 10;
+/** A level this close to the background may be an anti-aliasing halo rather than a glyph. */
+const HALO_MAX_BACKGROUND_DISTANCE = 40;
 /** Grid probes spent locating the ink extent of an element. */
 const INK_SCAN_MAX_PROBES = 16384;
 /**
@@ -234,8 +236,13 @@ export class ContrastImageAnalysis {
    * the same colour. The anti-aliasing band around a glyph edge is one pixel across, so
    * its levels never qualify, while a glyph or icon of their own colour does.
    */
-  private hasSolidStroke(image: RawImage, bounds: Element["bounds"], color: RGB): boolean {
-    return !this.solidStrokeSeeds(image, bounds, color).next().done;
+  private hasSolidStroke(
+    image: RawImage,
+    bounds: Element["bounds"],
+    color: RGB,
+    tolerance = STROKE_MAX_DISTANCE,
+  ): boolean {
+    return !this.solidStrokeSeeds(image, bounds, color, tolerance).next().done;
   }
 
   /**
@@ -250,6 +257,7 @@ export class ContrastImageAnalysis {
     image: RawImage,
     bounds: Element["bounds"],
     color: RGB,
+    tolerance = STROKE_MAX_DISTANCE,
   ): Generator<{ x: number; y: number }> {
     const left = Math.ceil(bounds.left);
     const top = Math.ceil(bounds.top);
@@ -258,7 +266,7 @@ export class ContrastImageAnalysis {
     const area = (right - left + 1) * (bottom - top + 1);
     const stride = Math.max(1, Math.ceil(Math.sqrt(area / STROKE_SCAN_MAX_PROBES)));
     const stroke = (x: number, y: number): boolean =>
-      this.colorDistance(this.resolvePixelColor(image, x, y), color) <= STROKE_MAX_DISTANCE;
+      this.colorDistance(this.resolvePixelColor(image, x, y), color) <= tolerance;
     const solid = (x: number, y: number): boolean =>
       stroke(x, y) &&
       ((x > left && stroke(x - 1, y)) || (x < right && stroke(x + 1, y))) &&
@@ -405,8 +413,19 @@ export class ContrastImageAnalysis {
         // JPEG ringing around glyphs sits just outside the similarity radius; it is not ink.
         (!ink || this.colorDistance(cluster.color, backgroundColor) > INK_MIN_DISTANCE),
     );
+    // A level this close to the background is usually a glyph's anti-aliasing halo, whose
+    // neighbouring levels sit within STROKE_MAX_DISTANCE of it and would pass as a stroke of
+    // its own colour, pulling the reported text colour toward the background (#14738).
+    // Such a level must repeat exactly over a 2x2 block to count as a separate glyph.
     const isSolidStroke = (color: RGB): boolean =>
-      this.hasSolidStroke(image, ink ?? interior, color);
+      this.hasSolidStroke(
+        image,
+        ink ?? interior,
+        color,
+        this.colorDistance(color, backgroundColor) <= HALO_MAX_BACKGROUND_DISTANCE
+          ? 0
+          : STROKE_MAX_DISTANCE,
+      );
     const inkText = this.selectTextColor(supported, backgroundColor, perimeter, isSolidStroke);
     // Strokes within INK_MIN_DISTANCE of the background are not ink, so a brighter icon
     // alone can set the extent and leave a faint label beside it unmeasured. Judge faint

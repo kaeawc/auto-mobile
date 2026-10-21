@@ -22,7 +22,7 @@ export const getLogsResultSchema = z
     lines: z.array(logLineSchema),
     truncated: z.boolean(),
     pids: z.array(z.number()),
-    attribution: z.enum(["uid", "pid", "subsystem", "none"]),
+    attribution: z.enum(["uid", "pid", "subsystem", "process", "none"]),
     warnings: z.array(z.string()),
   })
   .passthrough();

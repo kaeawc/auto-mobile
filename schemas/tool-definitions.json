@@ -16322,6 +16322,17 @@
                                           },
                                           "required": ["page"],
                                           "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "match": {
+                                              "type": "string",
+                                              "enum": ["text", "kind"]
+                                            }
+                                          },
+                                          "required": ["match"],
+                                          "additionalProperties": false
                                         }
                                       ]
                                     },
@@ -16391,6 +16402,9 @@
                                   },
                                   {
                                     "type": "boolean"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
                                   }
                                 ]
                               }
@@ -16485,6 +16499,9 @@
                                   },
                                   {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
                                   }
                                 ]
                               }
@@ -16548,7 +16565,23 @@
                                       "maxLength": 4096
                                     },
                                     {
-                                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/value"
+                                      "anyOf": [
+                                        {
+                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                        },
+                                        {
+                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                        },
+                                        {
+                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                        },
+                                        {
+                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                        },
+                                        {
+                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                        }
+                                      ]
                                     }
                                   ]
                                 },
@@ -16566,7 +16599,7 @@
                                 }
                               },
                               "body": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/value"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/headers/additionalProperties/anyOf/1"
                               },
                               "into": {
                                 "type": "string",
@@ -17946,6 +17979,33 @@
                       },
                       "minItems": 1,
                       "maxItems": 64
+                    },
+                    "linkify": {
+                      "type": "object",
+                      "properties": {
+                        "kinds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": ["mention", "hashtag", "url"]
+                          },
+                          "minItems": 1,
+                          "maxItems": 3
+                        },
+                        "style": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/6/properties/spans/items/properties/style"
+                        },
+                        "onTap": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                          },
+                          "minItems": 1,
+                          "maxItems": 32
+                        }
+                      },
+                      "required": ["kinds", "onTap"],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["type"],

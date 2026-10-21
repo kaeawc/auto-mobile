@@ -90,6 +90,99 @@
     }
   },
   {
+    "name": "accessibilityAction",
+    "description": "Perform an Android accessibility action on an element, the way TalkBack or Switch Access does: expand, collapse, dismiss, select, clear_selection, show_on_screen, scroll in a direction, page (API 29+), press_and_hold (API 30+), set_progress on a slider, or custom to run an app-defined action (e.g. a Compose customActions label) by its label. Target the element by resourceId, text or contentDesc; it needs a unique resource-id. An action the element does not offer is refused, and the error lists the actions it does offer (custom ones as custom:<label>).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Accessibility action. page_* needs API 29+, press_and_hold API 30+; set_progress takes progress; custom runs the app-defined action labeled customAction",
+          "type": "string",
+          "enum": [
+            "expand",
+            "collapse",
+            "dismiss",
+            "select",
+            "clear_selection",
+            "show_on_screen",
+            "scroll_forward",
+            "scroll_backward",
+            "scroll_up",
+            "scroll_down",
+            "scroll_left",
+            "scroll_right",
+            "page_up",
+            "page_down",
+            "page_left",
+            "page_right",
+            "press_and_hold",
+            "set_progress",
+            "custom"
+          ]
+        },
+        "resourceId": {
+          "description": "Target resource ID",
+          "type": "string"
+        },
+        "text": {
+          "description": "Target text",
+          "type": "string"
+        },
+        "contentDesc": {
+          "description": "Exact content-desc or accessible label; distinct from visible text",
+          "type": "string"
+        },
+        "customAction": {
+          "description": "Label of the app-defined action, for action custom",
+          "type": "string",
+          "minLength": 1
+        },
+        "progress": {
+          "description": "Value in the control's own range, for action set_progress",
+          "type": "number"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string"
+        },
+        "resourceId": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "resourceId"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "accessibilityFocus",
     "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
     "inputSchema": {
@@ -1088,6 +1181,56 @@
       },
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "cleared": {
+          "type": "number"
+        },
+        "remaining": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "deviceSynced": {
+          "type": "boolean",
+          "const": false
+        },
+        "warning": {
+          "type": "string"
+        },
+        "notInstalled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mockId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["mockId", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "deviceConfirmed": {
+          "type": "boolean",
+          "const": false
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["cleared", "remaining"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -1425,6 +1568,36 @@
       },
       "required": ["lock", "steps", "deviceCount"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "lock": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "executedSteps": {
+          "type": "number"
+        },
+        "totalSteps": {
+          "type": "number"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["success", "lock", "deviceId", "executedSteps", "totalSteps"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/planOnly": true
@@ -2846,6 +3019,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -2917,6 +3091,7 @@
               "setNotificationPolicy",
               "setPosture",
               "setPreference",
+              "setSensor",
               "setUIState",
               "shake",
               "snapshotOf",
@@ -2978,6 +3153,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -3049,6 +3225,7 @@
               "setNotificationPolicy",
               "setPosture",
               "setPreference",
+              "setSensor",
               "setUIState",
               "shake",
               "snapshotOf",
@@ -3412,13 +3589,13 @@
   },
   {
     "name": "getDeviceState",
-    "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
+    "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, networkCondition, clock, and screenLock. Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
+          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, networkCondition, clock, sensors (Android emulator only), and screenLock. Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -3429,6 +3606,7 @@
               "biometrics",
               "networkCondition",
               "clock",
+              "sensors",
               "screenLock"
             ]
           }
@@ -3536,6 +3714,7 @@
               "biometrics",
               "networkCondition",
               "clock",
+              "sensors",
               "screenLock"
             ]
           }
@@ -3942,6 +4121,85 @@
           "required": ["supported", "capability"],
           "additionalProperties": {}
         },
+        "sensors": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "verified": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "method": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "sensors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "acceleration",
+                      "gyroscope",
+                      "magnetic-field",
+                      "orientation",
+                      "temperature",
+                      "proximity",
+                      "light",
+                      "pressure",
+                      "humidity"
+                    ]
+                  },
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "required": ["name", "value"],
+                "additionalProperties": false
+              }
+            },
+            "unavailable": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "acceleration",
+                      "gyroscope",
+                      "magnetic-field",
+                      "orientation",
+                      "temperature",
+                      "proximity",
+                      "light",
+                      "pressure",
+                      "humidity"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": ["name", "reason"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
         "screenLock": {
           "type": "object",
           "properties": {
@@ -4171,6 +4429,44 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "graph": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "scheme": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "paths": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": ["scheme", "host", "paths"],
+            "additionalProperties": {}
+          }
+        },
+        "truncated": {
+          "type": "boolean",
+          "const": true
+        },
+        "maxEvents": {
+          "type": "number"
+        }
+      },
+      "required": ["graph"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
@@ -4837,7 +5133,7 @@
   },
   {
     "name": "inspectPackageSigning",
-    "description": "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "description": "Fresh read of one app's presence (installed/absent/unknown) and signing. Android: a user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and embedded provisioning profile (expiry, UUID). Never cached.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -4849,7 +5145,7 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "userId": {
-          "description": "Android user/profile to inspect; when omitted it is resolved and reported",
+          "description": "Android user/profile to inspect; when omitted it is resolved and reported. Refused on iOS",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
@@ -4882,7 +5178,7 @@
         },
         "platform": {
           "type": "string",
-          "const": "android"
+          "enum": ["android", "ios"]
         },
         "deviceId": {
           "type": "string"
@@ -5036,19 +5332,37 @@
           },
           "required": ["source", "fresh", "observedAt", "scope", "apiLevel"],
           "additionalProperties": {}
+        },
+        "deviceKind": {
+          "type": "string",
+          "enum": ["simulator", "physical"]
         }
       },
-      "required": [
-        "appId",
-        "platform",
-        "deviceId",
-        "userId",
-        "userSource",
-        "presence",
-        "signing",
-        "observation"
-      ],
-      "additionalProperties": {}
+      "required": ["appId", "platform", "deviceId", "presence", "signing", "observation"],
+      "if": {
+        "properties": {
+          "platform": {
+            "const": "android"
+          }
+        },
+        "required": ["platform"]
+      },
+      "then": {
+        "required": ["userId", "userSource"]
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "platform": {
+              "const": "ios"
+            }
+          },
+          "required": ["platform"]
+        },
+        "then": {
+          "required": ["deviceKind"]
+        }
+      }
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -5056,14 +5370,79 @@
   },
   {
     "name": "installApp",
-    "description": "Install app on device (.apk, .app, or .ipa)",
+    "description": "Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "artifactPath": {
-          "description": "App artifact path (.apk, .app, or .ipa)",
+          "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
           "type": "string"
+        },
+        "splits": {
+          "description": "Android: split APKs installed with the base .apk artifactPath (install-multiple)",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "bundle": {
+          "description": "Android .aab/.apks options",
+          "type": "object",
+          "properties": {
+            "keystore": {
+              "description": ".aab: signing key for the built APKs (default ~/.android/debug.keystore)",
+              "type": "object",
+              "properties": {
+                "path": {
+                  "description": "Keystore file path",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "alias": {
+                  "description": "Key alias",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "storePassword": {
+                  "description": "Keystore password (redacted from logs)",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "keyPassword": {
+                  "description": "Key password (redacted from logs; default storePassword)",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["path", "alias", "storePassword"],
+              "additionalProperties": false
+            },
+            "modules": {
+              "description": "Dynamic feature modules to install, or ['_ALL_']",
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "localTesting": {
+              "description": ".aab: build with bundletool --local-testing for on-demand modules",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "grantAllPermissions": {
+          "description": "Android: grant all requested runtime permissions (install -g)",
+          "type": "boolean"
+        },
+        "allowDowngrade": {
+          "description": "Android: allow a lower versionCode (install -d; debuggable apps only)",
+          "type": "boolean"
         },
         "expectedSigningSha256": {
           "description": "Android: complete signer set (SHA-256 of every signing certificate) an already installed copy must have before it is replaced; any other signer set, or signers that cannot be read, refuses the install. See inspectPackageSigning.",
@@ -9039,6 +9418,56 @@
       "required": ["host", "path"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "mockId": {
+          "type": "string"
+        },
+        "mocked": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "deviceSynced": {
+          "type": "boolean",
+          "const": false
+        },
+        "warning": {
+          "type": "string"
+        },
+        "notInstalled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mockId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["mockId", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "deviceConfirmed": {
+          "type": "boolean",
+          "const": false
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["mockId", "mocked"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -9330,6 +9759,73 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "capturing": {
+          "type": "boolean"
+        },
+        "notifFilter": {
+          "type": "string",
+          "enum": ["all", "errors", "slow"]
+        },
+        "notifDebounceMs": {
+          "type": "number"
+        },
+        "slowThresholdMs": {
+          "type": "number"
+        },
+        "simulatingErrors": {
+          "type": "object",
+          "properties": {
+            "errorType": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number"
+            },
+            "remainingSeconds": {
+              "type": "number"
+            }
+          },
+          "required": ["errorType", "remainingSeconds"],
+          "additionalProperties": {}
+        },
+        "deviceSynced": {
+          "type": "boolean",
+          "const": false
+        },
+        "warning": {
+          "type": "string"
+        },
+        "notInstalled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mockId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["mockId", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "deviceConfirmed": {
+          "type": "boolean",
+          "const": false
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["capturing", "notifFilter", "notifDebounceMs", "slowThresholdMs"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
@@ -15795,6 +16291,52 @@
                             "properties": {
                               "type": {
                                 "type": "string",
+                                "enum": ["scrollTo"]
+                              },
+                              "scroll": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "to": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": ["start", "end"]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "key": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": ["key"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "animated": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["type", "scroll", "to"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
                                 "enum": ["replace"]
                               },
                               "stack": {
@@ -18966,6 +19508,23 @@
                       "required": ["stateKey", "onRefresh"],
                       "additionalProperties": false
                     },
+                    "reverse": {
+                      "type": "boolean"
+                    },
+                    "stickToEnd": {
+                      "type": "boolean"
+                    },
+                    "atEndKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                    },
+                    "onStartReached": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
                     }
@@ -21007,6 +21566,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -21078,6 +21638,7 @@
               "setNotificationPolicy",
               "setPosture",
               "setPreference",
+              "setSensor",
               "setUIState",
               "shake",
               "snapshotOf",
@@ -22284,6 +22845,149 @@
       },
       "required": ["resources"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "device": {
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            }
+          },
+          "required": ["deviceId", "platform"],
+          "additionalProperties": {}
+        },
+        "identity": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "requested": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "profileFingerprint": {
+          "type": "string"
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        "remainingDrift": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        "applied": {
+          "type": "object",
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "requested": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "resources": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "changed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "verification": {
+              "type": "string",
+              "const": "current_boot"
+            },
+            "observed": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            },
+            "observationContradictions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "services": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "restore": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            }
+          },
+          "required": ["success", "requested", "resources", "changed", "verification"],
+          "additionalProperties": {}
+        },
+        "observed": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "verification": {
+          "type": "string",
+          "const": "current_boot"
+        }
+      },
+      "required": [
+        "success",
+        "device",
+        "identity",
+        "requested",
+        "profileFingerprint",
+        "drift",
+        "remainingDrift",
+        "observed",
+        "verification"
+      ],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "__schema1": {
+          "type": "object",
+          "properties": {
+            "resource": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["missingRequested", "ownedExtra", "unsupported", "commandFailure"]
+            },
+            "expected": {},
+            "observed": {}
+          },
+          "required": ["resource", "kind", "expected", "observed"],
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {
@@ -25792,6 +26496,81 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "device": {
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            }
+          },
+          "required": ["deviceId", "platform"],
+          "additionalProperties": {}
+        },
+        "requested": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "resources": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verification": {
+          "type": "string",
+          "const": "current_boot"
+        },
+        "observed": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "observationContradictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "services": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "restore": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "device", "requested", "resources", "changed", "verification"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {
@@ -26360,6 +27139,7 @@
               "biometrics",
               "networkCondition",
               "clock",
+              "sensors",
               "screenLock"
             ]
           }
@@ -26764,6 +27544,85 @@
             }
           },
           "required": ["supported", "capability"],
+          "additionalProperties": {}
+        },
+        "sensors": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "verified": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "method": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "sensors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "acceleration",
+                      "gyroscope",
+                      "magnetic-field",
+                      "orientation",
+                      "temperature",
+                      "proximity",
+                      "light",
+                      "pressure",
+                      "humidity"
+                    ]
+                  },
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "required": ["name", "value"],
+                "additionalProperties": false
+              }
+            },
+            "unavailable": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "acceleration",
+                      "gyroscope",
+                      "magnetic-field",
+                      "orientation",
+                      "temperature",
+                      "proximity",
+                      "light",
+                      "pressure",
+                      "humidity"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": ["name", "reason"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["supported"],
           "additionalProperties": {}
         },
         "screenLock": {
@@ -27402,6 +28261,136 @@
     }
   },
   {
+    "name": "setSensor",
+    "description": "Set or reset one Android emulator virtual sensor (acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity) through the emulator console. Pass exactly one of value or reset: true. The result reports applied and previous values plus a restore receipt. The value read before the first change is kept; in a daemon session, release or rebind restores every sensor the session changed. Sessionless changes persist until reset. Physical devices and iOS are refused. Read current values with getDeviceState include: [\"sensors\"].",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sensor": {
+          "description": "Emulator sensor. Three values (x:y:z): acceleration m/s² ±1000, gyroscope rad/s ±100, magnetic-field µT ±2000; orientation azimuth 0..360, pitch -180..180, roll -90..90 degrees. One value: temperature °C -273.15..1000, proximity cm 0..100, light lux 0..200000, pressure hPa 0..2000, humidity % 0..100.",
+          "type": "string",
+          "enum": [
+            "acceleration",
+            "gyroscope",
+            "magnetic-field",
+            "orientation",
+            "temperature",
+            "proximity",
+            "light",
+            "pressure",
+            "humidity"
+          ]
+        },
+        "value": {
+          "description": "Value(s) to set, in the sensor's arity and range; rounded to 6 decimals.",
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "reset": {
+          "description": "true restores the value read before the first setSensor change; use instead of value.",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["sensor"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "sensor": {
+          "type": "string",
+          "enum": [
+            "acceleration",
+            "gyroscope",
+            "magnetic-field",
+            "orientation",
+            "temperature",
+            "proximity",
+            "light",
+            "pressure",
+            "humidity"
+          ]
+        },
+        "applied": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "previous": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "reset": {
+          "type": "boolean"
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "onSessionRelease": {
+              "type": "boolean"
+            }
+          },
+          "required": ["value", "onSessionRelease"],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "success",
+        "message",
+        "deviceId",
+        "sensor",
+        "applied",
+        "previous",
+        "changed",
+        "reset"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "setToolEnabled",
     "description": "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call, including default-off tools such as pinchOn and prototype that tools/list never shows until enabled; read the automobile:tools resource for every tool's name and default discovery state. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     "inputSchema": {
@@ -27415,6 +28404,7 @@
           "minLength": 1,
           "enum": [
             "accessibility",
+            "accessibilityAction",
             "accessibilityFocus",
             "appLifecycle",
             "audit",
@@ -27486,6 +28476,7 @@
             "setNotificationPolicy",
             "setPosture",
             "setPreference",
+            "setSensor",
             "setUIState",
             "shake",
             "snapshotOf",
@@ -27513,6 +28504,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -27584,6 +28576,7 @@
               "setNotificationPolicy",
               "setPosture",
               "setPreference",
+              "setSensor",
               "setUIState",
               "shake",
               "snapshotOf",
@@ -27615,6 +28608,59 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sessionUuid": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["connection-profile", "device-session"]
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "toolNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "toolName": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "const": "always-on"
+              }
+            },
+            "required": ["toolName", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "enabledTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabledToolsError": {
+          "type": "string"
+        }
+      },
+      "required": ["sessionUuid", "scope", "enabled"],
+      "additionalProperties": {}
     }
   },
   {
@@ -33966,6 +35012,125 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "count": {
+          "type": "number"
+        },
+        "recordings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "recordingId": {
+                "type": "string"
+              },
+              "deviceId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "segmented": {
+                "type": "boolean",
+                "const": true
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["recordingId"],
+            "additionalProperties": {}
+          }
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "deviceId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["deviceId", "platform", "error"],
+            "additionalProperties": {}
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "deviceId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["deviceId", "platform", "code", "reason"],
+            "additionalProperties": {}
+          }
+        },
+        "segmented": {
+          "type": "boolean",
+          "const": true
+        },
+        "manifestPath": {
+          "type": "string"
+        },
+        "manifestPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "highlights": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {}
+          }
+        },
+        "evictedRecordingIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "alreadyStopped": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": ["action", "count", "recordings"],
+      "additionalProperties": {}
     }
   },
   {

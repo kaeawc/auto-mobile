@@ -420,16 +420,21 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
    * its on-disk path, cleaning up temp dirs afterward. Returns null if the bundle
    * can't be located (or not on macOS).
    *
-   * Lookup failures (info/copy) are swallowed → null. The callback's own errors
-   * PROPAGATE: clearAppDataViaReinstall must surface an install failure that
+   * Lookup failures (info/copy) are swallowed → null unless `surfaceLookupErrors` is set, which
+   * throws them with devicectl's stderr instead (#14094); null then means not installed. The
+   * callback's own errors PROPAGATE: clearAppDataViaReinstall must surface an install failure that
    * happens after the uninstall, not mask it as "could not resolve bundle".
    */
-  private async withInstalledAppBundle<T>(
+  public async withInstalledAppBundle<T>(
     deviceUdid: string,
     bundleId: string,
     fn: (bundlePath: string) => Promise<T>,
+    options: { surfaceLookupErrors?: boolean } = {},
   ): Promise<T | null> {
     if (this.deps.platform() !== "darwin") {
+      if (options.surfaceLookupErrors) {
+        throw new ActionableError("Reading a physical iOS app bundle requires macOS");
+      }
       return null;
     }
 
@@ -486,6 +491,11 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
         this.deps.logger.warn(
           `[DeviceAppManager] Failed to read installed app bundle for ${bundleId}: ${errorMessage(error)}`,
         );
+        if (options.surfaceLookupErrors) {
+          throw new ActionableError(
+            `Failed to copy the installed ${bundleId} bundle from device ${deviceUdid}: ${getExecErrorText(error)}`,
+          );
+        }
         return null;
       }
 

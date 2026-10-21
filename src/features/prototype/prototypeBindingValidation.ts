@@ -401,13 +401,28 @@ function refreshErrors(
     : undefined;
 }
 
+/** A chat scroll's `atEndKey` (#14232) must name a declared boolean state key. */
+function atEndKeyErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): PrototypeValidationError | undefined {
+  const key = value.type === "scroll" ? value.atEndKey : undefined;
+  return typeof key === "string" && (!Object.hasOwn(state, key) || typeof state[key] !== "boolean")
+    ? fail(`${path}.atEndKey`, "atEndKey must name a declared boolean state key")
+    : undefined;
+}
+
 export function sheetBindingErrors(
   checked: Checked,
   data: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path, item } of checked.nodes) {
-    const error = openWhenErrors(value, path, state) ?? refreshErrors(value, path, state);
+    const error =
+      openWhenErrors(value, path, state) ??
+      refreshErrors(value, path, state) ??
+      atEndKeyErrors(value, path, state);
     if (error) {
       return forItem(error, item);
     }
@@ -439,6 +454,7 @@ function boundKeys(value: Record<string, unknown>): string[] {
     value.minuteKey,
     object(value.trailing)?.stateKey,
     value.type === "scroll" ? object(value.refresh)?.stateKey : undefined,
+    value.type === "scroll" ? value.atEndKey : undefined,
   ];
   const openWhen = Object.hasOwn(MODAL_NAMES, String(value.type))
     ? object(value.openWhen)
@@ -457,7 +473,8 @@ function controlErrors(
     selectionErrors(value, path, state) ??
     trailingErrors(value, path, state) ??
     openWhenErrors(value, path, state) ??
-    refreshErrors(value, path, state)
+    refreshErrors(value, path, state) ??
+    atEndKeyErrors(value, path, state)
   );
 }
 

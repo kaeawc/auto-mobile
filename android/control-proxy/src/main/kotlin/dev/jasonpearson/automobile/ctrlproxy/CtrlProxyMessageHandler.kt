@@ -167,6 +167,7 @@ class CtrlProxyMessageHandler(
           request.action,
           request.resourceId,
           request.selector,
+          NodeActionArguments(customAction = request.customAction, progress = request.progress),
         )
       is RequestActivateAccessibilityLink ->
         actions.requestActivateAccessibilityLink(

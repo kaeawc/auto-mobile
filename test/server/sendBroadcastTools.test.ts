@@ -14,15 +14,20 @@ interface ToolResult {
   isError?: true;
 }
 
-function adbReturning(stdout: string) {
+function adbReturning(broadcastOutput: string) {
   return () => ({
-    execute: async (): Promise<ExecResult> => ({
-      stdout,
-      stderr: "",
-      toString: () => stdout,
-      trim: () => stdout.trim(),
-      includes: (value: string) => stdout.includes(value),
-    }),
+    execute: async (args: string[]): Promise<ExecResult> => {
+      const stdout = args[1]?.startsWith("pm list packages")
+        ? "package:com.example\n"
+        : broadcastOutput;
+      return {
+        stdout,
+        stderr: "",
+        toString: () => stdout,
+        trim: () => stdout.trim(),
+        includes: (value: string) => stdout.includes(value),
+      };
+    },
   });
 }
 

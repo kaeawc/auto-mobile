@@ -236,7 +236,9 @@ export class RunnerReadinessService {
     // A prior readiness request may have exhausted its health budget while the
     // daemon stays alive. Reopen the manager's one-attempt setup gate before
     // this independent request tries to recover a reinstalled or disabled runner.
-    manager.resetSetupState();
+    // Preserve the caches populated milliseconds earlier in this same attempt;
+    // setup mutations and failed-attempt retries still invalidate them.
+    manager.reopenSetupGate();
     await this.setupAndroidRunner(context, manager);
     await this.waitForResponsiveClient(context, client, manager);
     await this.anrRecovery.recoverIfPresent(context, client);

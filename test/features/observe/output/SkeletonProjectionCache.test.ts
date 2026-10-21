@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as util from "node:util";
@@ -14,6 +14,10 @@ import {
   capturedFloatingCoverHierarchy,
   observationOf,
 } from "../../../helpers/prototypeWindowCapture";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const config = { dropElements: true, compact: true, project: "skeleton" } as const;
 const captures = [
@@ -81,8 +85,6 @@ describe("cached skeleton projection validation", () => {
       cacheNext: string;
     }
   >();
-  const collect = () => spyOn(DefaultObserveElementCollector.prototype, "collect");
-  const compare = () => spyOn(util, "isDeepStrictEqual");
   const smallCapture = createObserveResultForTest({
     viewHierarchy: {
       hierarchy: {
@@ -98,8 +100,8 @@ describe("cached skeleton projection validation", () => {
   });
   const cacheReads: ObserveResult[][] = [];
   const fullProjectionBytes: string[] = [];
-  let collectorSpy: ReturnType<typeof collect> | undefined;
-  let compareSpy: ReturnType<typeof compare> | undefined;
+  let collectorSpy: ReturnType<typeof spyOn<DefaultObserveElementCollector, "collect">> | undefined;
+  let compareSpy: ReturnType<typeof spyOn<typeof util, "isDeepStrictEqual">> | undefined;
 
   beforeAll(async () => {
     for (const [file, platform] of captures) {
@@ -213,8 +215,8 @@ describe("cached skeleton projection validation", () => {
   test("collects and deep-compares once across production cache reads and return wrappers", () => {
     const expected = JSON.stringify(sanitizeObserveResult(smallCapture, config));
     const [first, second, third] = cacheReads[0];
-    collectorSpy = collect();
-    compareSpy = compare();
+    collectorSpy = spyOn(DefaultObserveElementCollector.prototype, "collect");
+    compareSpy = spyOn(util, "isDeepStrictEqual");
     expect(JSON.stringify(sanitizeObserveResult(first, config))).toBe(expected);
     expect(collectorSpy).toHaveBeenCalledTimes(1);
     expect(compareSpy).toHaveBeenCalledTimes(1);
@@ -235,8 +237,8 @@ describe("cached skeleton projection validation", () => {
     cached.elements.clickable = [];
     cached.elements.text = [];
     const expected = sanitizeObserveResult(structuredClone(cached), config);
-    collectorSpy = collect();
-    compareSpy = compare();
+    collectorSpy = spyOn(DefaultObserveElementCollector.prototype, "collect");
+    compareSpy = spyOn(util, "isDeepStrictEqual");
     expect(sanitizeObserveResult(cached, config)).toEqual(expected);
     expect(sanitizeObserveResult(cached, config)).toEqual(expected);
     expect(collectorSpy).toHaveBeenCalledTimes(1);
@@ -257,8 +259,8 @@ describe("cached skeleton projection validation", () => {
     cached.viewHierarchy.hierarchy = {};
     delete cached.viewHierarchy.windows;
     const expected = sanitizeObserveResult(structuredClone(cached), config);
-    collectorSpy = collect();
-    compareSpy = compare();
+    collectorSpy = spyOn(DefaultObserveElementCollector.prototype, "collect");
+    compareSpy = spyOn(util, "isDeepStrictEqual");
     expect(sanitizeObserveResult(cached, config)).toEqual(expected);
     expect(sanitizeObserveResult(cached, config)).toEqual(expected);
     expect(collectorSpy).toHaveBeenCalledTimes(1);
@@ -273,7 +275,7 @@ describe("cached skeleton projection validation", () => {
     const hierarchy = { ...cached.viewHierarchy, callback: () => undefined };
     cached.viewHierarchy = hierarchy;
     const expected = sanitizeObserveResult(smallCapture, config);
-    collectorSpy = collect();
+    collectorSpy = spyOn(DefaultObserveElementCollector.prototype, "collect");
     expect(sanitizeObserveResult(cached, config)).toEqual(expected);
     expect(sanitizeObserveResult(cached, config)).toEqual(expected);
     expect(collectorSpy).toHaveBeenCalledTimes(2);
@@ -281,7 +283,7 @@ describe("cached skeleton projection validation", () => {
 
   test("a failed collection is not cached or swallowed", () => {
     const cached = structuredClone(smallCapture);
-    collectorSpy = collect();
+    collectorSpy = spyOn(DefaultObserveElementCollector.prototype, "collect");
     collectorSpy.mockImplementationOnce(() => {
       throw new Error("collector failed");
     });

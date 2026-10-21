@@ -21,6 +21,7 @@ function harness(overrides: Partial<DaemonHealthCheckDeps> = {}) {
     httpServer: () => ({ listening: true }),
     socketServerListening: () => true,
     observationStreamHealthy: () => true,
+    retryDegradedObservationStream: async () => {},
     databaseHealthProbe: () => ({
       check: () => {
         probeCalls++;

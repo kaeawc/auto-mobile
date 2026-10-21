@@ -221,6 +221,14 @@ no `server/discover` on the 2025 era, the server advertises the extension in its
 result, and only to a client whose `initialize` declared it; every other client sees the
 `initialize` result unchanged.
 
+This is a deliberate AutoMobile extension of the spec (owner decision, 2026-10-20, #13143).
+SEP-2663's backward-compatibility rules leave the extension undefined on `2025-11-25` and
+negotiate it only on a compatible protocol version. Gating on that version today would leave
+no client able to negotiate Tasks, because the server has no 2026-era `server/discover` path.
+So the advertisement is not gated on the client's `protocolVersion`. Two alternatives were
+rejected for now: gating on a 2026-era `protocolVersion` plus adding `server/discover` (new
+protocol work), and implementing the legacy 2025-11-25 core task flow.
+
 **Pieces** (`src/server/tasks/`):
 
 - `TaskManager` (interface, `DefaultTaskManager`, test `FakeTaskManager`): ids from

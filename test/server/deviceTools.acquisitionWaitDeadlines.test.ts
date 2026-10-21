@@ -23,7 +23,10 @@ import {
   RunnerReadinessError,
   SystemUiAnrRecoveryRequiredError,
 } from "../../src/ctrlProxy/RunnerReadinessService";
-import { RunnerReadinessService } from "../../src/ctrlProxy/RunnerReadinessService";
+import {
+  RunnerReadinessService,
+  type ReadinessAndroidManager,
+} from "../../src/ctrlProxy/RunnerReadinessService";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
@@ -228,12 +231,13 @@ describe("device acquisition wait deadlines", () => {
       };
       const service = new RunnerReadinessService({
         timer,
-        getAndroidManager: () => ({
+        getAndroidManager: (): ReadinessAndroidManager => ({
           isInstalled: async () => true,
           isEnabled: async () => true,
           isVersionCompatible: async () => true,
           enable: async () => {},
           resetSetupState: () => {},
+          reopenSetupGate: () => {},
           setup: async () => ({ success: true, message: "ready" }),
           ensureCompatibleVersion: async () => {
             setupSignal = getAbortSignal();
@@ -433,12 +437,13 @@ describe("device acquisition wait deadlines", () => {
         };
         const service = new RunnerReadinessService({
           timer,
-          getAndroidManager: () => ({
+          getAndroidManager: (): ReadinessAndroidManager => ({
             isInstalled: async () => true,
             isEnabled: async () => true,
             isVersionCompatible: async () => true,
             enable: async () => {},
             resetSetupState: () => {},
+            reopenSetupGate: () => {},
             setup: async () => ({ success: true, message: "ready" }),
             ensureCompatibleVersion: async () => {
               if (stage === "CtrlProxy APK upgrade") {

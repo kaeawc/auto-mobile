@@ -1523,7 +1523,7 @@ test("S2: an acquire whose publication reuses a pending identity drops that entr
     // The filesystem reuses the doomed inode number within the same mtime for the new publication.
     const stat = spyOn(f.fs, "stat").mockImplementation((path) =>
       path.endsWith(".tmp")
-        ? { ino: doomed.ino, mtimeMs: doomed.mtimeMs }
+        ? { ino: BigInt(doomed.ino), mtimeMs: doomed.mtimeMs }
         : FakeLockFileSystem.prototype.stat.call(f.fs, path),
     );
     try {

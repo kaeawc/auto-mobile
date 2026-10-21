@@ -86,6 +86,7 @@ object ValidTools {
         "videoRecording",
         "appLifecycle",
         "displayConfig",
+        "displayProfile",
         "getAndroid",
         "getApple",
         "getDataStore",

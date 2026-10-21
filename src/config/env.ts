@@ -74,7 +74,7 @@ export const AMBIENT_ENV = {
     name: "JAVA_HOME",
     kind: "path",
     default: "unset",
-    doc: "Java installation root; ambient, checked by doctor.",
+    doc: "Java installation root; ambient, checked by doctor and used to run a bundletool jar.",
   },
   ANTHROPIC_API_KEY: {
     name: "ANTHROPIC_API_KEY",

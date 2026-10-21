@@ -137,6 +137,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   },
   { name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT", kind: "input", reason: "Read-only agent dylib." },
   {
+    name: "AUTOMOBILE_BUNDLETOOL_JAR",
+    kind: "input",
+    reason: "Read-only bundletool jar for installApp .aab/.apks.",
+  },
+  {
     name: "AUTOMOBILE_IOS_PROTOTYPE_VIEWER",
     kind: "input",
     reason: "Read-only viewer template archive.",

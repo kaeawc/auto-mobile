@@ -14,6 +14,7 @@ import {
   networkConditionProfileSchema,
 } from "../../features/utility/DeviceState";
 import { deviceClockInputSchema } from "../../features/utility/DeviceClock";
+import { EMULATOR_SENSOR_NAMES } from "../../features/utility/EmulatorSensors";
 import {
   LOCK_CREDENTIAL_MISMATCH,
   LOCK_CREDENTIAL_PREEXISTING,
@@ -206,6 +207,18 @@ const deviceStateOutputFields = {
       readBack: z.boolean().optional(),
       toleranceMs: z.number().optional(),
       outcome: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+  sensors: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      sensors: z
+        .array(z.object({ name: z.enum(EMULATOR_SENSOR_NAMES), value: z.array(z.number()) }))
+        .optional(),
+      unavailable: z
+        .array(z.object({ name: z.enum(EMULATOR_SENSOR_NAMES), reason: z.string() }))
+        .optional(),
     })
     .passthrough()
     .optional(),

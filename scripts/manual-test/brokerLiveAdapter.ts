@@ -91,10 +91,11 @@ export function assertPrivateBrokerBatch(
     totalDeviceCap > maxDevices ||
     sessionCap < totalDeviceCap ||
     host.limits.idlePoolCap !== 0 ||
-    host.reuseCleanDevices
+    host.reuseCleanDevices ||
+    host.reuseAndroidCleanDevices
   ) {
     throw new Error(
-      "Broker acceptance requires positive capacity <= --max-devices, sessionCap >= totalDeviceCap, idlePoolCap 0 and reuseCleanDevices false.",
+      "Broker acceptance requires positive capacity <= --max-devices, sessionCap >= totalDeviceCap, idlePoolCap 0, reuseCleanDevices false and reuseAndroidCleanDevices false.",
     );
   }
   return { batch, spec, host, totalDeviceCap };

@@ -125,6 +125,10 @@ const residueValidators = new Map<
   string,
   { inline: ValidateFunction; referenced: ValidateFunction }
 >();
+// Compiles two Ajv validators per registered tool plus every fixture, so the
+// cost grows with the registry and crosses bun's 5s hook default on a loaded
+// runner.
+const VALIDATOR_COMPILE_TIMEOUT_MS = 30_000;
 beforeAll(() => {
   const sdk = new AjvJsonSchemaValidator();
   const cfworker = new CfWorkerJsonSchemaValidator();
@@ -157,7 +161,7 @@ beforeAll(() => {
       );
     }
   }
-});
+}, VALIDATOR_COMPILE_TIMEOUT_MS);
 
 describe("referenced output schemas preserve captured structuredContent validation", () => {
   for (const project of ["full", "skeleton"] as const) {

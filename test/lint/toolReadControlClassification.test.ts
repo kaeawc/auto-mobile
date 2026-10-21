@@ -120,6 +120,7 @@ const CLASSIFICATION: Classification = {
     "resetKeychain",
     "rotate",
     "selectAllText",
+    "sendBroadcast",
     "sendKeys",
     "sendSms",
     "setAppPermissions",

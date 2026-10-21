@@ -122,6 +122,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "resetKeychain",
   "rotate",
   "selectAllText",
+  "sendBroadcast",
   "sendKeys",
   "sendSms",
   "setAppPermissions",

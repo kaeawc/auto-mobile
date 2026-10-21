@@ -23,7 +23,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
-`resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
+`resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendBroadcast`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
 `sqlQuery`,
@@ -1869,6 +1869,7 @@ subtree, or the whole active-window tree when owner-less.
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔏 <code>inspectPackageSigning</code>                                                            | Android: fresh read of a package's presence (`installed`, `absent`, `unknown`) for one user and its SHA-256 signing certificates, including the complete signer set and rotation history. Never cached.                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 📡 <code>sendBroadcast</code>                                                                    | Android: sends an explicit broadcast with a typed intent to the app under test and reports the ordered-broadcast result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                            |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📁 <code>stageSessionDownloads</code>                                                            | Deprecated session-bound alias of putAppFile target.domain user_files (Android Downloads); retains session ownership checks and remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -1900,6 +1901,30 @@ returns <code>supported: false</code> for both actions because no state-preservi
 termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 
 </details>
+
+### sendBroadcast
+
+`sendBroadcast` reaches an app's broadcast receivers, such as the debug receivers
+that toggle feature flags, seed data, reset state or fire a push-like event (#14081).
+It is Android-only; iOS returns `status: "unsupported"`.
+
+- `appId` is required. The broadcast is always explicit: `-p <appId>`, or
+  `-n <appId>/<receiver>` when `intent.component` names a receiver (`.DebugReceiver`,
+  `com.app.DebugReceiver`, or `com.app/.DebugReceiver`). A component in another
+  package is refused. Implicit system-wide broadcasts are out of scope.
+- `intent` takes `action` (required), plus optional `data`, `mimeType`, `categories`
+  and typed `extras`: `{ key, type, value }` with `type` one of `string`, `int`,
+  `long`, `float`, `boolean`, `stringArray` and `uri`. Every value is shell-quoted,
+  so shell metacharacters arrive literally. A comma inside a `stringArray` element
+  is escaped for `--esa`.
+- `userId` delivers to another Android user (`--user`).
+- `waitForResult` (default `true`) reports the ordered-broadcast `resultCode` and
+  `resultData` that `am broadcast` prints (`Broadcast completed: result=…`). With
+  `false` they are left out; `am` still waits for delivery.
+- A protected system broadcast (for example `BOOT_COMPLETED`), which the shell may
+  not send, fails with `errorCode: "protected_broadcast"`. Other refusals report
+  `permission_denied`, and output with no completion line reports
+  `broadcast_failed`.
 
 ### App launch, installation, links, and storage options
 

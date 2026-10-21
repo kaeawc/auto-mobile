@@ -56,6 +56,16 @@ class CleanupFiles implements DaemonCleanupFileSystem {
     }
     this.paths.set(to, this.stat(from));
   };
+  copyFileExclusiveSync = (from: string, to: string) => {
+    if (this.paths.has(to)) {
+      throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+    }
+    const entry = this.stat(from);
+    this.paths.set(to, {
+      dev: entry.dev,
+      ino: Math.max(...[...this.paths.values()].map(({ ino }) => ino)) + 1,
+    });
+  };
 }
 
 const options = {

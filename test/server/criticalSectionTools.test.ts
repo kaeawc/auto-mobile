@@ -9,11 +9,8 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { ActionableError, type BootedDevice } from "../../src/models";
-import {
-  DeviceLostError,
-  isDeviceLostError,
-  rememberDeviceLossAbort,
-} from "../../src/models/DeviceLostError";
+import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
+import { rememberDeviceLossAbort } from "../../src/utils/deviceLossAbortRegistry";
 import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";

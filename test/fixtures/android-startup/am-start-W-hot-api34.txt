@@ -1,0 +1,7 @@
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=dev.jasonpearson.automobile.playground/.MainActivity }
+Status: ok
+LaunchState: HOT
+Activity: dev.jasonpearson.automobile.playground/.MainActivity
+TotalTime: 98
+WaitTime: 104
+Complete

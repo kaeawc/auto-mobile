@@ -550,7 +550,7 @@
                 .multilineTextAlignment(alignment)
                 .lineLimit(style?.maxLines)
                 .truncationMode(.tail)
-                .modifier(SpanLinksModifier(runs: runs, spans: node.spans, model: model))
+                .modifier(SpanLinksModifier(runs: runs, model: model))
         }
 
         private func spanWeight(_ value: Int) -> Font.Weight {
@@ -993,15 +993,13 @@
     @MainActor
     private struct SpanLinksModifier: ViewModifier {
         let runs: [PrototypeTextRun]?
-        let spans: [PrototypeTextSpan]?
         let model: PrototypeModel
 
         func body(content: Content) -> some View {
-            if let runs, let spans {
+            if let runs {
                 content.environment(\.openURL, OpenURLAction { url in
                     guard url.scheme == PrototypeRichText.linkScheme,
-                          let index = runs.firstIndex(where: { $0.link == url }),
-                          spans.indices.contains(index), let actions = spans[index].onTap
+                          let run = runs.first(where: { $0.link == url }), let actions = run.actions
                     else { return .discarded }
                     model.run(actions)
                     return .handled

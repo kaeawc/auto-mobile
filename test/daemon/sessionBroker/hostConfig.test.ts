@@ -12,6 +12,17 @@ function config(overrides: Record<string, unknown> = {}): Record<string, unknown
 }
 
 describe("session broker host configuration", () => {
+  test("accepts only positive reset boot concurrency", () => {
+    expect(
+      parseSessionBrokerHostConfig(config({ limits: { maxConcurrentResetBoots: 2 } })).limits
+        .maxConcurrentResetBoots,
+    ).toBe(2);
+    for (const limit of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        parseSessionBrokerHostConfig(config({ limits: { maxConcurrentResetBoots: limit } })),
+      ).toThrow("Invalid session broker host configuration");
+    }
+  });
   test("requires an explicit operator default policy and fills only safe optional metadata", () => {
     const parsed = parseSessionBrokerHostConfig(config());
 

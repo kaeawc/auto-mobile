@@ -170,6 +170,12 @@ export const MEDIA_ENV = {
     default: "unset",
     doc: "Trusted cwebp binary used instead of PATH or the bundled copy.",
   },
+  TRACE_PROCESSOR: {
+    name: "AUTOMOBILE_TRACE_PROCESSOR",
+    kind: "path",
+    default: "unset",
+    doc: "Perfetto trace_processor_shell used to summarise Android performanceTrace traces instead of PATH.",
+  },
   DWEBP_PATH: {
     name: "AUTOMOBILE_DWEBP_PATH",
     kind: "path",

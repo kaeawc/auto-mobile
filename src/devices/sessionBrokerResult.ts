@@ -1,7 +1,7 @@
 import type { SessionDeviceProfile } from "./sessionRequirements";
 
 export interface SessionBrokerAcquisitionTiming {
-  admission: "reuse" | "create" | "evict-then-create";
+  admission: "reuse" | "create" | "evict-then-create" | "wait";
   reuseCount: number;
   outcome: "pending" | "ready" | "failed";
   startedAtMs: number;

@@ -3,6 +3,7 @@ import {
   type BootCapacityReserver,
   type BootReservationOptions,
   type BootSlotReservation,
+  type BootAdmissionReason,
 } from "../../devices/bootAdmission/BootSlotReservation";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { logger } from "../../utils/logger";
@@ -52,6 +53,7 @@ export type CapacityDecision =
 export type CapacityAdmission = BootAdmissionResult<CapacityDecision>;
 
 export interface CapacityAdmitOptions {
+  reason?: BootAdmissionReason;
   signal?: AbortSignal;
   /** UDID the admitted boot is for; counted as in flight until it reports Booted. */
   bootUdid?: string;
@@ -235,7 +237,7 @@ export class IosSimCapacityGate
       },
       ledger: this.admittedBoots,
       decide: (report, window) => this.decide(report, request, "hint", options.bootUdid, window),
-      admit: () => this.recordAdmission(options.bootUdid),
+      admit: () => this.recordAdmission(options.bootUdid, undefined, options.reason),
     });
   }
 
@@ -254,7 +256,7 @@ export class IosSimCapacityGate
       decide: (report, window) =>
         this.decide(report, undefined, "hint", options.replacingDeviceId, window),
       admit: () => {
-        admission = this.admittedBoots.admit(options.replacingDeviceId, true);
+        admission = this.admittedBoots.admit(options.replacingDeviceId, true, options.reason);
         return admission.release;
       },
     });
@@ -275,6 +277,7 @@ export class IosSimCapacityGate
   private recordAdmission(
     udid?: string,
     reserved?: LedgerAdmission,
+    reason?: BootAdmissionReason,
   ): NonNullable<CapacityAdmission["releaseAdmission"]> {
     const boots = udid
       ? (this.bootsByUdid.get(udid) ?? { unreleased: 0, succeeded: false })
@@ -284,7 +287,7 @@ export class IosSimCapacityGate
       boots.unreleased += 1;
       this.bootsByUdid.set(udid, boots);
     }
-    const admission = reserved ?? this.admittedBoots.admit(udid);
+    const admission = reserved ?? this.admittedBoots.admit(udid, false, reason);
     let released = false;
     return (outcome) => {
       if (released) {
@@ -331,6 +334,7 @@ export class IosSimCapacityGate
         limit: this.limitsFor(report, window).maxBooted,
         booted: occupyingUdids(report).length,
         inFlight: this.inFlightBootCount(report, undefined, window),
+        admissionsByReason: this.admittedBoots.admissionsByReason(),
         hostPressure: {
           sustained: this.pressuredStreak >= this.sustainedSamples,
           consecutiveSamples: this.pressuredStreak,

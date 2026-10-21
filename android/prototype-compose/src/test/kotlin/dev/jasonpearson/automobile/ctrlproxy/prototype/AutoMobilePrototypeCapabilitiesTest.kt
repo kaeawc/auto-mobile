@@ -29,9 +29,24 @@ class AutoMobilePrototypeCapabilitiesTest {
     }
   }
 
+  /**
+   * Gates the renderer deliberately does not advertise yet, with their reason; remove each once
+   * supported. The platform vocabulary (#14294) runs on the module registry (#14295), and the
+   * `test` module is a placeholder no production runtime ever advertises.
+   */
+  private val exclusions = setOf("prototype_platform_v1", "prototype_platform_test_v1")
+
   @Test
   fun `shared spec capabilities are supported`() {
-    val missing = requiredCapabilities - AutoMobilePrototype.capabilities
+    assertTrue(
+      "Exclusions must name current spec gates",
+      requiredCapabilities.containsAll(exclusions),
+    )
+    assertTrue(
+      "Remove exclusions once supported",
+      exclusions.none { it in AutoMobilePrototype.capabilities },
+    )
+    val missing = requiredCapabilities - AutoMobilePrototype.capabilities - exclusions
     assertTrue("Renderer is missing spec capabilities: $missing", missing.isEmpty())
   }
 

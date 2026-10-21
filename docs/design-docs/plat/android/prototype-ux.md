@@ -241,7 +241,7 @@ depth precedes array length, then children; the byte check runs last.
 | `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                |
 | `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                             |
 | Condition `.key`                                                                          | `Exactly one of key, data, all, any, not is required`                                                                                                                 |
-| Condition comparison field                                                                | `Requires key or data`; `Exactly one of equals, notEquals, gt, lt is required`                                                                                        |
+| Condition comparison field                                                                | `Requires key or data or platform`; `Exactly one of equals, notEquals, gt, lt, empty is required`                                                                     |
 | Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                     |
 | `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                             |
 
@@ -492,6 +492,7 @@ layout room.
 | `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                            |
 | `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                             |
 | `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                                     |
+| `chart`           | Required `variant` (`line`, `area`, `bar`, `ring`) and 1 to 4 `series` `{path, x?, y, label, color?}` over a `/data` array; optional `yRange`, `xLabels`, `goal`. See Charts.                                                                          |
 | `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                                  |
 | `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                                      |
 | `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                                      |
@@ -755,6 +756,12 @@ vertical), even through intervening containers or horizontal scrolls. A vertical
 pager inside only a horizontal scroll is valid; horizontal pagers stay valid.
 The error is at the pager's `.axis`: "A vertical pager cannot appear inside a vertical scroll".
 
+The horizontal counterpart (#14165): a horizontal (or default-axis) pager or a carousel cannot have
+any horizontal scroll ancestor, because a horizontal scroll measures its child with an infinite
+width that their lazy layouts cannot take. The errors are at the pager or carousel itself: "A
+horizontal pager cannot appear inside a horizontal scroll" and "A carousel cannot appear inside a
+horizontal scroll".
+
 Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
@@ -889,6 +896,31 @@ without `visibleWhen`, or when motion is off.
 A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
+
+### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)
+
+- **Animated style.** A node's `animate: {durationMs?, easing?}` (0–2000 ms, default 300;
+  `standard` (default), `emphasized`, `linear` or `spring`, which ignores the duration) makes
+  changes to its `alpha`, `offset`, `scale`, `rotation`, `background` and `color` animate, for
+  example a heart that grows and turns red when a `styleWhen` matches. Without `animate` those
+  changes stay instant.
+- **Scale and rotation.** Style `scale` (0–4) and `rotation` (-360..360 degrees) are drawn about
+  the node's centre without changing its layout slot, like `offset`; `styleWhen` can set them.
+- **Transitions.** `transition` also takes `slideStart` and `slideEnd`, which slide in from and out
+  to that edge (a drawer), and `scale`, which scales in with a fade. Start and end follow the layout
+  direction, so drawers mirror in right-to-left locales.
+- **Zoomable images.** An `image` with `zoomable: {maxScale}` (1–8) pinches between 1 and
+  `maxScale`, pans within its own bounds once zoomed, and toggles between 1x and 2x (or
+  `maxScale`) on a double tap; TalkBack gets "Zoom in" and "Zoom out" actions. The zoom is clipped
+  to the image's box and does not change its layout or reported bounds. `onTap` still runs; a
+  zoomable image cannot also have `onDoubleTap` (rejected at `<path>.zoomable`).
+- **Reduced motion.** Under `motion: "none"` or animator duration scale 0, style changes and
+  transitions snap, so `observe` and screenshots stay deterministic. Zoom changes are always applied
+  directly.
+
+Android draws scale and rotation with a `graphicsLayer`, animates with `animateFloatAsState` and
+`animateColorAsState`, and zooms with `transformable`. The iOS agent does not implement motion v2
+yet and does not advertise the capability (#14684), so the host refuses these fields there.
 
 ## Actions and state
 
@@ -1317,6 +1349,107 @@ Worked example: a feed that shows a spinner, the result and an error (state
 The shared native-parity fixture `test/fixtures/prototype-spec/valid/request-actions.json` covers
 both `via` values, `onSuccess` / `onError`, nesting, `statusKey` and `visibleWhen` on the status.
 
+### Platform actions and events (#14294)
+
+The platform vocabulary is the one shape every platform integration uses (notifications, media,
+location, share and so on): a `platform` action calls the platform from a tap, root `platform.on`
+handlers react to platform events, `{platform}` reads show live platform state, and a root
+`requires` block declares up front what the spec needs. It is modelled on the `request` action.
+This section is the contract and the host validation; running the calls is the device module
+registries' job (#14295 on Android, #14296 on iOS), and no production runtime advertises it yet.
+
+```json
+{
+  "requires": {
+    "platform": ["notifications", "media"],
+    "permissions": [{ "name": "notifications", "purpose": "Alerts when a new episode is out" }],
+    "background": ["audio"]
+  },
+  "platform": {
+    "on": {
+      "media.ended": [{ "type": "setState", "key": "playing", "value": false }]
+    }
+  }
+}
+```
+
+```json
+{
+  "type": "platform",
+  "call": "notifications.post",
+  "args": { "title": { "value": "New episode" }, "body": { "data": "/episodes/0/title" } },
+  "into": "/data/lastPost",
+  "statusKey": "postStatus",
+  "timeoutMs": 5000,
+  "onSuccess": [],
+  "onError": []
+}
+```
+
+**Modules.** The contract's top-level `platformModules` table is the single source for every call
+and event: each module names its capability, and each call its arguments (with the contract rule
+a literal `{value}` argument must satisfy), the permissions and background names it needs, and a
+`sensitive` flag for the threat model (#14293). The validators and the capability gates read the
+table, so a module is added by adding its entry. The placeholder module `test` (`test.echo`,
+`test.protected`, the `test.tick` event, capability `prototype_platform_test_v1`) makes the
+vocabulary testable before any real module exists; no production runtime advertises it.
+
+| Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call`                 | Required: `"<module>.<op>"` naming a call in `platformModules`, else `Unknown platform call` at `.call`. Its module must be listed in `requires.platform`, its permissions in `requires.permissions` and its background names in `requires.background`; each error is at `.call`.                                                                                                         |
+| `args`                 | Up to `MAX_PROTOTYPE_PLATFORM_ARGS` (16) entries, exactly the call's declared arguments (`Unknown argument`, `Required argument` at `.args.<name>`). Each is a value binding: `{value}`, `{state}`, `{data}`, `{platform}`, `{item}` / `{index: true}` in a repeat, and `{event}` inside a handler. A literal `{value}` must satisfy the argument's rule (error at `.args.<name>.value`). |
+| `into`                 | Optional `/data/<pointer>`, the `request` rule: an object member, not an array element, so `<into>__meta` can be written beside it. `/platform` is read-only, so an `into` under it is refused. Written with `applyPrototypeDataWrite` and reported as a `change` event.                                                                                                                  |
+| `statusKey`            | A declared **string** state key, moved `loading` → `success` or `error`, as for `request`.                                                                                                                                                                                                                                                                                                |
+| `timeoutMs`            | Optional integer, 1 to `MAX_PROTOTYPE_PLATFORM_TIMEOUT_MS` (300000, long enough for a system picker); the default is `DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS` (10000).                                                                                                                                                                                                                     |
+| `onSuccess`, `onError` | Optional action lists (1 to 32). They count toward `MAX_PROTOTYPE_ACTION_DEPTH`.                                                                                                                                                                                                                                                                                                          |
+
+A failed call writes `{code, message}` to `<into>__meta.error`, with `code` one of `unsupported`,
+`unavailable`, `permission_denied`, `invalid_args`, `cancelled`, `timeout`, `too_many_in_flight`
+(more than `MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT`, 4) or `platform_error`.
+
+**`requires`** is optional and strict. `platform` lists module names (1 to 32, unique, each in
+`platformModules`, else `Unknown platform module`). `permissions` lists `{name, purpose}` entries
+(1 to 16, names unique): `name` is one of the canonical permissions of #14297 (`camera`,
+`microphone`, `location`, `locationBackground`, `notifications`, `photos`, `photosAdd`, `contacts`,
+`calendar`, `bluetooth`, `nearbyWifi`, `motion`, `speech`) and `purpose`, a nonblank string of at
+most 512 characters, becomes the iOS usage string and the Android rationale. `background` lists
+the canonical background names of #14301 (`audio`, `location`, `call`, `connectedDevice`,
+`transfer`, `camera`, `microphone`, `remoteNotification`). The host reads `requires` before show
+for the gates below, and the disposable-app shell (#14184) derives its manifest and Info.plist from
+it.
+
+**Events.** `platform.on` maps `"<module>.<event>"` names (up to `MAX_PROTOTYPE_PLATFORM_HANDLERS`, 32) to action lists. An unknown event is refused at `platform.on["<name>"]`, and its module must be
+declared. A handler runs atomically under the interaction lock, like a tap, and may use `push` /
+`pop`, data and state actions and `platform` calls. Only inside a handler, `{event: "/pointer"}`
+reads the delivered event's data, scoped the way `{item}` is scoped to a repeat; anywhere else it
+is refused with `{event} is only available inside a platform.on handler`.
+
+**Platform state** is device-owned JSON under `/platform/<module>/...` (for example
+`/platform/permissions/camera`), at most `MAX_PROTOTYPE_PLATFORM_STATE_BYTES` (65536). It is read
+with a `{platform:/pointer}` text placeholder, a `{platform: pointer}` value binding and a
+`{platform: pointer, equals | notEquals | gt | lt}` condition, parallel to the `{data}` forms; the
+pointer's first segment names the module, which must be declared. It is not patchable, not
+storable and not part of the `/data` revision log.
+
+**Reported events.** No wire field is added. A finished call is an `emit` named
+`prototype_platform` with payload `{callId, call, outcome, error?, durationMs, simulated?}`, sent
+after the `into`, `__meta` and `statusKey` writes and before `onSuccess` / `onError`. A delivered
+event is an `emit` named `prototype_platform_event` with payload `{event, data, truncated?,
+simulated?}`, `data` cut to the 4 KiB emit budget with `truncated: true`. Await them with
+`awaitEvent {kind: "emit", eventName: "prototype_platform"}`; a malformed payload is dropped, as for
+requests (`prototypePlatformEvent.ts`). Authored emit names cannot start with `prototype_`, which
+generalizes the single reserved `prototype_request` name.
+
+**Capabilities.** `prototype_platform_v1` gates `requires`, `platform.on`, the `platform` action and
+`{platform}` reads; each module adds `prototype_platform_<module>_v1`, and a later op or event gets
+a `_v2` gate that checks the fields that version introduced. The gates are generated from
+`platformModules` and join `PROTOTYPE_SPEC_CAPABILITY_GATES`, so show, patch and `replaceNode`
+refuse uniformly. Because every module use must be declared in the root `requires`, which a patch
+cannot add, a patch never introduces a module the shown spec did not already require.
+
+The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
+`invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
+
 ### Conditions
 
 A condition is exactly one of these forms. `visibleWhen` takes any of them;
@@ -1328,6 +1461,7 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{key, notEquals: scalar}` | The state value differs, including when the key is missing.              |
 | `{key, gt: number}`        | The state value is a number greater than `gt`. Any other type is false.  |
 | `{key, lt: number}`        | The state value is a number less than `lt`. Any other type is false.     |
+| `{data \| platform, ...}`  | The same comparisons on a `/data` or `/platform` value (see above).      |
 | `{all: [condition, ...]}`  | Every member holds. One to 16 members.                                   |
 | `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
 | `{not: condition}`         | The member does not hold.                                                |
@@ -2216,6 +2350,29 @@ size modifiers sit on the box. iOS uses `refreshable`, whose async closure stays
 is false again; a key set true without a pull (an agent patch) shows a plain `ProgressView` at the
 top because SwiftUI cannot start `refreshable` programmatically.
 
+## Chat lists (`prototype_chat_scroll_v1`, #14232, not device-verified)
+
+A vertical `scroll` can be a conversation view:
+
+| Field            | Rule                                                                                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reverse`        | Anchors the scroll at the end of its content (Android `verticalScroll(reverseScrolling = true)`), so the newest row is at the bottom and growth keeps the end in view. |
+| `stickToEnd`     | A forward scroll at its end follows rows appended to it. A reverse scroll is anchored at its end already.                                                              |
+| `atEndKey`       | A declared boolean state key the runtime writes when the end position changes, as a `change` event, for a "new messages" pill.                                         |
+| `onStartReached` | 1 to 32 actions run once each time the scroll reaches its start (edge-triggered; a list that fits never fires), for loading older history.                             |
+
+The options need a vertical scroll (`Chat scroll options need a vertical scroll` at the option's
+path), and `atEndKey` a declared boolean state key. `scrollTo {scroll, to, animated?}` moves the
+scroll whose `id` is `scroll`; exactly one scroll may carry that id (`Unknown scroll id`,
+`Duplicate scroll id` at `.scroll`). `to` is `"start"`, `"end"` or `{key: value}`, a `repeat.key`
+value of a row inside the scroll; a key that is not laid out drops the request. `animated` defaults
+to true. Scrolling is not a state change and emits nothing. A composer is a row with a `textField`
+(`imeAction: "send"`, `onSubmit`) and a send `iconButton`, padded with
+`safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}`; whether a fullscreen overlay
+receives IME insets is owed device verification, like the bottom-sheet lift (#10262). Rows off
+screen are absent from `observe`; `swipeOn lookFor` still finds them. The iOS agent does not
+advertise the capability yet (#14671), so the host refuses these specs there.
+
 ## Swipe actions (not device-verified)
 
 A `row` or `listItem` may declare `swipeActions: {start?, end?, fullSwipe?}` (needs
@@ -2281,6 +2438,43 @@ pinned to the material3 supplied by `androidx-compose-bom` in
 window, not a SearchBar popup/dialog or lazy list that drops rows, so `observe`
 sees every result row.
 
+## Loading and empty states (#14207, `prototype_loading_states_v1`, not device-verified)
+
+A data condition may test emptiness instead of comparing: `{data: "/feed", empty: true}` holds
+when the value is missing, `[]`, `{}` or `""` (`null` cannot be stored in `/data`), and
+`empty: false` holds otherwise. `empty` takes the place of `equals`, `notEquals`, `gt` and `lt`
+(exactly one is required), and `{key, empty}` is rejected at `<path>.empty` with
+`empty applies only to data conditions`. Like other data conditions it is resolved on the device
+against the current `/data`, so a request response or data action flips it.
+
+Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `column` or `card`
+over its background and inside its clip; any other node type is rejected at
+`<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
+animator scale 0 no band is drawn, so screenshots see the plain placeholder. A `repeat` of literal
+placeholder rows makes a skeleton list. The iOS agent evaluates `empty` but does not draw shimmer
+yet and does not advertise the capability (#14689).
+
+## Charts (#14209, not device-verified)
+
+A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series`. Each series
+reads the `/data` array at `path` (objects only, at most 500 like any data array), taking each
+point's numeric `y` member and optional `x` label member. A literal `path` must resolve to an array
+when the spec is shown, and every point must be an object with a numeric `y`. A repeat-bound path is
+bound per row. `yRange {min, max}` fixes the axis (max above min); otherwise it spans the values
+and the goal, and bars rise from zero. `xLabels` (`none`, `ends`, `all`) draws the first series'
+x labels below the plot. `goal` is a dashed reference line; a `ring` takes exactly one series and a
+positive goal and draws that series' latest value against it. The capability is
+`prototype_chart_v1`.
+
+Android draws it with Compose `Canvas` and no new dependency. The render mapper reads the points
+from the current `/data` on every mapping pass, so a data action, request or patch redraws it. Points
+a later write broke (a non-object, a non-numeric `y`) are skipped rather than failing the frame. The
+chart is one accessibility node labelled with its summary ("Line chart, Heart rate, 24 points, min
+58, max 141, latest 72"; "Ring chart, Steps today, 6500 of 10000"); an authored
+`contentDescription` replaces it, and `observe` reports it. The x labels are visual only. iOS
+rendering with Swift Charts and `AXChartDescriptor` is #14679; until then the iOS agent does not
+advertise the capability and the host refuses chart specs there.
+
 ## Rich text
 
 A text node has exactly one of `text` or `spans`; plain `text: ""` remains valid.
@@ -2300,6 +2494,23 @@ these selectors act across windows because tapOn refuses layer with accessibilit
 Use `tapAt` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
 `rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.
+
+### Linkify (#14233)
+
+`linkify: {kinds, style?, onTap}` on a text node with `text` (not `spans`) turns @mentions,
+#hashtags and URLs in the resolved text into links, for content from data such as `{item.body}`.
+`kinds` lists 1 to 3 of `mention`, `hashtag` and `url`; `style` takes the span style fields; a tap on
+a match runs `onTap` (1 to 32 actions). The grammar is fixed and shared by every runtime
+(`test/fixtures/prototype-spec/linkify/cases.json`): a match starts at the start of the text or
+after whitespace; a mention is `@` and 1 to 30 of `[A-Za-z0-9_]` (so `ana@example.com` is not one);
+a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a URL is `http://` or
+`https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
+`{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
+value, a `setData` / `appendData` value or an emit context entry, for example
+`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused, as
+are repeat bindings inside `onTap`. A URL tap never opens a browser; that is the `links.open`
+platform call. Matches are links like tappable spans (Android `tapOn {accessibilityLink}`, iOS
+`tapAt`) and require `prototype_linkify_v1`.
 
 Owed device checks (later platform passes): advertise the capability only after renderer support;
 verify mixed span styles, resolved concatenated observe text, per-span actions without URL navigation,

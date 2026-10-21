@@ -47,8 +47,6 @@ export {
   DaemonToolUnavailableError,
   DaemonVersionMismatchError,
   LifecycleConnectionInFlightError,
-  type BuildMismatchReason,
-  type VersionMismatchReason,
 } from "./proxy/daemonErrors";
 export {
   decideNotFoundAnswer,

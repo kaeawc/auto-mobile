@@ -113,8 +113,16 @@ describe("simctl row", () => {
     "spawnSync(`xcrun`, variableArgs);",
     'execSync("xcrun simctl list");',
     'execFile("/bin/sh", ["-c", "xcrun simctl boot"]);',
+    'spawn("xcrun", [...args]);',
+    'spawn("xcrun", [tool, "list"]);',
+    'spawn("xcrun", ["--sdk", "iphoneos", "simctl"]);',
   ])("flags %s", (line) => {
     expect(scan("simctl", [addedFile("src/x.ts", [line])])).toHaveLength(1);
+  });
+
+  test("allows an argv literal that names another xcrun tool", () => {
+    const xctrace = addedFile("src/y.ts", ['spawn("xcrun", ["xctrace", "record", ...args]);']);
+    expect(scan("simctl", [xctrace])).toEqual([]);
   });
 
   test("skips the owner and test paths, allows non-xcrun launches", () => {

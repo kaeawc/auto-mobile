@@ -13,6 +13,7 @@ import {
   waitForNotificationMatch,
   clearMatchingSystemTrayNotifications,
   clearIosSystemTrayNotifications,
+  readClearAllTerminalObservation,
   listSystemTrayNotifications,
   NotificationShadeNotOpenError,
   readActiveNotificationKeysForApp,
@@ -744,16 +745,10 @@ export class SystemTray {
       await this.restoreFailedClearAll();
     }
 
-    const { observeScreenFactory } = getSystemTrayDependencies();
-    const observeScreen = observeScreenFactory(device);
-    throwIfAborted(signal);
-    const nextObservation = await awaitWhileRequestIsLive(
-      observeScreen.execute({
-        skipScreenshot: true,
-        skipAccessibilityAudit: true,
-        skipPerformanceAudit: true,
-        signal,
-      }),
+    const nextObservation = await readClearAllTerminalObservation(
+      device,
+      drained,
+      awaitTimeoutMs,
       signal,
     );
     await captureSystemTrayTerminalEvidence(device, nextObservation, signal);

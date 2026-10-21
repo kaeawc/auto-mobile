@@ -796,6 +796,9 @@
                 "required": ["screenLock"]
               },
               {
+                "required": ["deviceCondition"]
+              },
+              {
                 "required": ["params"]
               }
             ],
@@ -1849,6 +1852,19 @@
               "additionalProperties": false
             }
           ]
+        },
+        "deviceCondition": {
+          "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Sent in its own setDeviceState call.",
+          "type": "object",
+          "properties": {
+            "version": { "type": "number", "const": 1 },
+            "rootState": { "type": "string", "const": "unset" },
+            "integrityState": { "type": "string", "const": "unset" },
+            "faults": { "type": "object", "properties": {}, "additionalProperties": false },
+            "expiresInSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+            "reset": { "type": "boolean", "const": true }
+          },
+          "additionalProperties": false
         }
       },
       "anyOf": [
@@ -1875,6 +1891,9 @@
         },
         {
           "required": ["screenLock"]
+        },
+        {
+          "required": ["deviceCondition"]
         }
       ],
       "description": "Parameters for setDeviceState"

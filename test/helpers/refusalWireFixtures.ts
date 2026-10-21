@@ -1,3 +1,4 @@
+import { DaemonRestartOptionsUnknownError } from "../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
 import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
@@ -53,7 +54,6 @@ import {
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
 } from "../../src/daemon/daemonRestartPending";
-import { DaemonRestartOptionsUnknownError } from "../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -740,6 +740,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(new DaemonRestartDeferredError("a device operation is active")),
   ],
   [
+    "daemon_restart_options_unknown",
+    "DaemonRestartOptionsUnknownError via shapeToolCallError",
+    () => shaped(new DaemonRestartOptionsUnknownError()),
+  ],
+  [
     "daemon_restart_pending",
     "daemonRestartPendingToolResult",
     () => {
@@ -748,13 +753,6 @@ const BUILDERS: readonly FixtureEntry[] = [
       );
       return { isError, content };
     },
-  ],
-  // The proxy refuses to auto-start a default daemon in a private namespace whose lost daemon's
-  // startup options are unknown (#14742); proxyServer shapes it through shapeToolCallError.
-  [
-    "daemon_restart_options_unknown",
-    "DaemonRestartOptionsUnknownError via shapeToolCallError",
-    () => shaped(new DaemonRestartOptionsUnknownError()),
   ],
 ];
 
@@ -1196,6 +1194,7 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   "session_recovery_pending",
   "daemon_restart_pending",
   "daemon_restart_deferred",
+  "daemon_restart_options_unknown",
   "viewer_read_only",
   "target_identity_unresolved",
   "cancelled",

@@ -321,8 +321,15 @@ export class DeviceReadiness implements DeviceReadinessContract {
     });
   }
 
-  public verifyAndroidCtrlProxyServiceReady(device: BootedDevice): Promise<boolean> {
-    return this.provider.getAndroidCtrlProxyClient(device).verifyServiceReady(2, 200, 2000);
+  public verifyAndroidCtrlProxyServiceReady(
+    device: BootedDevice,
+    options?: { signal?: AbortSignal; timeoutMs?: number; noRetry?: boolean },
+  ): Promise<boolean> {
+    const verify = () =>
+      this.provider
+        .getAndroidCtrlProxyClient(device)
+        .verifyServiceReady(options?.noRetry ? 1 : 2, 200, options?.timeoutMs ?? 2000);
+    return options?.signal ? runWithAbortSignal(options.signal, verify) : verify();
   }
 
   private readonly checkedAndroidOwnership = new AsyncLocalStorage<Set<string>>();

@@ -310,7 +310,7 @@ export class GrantAndroidPermissions {
       const state = parseAndroidRuntimePermissions(result.stdout, packageName, userId);
       if (!state) {
         throw new ActionableError(
-          `Cannot parse permission state for ${packageName} (missing package or requested permissions section)`,
+          `Cannot parse permission state for ${packageName} (missing package section)`,
         );
       }
       return state;

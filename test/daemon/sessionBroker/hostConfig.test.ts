@@ -155,7 +155,46 @@ describe("session broker host configuration", () => {
     ).toThrow();
   });
 
+  test("keep-booted is an optional operator mode with a positive maxUses limit", () => {
+    expect(
+      parseSessionBrokerHostConfig(
+        config({
+          defaults: { android: androidDefaults() },
+          reuseAndroidCleanDevices: true,
+          androidResetMode: "keep-booted",
+          androidKeepBootedMaxUses: 5,
+        }),
+      ),
+    ).toMatchObject({
+      androidResetMode: "keep-booted",
+      androidKeepBootedMaxUses: 5,
+      reuseAndroidCleanDevices: true,
+    });
+    for (const maxUses of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        parseSessionBrokerHostConfig(config({ androidKeepBootedMaxUses: maxUses })),
+      ).toThrow();
+    }
+    expect(() => parseSessionBrokerHostConfig(config({ androidResetMode: "unknown" }))).toThrow();
+  });
+
   test.each([
+    [
+      "reset mode without reuse",
+      { androidResetMode: "keep-booted", defaults: { android: androidDefaults() } },
+    ],
+    [
+      "reset mode without Android defaults",
+      { androidResetMode: "keep-booted", reuseAndroidCleanDevices: true },
+    ],
+    [
+      "maxUses without mode",
+      {
+        androidKeepBootedMaxUses: 2,
+        reuseAndroidCleanDevices: true,
+        defaults: { android: androidDefaults() },
+      },
+    ],
     ["negative total cap", { limits: { totalDeviceCap: -1 } }],
     ["fractional session cap", { limits: { sessionCap: 1.5 } }],
     ["unsafe idle cap", { limits: { idlePoolCap: Number.MAX_SAFE_INTEGER + 1 } }],

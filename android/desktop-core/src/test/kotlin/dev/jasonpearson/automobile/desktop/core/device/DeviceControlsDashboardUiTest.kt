@@ -209,7 +209,7 @@ class DeviceControlsDashboardUiTest {
         MaterialTheme {
           DeviceControlsDashboard(
             activeDeviceId = "emulator-5554",
-            releasedDeviceId = released.value,
+            release = released.value?.let { DeviceRelease(it) },
             options =
               DeviceControlsClients(
                 appearanceClient = FakeAppearanceClient(),
@@ -244,8 +244,7 @@ class DeviceControlsDashboardUiTest {
         MaterialTheme {
           DeviceControlsDashboard(
             activeDeviceId = selected.value,
-            releasedDeviceId = released.value,
-            releaseReason = SessionReleaseReason.DEVICE_SWITCH.takeIf { released.value != null },
+            release = released.value?.let { DeviceRelease(it, SessionReleaseReason.DEVICE_SWITCH) },
             options =
               DeviceControlsClients(
                 appearanceClient = FakeAppearanceClient(),

@@ -47,6 +47,11 @@ import kotlinx.coroutines.Dispatchers
 private val LOG = LoggerFactory.getLogger("DeviceControlsDashboard")
 
 /**
+ * The device the session released, and why (#11366): selecting another device is such a release.
+ */
+data class DeviceRelease(val deviceId: String, val reason: SessionReleaseReason? = null)
+
+/**
  * Device appearance, video recording, and screen sharing.
  *
  * Appearance is a stored daemon setting, not a per-device toggle: `appearance.sock` takes no device
@@ -65,8 +70,7 @@ fun DeviceControlsDashboard(
   activeDeviceId: String?,
   modifier: Modifier = Modifier,
   activeRecordings: ActiveRecordingTracker = remember { ActiveRecordingTracker() },
-  releasedDeviceId: String? = null,
-  releaseReason: SessionReleaseReason? = null,
+  release: DeviceRelease? = null,
   options: DeviceControlsClients,
 ) {
   val memory = rememberDeviceControlsMemory()
@@ -97,11 +101,11 @@ fun DeviceControlsDashboard(
       // The session released the recorded device: the daemon already stopped and finalized the
       // recording, so show it as stopped by the release and offer its artifact. Selecting another
       // device is such a release too (owner decision 2026-10-10, #11366).
-      LaunchedEffect(releasedDeviceId) {
+      LaunchedEffect(release) {
         val tracked = activeRecordings.current
-        if (releasedDeviceId != null && tracked != null && tracked.deviceId == releasedDeviceId) {
+        if (release != null && tracked != null && tracked.deviceId == release.deviceId) {
           val outcome =
-            if (releaseReason == SessionReleaseReason.DEVICE_SWITCH) "Stopped by device switch"
+            if (release.reason == SessionReleaseReason.DEVICE_SWITCH) "Stopped by device switch"
             else "Stopped by release"
           run("Fetch recording") { finishRecording(tracked, outcome) }
         }

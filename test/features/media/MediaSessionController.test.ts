@@ -159,6 +159,22 @@ describe("AndroidMediaSessionController.dispatch", () => {
     ]);
   });
 
+  test.each(["next", "previous"] as const)(
+    "%s reports the state change but withholds the restore receipt",
+    async (key) => {
+      const adb = new ScriptedAdb()
+        .dumps(PLAYING, PLAYING, PAUSED)
+        .on(`shell cmd media_session dispatch ${key}`, ok());
+      const { controller } = controllerFor(adb);
+
+      const result = await controller.dispatch({ key });
+
+      expect(result.stateChanged).toBe(true);
+      expect(result.previousState).toBe("playing");
+      expect(result.restore).toBeUndefined();
+    },
+  );
+
   test("an unchanged state settles after the window with no receipt", async () => {
     const adb = new ScriptedAdb().dumps(PLAYING).on("shell cmd media_session dispatch play", ok());
     const { controller, timer } = controllerFor(adb);

@@ -34,6 +34,8 @@ const RESTORING_KEYS: Partial<Record<MediaPlaybackState, MediaDispatchKey>> = {
   stopped: "stop",
 };
 
+const TRACK_CHANGING_KEYS: ReadonlySet<MediaDispatchKey> = new Set(["next", "previous"]);
+
 /** Output from `cmd` on a release without the `media_session` shell command. */
 const COMMAND_UNAVAILABLE_MARKERS = [
   "No shell command implementation",
@@ -150,7 +152,12 @@ function dispatchOutcome(
 ): MediaSessionDispatchResult {
   const state = findSession(after, handledBy)?.state;
   const stateChanged = previousState !== undefined && state !== previousState;
-  const restoringKey = previousState === undefined ? undefined : RESTORING_KEYS[previousState];
+  // A track change cannot be undone by a transport key, so `next`/`previous` carry no receipt
+  // even when the player briefly reports a skipping or buffering state.
+  const restoringKey =
+    previousState === undefined || TRACK_CHANGING_KEYS.has(key)
+      ? undefined
+      : RESTORING_KEYS[previousState];
   return {
     key,
     handledBy,

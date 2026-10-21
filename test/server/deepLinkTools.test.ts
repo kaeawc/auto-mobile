@@ -124,6 +124,33 @@ describe("Deep Link Tools Registration", function () {
         expect(response).not.toHaveProperty("isError");
       });
 
+      test("passes the App Links section through (#14110)", async () => {
+        const appLinks = [
+          {
+            domain: "shop.example.com",
+            state: "verified",
+            autoVerify: true,
+            userSelected: false,
+            approvedForLinks: true,
+          },
+        ];
+        const { payload } = await invokeHandler({
+          success: true,
+          appId: "com.example.shop",
+          deepLinks: emptyDeepLinks,
+          appLinks,
+          appLinksUserId: 0,
+          appLinkHandlingAllowed: true,
+        });
+
+        expect(payload).toMatchObject({
+          appLinks,
+          appLinksUserId: 0,
+          appLinkHandlingAllowed: true,
+        });
+        expect(payload).not.toHaveProperty("appLinksUnavailable");
+      });
+
       test("keeps the success wording when no links are configured", async () => {
         const { response, payload } = await invokeHandler({
           success: true,

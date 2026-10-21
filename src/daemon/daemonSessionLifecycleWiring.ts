@@ -22,6 +22,7 @@ import {
   registerNetworkStateSessionCleanup,
 } from "./networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
+import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   createRecorderTeardownRecoveryMarker,
@@ -92,6 +93,7 @@ export function wireSessionLifecycle(
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
   registerNetworkStateSessionCleanup(sessionManager);
+  registerAppLinksSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,

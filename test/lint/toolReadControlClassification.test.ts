@@ -122,6 +122,7 @@ const CLASSIFICATION: Classification = {
     "selectAllText",
     "sendKeys",
     "sendSms",
+    "setAppLinks",
     "setAppPermissions",
     "setDeviceResources",
     "setDeviceState",

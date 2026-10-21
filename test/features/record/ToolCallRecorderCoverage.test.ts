@@ -124,6 +124,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "selectAllText",
   "sendKeys",
   "sendSms",
+  "setAppLinks",
   "setAppPermissions",
   "setDeviceState",
   "setNotificationPolicy",

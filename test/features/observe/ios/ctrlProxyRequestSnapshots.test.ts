@@ -43,6 +43,7 @@ import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { requestSdkTrigger } from "../../../../src/features/observe/ios/CtrlProxySdkTrigger";
+import { requestAccessibilityAudit } from "../../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
@@ -184,6 +185,15 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
         text: "Details",
         occurrence: 2,
         ownerResourceId: "owner-42",
+      }),
+  },
+  {
+    name: "request_accessibility_audit",
+    builder: "requestAccessibilityAudit",
+    invoke: (h) =>
+      requestAccessibilityAudit(h.context, {
+        appId: "com.example.audited",
+        checks: ["contrast", "hitRegion"],
       }),
   },
   {

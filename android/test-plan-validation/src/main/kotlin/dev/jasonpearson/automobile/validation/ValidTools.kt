@@ -15,6 +15,7 @@ object ValidTools {
     MIGRATED_LEGACY_TOOLS +
       setOf(
         "accessibility",
+        "accessibilityAudit",
         "accessibilityFocus",
         "barrier",
         "biometricAuth",

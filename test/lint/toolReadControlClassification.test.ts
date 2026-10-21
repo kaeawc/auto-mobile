@@ -85,6 +85,8 @@ const CLASSIFICATION: Classification = {
   },
   control: [
     "accessibilityFocus",
+    // Drives an XCUITest audit of the app under test, so it is held to the owner.
+    "accessibilityAudit",
     "appLifecycle",
     "barrier",
     "biometricAuth",

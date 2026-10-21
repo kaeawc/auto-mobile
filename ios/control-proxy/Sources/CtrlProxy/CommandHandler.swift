@@ -66,6 +66,7 @@ final class CommandHandler: CommandHandling {
     let voiceOverStateProvider: any VoiceOverStateProviding
     let voiceOverToggle: any VoiceOverToggling
     let hingeAngleSetter: any HingeAngleSetting
+    let accessibilityAuditor: any AccessibilityAuditing
     let frameContext: FrameContext
     let rotationTimer: any ProxyTimer
     let hierarchyPairRecorder: (any HierarchyPairRecording)?
@@ -82,6 +83,7 @@ final class CommandHandler: CommandHandling {
         voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
+        accessibilityAuditor: any AccessibilityAuditing = DefaultAccessibilityAuditor(),
         frameContext: FrameContext = FrameContext(),
         rotationTimer: any ProxyTimer = SystemTimer(),
         hierarchyPairRecorder: (any HierarchyPairRecording)? = nil
@@ -97,6 +99,7 @@ final class CommandHandler: CommandHandling {
         self.voiceOverStateProvider = voiceOverStateProvider
         self.voiceOverToggle = voiceOverToggle
         self.hingeAngleSetter = hingeAngleSetter
+        self.accessibilityAuditor = accessibilityAuditor
         self.frameContext = frameContext
         self.rotationTimer = rotationTimer
         self.hierarchyPairRecorder = hierarchyPairRecorder
@@ -167,7 +170,7 @@ final class CommandHandler: CommandHandling {
         case .action, .activateAccessibilityLink, .launchApp, .resetPermissions, .rotate, .setHingeAngle, .clipboard:
             return try await dispatchAppAndDevice(request, startTime: startTime)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
-             .setVoiceOverState:
+             .setVoiceOverState, .accessibilityAudit:
             return try await dispatchAccessibility(request, startTime: startTime)
         case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
              .clearPreferences:
@@ -318,6 +321,8 @@ final class CommandHandler: CommandHandling {
             return await handleGetVoiceOverState(payload, startTime: startTime)
         case let .setVoiceOverState(payload):
             return await handleSetVoiceOverState(payload, startTime: startTime)
+        case let .accessibilityAudit(payload):
+            return await handleAccessibilityAudit(payload, startTime: startTime)
         default:
             throw CommandError.unknownCommand(request.typeString)
         }

@@ -33,6 +33,16 @@
       }
     },
     {
+      "name": "request_accessibility_audit",
+      "builder": "requestAccessibilityAudit",
+      "wire": {
+        "type": "request_accessibility_audit",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.audited",
+        "checks": ["contrast", "hitRegion"]
+      }
+    },
+    {
       "name": "request_magic_tap",
       "builder": "CtrlProxyVoiceOver.requestMagicTap",
       "wire": {

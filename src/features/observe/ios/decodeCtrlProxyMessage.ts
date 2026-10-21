@@ -524,6 +524,16 @@ const messageDecoders = new Map<
   ["ime_action_result", decodeImeActionResult],
   ["action_result", decodeImeActionResult],
   [
+    "accessibility_audit_result",
+    (message) => ({
+      success: message.success ?? false,
+      issues: message.issues ?? [],
+      unsupportedChecks: message.unsupportedChecks ?? [],
+      error: message.error,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    }),
+  ],
+  [
     "magic_tap_result",
     (message) => ({
       success: message.success ?? false,

@@ -85,6 +85,20 @@ final class ResponseContractFixtureTests: XCTestCase {
             HingeAngleResponse(requestId: requestId, success: false, error: "unsupported", angle: 90, totalTimeMs: 17)
         )
         try append(
+            "accessibility_audit_result",
+            AccessibilityAuditResponse(
+                requestId: requestId,
+                issues: [AccessibilityAuditIssue(
+                    check: "contrast", summary: "fixture issue", detail: "fixture detail",
+                    elementId: "fixture-element", label: "Fixture",
+                    bounds: ElementBounds(left: 1, top: 2, right: 3, bottom: 4)
+                )],
+                unsupportedChecks: ["fixture-check"],
+                error: nil,
+                totalTimeMs: 17
+            )
+        )
+        try append(
             "magic_tap_result",
             MagicTapResponse(
                 requestId: requestId,

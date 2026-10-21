@@ -47,6 +47,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case magicTap(RequestEnvelope)
     case sdkTrigger(RequestSdkTrigger)
     case getVoiceOverState(RequestEnvelope)
+    case accessibilityAudit(RequestAccessibilityAudit)
     case setVoiceOverState(RequestSetVoiceOverState)
 
     case listPreferenceFiles(RequestEnvelope)
@@ -101,7 +102,7 @@ public enum WebSocketRequest: Decodable, Sendable {
              .requestRotate, .setHingeAngle, .requestClipboard:
             return try decodeAppAndDevice(requestType, from: decoder)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
-             .setVoiceOverState:
+             .setVoiceOverState, .requestAccessibilityAudit:
             return try decodeAccessibility(requestType, from: decoder)
         case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
              .clearPreferences:
@@ -224,6 +225,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try .getVoiceOverState(RequestEnvelope(from: decoder))
         case .setVoiceOverState:
             return try .setVoiceOverState(RequestSetVoiceOverState(from: decoder))
+        case .requestAccessibilityAudit:
+            return try .accessibilityAudit(RequestAccessibilityAudit(from: decoder))
         default:
             throw CommandError.unknownCommand(requestType.rawValue)
         }
@@ -322,6 +325,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .sdkTrigger: return .sdkTrigger
         case .getVoiceOverState: return .getVoiceOverState
         case .setVoiceOverState: return .setVoiceOverState
+        case .accessibilityAudit: return .requestAccessibilityAudit
         case .listPreferenceFiles: return .listPreferenceFiles
         case .getPreferences: return .getPreferences
         case .getPreference: return .getPreference
@@ -366,6 +370,7 @@ public enum WebSocketRequest: Decodable, Sendable {
              let .getSdkCapabilities(payload):
             return payload
         case let .setVoiceOverState(payload): return payload
+        case let .accessibilityAudit(payload): return payload
         case let .sdkTrigger(payload): return payload
         case let .setHingeAngle(payload): return payload
         case let .tapCoordinates(payload): return payload

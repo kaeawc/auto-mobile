@@ -95,10 +95,13 @@ export interface DeviceReadinessContract {
    */
   setCurrentDevice(device: BootedDevice, platform: Platform): void;
 
-  /** Explicit selection made by the legacy setActiveDevice tool. */
-  getExplicitDevicePin(): BootedDevice | undefined;
-  setExplicitDevicePin(device: BootedDevice): void;
+  /** Explicit selection made by this connection's legacy setActiveDevice tool. */
+  getExplicitDevicePin(connectionId?: string): BootedDevice | undefined;
+  setExplicitDevicePin(device: BootedDevice, connectionId?: string): void;
+  /** Invalidate every connection's pin naming a released or removed device. */
   clearExplicitDevicePin(deviceId: string): void;
+  /** Forget only the disconnected connection's selection. */
+  clearConnectionDevicePin(connectionId: string): void;
 
   /**
    * Ensure a device is ready for the specified platform and return its ID
@@ -197,6 +200,8 @@ export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "o
 
 export interface DeviceReadyOptions {
   sessionId?: string;
+  /** MCP connection key for explicit selection; omitted for the single direct stdio connection. */
+  connectionId?: string;
   /**
    * What the caller will do with the device. A `read` gets only the readiness reading needs: no
    * current-device pin or appearance write (#11641). Defaults to `control`.

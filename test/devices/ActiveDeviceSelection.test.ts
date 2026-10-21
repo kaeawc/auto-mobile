@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { ActiveDeviceSelection } from "../../src/devices/ActiveDeviceSelection";
+import {
+  ActiveDeviceSelection,
+  DIRECT_DEVICE_CONNECTION_KEY,
+} from "../../src/devices/ActiveDeviceSelection";
 import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -15,11 +18,12 @@ const device = (deviceId: string): BootedDevice => ({
 describe("ActiveDeviceSelection", () => {
   test("clearPinFor drops the pin only for the pinned device", () => {
     const selection = new ActiveDeviceSelection();
-    selection.explicitDevicePin = device("a");
+    selection.setPin(device("a"));
+    expect(selection.getPin(DIRECT_DEVICE_CONNECTION_KEY)?.deviceId).toBe("a");
     selection.clearPinFor("b");
-    expect(selection.explicitDevicePin?.deviceId).toBe("a");
+    expect(selection.getPin()?.deviceId).toBe("a");
     selection.clearPinFor("a");
-    expect(selection.explicitDevicePin).toBeUndefined();
+    expect(selection.getPin()).toBeUndefined();
   });
 
   test("two DeviceReadiness instances do not share a current device or pin", () => {

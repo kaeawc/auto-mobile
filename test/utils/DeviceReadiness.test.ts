@@ -1387,6 +1387,47 @@ describe("DeviceReadiness dual-platform resolution", () => {
     expect(result.deviceId).toBe("ios-sim-1");
   });
 
+  test("an explicit pin selects only its connection on mixed platforms", async () => {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+    manager.setExplicitDevicePin(iosDevice, "conn-a");
+    // Readiness updates the shared current device; check the unpinned connection first.
+    await expect(
+      manager.ensureDeviceReady("either", undefined, { connectionId: "conn-b" }),
+    ).rejects.toThrow("Both Android and iOS devices are connected");
+    const result = await manager.ensureDeviceReady("either", undefined, {
+      connectionId: "conn-a",
+    });
+    expect(result.deviceId).toBe(iosDevice.deviceId);
+  });
+
+  test("disconnect clears only that connection's explicit pin", () => {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+    manager.setExplicitDevicePin(iosDevice, "conn-a");
+    manager.setExplicitDevicePin(iosDevice, "conn-b");
+    manager.clearConnectionDevicePin("conn-a");
+    expect(manager.getExplicitDevicePin("conn-a")).toBeUndefined();
+    expect(manager.getExplicitDevicePin("conn-b")).toEqual(iosDevice);
+  });
+
+  test("device release clears every connection pin naming that device", () => {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+    manager.setExplicitDevicePin(iosDevice, "conn-a");
+    manager.setExplicitDevicePin(iosDevice, "conn-b");
+    manager.setExplicitDevicePin(androidDevice, "conn-c");
+    manager.clearExplicitDevicePin(iosDevice.deviceId);
+    expect(manager.getExplicitDevicePin("conn-a")).toBeUndefined();
+    expect(manager.getExplicitDevicePin("conn-b")).toBeUndefined();
+    expect(manager.getExplicitDevicePin("conn-c")).toEqual(androidDevice);
+  });
+
+  test("a pin without a connection id preserves direct-mode selection", async () => {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+    manager.setExplicitDevicePin(iosDevice);
+    const result = await manager.ensureDeviceReady("either");
+    expect(result.deviceId).toBe(iosDevice.deviceId);
+    expect(manager.getExplicitDevicePin("conn-a")).toBeUndefined();
+  });
+
   test("explicit pin wins over a later ambient device resolution", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
     manager.setCurrentDevice(iosDevice, "ios");

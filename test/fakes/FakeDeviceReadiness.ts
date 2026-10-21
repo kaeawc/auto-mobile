@@ -4,6 +4,7 @@ import {
   DeviceReadiness,
 } from "../../src/daemon/readiness/DeviceReadiness";
 import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src/models";
+import { DIRECT_DEVICE_CONNECTION_KEY } from "../../src/devices/ActiveDeviceSelection";
 
 /**
  * Fake implementation of DeviceReadiness for testing
@@ -17,6 +18,7 @@ export class FakeDeviceReadiness implements Pick<
   | "getExplicitDevicePin"
   | "setExplicitDevicePin"
   | "clearExplicitDevicePin"
+  | "clearConnectionDevicePin"
   | "ensureDeviceReady"
   | "detectConnectedPlatforms"
   | "detectConnectedPlatformsWithStatus"
@@ -29,7 +31,7 @@ export class FakeDeviceReadiness implements Pick<
 > {
   private currentDevice: BootedDevice | undefined;
   private currentPlatform: Platform | undefined;
-  private explicitDevicePin: BootedDevice | undefined;
+  private readonly explicitDevicePins = new Map<string, BootedDevice>();
   private connectedDevices: BootedDevice[] = [];
   private connectedPlatforms: BootedDevice[] = [];
   private preferredPlatform: Platform | undefined;
@@ -243,17 +245,23 @@ export class FakeDeviceReadiness implements Pick<
     this.setCurrentDeviceCalls.push(device);
   }
 
-  getExplicitDevicePin(): BootedDevice | undefined {
-    return this.explicitDevicePin;
+  getExplicitDevicePin(connectionId = DIRECT_DEVICE_CONNECTION_KEY): BootedDevice | undefined {
+    return this.explicitDevicePins.get(connectionId);
   }
 
-  setExplicitDevicePin(device: BootedDevice): void {
-    this.explicitDevicePin = device;
+  setExplicitDevicePin(device: BootedDevice, connectionId = DIRECT_DEVICE_CONNECTION_KEY): void {
+    this.explicitDevicePins.set(connectionId, device);
+  }
+
+  clearConnectionDevicePin(connectionId: string): void {
+    this.explicitDevicePins.delete(connectionId);
   }
 
   clearExplicitDevicePin(deviceId: string): void {
-    if (this.explicitDevicePin?.deviceId === deviceId) {
-      this.explicitDevicePin = undefined;
+    for (const [connectionId, device] of this.explicitDevicePins) {
+      if (device.deviceId === deviceId) {
+        this.clearConnectionDevicePin(connectionId);
+      }
     }
   }
 
@@ -290,12 +298,13 @@ export class FakeDeviceReadiness implements Pick<
     } else {
       // Find device for the specified platform. Like the real readiness, a pin or current device
       // that is no longer connected is dropped (the pin) or ignored (the current device).
-      const isConnected = (device: BootedDevice | undefined): device is BootedDevice =>
+      const isConnected = (device: BootedDevice | undefined): boolean =>
         !!device && this.connectedDevices.some((d) => d.deviceId === device.deviceId);
-      if (!isConnected(this.explicitDevicePin)) {
-        this.explicitDevicePin = undefined;
+      const explicitPin = this.getExplicitDevicePin(options?.connectionId);
+      if (explicitPin && !isConnected(explicitPin)) {
+        this.clearExplicitDevicePin(explicitPin.deviceId);
       }
-      const pin = this.explicitDevicePin;
+      const pin = this.getExplicitDevicePin(options?.connectionId);
       const current = isConnected(this.currentDevice) ? this.currentDevice : undefined;
       const currentPlatform = current ? this.currentPlatform : undefined;
       const pick = (resolvedPlatform: Platform | undefined): BootedDevice | undefined =>
@@ -307,7 +316,7 @@ export class FakeDeviceReadiness implements Pick<
       if (platform === "either") {
         const hasAndroid = this.connectedDevices.some((device) => device.platform === "android");
         const hasIos = this.connectedDevices.some((device) => device.platform === "ios");
-        if (hasAndroid && hasIos && !current) {
+        if (hasAndroid && hasIos && !current && !pin) {
           throw new ActionableError(
             "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
           );

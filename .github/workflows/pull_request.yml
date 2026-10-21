@@ -860,6 +860,12 @@ jobs:
               echo '::warning::Failed to stop the isolated Gradle daemon before removing its home.' >&2
             fi
           fi
+          # `gradlew --stop` can return while the daemon still flushes into its home, so rm
+          # races it with "Directory not empty". Retry briefly; the last attempt still fails.
+          for attempt in 1 2 3 4; do
+            rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" 2>/dev/null && exit 0
+            sleep "$attempt"
+          done
           rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   desktop-app-unit-tests:

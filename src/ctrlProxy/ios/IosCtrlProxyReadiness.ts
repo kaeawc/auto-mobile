@@ -28,6 +28,16 @@ interface IosCtrlProxyReadinessHost {
   resolveHealthPollMaxAttempts(env?: NodeJS.ProcessEnv): number;
 }
 
+const FAST_HEALTH_POLL_INTERVAL_MS = 100;
+const FAST_HEALTH_POLL_WINDOW_MS = 5_000;
+
+// This policy is elapsed-time based; the shared Backoff policies count attempts.
+function healthPollDelayMs(elapsedMs: number, delayMs: number): number {
+  return elapsedMs < FAST_HEALTH_POLL_WINDOW_MS
+    ? Math.min(FAST_HEALTH_POLL_INTERVAL_MS, delayMs)
+    : delayMs;
+}
+
 /** Shares caller health deadlines and replaces runners that never become ready. */
 export class IosCtrlProxyReadiness {
   constructor(
@@ -187,7 +197,7 @@ export class IosCtrlProxyReadiness {
     );
     this.host.adoptServicePort(IOS_CTRL_PROXY_DEFAULT_PORT);
     this.host.clearCaches();
-    await this.sleepForHealthPoll(500, sharedStart.controller.signal);
+    sharedStart.controller.signal.throwIfAborted();
     await this.host.startProcessSupervision();
     return true;
   }
@@ -261,6 +271,7 @@ export class IosCtrlProxyReadiness {
     launchDeadlineMs: number = Number.POSITIVE_INFINITY,
   ): Promise<boolean> {
     perf.startOperation("healthPolling");
+    const pollStartedAt = this.state.timer.now();
     let attempts = 0;
     // A joining caller can move the shared deadline while this polls; the launch
     // window (#10649) only ever shortens it.
@@ -289,7 +300,10 @@ export class IosCtrlProxyReadiness {
         return false;
       }
       await this.sleepForHealthPoll(
-        Math.min(delayMs, remainingPollMs),
+        Math.min(
+          healthPollDelayMs(this.state.timer.now() - pollStartedAt, delayMs),
+          remainingPollMs,
+        ),
         sharedStart.controller.signal,
       );
     }
@@ -297,17 +311,14 @@ export class IosCtrlProxyReadiness {
 
   async completeHealthStartup(
     sharedStart: SharedCtrlProxyStart,
-    perf: PerformanceTracker,
+    _perf: PerformanceTracker,
   ): Promise<void> {
     logger.info("[IOSCtrlProxy] HTTP health endpoint is ready");
     this.host.clearCaches();
     await this.host.startProcessSupervision();
 
-    // The HTTP server can respond before the WebSocket server is initialized.
-    logger.info("[IOSCtrlProxy] Waiting for WebSocket server initialization");
-    perf.startOperation("websocketInit");
-    await this.sleepForHealthPoll(500, sharedStart.controller.signal);
-    perf.endOperation("websocketInit");
+    // Health and WebSocket upgrades share one listener, so health proves it is ready.
+    sharedStart.controller.signal.throwIfAborted();
 
     if (!this.host.isSimulator()) {
       await this.state.tunnelClient.supervise();

@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, expect, spyOn, test } from "bun:test";
 import { SESSION_RELEASE_TEARDOWN_CAP_MS, SessionManager } from "../../src/daemon/sessionManager";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
@@ -8,6 +8,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const deviceId = "emulator-5554";
 const dispose: Array<() => void> = [];

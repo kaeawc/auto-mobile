@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { DeviceAutolockManager } from "../../src/daemon/deviceAutolockManager";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -8,6 +8,10 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+
+afterEach(() => {
+  mock.restore();
+});
 
 describe("explicit rebind release caller ordering", () => {
   test.each([false, true])("pool rejection=%s keeps rebound session live", async (rejectPool) => {

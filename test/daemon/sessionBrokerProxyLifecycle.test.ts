@@ -137,7 +137,11 @@ describe("session broker proxy lifecycle", () => {
     ).toEqual([
       {
         method: DAEMON_RELEASE_BROKER_SESSION_METHOD,
-        params: { sessionId: SESSION, livenessOwnerToken: TOKEN },
+        params: {
+          sessionId: SESSION,
+          livenessOwnerToken: TOKEN,
+          replyBudgetMs: 1_000,
+        },
       },
     ]);
     expect(
@@ -164,7 +168,12 @@ describe("session broker proxy lifecycle", () => {
     ).toEqual([
       {
         method: DAEMON_RELEASE_BROKER_SESSION_METHOD,
-        params: { sessionId: SESSION, livenessOwnerToken: TOKEN, reason: "session_owner_exited" },
+        params: {
+          sessionId: SESSION,
+          livenessOwnerToken: TOKEN,
+          reason: "session_owner_exited",
+          replyBudgetMs: 1_000,
+        },
       },
     ]);
   });
@@ -189,7 +198,12 @@ describe("session broker proxy lifecycle", () => {
     expect(releaseCalls(clients)).toEqual([
       {
         method: DAEMON_RELEASE_BROKER_SESSION_METHOD,
-        params: { sessionId: SESSION, livenessOwnerToken: TOKEN, reason: "session_owner_exited" },
+        params: {
+          sessionId: SESSION,
+          livenessOwnerToken: TOKEN,
+          reason: "session_owner_exited",
+          replyBudgetMs: 1_000,
+        },
       },
     ]);
   });
@@ -208,7 +222,11 @@ describe("session broker proxy lifecycle", () => {
     expect(releaseCalls(clients)).toEqual([
       {
         method: DAEMON_RELEASE_BROKER_SESSION_METHOD,
-        params: { sessionId: SESSION, livenessOwnerToken: TOKEN },
+        params: {
+          sessionId: SESSION,
+          livenessOwnerToken: TOKEN,
+          replyBudgetMs: 1_000,
+        },
       },
     ]);
   });
@@ -225,6 +243,7 @@ describe("session broker proxy lifecycle", () => {
     expect(releaseCalls(clients)[0]?.params).toEqual({
       sessionId: SESSION,
       livenessOwnerToken: TOKEN,
+      replyBudgetMs: 1_000,
     });
   });
 

@@ -145,7 +145,8 @@ describe("preparations crossing restart handoff", () => {
       finishPreparation.resolve();
       expect(await preparing).toMatchObject({
         outcome: "failed",
-        failure: { code: "session_preparation_failed", retryable: false },
+        // Shutdown aborts the preparation; the receipt is a typed retryable cancellation (#13800).
+        failure: { code: "cancelled", retryable: true },
       });
       expect(closed).toBe(false);
       finishRelease.resolve();

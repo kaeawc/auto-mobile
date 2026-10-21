@@ -101,6 +101,8 @@ export class JournalDeviceSettingDefaultsPersistence implements DeviceSettingDef
       }
       if (entry.priorValue.state === "absent") {
         values[key] = null;
+      } else if (entry.priorValue.state === "unobservable") {
+        throw new ActionableError(`Unobservable journaled device setting ${key}`);
       } else {
         const value = entry.priorValue.value;
         if (value !== null && typeof value !== "string" && typeof value !== "number") {

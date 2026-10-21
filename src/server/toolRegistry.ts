@@ -5,7 +5,7 @@ import {
   setToolTransportRecovery,
   type ToolTransportRecovery,
 } from "../daemon/toolTransportRecovery";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError } from "../models";
 import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import {
   postActionCaptures,
@@ -23,7 +23,6 @@ import { assertSessionBrokerToolCall } from "./sessionBrokerToolGate";
 
 import { runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { executionTracker } from "../daemon/executionTracker";
-import { markInternalToolCall } from "../daemon/internalToolCall";
 import {
   ListChangedBroadcaster,
   type ServerRegistrationOptions,
@@ -138,7 +137,12 @@ import {
   ToolListingOptions,
   ToolRegistryCollaborators,
   ToolRegistryPipelineOverrides,
+  type DeviceMutationRecording,
 } from "./toolRegistryTypes";
+
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import { createRecording } from "./deviceMutationRecording";
+import { invokeRecordedInternalTool } from "./deviceMutationDispatch";
 
 // The registry that holds all tools
 export class ToolRegistryClass {
@@ -184,6 +188,7 @@ export class ToolRegistryClass {
     timer: Timer = defaultTimer,
     loggerInstance: Logger = logger,
     deviceReadiness: DeviceReadiness | null = DeviceReadiness.createInstance(),
+    private mutationRecording: DeviceMutationRecording = createRecording(defaultDaemonContext),
   ) {
     if (deviceReadiness) {
       this.deviceReadiness = deviceReadiness;
@@ -426,6 +431,7 @@ export class ToolRegistryClass {
                     progress,
                     signal,
                     auditRunner: this.auditRunner,
+                    mutationRecording: this.mutationRecording,
                     navigationRecorder: this.navigationToolCallRecorder,
                     traits,
                     isResponseFailure: this.isResponseFailure,
@@ -642,12 +648,13 @@ export class ToolRegistryClass {
       runWithPostActionCaptureScope(
         signal,
         () =>
-          this.invokeInternalTool(
+          invokeRecordedInternalTool(
             resolved,
             invocation.args,
             progress ?? getToolSelectionContext()?.planRequest?.progress,
             signal,
             options.targetDevice,
+            this.mutationRecording,
           ),
         false,
       ),
@@ -683,24 +690,6 @@ export class ToolRegistryClass {
       sessionToolSelectionService:
         options.sessionToolSelectionService ?? context?.sessionToolSelectionService,
     };
-  }
-
-  private async invokeInternalTool(
-    tool: RegisteredTool,
-    args: Record<string, unknown>,
-    progress: ProgressCallback | undefined,
-    signal: AbortSignal | undefined,
-    targetDevice: BootedDevice | undefined,
-  ): Promise<unknown> {
-    if (targetDevice && tool.deviceAwareHandler) {
-      const pinnedHandler = sessionDisplayPinnedHandler({
-        name: tool.name,
-        schema: tool.schema,
-        handler: tool.deviceAwareHandler,
-      });
-      return pinnedHandler(targetDevice, markInternalToolCall(args), progress, signal);
-    }
-    return tool.handler(markInternalToolCall(args), progress, signal);
   }
 
   // Typed variant of `callInternal` for internally-consumed tools whose envelope a caller then
@@ -975,6 +964,10 @@ export class ToolRegistryClass {
     this.deviceReadiness = readiness;
   }
 
+  setMutationRecording(recording: DeviceMutationRecording): void {
+    this.mutationRecording = recording;
+  }
+
   // Get the device session manager
   getDeviceReadiness(): DeviceReadiness {
     if (!this.deviceReadiness) {
@@ -995,6 +988,7 @@ export class ToolRegistryClass {
       env: this.env,
       executionTargetResolver: this.executionTargetResolver,
       auditRunner: this.auditRunner,
+      mutationRecording: this.mutationRecording,
       afterToolCall: this.afterToolCall,
       planLifecycleManager: this.planLifecycleManager,
     };
@@ -1009,20 +1003,16 @@ export class ToolRegistryClass {
         overrides.deviceReadAccess,
       );
     }
-    if (overrides.auditRunner) {
-      this.auditRunner = overrides.auditRunner;
-    }
-    if (overrides.afterToolCall) {
-      this.afterToolCall = overrides.afterToolCall;
-    }
-    if (overrides.planLifecycleManager) {
-      this.planLifecycleManager = overrides.planLifecycleManager;
-    }
+    this.auditRunner = overrides.auditRunner ?? this.auditRunner;
+    this.mutationRecording = overrides.mutationRecording ?? this.mutationRecording;
+    this.afterToolCall = overrides.afterToolCall ?? this.afterToolCall;
+    this.planLifecycleManager = overrides.planLifecycleManager ?? this.planLifecycleManager;
 
     return () => {
       this.env = previous.env;
       this.executionTargetResolver = previous.executionTargetResolver;
       this.auditRunner = previous.auditRunner;
+      this.mutationRecording = previous.mutationRecording;
       this.afterToolCall = previous.afterToolCall;
       this.planLifecycleManager = previous.planLifecycleManager;
     };

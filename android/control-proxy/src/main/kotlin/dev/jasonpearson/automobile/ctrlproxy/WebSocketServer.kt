@@ -41,6 +41,15 @@ class WebSocketServer(
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
+    private val inboundTypePattern = Regex("[a-z_]+")
+    private val inboundLogSink =
+      object : InboundLogSink {
+        override fun isDebugEnabled(): Boolean = Log.isLoggable(TAG, Log.DEBUG)
+
+        override fun debug(message: String) {
+          Log.d(TAG, message)
+        }
+      }
     private const val MAX_START_ATTEMPTS = 5
     private const val START_RETRY_BASE_DELAY_MS = 250L
     private const val CONNECTOR_RESOLVE_TIMEOUT_MS = 2_000L
@@ -140,10 +149,23 @@ class WebSocketServer(
       }
 
     /** Log only the protocol type and length, never free-form request fields. */
-    internal fun inboundFrameLogLine(connectionId: Int, raw: String): String {
+    internal fun inboundFrameLogLine(
+      connectionId: Int,
+      raw: String,
+      frameBytes: ByteArray = raw.toByteArray(Charsets.UTF_8),
+    ): String {
       val type =
-        extractStringField(raw, "type")?.takeIf { it.matches(Regex("[a-z_]+")) } ?: "unknown"
+        InboundFrameHeader.peek(frameBytes, validateObject = true).type?.takeIf {
+          it.matches(inboundTypePattern)
+        } ?: "unknown"
       return "Received from client #$connectionId: type=$type length=${raw.length}"
+    }
+
+    internal fun logInboundFrame(
+      sink: InboundLogSink = inboundLogSink,
+      buildLine: () -> String,
+    ) {
+      if (sink.isDebugEnabled()) sink.debug(buildLine())
     }
 
     /** Substring every correlated frame carries; passive event frames omit it. */
@@ -300,6 +322,12 @@ class WebSocketServer(
       findPath(lenientJson.parseToJsonElement(raw), "$")
     }
       .getOrNull()
+  }
+
+  internal interface InboundLogSink {
+    fun isDebugEnabled(): Boolean
+
+    fun debug(message: String)
   }
 
   internal fun supportedCommands(): List<String> = buildList {
@@ -1224,7 +1252,7 @@ class WebSocketServer(
     val rejection = options.inboundFrameLimits.check(frame.data)
     if (rejection == null) {
       val text = frame.readText()
-      Log.d(TAG, inboundFrameLogLine(connectionId, text))
+      logInboundFrame { inboundFrameLogLine(connectionId, text, frame.data) }
       handleClientMessage(text, connection)
       return
     }

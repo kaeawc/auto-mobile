@@ -1,3 +1,5 @@
+import { resolveJsonSchemaReference } from "./jsonSchemaReferences";
+
 /**
  * Honest-by-default advertisement of the `bounds` output shape (issue #2990).
  *
@@ -37,14 +39,17 @@ export function advertiseBoundsForCompact(schema: unknown, compactEnabled: boole
   if (compactEnabled) {
     return schema;
   }
-  return collapseBoundsUnions(schema);
+  return collapseBoundsUnions(schema, schema as Record<string, unknown>);
 }
 
-function collapseBoundsUnions(node: Record<string, unknown>): Record<string, unknown>;
-function collapseBoundsUnions(node: unknown): unknown;
-function collapseBoundsUnions(node: unknown): unknown {
+function collapseBoundsUnions(
+  node: Record<string, unknown>,
+  root: Record<string, unknown>,
+): Record<string, unknown>;
+function collapseBoundsUnions(node: unknown, root: Record<string, unknown>): unknown;
+function collapseBoundsUnions(node: unknown, root: Record<string, unknown>): unknown {
   if (Array.isArray(node)) {
-    return node.map(collapseBoundsUnions);
+    return node.map((child) => collapseBoundsUnions(child, root));
   }
   if (!node || typeof node !== "object") {
     return node;
@@ -57,20 +62,26 @@ function collapseBoundsUnions(node: unknown): unknown {
     typeof obj.description === "string" &&
     obj.description.startsWith(BOUNDS_UNION_DESCRIPTION_PREFIX)
   ) {
-    const objectArm = anyOf.find(
-      (arm): arm is Record<string, unknown> =>
-        !!arm && typeof arm === "object" && (arm as Record<string, unknown>).type === "object",
-    );
+    const objectArm = anyOf
+      .map((arm) =>
+        arm && typeof arm === "object" && !Array.isArray(arm)
+          ? resolveJsonSchemaReference(root, arm as Record<string, unknown>)
+          : arm,
+      )
+      .find(
+        (arm): arm is Record<string, unknown> =>
+          !!arm && typeof arm === "object" && (arm as Record<string, unknown>).type === "object",
+      );
     if (objectArm) {
       // Keep the union's description (it names the tuple order + enabling flag) so
       // the object-only advertisement still documents the compact form in prose.
-      return { ...collapseBoundsUnions(objectArm), description: obj.description };
+      return { ...collapseBoundsUnions(objectArm, root), description: obj.description };
     }
   }
 
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    out[key] = collapseBoundsUnions(value);
+    out[key] = collapseBoundsUnions(value, root);
   }
   return out;
 }

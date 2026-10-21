@@ -38,7 +38,7 @@ import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
  * all the field names live — is built by the production `buildNetworkMockRules`.
  */
 
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
@@ -162,19 +162,12 @@ async function withClient(
     },
     h.context.timer,
   );
-  const gate = spyOn(client.getSdkCapabilityTestHooks(), "sdkCapabilityGate").mockResolvedValue(
-    null,
-  );
-  const send = spyOn(client, "sendMessage").mockImplementation((data) => {
+  client.getSdkCapabilityTestHooks().sdkCapabilityGate = async () => null;
+  client.sendMessage = (data) => {
     h.sent.push(data);
     return true;
-  });
-  try {
-    return await invoke(client);
-  } finally {
-    gate.mockRestore();
-    send.mockRestore();
-  }
+  };
+  return await invoke(client);
 }
 
 const SNAPSHOT_SPECS: SnapshotSpec[] = [

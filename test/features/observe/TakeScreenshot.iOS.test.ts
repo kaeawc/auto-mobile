@@ -265,7 +265,7 @@ function screenshotClient(
     },
     new FakeTimer(),
   );
-  spyOn(client, "ensureConnected").mockImplementation(stub.ensureConnected);
-  spyOn(client, "requestScreenshot").mockImplementation(stub.requestScreenshot);
+  client.ensureConnected = stub.ensureConnected;
+  client.requestScreenshot = stub.requestScreenshot;
   return client;
 }

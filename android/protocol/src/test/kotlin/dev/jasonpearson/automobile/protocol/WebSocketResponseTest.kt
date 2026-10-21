@@ -247,8 +247,11 @@ class WebSocketResponseTest : WebSocketResponseTestSupport() {
     val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
 
     assertTrue(encoded.contains(""""type":"hierarchy_update""""))
-    assertTrue(encoded.contains(""""data":"{\"nodes\":[]}""""))
-    assertTrue(encoded.contains(""""perfTiming":"{\"total\":50}""""))
+    // The service embeds both as JSON objects, not quoted strings (#11877).
+    assertTrue(encoded.contains(""""data":{"nodes":[]}"""), encoded)
+    assertTrue(encoded.contains(""""perfTiming":{"total":50}"""), encoded)
+    val decoded = json.decodeFromString(WebSocketResponse.serializer(), encoded)
+    assertEquals(response, decoded)
     assertTrue(encoded.contains("\"requestId\":null"), encoded)
   }
 

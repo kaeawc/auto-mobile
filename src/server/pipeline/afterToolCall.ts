@@ -35,6 +35,7 @@ import { isClientCancelled } from "../../utils/AbortContext";
 import { deleteInternalToolParams } from "../../daemon/constants";
 import type { ToolTraits } from "../toolRegistry";
 import { isRecord } from "./isRecord";
+import { redactToolSecrets } from "../../utils/redactToolSecrets";
 
 interface AfterToolCallInput {
   name: string;
@@ -362,7 +363,7 @@ function recordCompletedToolCall(
 ) {
   const { args, name, toolStartMs, traits } = input;
   const { durationMs, toolSuccess, toolError } = result;
-  const telemetryArgs = { ...args };
+  const telemetryArgs: Record<string, unknown> = { ...args };
   deleteInternalToolParams(telemetryArgs);
   TelemetryRecorder.getInstance().recordToolCallEvent({
     timestamp: toolStartMs,
@@ -370,7 +371,8 @@ function recordCompletedToolCall(
     durationMs,
     success: toolSuccess,
     error: toolError,
-    args: typeof args === "object" ? telemetryArgs : null,
+    // Telemetry leaves the process (IDE socket): credentials never ride along.
+    args: typeof args === "object" ? redactToolSecrets(name, telemetryArgs) : null,
   });
 
   if (toolSuccess) {

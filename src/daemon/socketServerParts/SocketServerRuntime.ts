@@ -10,13 +10,13 @@ import { GestureOwnershipRegistry } from "../gestureOwnership";
 import { errorMessage } from "../../utils/describeUnknownError";
 
 import { DaemonRequest, SessionContext, type DaemonOptions } from "../types";
-import { SOCKET_PATH, DAEMON_HANDSHAKE_ENABLED, DAEMON_VERSION } from "../constants";
+import { SOCKET_PATH, DAEMON_HANDSHAKE_ENABLED } from "../constants";
 
 import { type DaemonSocketReachabilityLike } from "../daemonSocketReachability";
 
 import { type DaemonSelfIdentity } from "../daemonHandshake";
 
-import { getCurrentBuildIdentity } from "../buildIdentity";
+import { liveDaemonIdentity } from "../buildIdentity";
 import { defaultDaemonContext } from "../daemonContext";
 
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -300,10 +300,7 @@ export class SocketServerRuntime {
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
-    this.daemonIdentity = handshakeConfig.identity ?? {
-      version: DAEMON_VERSION,
-      build: getCurrentBuildIdentity(),
-    };
+    this.daemonIdentity = handshakeConfig.identity ?? liveDaemonIdentity();
     this.identityStartedAt = resolveIdentityStartedAt(
       handshakeConfig.identityStartedAt,
       this.timer,

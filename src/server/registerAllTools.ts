@@ -18,6 +18,7 @@ import { registerSnapshotTools } from "./snapshotTools";
 import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
+import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
 import {
@@ -85,6 +86,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSnapshotOfTools();
   registerBiometricTools();
   registerTelephonyTools();
+  registerWindowModeTools();
   registerHighlightTools();
   registerPrototypeTools({
     agentConnections: new CompositePrototypeAgentConnections(

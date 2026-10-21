@@ -22,6 +22,7 @@ test/contracts/daemonClient.integration.test.ts | safe | fake versus real Daemon
 test/contracts/deviceResourceApplicationStore.integration.test.ts | safe | fake versus real DeviceResourceApplicationRepository over createTestDatabase in-memory L8
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
+test/contracts/hostBootAdmissionRegistry.integration.test.ts | safe | fake versus real FileHostBootAdmissionRegistry over a private mkdtemp directory removed afterwards, injected liveness and FakeTimer L36
 test/contracts/imageBackend.integration.test.ts | safe | fake versus real JimpBackend and SharpBackend decoding a repo PNG fixture, no writes L9
 test/contracts/lockFileSystem.integration.test.ts | safe | fake versus nodeLockFileSystem over a private mkdtemp directory removed afterwards
 test/contracts/mcpTaskStore.integration.test.ts | safe | fake versus real McpTaskRepository over createTestDatabase in-memory with FakeTimer L12
@@ -53,6 +54,7 @@ test/daemon/integration/startupOptionReconciliation.integration.test.ts | safe |
 test/daemon/integration/versionMismatchRestart.integration.test.ts | unsafe | real DaemonManager L56 with no fake spawner, process table or signaler
 test/daemon/mcpForwardByteParity.integration.test.ts | safe | tmpdir socket L185, loopback ephemeral port L181, hermetic fixture device boundary
 test/daemon/sessionBroker/brokerRestartHandoff.integration.test.ts | safe | :memory: binding registry and createTestDatabase in-memory DB, FakeNativePort and FakeTimer, no processes or host tooling
+test/daemon/sessionBroker/brokerTiming.integration.test.ts | safe | private file-backed registry temp directory, FakeNativePort and FakeTimer, no processes or host tooling
 test/daemon/sessionBroker/exports.integration.test.ts | safe | file-backed registry in tracked harness temp directory with FakeNativePort and FakeTimer
 test/daemon/sessionBroker/provisioning/bindingRegistryAbsence.integration.test.ts | safe | temp-dir SQLite via bindFileBackedDbHarness L18, FakeTimer
 test/daemon/sessionBroker/provisioning/simctlCatalog.integration.test.ts | safe | real resolver and SimCtlClient over injected exec seam and FakeTimer; no host commands

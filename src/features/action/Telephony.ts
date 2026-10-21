@@ -1,4 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import {
+  defaultDeviceTraits,
+  type DeviceTraits,
+} from "../../utils/android-cmdline-tools/deviceTraits";
 import { BootedDevice, PhoneCallAction, PhoneCallResult, SendSmsResult } from "../../models";
 import {
   EmulatorConsoleClient,
@@ -56,6 +60,7 @@ export class Telephony {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     private readonly consoleFactory: EmulatorConsoleClientFactory = defaultEmulatorConsoleClientFactory,
     private readonly iosSdkTriggers: IosSdkTriggerSenderFactory = defaultIosSdkTriggerSenderFactory,
+    private readonly deviceTraits: DeviceTraits = defaultDeviceTraits,
   ) {
     if (
       adbFactoryOrExecutor &&
@@ -297,8 +302,8 @@ export class Telephony {
 
   private async isEmulator(): Promise<boolean> {
     try {
-      const result = await this.adb.executeCommand("shell getprop ro.kernel.qemu");
-      return result.stdout.trim() === "1";
+      const traits = await this.deviceTraits.read(this.adb, this.device.deviceId);
+      return traits.isEmulator === true;
     } catch (error) {
       logger.warn(
         `Telephony: failed to probe emulator state for ${this.device.deviceId}: ${error}`,

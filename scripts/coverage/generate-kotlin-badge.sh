@@ -18,6 +18,7 @@ JVM_MODULES=(
 
 ANDROID_MODULES=(
   "control-proxy"
+  "prototype-compose"
   "auto-mobile-sdk"
 )
 

@@ -17,6 +17,7 @@ fun interface PrototypeEscapeScheduler {
 @InternalAutoMobilePrototypeApi
 data class PrototypeEscapePointer(val id: Int, val x: Float, val y: Float)
 
+@InternalAutoMobilePrototypeApi
 enum class PrototypeEscapeAction {
   DOWN,
   POINTER_DOWN,

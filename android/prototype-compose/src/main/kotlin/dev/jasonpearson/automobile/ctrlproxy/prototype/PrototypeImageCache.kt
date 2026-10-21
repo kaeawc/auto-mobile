@@ -21,6 +21,7 @@ interface PrototypeDecodedImage {
 @InternalAutoMobilePrototypeApi data class PrototypeImageTarget(val widthPx: Int, val heightPx: Int)
 
 /** Decodes encoded PNG/JPEG/WebP bytes, or returns null when they cannot be decoded. */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeImageDecoder {
   /** Blocking and heavy: always called off the main thread. */
   fun decode(bytes: ByteArray, target: PrototypeImageTarget): PrototypeDecodedImage?

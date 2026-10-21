@@ -9,7 +9,7 @@ import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
-import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
+import { type BuildIdentity, liveDaemonIdentity } from "./buildIdentity";
 import { serializeRequestFrame } from "./clientFrameSerialization";
 import { handleInboundLine } from "./clientInboundFrames";
 import { overflowingResponseId } from "./clientInboundOverflow";
@@ -31,7 +31,8 @@ import {
   CONNECTION_TIMEOUT_MS,
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-  DAEMON_VERSION,
+  resolveDaemonVersion,
+  syncSettledDaemonVersion,
   SOCKET_PATH,
 } from "./constants";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
@@ -157,13 +158,8 @@ export class DaemonClient {
     connectionTimeout: number = CONNECTION_TIMEOUT_MS,
     timer: Timer = defaultTimer,
     recoveryOptions: DaemonClientRecoveryOptions = {},
-    // `null` opts out of the handshake so the daemon treats this client as legacy and never gates
-    // it — used by diagnostics (doctor) that must reach even a wrong-build daemon to report it,
-    // without triggering a restart. Defaults to this process's real version/build identity.
-    clientIdentity: { version: string; build: BuildIdentity } | null = {
-      version: DAEMON_VERSION,
-      build: getCurrentBuildIdentity(),
-    },
+    // `null` = no handshake, so doctor reaches a wrong-build daemon ungated; omitted = live identity.
+    clientIdentity?: { version: string; build: BuildIdentity } | null,
     {
       idGenerator = defaultIdGenerator,
       platformOverride = platform(),
@@ -180,7 +176,7 @@ export class DaemonClient {
     this.connectionTimeout = connectionTimeout;
     this.timer = timer;
     this.recoveryOptions = recoveryOptions;
-    this.clientIdentity = clientIdentity;
+    this.clientIdentity = clientIdentity === undefined ? liveDaemonIdentity() : clientIdentity;
     this.idGenerator = idGenerator;
     this.platform = platformOverride;
     this.maxInboundFrameBytes = maxInboundFrameBytes;
@@ -299,6 +295,10 @@ export class DaemonClient {
     const attempt = (async () => {
       const deadline = this.timer.now() + timeoutMs;
       try {
+        // Any client that declares an identity must declare the settled one (#14405).
+        if (this.clientIdentity !== null && !syncSettledDaemonVersion()) {
+          await resolveDaemonVersion();
+        }
         await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
       } catch (error) {
         throw this.annotateStaleSocketHint(error);

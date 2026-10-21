@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   renameSync,
+  linkSync,
   rmSync,
   statSync,
   unlinkSync,
@@ -134,6 +135,12 @@ describe("BaseSocketServer bind guard", () => {
           remove: () => {
             throw new Error("conflict must not remove");
           },
+          rename: () => {
+            throw new Error("conflict must not rename");
+          },
+          link: () => {
+            throw new Error("conflict must not link");
+          },
         },
         processes,
       );
@@ -158,6 +165,8 @@ describe("BaseSocketServer bind guard", () => {
         lstat: () => ({ isFile: () => true, size: 0 }),
         stat: statSync,
         remove: unlinkSync,
+        rename: renameSync,
+        link: linkSync,
         write: () => {
           throw new Error("ENOSPC");
         },

@@ -17,6 +17,19 @@ describe("iOS observed rotation verification (#8778)", () => {
   let observe: FakeObserveScreen;
   let instanceSpy: ReturnType<typeof spyOn>;
 
+  test("restore state is unobservable and never reads defaulted Android orientation on iOS", async () => {
+    const adb = new FakeAdbExecutor();
+    const iosRotate = new Rotate(
+      { deviceId: "ios-restore", name: "iPhone", platform: "ios" },
+      adb,
+      new FakeTimer(),
+    );
+    await expect(iosRotate.getRestoreState()).rejects.toThrow(
+      "iOS rotation restore state is unobservable",
+    );
+    expect(adb.getCommandCalls()).toEqual([]);
+  });
+
   const createObserveResult = (rotation?: number, knownSize = true): ObserveResult => ({
     updatedAt: 1000,
     observationId: "test-observation",

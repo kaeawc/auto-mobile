@@ -63,6 +63,7 @@ type State = Pick<
   | "acceptingRequests"
   | "idGenerator"
   | "timer"
+  | "requestTimeoutEnv"
   | "sessions"
   | "clientSockets"
   | "acceptedClientConnections"
@@ -98,6 +99,7 @@ type Callbacks = Pick<
   | "forgetSocketDiscovery"
   | "clearBoundMcpClientKey"
   | "releaseDevicePoolMcpSessionBindings"
+  | "clearConnectionDevicePin"
   | "forgetLateSessionToolBindings"
   | "abortRequestControllers"
   | "writeFrameData"
@@ -241,7 +243,12 @@ export class SocketTransport {
         DAEMON_CANCEL_REQUEST_METHOD,
         DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
       ].includes(request.method);
-      const context = createRequestContext(request, sessionId, receivedAtMs);
+      const context = createRequestContext(
+        request,
+        sessionId,
+        receivedAtMs,
+        this.state.requestTimeoutEnv,
+      );
       const tracked: PendingSocketRequest = {
         id: request.id,
         sessionId,
@@ -399,6 +406,7 @@ export class SocketTransport {
     this.state.resourceSubscriptions.delete(sessionId);
     this.callbacks.clearBoundMcpClientKey(sessionId);
     this.callbacks.releaseDevicePoolMcpSessionBindings(sessionId);
+    this.callbacks.clearConnectionDevicePin(sessionId);
     this.state.daemonState.getBrokerConnectionScopes?.().unbind(sessionId);
     this.state.releaseToolCallRecording(sessionId);
     this.state.forgetSessionToolBindings(sessionId);
@@ -580,7 +588,7 @@ export class SocketTransport {
       controlFrame ||
       request.type !== "mcp_request" ||
       request.acceptsRequestBudget !== true ||
-      resolvedMs <= (request.timeoutMs ?? 0)
+      resolvedMs === request.timeoutMs
     ) {
       return;
     }

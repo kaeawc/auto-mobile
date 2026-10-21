@@ -389,6 +389,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeListItemNode ->
       copy(
+        headline = instance.interpolate(headline),
+        supporting = supporting?.let(instance::interpolate),
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,

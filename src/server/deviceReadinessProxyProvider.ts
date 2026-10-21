@@ -29,17 +29,10 @@ const realProvider: DeviceReadinessProxyDriverProvider = (device) => {
   };
 };
 
-/** Resolve the readiness driver for a device through the (possibly overridden) provider. */
+/**
+ * Resolve the readiness driver for a device through the provider. Tests replace it with
+ * `testOverrides.deviceReadinessProxyDriverProvider` (the shared preload installs a no-op).
+ */
 export function getDeviceReadinessProxyDriver(device: BootedDevice): DeviceReadinessProxyDriver {
   return (testOverrides.deviceReadinessProxyDriverProvider ?? realProvider)(device);
-}
-
-/**
- * Test seam: override the readiness driver provider process-wide. Pass `null`
- * to restore the real provider.
- */
-export function setDeviceReadinessProxyDriverProviderForTesting(
-  next: DeviceReadinessProxyDriverProvider | null,
-): void {
-  testOverrides.deviceReadinessProxyDriverProvider = next;
 }

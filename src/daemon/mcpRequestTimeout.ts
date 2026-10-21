@@ -42,6 +42,10 @@ import { logger } from "../utils/logger";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { DaemonRequest } from "./types";
 import {
+  isEnvTunableToolRequest,
+  resolveExplicitToolTimeoutOverrideMs,
+} from "./explicitToolTimeoutOverride";
+import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   DEFAULT_START_DEVICE_TIMEOUT_MS,
@@ -918,37 +922,63 @@ export function resolveMcpRequestTimeoutMs(
     request.method === "tools/call"
       ? resolveToolTimeoutFloorMs(request.params?.name, env)
       : undefined;
-  const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
-  const tapOnLongPressBudget = resolveTapOnLongPressBudgetMs(request);
-  const tapAnyLongPressBudget = resolveTapAnyLongPressBudgetMs(request);
-  const tapAnyOrdinaryTapBudget = resolveTapAnyOrdinaryTapBudgetMs(request);
+  return resolveMcpRequestTimeoutWithBounds(request, base, floor);
+}
+
+/** Share every argument-derived minimum between the client and daemon budget policies. */
+function resolveMcpRequestTimeoutWithBounds(
+  request: DaemonRequest,
+  base: number,
+  floor: number | undefined,
+): number {
   return Math.max(
     base,
     resolveArgumentBudgetToolBudgetMs(request),
     resolveExecutePlanBudgetMs(request),
     resolveTextToolBudgetMs(request, floor),
     floor ?? 0,
-    devicePreparationBudget ?? 0,
-    tapOnLongPressBudget ?? 0,
-    tapAnyLongPressBudget ?? 0,
-    tapAnyOrdinaryTapBudget ?? 0,
+    resolveDevicePreparationToolBudgetMs(request) ?? 0,
+    resolveTapOnLongPressBudgetMs(request) ?? 0,
+    resolveTapAnyLongPressBudgetMs(request) ?? 0,
+    resolveTapAnyOrdinaryTapBudgetMs(request) ?? 0,
   );
+}
+
+/**
+ * The daemon owns explicit openLink/observe budgets (#13797). Its explicit override wins;
+ * otherwise a client's explicit override replaces the daemon's default floor. Generic client
+ * timeouts cannot floor either choice, but argument-derived correctness budgets still apply.
+ */
+export function resolveDaemonMcpRequestTimeoutMs(
+  request: DaemonRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  if (!isEnvTunableToolRequest(request)) {
+    return resolveMcpRequestTimeoutMs(request, env);
+  }
+  const chosen =
+    clampCallerMcpRequestTimeoutMs(resolveExplicitToolTimeoutOverrideMs(request, env)) ??
+    clampCallerMcpRequestTimeoutMs(request.requestedTimeoutMs);
+  return chosen === undefined
+    ? resolveMcpRequestTimeoutMs(request, env)
+    : resolveMcpRequestTimeoutWithBounds(request, DEFAULT_MCP_REQUEST_TIMEOUT_MS, chosen);
 }
 
 const resolvedTimeouts = new WeakMap<DaemonRequest, number>();
 
 /**
- * {@link resolveMcpRequestTimeoutMs} once per request object (#11817). The control socket asks for
- * the budget at frame parse, at admission and again inside each input handler; for `executePlan`
- * that is a YAML parse of the plan each time. The frame is immutable once parsed, so the first
- * answer holds for every later reader of the same request.
+ * Cache the daemon budget once per immutable request (#11817), including its environment.
+ * Frame parse, admission and input handlers share the answer; executePlan's YAML is parsed once.
  */
-export function resolveMcpRequestTimeoutMsOnce(request: DaemonRequest): number {
+export function resolveMcpRequestTimeoutMsOnce(
+  request: DaemonRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
   const known = resolvedTimeouts.get(request);
   if (known !== undefined) {
     return known;
   }
-  const resolved = resolveMcpRequestTimeoutMs(request);
+  const resolved = resolveDaemonMcpRequestTimeoutMs(request, env);
   resolvedTimeouts.set(request, resolved);
   return resolved;
 }

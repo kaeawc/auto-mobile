@@ -1,3 +1,4 @@
+import type { ActionCall } from "./ActionCall";
 import {
   type AppendTextFailureSource,
   BootedDevice,
@@ -45,6 +46,16 @@ export { type TextInputTargetFocuser, type TextInputTargetSelector } from "./Tex
 export const KEY_EVENT_SETTLE_MS = 100;
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "append";
+
+/** Named `InputText.execute` options; the request-scoped signal travels on the {@link ActionCall} (#11835). */
+export interface InputTextOptions {
+  imeAction?: ImeAction;
+  dismissKeyboard?: boolean;
+  /** Android input mode; unset lets event-all markers auto-promote. Ignored on iOS. */
+  mode?: InputTextMode;
+  /** Focus this field before typing. */
+  selector?: TextInputTargetSelector;
+}
 
 /**
  * Runs once, immediately before the append's FIRST key event, to confirm the
@@ -99,6 +110,13 @@ export interface InputTextTestHooks {
   ) => ReturnType<typeof executeIosTextInput>;
 }
 
+function inputTextArgs(
+  options: InputTextOptions = {},
+  call: ActionCall = {},
+): InputTextOptions & { dismissKeyboard: boolean; signal?: AbortSignal } {
+  return { ...options, dismissKeyboard: options.dismissKeyboard ?? false, signal: call.signal };
+}
+
 export class InputText extends BaseVisualChange {
   private androidApiLevel: number | undefined;
   private targetFocuser: TextInputTargetFocuser;
@@ -132,12 +150,10 @@ export class InputText extends BaseVisualChange {
 
   async execute(
     text: string | null | undefined,
-    imeAction?: ImeAction,
-    dismissKeyboard: boolean = false,
-    mode?: InputTextMode,
-    signal?: AbortSignal,
-    selector?: TextInputTargetSelector,
+    options?: InputTextOptions,
+    call?: ActionCall,
   ): Promise<SendTextResult & { method?: InputTextMode; retryable?: false }> {
+    const { imeAction, dismissKeyboard, mode, selector, signal } = inputTextArgs(options, call);
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
 

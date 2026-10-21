@@ -8,7 +8,11 @@ import { logger } from "../../utils/logger";
 
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
-import { DAEMON_SHUTTING_DOWN_ERROR_MESSAGE } from "../constants";
+import {
+  DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+  resolveDaemonVersion,
+  syncSettledDaemonVersion,
+} from "../constants";
 
 import { daemonShuttingDownFailure, daemonShuttingDownFrameFields } from "../daemonShutdownOutcome";
 
@@ -92,6 +96,9 @@ export class SocketLifecycle {
    */
   async start(): Promise<void> {
     this.callbacks.beginAccepting();
+    if (!syncSettledDaemonVersion()) {
+      await resolveDaemonVersion();
+    }
     // Owner-only (0o700) socket directory so the control socket is not
     // world-traversable. On macOS socket-file permission bits are not reliably
     // enforced on connect(), so the containing directory's mode is the primary

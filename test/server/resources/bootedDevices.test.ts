@@ -69,6 +69,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { resolveApkChecksum, resolveIpaChecksum } from "../../../src/constants/release";
 import { z } from "zod/v4";
 import { FakeOrientationReader } from "../../fakes/FakeOrientationReader";
+import { FakeDeviceTraits, androidDeviceTraits } from "../../fakes/FakeDeviceTraits";
 import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 import { notifyDeviceImageResourcesUpdated } from "../../../src/server/deviceImageResources";
 import type { IosLockStateProbe } from "../../../src/features/observe/ios/IosLockStateProbe";
@@ -91,6 +92,11 @@ function useOrientationReaderFactory(
   value: BootedDeviceResourceDependencies["injectedOrientationReaderFactory"] | null,
 ): void {
   deps = { ...deps, injectedOrientationReaderFactory: value ?? undefined };
+  registerBootedDeviceResources(deps);
+}
+
+function useDeviceTraits(value: BootedDeviceResourceDependencies["injectedDeviceTraits"]): void {
+  deps = { ...deps, injectedDeviceTraits: value ?? undefined };
   registerBootedDeviceResources(deps);
 }
 
@@ -160,6 +166,7 @@ describe("MCP Booted Device Resources", () => {
     setDeviceLockProbe(null);
     setIosLockStateProbe(null);
     useOrientationReaderFactory(null);
+    useDeviceTraits(null);
     resetBootedDevicesResourceCache();
   });
 
@@ -940,6 +947,30 @@ describe("MCP Booted Device Resources", () => {
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
 
       expect(data.devices[0].runtime.orientation).toBe("landscape");
+    });
+
+    test("includes manufacturer and brand from the injected DeviceTraits", async function () {
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      const traits = new FakeDeviceTraits(
+        androidDeviceTraits({ manufacturer: "samsung", brand: "samsung", model: "SM-S921B" }),
+      );
+      useDeviceTraits(traits);
+
+      const { client } = fixture.getContext();
+      const result = await client.request(
+        { method: "resources/read", params: { uri: "automobile:devices/booted/android" } },
+        z.object({ contents: z.array(z.object({ text: z.string() })) }),
+      );
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
+
+      expect(data.devices[0].traits).toEqual({
+        manufacturer: "samsung",
+        brand: "samsung",
+        model: "SM-S921B",
+        sdk: 35,
+        abi: "arm64-v8a",
+      });
+      expect(traits.reads.map((read) => read.deviceId)).toEqual([mockAndroidDevice1.deviceId]);
     });
 
     test("omits lock state for a device the probe cannot read", async function () {

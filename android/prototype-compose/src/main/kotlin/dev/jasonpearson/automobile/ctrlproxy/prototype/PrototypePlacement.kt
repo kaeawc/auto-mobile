@@ -6,6 +6,7 @@ import android.view.WindowManager
 import androidx.compose.ui.graphics.Color
 import dev.jasonpearson.automobile.protocol.PrototypeModeValue
 
+@InternalAutoMobilePrototypeApi
 sealed interface PrototypePlacement {
   /**
    * [scrim] is the literal colour of a single hex scrim. [scrimSpec] is the authored slot, which
@@ -45,6 +46,7 @@ sealed interface PrototypePlacement {
  * app; it needs SYSTEM_ALERT_WINDOW, which the controller checks before showing.
  */
 @SuppressLint("InlinedApi") // APP is only requested on API 26+; the controller refuses it below.
+@InternalAutoMobilePrototypeApi
 enum class PrototypeWindowLayer(val windowType: Int) {
   SYSTEM(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY),
   APP(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);

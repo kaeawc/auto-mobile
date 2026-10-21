@@ -155,8 +155,14 @@ export const resolveMcpServerVersion = (deps: McpVersionDeps): string => {
 };
 
 /** Cache the startup stamp and refine tracked edits once, off the startup path. */
-export const createMcpVersionResolver = (deps: McpVersionResolverDeps): { current(): string } => {
+export const createMcpVersionResolver = (
+  deps: McpVersionResolverDeps,
+): { current(): string; isSettled(): boolean; resolveSettled(): Promise<string> } => {
   let cachedVersion: string | null = null;
+  let refine: (() => Promise<void>) | undefined;
+  let refinement: Promise<void> | undefined;
+  let refined = false;
+  const startRefinement = (): Promise<void> => (refinement ??= refine?.() ?? Promise.resolve());
   return {
     current() {
       if (cachedVersion !== null) {
@@ -171,7 +177,7 @@ export const createMcpVersionResolver = (deps: McpVersionResolverDeps): { curren
       const git = base === "unknown" ? null : deps.readGitVersion();
       cachedVersion = formatMcpServerVersion(base, git);
       if (git) {
-        const refine = async (): Promise<void> => {
+        refine = async (): Promise<void> => {
           try {
             const state = await deps.readDirtyState();
             if (state?.dirty) {
@@ -179,18 +185,32 @@ export const createMcpVersionResolver = (deps: McpVersionResolverDeps): { curren
             }
           } catch (error) {
             logger.warn("Background git dirty-state resolution failed", error);
+          } finally {
+            refined = true;
           }
         };
-        deps.timer.setTimeout(() => void refine(), 0);
+        deps.timer.setTimeout(() => void startRefinement(), 0);
       }
       return cachedVersion;
+    },
+    /** True once current() can no longer change: no refinement is due, or it has finished. */
+    isSettled() {
+      this.current();
+      return refine === undefined || refined;
+    },
+    async resolveSettled() {
+      this.current();
+      // Explicit identity consumers cannot rely on an unref'ed timer keeping the
+      // process alive. Start (or join) the same asynchronous probe immediately.
+      await startRefinement();
+      return this.current();
     },
   };
 };
 
 let resolver: ReturnType<typeof createMcpVersionResolver> | undefined;
 
-export const getMcpServerVersion = (): string => {
+const getResolver = (): ReturnType<typeof createMcpVersionResolver> => {
   resolver ??= createMcpVersionResolver({
     env: {
       MCP_SERVER_VERSION: readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION),
@@ -208,5 +228,13 @@ export const getMcpServerVersion = (): string => {
       },
     },
   });
-  return resolver.current();
+  return resolver;
 };
+
+export const getMcpServerVersion = (): string => getResolver().current();
+
+/** Whether {@link getMcpServerVersion} already returns its final (dirty-aware) value. */
+export const isMcpServerVersionSettled = (): boolean => getResolver().isSettled();
+
+/** Await the same one-shot refinement used by normal background discovery. */
+export const getSettledMcpServerVersion = (): Promise<string> => getResolver().resolveSettled();

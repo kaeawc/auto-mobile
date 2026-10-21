@@ -28,12 +28,16 @@ actor SdkEndpointResolver {
     private var lastForegroundBundle: String?
     private var warnedAboutLegacy = false
 
+    /// Failed discovery costs 7–9 loopback probes. Verify 20261021a observed a 4 s
+    /// agent cadence, so the default 30 s negative window covers about seven observes.
+    /// Lifecycle and foreground-bundle changes invalidate it immediately; an SDK app
+    /// started outside the runner without a bundle change has at most 30 s of staleness.
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         healthTransport: any HTTPRequesting,
         legacyPort: UInt16 = 8766,
         now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        negativeTTL: TimeInterval = 3,
+        negativeTTL: TimeInterval = 30,
         warning: @escaping @Sendable (String) -> Void = {
             Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkEndpointResolver")
                 .warning("\($0, privacy: .public)")
@@ -102,6 +106,11 @@ actor SdkEndpointResolver {
     func noteForegroundBundle(_ bundleId: String?) {
         guard bundleId != lastForegroundBundle else { return }
         lastForegroundBundle = bundleId
+        negativeUntil = nil
+    }
+
+    /// Runner-managed app lifecycle changes may expose an SDK in the same bundle.
+    func noteAppLifecycleEvent() {
         negativeUntil = nil
     }
 

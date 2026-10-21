@@ -10,6 +10,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import {
   getHierarchyRoots,
+  hasIosCoverSheetNotificationCenter,
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
   traverseForHint,
@@ -28,6 +29,7 @@ export interface IosGestureResult {
 }
 
 export interface IosNotificationUIDetectorDeps {
+  pressHome?(): Promise<IosGestureResult>;
   requestSwipe(
     x1: number,
     y1: number,
@@ -49,10 +51,9 @@ const IOS_CLOSE_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS;
  * observation's `packageName` containing "springboard" before scanning
  * for legacy NotificationCenter hints or the captured cover-sheet list structure.
  *
- * Expand and collapse are vertical swipes anchored at the screen's
- * mid-X. The detector requires the caller to pass the most recent
- * observation so it can read `screenSize` — without dimensions there
- * is no safe gesture path on iOS and the operation aborts.
+ * Expand and legacy collapse use vertical swipes anchored at the screen's
+ * mid-X and require `screenSize` from the most recent observation. The iOS 27
+ * cover sheet collapses via HOME instead and does not require dimensions.
  */
 export class IosNotificationUIDetector implements NotificationUIDetector {
   readonly device: BootedDevice;
@@ -88,6 +89,17 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
   }
 
   async collapseTray(observation?: ObserveResult): Promise<void> {
+    if (
+      observation?.viewHierarchy &&
+      hasIosCoverSheetNotificationCenter(observation.viewHierarchy)
+    ) {
+      if (!this.deps.pressHome) {
+        throw new ActionableError("Failed to close Notification Center: home press unavailable");
+      }
+      const result = await this.deps.pressHome();
+      this.requireGestureSuccess(result, "close Notification Center");
+      return;
+    }
     const { width, height } = this.requireScreenSize(observation, "close");
     const result = await this.deps.requestSwipe(
       Math.floor(width * 0.5),

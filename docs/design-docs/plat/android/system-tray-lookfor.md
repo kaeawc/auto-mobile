@@ -103,11 +103,18 @@ and one observe. iOS is unchanged.
 Android `clearAll` expands collapsed groups before swiping individual rows and
 verifies each dismissal. If a post-swipe read finds the shade closed, it reopens
 the shade before another fresh read, throttled to once per second within the
-shared clear deadline. An unreadable shade or a read/reopen timeout after a
+current notification's deadline. An unreadable shade or a read/reopen timeout after a
 swipe returns a partial result with `stalled: true` and a separate `swipeCount`;
 unverified swipes do not count as dismissals. App-filtered `dismissedCount`
 continues to use the before/after notification inventory. Cancellation still
 aborts the operation, and an unreadable shade before any swipe remains an error.
+
+The initial shade read uses the initial `awaitTimeout` budget. Each verified
+dismissal starts a fresh per-notification budget for expansion, swiping and
+verification, so a progressing drain can exceed `awaitTimeout` overall. A row
+that does not leave within its budget stalls the drain without another swipe on
+that row; the inventory swipe limit, 25-swipe safety cap and cancellation still
+bound the operation.
 
 ## Android implementation
 

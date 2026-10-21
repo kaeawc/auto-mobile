@@ -3,13 +3,17 @@ import {
   MALFORMED_MCP_BUDGETS,
 } from "../helpers/mcpArgumentBudgetCases";
 import { describe, expect, spyOn, test, beforeEach } from "bun:test";
+import { getEventListeners } from "node:events";
 import { Duplex } from "node:stream";
 import {
   DaemonClient,
   DaemonUnavailableError,
   DAEMON_RESPONSE_GRACE_MS,
 } from "../../src/daemon/client";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { pushProgressNotification } from "../../src/daemon/socketServer/notificationFanOut";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { MAX_CANCELLED_REQUEST_IDS } from "../../src/daemon/clientResponseDecoding";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -63,7 +67,7 @@ function createConnectedClient(
     fakeTimer,
     ISOLATED_DAEMON_RECOVERY,
     null,
-    { env },
+    { env, idGenerator: new FakeIdGenerator() },
   );
   client.testHooks.attachSocket(socket);
   return client;
@@ -289,7 +293,10 @@ describe("DaemonClient per-request timeout", () => {
       settled = true;
     });
     try {
-      expect(socket.getWrittenMessages(daemonRequestFrameSchema)[0]?.timeoutMs).toBe(45_000);
+      expect(socket.getWrittenMessages(daemonRequestFrameSchema)[0]).toMatchObject({
+        timeoutMs: 45_000,
+        requestedTimeoutMs: 45_000,
+      });
       fakeTimer.advanceTime(45_000 + DAEMON_RESPONSE_GRACE_MS - 1);
       await Promise.resolve();
       expect(settled).toBe(false);
@@ -315,6 +322,9 @@ describe("DaemonClient per-request timeout", () => {
       const result = client.callTool(tool, {}).catch((error: unknown) => error);
       try {
         expect(socket.getWrittenMessages(daemonRequestFrameSchema)[0]?.timeoutMs).toBe(120_000);
+        expect(socket.getWrittenMessages(daemonRequestFrameSchema)[0]).not.toHaveProperty(
+          "requestedTimeoutMs",
+        );
         expect(fakeTimer.getPendingTimeouts()).toEqual([120_000 + DAEMON_RESPONSE_GRACE_MS]);
       } finally {
         await client.close();
@@ -948,12 +958,11 @@ test("client sends observe's legacy nested alias budget", async () => {
   );
 });
 
-describe("DaemonClient lengthens its backstop to the daemon's resolved budget (#13797)", () => {
+describe("DaemonClient adopts the daemon budget for its backstop to the daemon's resolved budget (#13797)", () => {
   function setup() {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
-    client.testHooks.attachSocket(socket);
+    const client = createConnectedClient(timer, 1000, {}, socket);
     const notifyBudget = (requestId: string, timeoutMs: number) =>
       client.testHooks.simulateIncomingData(
         Buffer.from(
@@ -1005,20 +1014,124 @@ describe("DaemonClient lengthens its backstop to the daemon's resolved budget (#
     }
   });
 
-  test("a smaller or equal budget never shortens the backstop", async () => {
+  test.each([false, true])(
+    "a smaller budget shortens the backstop, progress=%s",
+    async (withProgress) => {
+      const { client, timer, socket, notifyBudget } = setup();
+      const outcome = client
+        .callTool("openLink", {}, withProgress ? "short-budget" : undefined)
+        .catch((error: unknown) => error);
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+      try {
+        timer.advanceTime(10_000);
+        notifyBudget(request.id, 45_000);
+        expect(timer.getPendingTimeouts()).toEqual([35_000 + responseGraceMs]);
+        timer.advanceTime(35_000 + responseGraceMs - 1);
+        expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
+        timer.advanceTime(1);
+        expect(await outcome).toBeInstanceOf(McpTimeoutError);
+        expect(socket.getWrittenMessages(daemonRequestFrameSchema)[1]).toMatchObject({
+          method: DAEMON_CANCEL_REQUEST_METHOD,
+          params: { requestId: request.id },
+        });
+      } finally {
+        await client.close();
+        await outcome;
+      }
+    },
+  );
+
+  test("past announced deadline retains response grace with no negative delay", async () => {
     const { client, timer, socket, notifyBudget } = setup();
     const outcome = client.callTool("openLink", {}).catch((error: unknown) => error);
     const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
-    const sent = request.timeoutMs!;
     try {
-      notifyBudget(request.id, sent);
-      notifyBudget(request.id, 1);
-      timer.advanceTime(sent + responseGraceMs - 1);
+      timer.advanceTime(50_000);
+      notifyBudget(request.id, 45_000);
+      expect(timer.getPendingTimeouts()).toEqual([responseGraceMs]);
+      timer.advanceTime(responseGraceMs - 1);
       expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
       timer.advanceTime(1);
       expect(await outcome).toBeInstanceOf(McpTimeoutError);
     } finally {
       await client.close();
+      await outcome;
+    }
+  });
+
+  test("equal and invalid notices leave the existing backstop intact", async () => {
+    const { client, timer, socket, notifyBudget } = setup();
+    const outcome = client.callTool("openLink", {}).catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    try {
+      const before = timer.getPendingTimeouts();
+      for (const value of [request.timeoutMs!, 0, -1, Infinity, Number.NaN]) {
+        notifyBudget(request.id, value);
+      }
+      expect(timer.getPendingTimeouts()).toEqual(before);
+    } finally {
+      await client.close();
+      await outcome;
+    }
+  });
+
+  test("progress after shortening extends relative to the daemon budget", async () => {
+    const { client, timer, socket, notifyBudget } = setup();
+    const outcome = client
+      .callTool("openLink", {}, "short-budget")
+      .catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    const progressFromDaemon = (progress: number) =>
+      pushProgressNotification(
+        {
+          hasSocket: () => true,
+          write: (_sessionId, frame) =>
+            client.testHooks.simulateIncomingData(Buffer.from(JSON.stringify(frame) + "\n")),
+        },
+        "test-session",
+        { requestId: request.id, progressToken: "short-budget", progress },
+      );
+    try {
+      // Extend the old deadline before the announcement; adoption must replace it.
+      timer.advanceTime(20_000);
+      progressFromDaemon(1);
+      notifyBudget(request.id, 45_000);
+      timer.advanceTime(10_000);
+      progressFromDaemon(2);
+      expect(timer.getPendingTimeouts()).toEqual([45_000 + responseGraceMs]);
+      timer.advanceTime(45_000 + responseGraceMs);
+      expect(await outcome).toBeInstanceOf(McpTimeoutError);
+    } finally {
+      await client.close();
+      await outcome;
+    }
+  });
+
+  test("explicit tool overrides are clamped and never mark unrelated requests", async () => {
+    const timer = new FakeTimer();
+    const socket = new FakeSocket();
+    const client = createConnectedClient(
+      timer,
+      120_000,
+      {
+        [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: String(Number.MAX_SAFE_INTEGER),
+        [OBSERVE_MCP_TIMEOUT_ENV_VAR]: "45000",
+      },
+      socket,
+    );
+    const outcomes = [
+      client.callTool("openLink", {}),
+      client.callTool("installApp", {}),
+      client.readResource("automobile:devices/booted/android"),
+    ].map((p) => p.catch((error: unknown) => error));
+    try {
+      const frames = socket.getWrittenMessages(daemonRequestFrameSchema);
+      expect(frames[0]).toMatchObject({ requestedTimeoutMs: MAX_CALLER_MCP_REQUEST_TIMEOUT_MS });
+      expect(frames[1]).not.toHaveProperty("requestedTimeoutMs");
+      expect(frames[2]).not.toHaveProperty("requestedTimeoutMs");
+    } finally {
+      await client.close();
+      await Promise.all(outcomes);
     }
   });
 
@@ -1069,8 +1182,11 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
   function setup() {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
+    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      idGenerator: new FakeIdGenerator(),
+    });
     client.testHooks.attachSocket(socket);
+    socket.once("close", () => client.testHooks.socketClosed(socket));
     return { client, timer, socket };
   }
 
@@ -1160,4 +1276,97 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
       await client.close();
     }
   });
+
+  for (const abortMode of ["request", "connection"] as const) {
+    test(`cancelOnTimeout:false cancels after timeout with ${abortMode} abort mode`, async () => {
+      const { client, timer, socket } = setup();
+      const controller = new AbortController();
+      const outcome = client
+        .callDaemonMethod(
+          "daemon/prepareSession",
+          {},
+          {
+            timeoutMs: 5000,
+            cancelOnTimeout: false,
+            signal: controller.signal,
+            abortMode,
+          },
+        )
+        .catch((error: unknown) => error);
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+      try {
+        timer.advanceTime(request.timeoutMs! + responseGraceMs);
+        const error = await outcome;
+        expect(error).toBeInstanceOf(McpTimeoutError);
+        controller.abort(new Error("proxy closing after timeout"));
+        controller.abort();
+        const frames = socket.getWrittenMessages(daemonRequestFrameSchema);
+        expect(frames).toHaveLength(2);
+        expect(frames[1]).toMatchObject({
+          method: DAEMON_CANCEL_REQUEST_METHOD,
+          params: { requestId: request.id },
+        });
+        expect(socket.destroyed).toBe(abortMode === "connection");
+        expect(await outcome).toBe(error);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        await client.close();
+      }
+    });
+  }
+
+  for (const settlement of ["response", "socket close", "client close", "eviction"] as const) {
+    test(`cancelOnTimeout:false removes the retained abort listener on ${settlement}`, async () => {
+      const { client, timer, socket } = setup();
+      const controller = new AbortController();
+      const outcome = client
+        .callDaemonMethod(
+          "daemon/prepareSession",
+          {},
+          {
+            timeoutMs: 5000,
+            cancelOnTimeout: false,
+            signal: controller.signal,
+            abortMode: "request",
+          },
+        )
+        .catch((error: unknown) => error);
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+      try {
+        timer.advanceTime(request.timeoutMs! + responseGraceMs);
+        expect(await outcome).toBeInstanceOf(McpTimeoutError);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(1);
+        if (settlement === "response") {
+          client.testHooks.simulateIncomingData(
+            Buffer.from(
+              JSON.stringify({ id: request.id, type: "mcp_response", success: true, result: {} }) +
+                "\n",
+            ),
+          );
+        } else if (settlement === "socket close") {
+          client.testHooks.socketClosed(socket);
+          // An old signal must not cancel a request on a replacement connection.
+          client.testHooks.attachSocket(socket);
+        } else if (settlement === "client close") {
+          await client.close();
+        } else {
+          const outcomes = Array.from({ length: MAX_CANCELLED_REQUEST_IDS }, () =>
+            client
+              .callDaemonMethod("daemon/status", {}, { timeoutMs: 5000, cancelOnTimeout: false })
+              .catch((error: unknown) => error),
+          );
+          timer.advanceTime(5000 + responseGraceMs);
+          await Promise.all(outcomes);
+        }
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+        const frameCount = socket.getWrittenMessages().length;
+        controller.abort(new Error("abort after daemon settlement"));
+        expect(socket.getWrittenMessages()).toHaveLength(frameCount);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        await client.close();
+      }
+    });
+  }
 });

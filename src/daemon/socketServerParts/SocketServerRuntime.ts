@@ -10,13 +10,13 @@ import { GestureOwnershipRegistry } from "../gestureOwnership";
 import { errorMessage } from "../../utils/describeUnknownError";
 
 import { DaemonRequest, SessionContext, type DaemonOptions } from "../types";
-import { SOCKET_PATH, DAEMON_HANDSHAKE_ENABLED, DAEMON_VERSION } from "../constants";
+import { SOCKET_PATH, DAEMON_HANDSHAKE_ENABLED } from "../constants";
 
 import { type DaemonSocketReachabilityLike } from "../daemonSocketReachability";
 
 import { type DaemonSelfIdentity } from "../daemonHandshake";
 
-import { getCurrentBuildIdentity } from "../buildIdentity";
+import { liveDaemonIdentity } from "../buildIdentity";
 import { defaultDaemonContext } from "../daemonContext";
 
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -81,6 +81,9 @@ export type SocketServerConstructorArgs = [
     liveAcceptanceStartupSecret?: string;
     acceptanceDiscoveryCapability?: string;
     sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
+    /** Environment used for daemon request budgets; defaults to this process. */
+    requestTimeoutEnv?: NodeJS.ProcessEnv;
+    clearConnectionDevicePin?: (connectionId: string) => void;
     onFrameTrace?: (event: SocketFrameTraceEvent) => void;
     /**
      * Runs forwards in process (#11820). The daemon passes its own, so shutdown can close the
@@ -103,6 +106,7 @@ export class SocketServerRuntime {
   serverClosePromise: Promise<void> | null = null;
   closing = false;
   acceptingRequests = false;
+  readonly requestTimeoutEnv?: NodeJS.ProcessEnv;
   /** Largest inbound frame a control-socket peer may send; tests lower it. */
   get maxInboundFrameBytes(): number {
     return this.inboundFrameLimit();
@@ -135,6 +139,7 @@ export class SocketServerRuntime {
   sessionReleaseUnsubscribe: (() => void) | null = null;
   socketPath: string;
   daemonState: SocketDaemonStateAccess;
+  readonly clearConnectionDevicePin: ((connectionId: string) => void) | undefined;
   /**
    * The loopback MCP client that a socket transport most recently bound with a
    * device session. Follow-up requests can omit their session UUID, so reuse
@@ -267,7 +272,9 @@ export class SocketServerRuntime {
 
     this.socketPath = socketPath;
     this.daemonState = daemonState;
+    this.clearConnectionDevicePin = handshakeConfig.clearConnectionDevicePin;
     this.timer = timer;
+    this.requestTimeoutEnv = handshakeConfig.requestTimeoutEnv;
     this.onFrameTrace = handshakeConfig.onFrameTrace;
     this.mcpDispatcher =
       handshakeConfig.mcpDispatcher ??
@@ -293,10 +300,7 @@ export class SocketServerRuntime {
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
-    this.daemonIdentity = handshakeConfig.identity ?? {
-      version: DAEMON_VERSION,
-      build: getCurrentBuildIdentity(),
-    };
+    this.daemonIdentity = handshakeConfig.identity ?? liveDaemonIdentity();
     this.identityStartedAt = resolveIdentityStartedAt(
       handshakeConfig.identityStartedAt,
       this.timer,

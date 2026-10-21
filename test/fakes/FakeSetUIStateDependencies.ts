@@ -6,6 +6,7 @@ import { ClearTextResult } from "../../src/models/ClearTextResult";
 import { SwipeOnResult } from "../../src/models/SwipeOnResult";
 import { FieldType } from "../../src/models/SetUIStateResult";
 import type { ActionCall } from "../../src/features/action/ActionCall";
+import type { InputTextOptions } from "../../src/features/action/InputText";
 import {
   FieldTypeDetector,
   type FieldTypeDetection,
@@ -29,7 +30,7 @@ interface TapOnElementLike {
  * Interface for InputText dependency
  */
 interface InputTextLike {
-  execute(text: string, imeAction?: string): Promise<SendTextResult>;
+  execute(text: string, options?: InputTextOptions): Promise<SendTextResult>;
 }
 
 /**
@@ -131,8 +132,8 @@ export class FakeInputText implements InputTextLike {
   private result: SendTextResult = { success: true, text: "" };
   private resultsByText = new Map<string, SendTextResult>();
 
-  async execute(text: string, imeAction?: string): Promise<SendTextResult> {
-    this.calls.push({ text, imeAction });
+  async execute(text: string, options?: InputTextOptions): Promise<SendTextResult> {
+    this.calls.push({ text, imeAction: options?.imeAction });
     return { ...(this.resultsByText.get(text) ?? this.result), text };
   }
 

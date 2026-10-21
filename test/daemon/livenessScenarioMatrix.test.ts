@@ -14,7 +14,6 @@ import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
 } from "../../src/daemon/sessionManager";
-import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
@@ -446,7 +445,7 @@ describe("daemon release wiring (#10975)", () => {
     // The device passes to a new owner, who pins it.
     const second = await scenario.acquire();
     expect(second).not.toBe(first);
-    DeviceReadiness.getInstance().setExplicitDevicePin({
+    scenario.daemon.daemon.getDeviceReadiness().setExplicitDevicePin({
       deviceId: DEVICE_A,
       name: DEVICE_A,
       platform: "android",
@@ -457,16 +456,18 @@ describe("daemon release wiring (#10975)", () => {
       await scenario.daemon.manager.releaseSession(first, "device-killed", {
         expectedOwner: { session: captured, deviceId: DEVICE_A },
       });
-      expect(DeviceReadiness.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE_A);
+      expect(scenario.daemon.daemon.getDeviceReadiness().getExplicitDevicePin()?.deviceId).toBe(
+        DEVICE_A,
+      );
       expectHeld(second);
 
       // Released side: the successor's own idle release does clear its pin.
       expect(
         await scenario.idleUntilReleased(second, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
       ).toBeDefined();
-      expect(DeviceReadiness.getInstance().getExplicitDevicePin()).toBeUndefined();
+      expect(scenario.daemon.daemon.getDeviceReadiness().getExplicitDevicePin()).toBeUndefined();
     } finally {
-      DeviceReadiness.getInstance().clearExplicitDevicePin(DEVICE_A);
+      scenario.daemon.daemon.getDeviceReadiness().clearExplicitDevicePin(DEVICE_A);
     }
   });
 
@@ -1134,8 +1135,7 @@ describe("host appearance sync follows the session that holds the device (#8361,
     applyOnConnect: true,
   });
 
-  // #11442 o2: both target sources must name only held devices, each with its holder's session.
-  // The scheduler's own source is what a sync runs on until the daemon scopes it at startup.
+  // The daemon scopes sync to its holders. An unscoped scheduler must touch nothing (#11810).
   for (const source of ["the running daemon's scope", "the scheduler's own targets"] as const) {
     test(`two sessions with different configs and a free device, from ${source}: a tick applies each config to its holder's device only, and a freed device is left alone`, async () => {
       scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B, DEVICE_C] });
@@ -1161,7 +1161,9 @@ describe("host appearance sync follows the session that holds the device (#8361,
 
       // Held side: each held device gets its own session's mode; the free device gets nothing.
       await scheduler.trigger();
-      expect(applied.toSorted()).toEqual([`${DEVICE_A}:light`, `${DEVICE_B}:dark`]);
+      expect(applied.toSorted()).toEqual(
+        source === "the running daemon's scope" ? [`${DEVICE_A}:light`, `${DEVICE_B}:dark`] : [],
+      );
 
       // Released side: once A's session idles out, no tick re-themes its device from the global
       // config, while B's session still decides for B.
@@ -1175,7 +1177,7 @@ describe("host appearance sync follows the session that holds the device (#8361,
       configs.set(b, config("light"));
       applied.length = 0;
       await scheduler.trigger();
-      expect(applied).toEqual([`${DEVICE_B}:light`]);
+      expect(applied).toEqual(source === "the running daemon's scope" ? [`${DEVICE_B}:light`] : []);
       await scheduler.stop();
     });
   }

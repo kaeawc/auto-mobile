@@ -335,7 +335,7 @@ export const MEDIA_ENV = {
     kind: "int",
     default: "see docs",
     min: 1,
-    doc: "observe MCP request timeout in ms.",
+    doc: "observe MCP budget in ms: daemon decides; explicit client or daemon value applies; daemon wins if both set. The client connection timeout (default 120 s) is bypassed only when an explicit value is set in the client or daemon process; with neither set it still floors the budget.",
   },
   WEBRTC_STREAM_SOCKET_PATH: {
     name: "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",
@@ -346,9 +346,9 @@ export const MEDIA_ENV = {
   },
   DEBUG_PERF: {
     name: "AUTOMOBILE_DEBUG_PERF",
-    kind: "string",
+    kind: "bool",
     default: "off",
-    doc: "Enable UI performance debug tracking; exact 1 enables.",
+    doc: "Enable UI performance debug tracking (1/true).",
   },
   VIDEO_QUALITY_PRESET: {
     name: "AUTOMOBILE_VIDEO_QUALITY_PRESET",

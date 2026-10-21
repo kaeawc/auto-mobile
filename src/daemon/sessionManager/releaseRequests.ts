@@ -36,6 +36,8 @@ import {
   type SessionLifecycleSlots,
   restartRecoveryDeadlineFromPersisted,
 } from "./internalContracts";
+import type { ReleaseSessionInternalRequest } from "./releaseCommit";
+import { classifyOwnedRelease, classifyUnpublishedRelease } from "./releaseTarget";
 
 export interface SessionReleaseRequestsHost {
   readonly recoveryExpiryReleaseHandler: RecoveryExpiryReleaseHandler | undefined;
@@ -85,14 +87,7 @@ export interface SessionReleaseRequestsHost {
   sessionNow(): number;
   flushDeferredRebindCleanups(filter?: { sessionId?: string; deviceId?: string }): void;
   finishReleaseForcedBeforeStart(session: Session): Promise<null>;
-  releaseSessionInternal(
-    sessionId: string,
-    session: Session,
-    reason: ReleaseReasonState,
-    shouldCommit: ReleaseCommitFence | undefined,
-    options: SessionReleaseOptions,
-    operation?: SessionReleaseOperation,
-  ): Promise<string | null>;
+  releaseSessionInternal(request: ReleaseSessionInternalRequest): Promise<string | null>;
   finishIdentityReplacedRelease(release: SessionReleaseOperation): void;
   releaseSession(
     sessionId: string,
@@ -244,14 +239,14 @@ export class SessionReleaseRequests {
       this.host.flushDeferredRebindCleanups({ sessionId });
       return release.forced
         ? this.host.finishReleaseForcedBeforeStart(session)
-        : this.host.releaseSessionInternal(
+        : this.host.releaseSessionInternal({
             sessionId,
             session,
             reason,
             shouldCommit,
-            release.options,
-            release,
-          );
+            options: release.options,
+            operation: release,
+          });
     };
     try {
       release.promise = this.startReleaseWithDeviceHold(release, hold, pendingRebind, run);
@@ -363,35 +358,24 @@ export class SessionReleaseRequests {
     releaseReason: SessionReleaseReason = "explicit-release",
     request: ReleaseSessionRequest = {},
   ): Promise<string | null> {
-    const session = this.host.sessions.get(sessionId);
-    if (session === expectedSession && session.assignedDevice === expectedDeviceId) {
-      return await this.host.releaseSession(sessionId, releaseReason, request);
-    }
-    if (session) {
-      return null;
-    }
-    if (
-      this.host.sessionSlots.hasAssignment(sessionId) ||
-      this.host.sessionSlots.hasCreation(sessionId)
-    ) {
-      return null;
-    }
-    const inFlightRelease = this.host.sessionSlots.getReleaseOp(sessionId);
-    if (inFlightRelease) {
-      if (
-        inFlightRelease.session === expectedSession &&
-        expectedSession.assignedDevice === expectedDeviceId
-      ) {
+    const target = classifyOwnedRelease(this.host, sessionId, expectedSession, expectedDeviceId);
+    switch (target) {
+      case "release":
         return await this.host.releaseSession(sessionId, releaseReason, request);
+      case "decline":
+        return null;
+      case "finalized":
+        return await this.releaseFinalizedSessionIfOwned(
+          sessionId,
+          expectedSession,
+          expectedDeviceId,
+          releaseReason,
+        );
+      default: {
+        const exhaustive: never = target;
+        return exhaustive;
       }
-      return null;
     }
-    return await this.releaseFinalizedSessionIfOwned(
-      sessionId,
-      expectedSession,
-      expectedDeviceId,
-      releaseReason,
-    );
   }
 
   private async releaseFinalizedSessionIfOwned(
@@ -416,41 +400,42 @@ export class SessionReleaseRequests {
     releaseReason: string,
     allowExpired: boolean,
   ): Promise<string | null> {
-    const inFlightRelease = this.host.forcedStuckRelease.inFlightReleaseStillOwning(sessionId);
-    if (inFlightRelease) {
-      if (inFlightRelease.reason.finalizedSnapshot && isTerminalReleaseReason(releaseReason)) {
-        return await this.host.releaseFinalizedSession(inFlightRelease.reason, releaseReason);
+    const target = classifyUnpublishedRelease(this.host, sessionId, releaseReason);
+    switch (target.kind) {
+      case "forced-in-flight": {
+        const { release } = target;
+        if (release.reason.finalizedSnapshot && isTerminalReleaseReason(releaseReason)) {
+          return await this.host.releaseFinalizedSession(release.reason, releaseReason);
+        }
+        this.host.upgradeReleaseReason(release.reason, releaseReason);
+        return await release.promise;
       }
-      this.host.upgradeReleaseReason(inFlightRelease.reason, releaseReason);
-      return await inFlightRelease.promise;
-    }
-    const terminalSnapshot = this.host.sessionSlots.getTerminalSnapshot(sessionId);
-    if (terminalSnapshot && isTerminalReleaseReason(releaseReason)) {
-      const terminalReason = this.host.sessionSlots.getTerminalReasonState(sessionId);
-      if (terminalReason) {
-        return await this.host.releaseFinalizedSession(terminalReason, releaseReason);
+      case "terminal-fenced": {
+        const { snapshot, reasonState } = target;
+        if (reasonState) {
+          return await this.host.releaseFinalizedSession(reasonState, releaseReason);
+        }
+        await this.host.persistSessionRelease(snapshot);
+        return snapshot.deviceId;
       }
-      await this.host.persistSessionRelease(terminalSnapshot);
-      return terminalSnapshot.deviceId;
+      case "row-pending":
+        return (await this.host.persistSessionRelease(target.snapshot, true))
+          ? target.snapshot.deviceId
+          : null;
+      case "pending-work":
+        return await this.releasePendingSessionWork(
+          sessionId,
+          releaseReason,
+          allowExpired,
+          target.pendingSession,
+        );
+      case "persisted-only":
+        return await this.releasePersistedRestartRecovery(sessionId, releaseReason);
+      default: {
+        const exhaustive: never = target;
+        return exhaustive;
+      }
     }
-    const pendingSnapshot = this.host.rowWriter.pendingNonTerminalReleases().get(sessionId);
-    if (pendingSnapshot) {
-      return (await this.host.persistSessionRelease(pendingSnapshot, true))
-        ? pendingSnapshot.deviceId
-        : null;
-    }
-    const pendingAssignment = this.host.sessionSlots.getAssignment(sessionId);
-    const pendingCreation = this.host.sessionSlots.getCreation(sessionId);
-    const pendingSession = pendingAssignment ?? pendingCreation?.promise;
-    if (!pendingSession) {
-      return await this.releasePersistedRestartRecovery(sessionId, releaseReason);
-    }
-    return await this.releasePendingSessionWork(
-      sessionId,
-      releaseReason,
-      allowExpired,
-      pendingSession,
-    );
   }
 
   /** Replace a removed session's restart permission only while its window is open. */

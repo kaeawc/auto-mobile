@@ -4313,7 +4313,7 @@ describe("systemTray automatic terminal evidence", () => {
   });
 });
 
-describe("iOS systemTray open", () => {
+describe("iOS systemTray open/close", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
   });
@@ -4323,6 +4323,49 @@ describe("iOS systemTray open", () => {
       resetSystemTrayDependencies();
       ToolRegistry.clearTools();
     });
+    test.each([true, false])(
+      "closes the captured cover sheet only when HOME clears it (%s)",
+      async (homeClearsSheet) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        let homeCalls = 0;
+        observer.setObserveResult(() =>
+          createIosObservation(
+            homeClearsSheet && homeCalls > 0
+              ? capturedIosHomeIconHierarchy
+              : ios27NotificationCenterHierarchy,
+          ),
+        );
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          pressHomeFactory: async () => {
+            homeCalls++;
+            return { success: true };
+          },
+          observeScreenFactory: () => observer,
+        });
+        registerInteractionTools();
+        const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(iosDevice, {
+          action: "close",
+          platform: "ios",
+          awaitTimeoutMs: 500,
+        });
+        const payload = toolJson(response);
+        expect(payload.success).toBe(homeClearsSheet);
+        expect(payload.skipped).toBe(false);
+        expect(homeCalls).toBe(1);
+        expect(client.swipeCalls).toHaveLength(0);
+        expect(payload.message).toBe(
+          homeClearsSheet
+            ? "Closed system tray (collapsed notification shade)"
+            : "Failed to close system tray: the tray remained open",
+        );
+      },
+    );
+
     test("opens the captured iOS 27 Notification Center after the swipe", async () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -4812,6 +4855,127 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
     );
 
     await expect(drain()).rejects.toBe(readError);
+  });
+});
+
+describe("Android systemTray clearAll progress budget", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  const setup = (stuckAfter = 3) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const observer = new FakeObserveScreen();
+    const swipes = () =>
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"));
+    const executeCommand = adb.executeCommand.bind(adb);
+    spyOn(adb, "executeCommand").mockImplementation((command, options) => {
+      if (command.startsWith("shell input swipe")) {
+        timer.advanceTime(2600);
+      }
+      return executeCommand(command, options);
+    });
+
+    // Repeat a captured child row within its expanded group. Identical rows
+    // exercise signature counts as siblings leave, without inventing parser input.
+    const captured = headerlessTwoNotificationGroups.expanded;
+    const root: TestHierarchyNode = captured.hierarchy.node ?? {};
+    const group = root.node?.[0];
+    const container = group?.node?.find(
+      (node) => node["resource-id"] === "com.android.systemui:id/notification_children_container",
+    );
+    const row = container?.node?.find(
+      (node) => node["resource-id"] === "com.android.systemui:id/expandableNotificationRow",
+    );
+    if (!group || !container || !row) {
+      throw new Error("Captured expanded notification group is missing its child row");
+    }
+    const observations = [3, 2, 1].map((remaining) =>
+      createObservation(
+        createHierarchyForTest({
+          ...captured,
+          hierarchy: {
+            node: {
+              ...root,
+              node: [
+                {
+                  ...group,
+                  node: group.node?.map((node) =>
+                    node === container
+                      ? {
+                          ...container,
+                          node: [
+                            ...(container.node ?? []).filter(
+                              (child) =>
+                                child["resource-id"] !==
+                                "com.android.systemui:id/expandableNotificationRow",
+                            ),
+                            ...Array.from({ length: remaining }, () => structuredClone(row)),
+                          ],
+                        }
+                      : node,
+                  ),
+                },
+              ],
+            },
+          },
+        }),
+      ),
+    );
+    observations.push(createEmptyTrayObservation());
+    let verifiedSwipes = 0;
+    observer.setObserveResult(() => {
+      const swipeCount = swipes().length;
+      if (swipeCount > verifiedSwipes) {
+        timer.advanceTime(400);
+        verifiedSwipes = swipeCount;
+      }
+      return observations[Math.min(swipeCount, stuckAfter)];
+    });
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      observeScreenFactory: () => observer,
+    });
+    const drain = (maxSwipes?: number) =>
+      clearMatchingSystemTrayNotifications(
+        device,
+        { appId: "com.android.shell" },
+        ["Delta"],
+        5000,
+        {
+          maxSwipes,
+        },
+      );
+    return { timer, swipes, drain };
+  };
+
+  test("drains three grouped notifications across multiple awaitTimeout budgets", async () => {
+    const { timer, swipes, drain } = setup();
+
+    expect(await drain()).toEqual({ swipeCount: 3, dismissedCount: 3, stalled: false });
+    expect(swipes()).toHaveLength(3);
+    expect(timer.now()).toBe(9000);
+    expect(timer.now()).toBeGreaterThan(5000);
+  });
+
+  test("stalls with partial progress without swiping a surviving row again", async () => {
+    const { timer, swipes, drain } = setup(1);
+
+    expect(await drain()).toEqual({ swipeCount: 2, dismissedCount: 1, stalled: true });
+    expect(swipes()).toHaveLength(2);
+    expect(timer.now()).toBe(8000);
+  });
+
+  test("respects maxSwipes even while dismissals keep making progress", async () => {
+    const { timer, swipes, drain } = setup();
+
+    expect(await drain(2)).toEqual({ swipeCount: 2, dismissedCount: 2, stalled: true });
+    expect(swipes()).toHaveLength(2);
+    expect(timer.now()).toBe(6000);
   });
 });
 

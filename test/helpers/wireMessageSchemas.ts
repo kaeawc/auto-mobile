@@ -168,6 +168,8 @@ export const daemonRequestFrameSchema = z.looseObject({
   method: z.string(),
   params: z.unknown(),
   timeoutMs: z.number().optional(),
+  requestedTimeoutMs: z.number().optional(),
+  acceptsRequestBudget: z.boolean().optional(),
   progressToken: z.union([z.string(), z.number()]).optional(),
 }) satisfies z.ZodType<DaemonRequest>;
 

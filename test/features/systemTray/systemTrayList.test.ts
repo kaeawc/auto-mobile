@@ -1831,7 +1831,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
-  test("text-filtered clearAll shares its deadline across confirmed dismissals", async () => {
+  test("text-filtered clearAll renews its deadline after confirmed dismissals", async () => {
     const { timer, swipes } = setupDelayedClear(0, 250);
     const response = await handler()(device, {
       action: "clearAll",
@@ -1839,13 +1839,13 @@ describe("systemTray clearAll dumpsys ownership", () => {
       awaitTimeout: 375,
     });
     expect(toolJson(response)).toMatchObject({
-      success: false,
-      dismissedCount: 1,
+      success: true,
+      dismissedCount: 2,
     });
-    expect(toolIsError(response)).toBe(true);
+    expect(toolIsError(response)).not.toBe(true);
     expect(swipes()).toHaveLength(2);
-    expect(timer.getSleepHistory()).toEqual([250, 125]);
-    expect(timer.now()).toBe(375);
+    expect(timer.getSleepHistory()).toEqual([250, 250]);
+    expect(timer.now()).toBe(500);
   });
 
   test("new matching arrivals cannot raise the initial dismissal budget", async () => {

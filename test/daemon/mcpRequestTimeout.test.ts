@@ -53,6 +53,7 @@ import {
   MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
   clampCallerMcpRequestTimeoutMs,
   resolveMcpRequestTimeoutMs,
+  resolveMcpRequestTimeoutMsOnce,
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
   EXECUTE_PLAN_BUDGET_HEADROOM_MS,
@@ -1947,4 +1948,105 @@ describe("executePlan deadline derived from the plan's steps (#9882)", () => {
       }),
     ).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
+});
+
+describe("daemon-owned explicit tool budgets (#13797)", () => {
+  test.each([
+    ["openLink", OPEN_LINK_MCP_TIMEOUT_ENV_VAR],
+    ["observe", OBSERVE_MCP_TIMEOUT_ENV_VAR],
+  ])("%s chooses explicit daemon then client budgets without a generic floor", (name, envVar) => {
+    for (const [clientExplicit, daemonExplicit, expected] of [
+      [45_000, undefined, 45_000],
+      [undefined, 45_000, 45_000],
+      [undefined, 180_000, 180_000],
+      [180_000, undefined, 180_000],
+      [45_000, 60_000, 60_000],
+      [180_000, 45_000, 45_000],
+      [undefined, undefined, 120_000],
+      [1, undefined, 30_000],
+      [Number.MAX_SAFE_INTEGER, undefined, MAX_CALLER_MCP_REQUEST_TIMEOUT_MS],
+      [undefined, Number.MAX_SAFE_INTEGER, MAX_CALLER_MCP_REQUEST_TIMEOUT_MS],
+      [undefined, 1, DEFAULT_MCP_REQUEST_TIMEOUT_MS],
+    ] satisfies [number | undefined, number | undefined, number][]) {
+      const request = {
+        id: "daemon-budget",
+        type: "mcp_request" as const,
+        method: "tools/call",
+        params: { name, arguments: {} },
+        timeoutMs: clientExplicit ?? 120_000,
+        requestedTimeoutMs: clientExplicit,
+      };
+      const env = daemonExplicit === undefined ? {} : { [envVar]: String(daemonExplicit) };
+      expect(resolveMcpRequestTimeoutMsOnce(request, env)).toBe(expected);
+      // The client's calculation still applies its own default floor.
+      if (clientExplicit === 45_000 && daemonExplicit === undefined) {
+        expect(resolveMcpRequestTimeoutMs(request, {})).toBe(90_000);
+      }
+    }
+  });
+
+  test("daemon legacy explicit override wins for an old client", () => {
+    const request = {
+      id: "legacy-budget",
+      type: "mcp_request" as const,
+      method: "tools/call",
+      params: { name: "openLink" },
+      timeoutMs: 120_000,
+    };
+    expect(
+      resolveMcpRequestTimeoutMsOnce(request, {
+        [LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "45000",
+      }),
+    ).toBe(45_000);
+  });
+
+  test("requested budget cannot lower fixed floors or affect non-tool requests", () => {
+    for (const [method, name] of [
+      ["tools/call", "installApp"],
+      ["tools/call", "startDevice"],
+      ["resources/read", "observe"],
+    ]) {
+      const request = {
+        id: "fixed-budget",
+        type: "mcp_request" as const,
+        method,
+        params: { name },
+        timeoutMs: 120_000,
+        requestedTimeoutMs: 1,
+      };
+      const env = { [OBSERVE_MCP_TIMEOUT_ENV_VAR]: "45000" };
+      expect(resolveMcpRequestTimeoutMsOnce(request, env)).toBe(
+        resolveMcpRequestTimeoutMs(request, env),
+      );
+    }
+  });
+
+  test("observe argument budget still wins over both explicit overrides", () => {
+    const request = {
+      id: "wait-budget",
+      type: "mcp_request" as const,
+      method: "tools/call",
+      params: { name: "observe", arguments: { waitFor: { elementId: "x", timeout: 600_000 } } },
+      timeoutMs: 120_000,
+      requestedTimeoutMs: 45_000,
+    };
+    expect(
+      resolveMcpRequestTimeoutMsOnce(request, { [OBSERVE_MCP_TIMEOUT_ENV_VAR]: "60000" }),
+    ).toBe(630_000);
+  });
+
+  test.each([Number.NaN, Infinity, 0, -1])(
+    "invalid requested budget %s keeps default resolution",
+    (requestedTimeoutMs) => {
+      const request = {
+        id: "invalid-budget",
+        type: "mcp_request" as const,
+        method: "tools/call",
+        params: { name: "openLink" },
+        timeoutMs: 120_000,
+        requestedTimeoutMs,
+      };
+      expect(resolveMcpRequestTimeoutMsOnce(request, {})).toBe(120_000);
+    },
+  );
 });

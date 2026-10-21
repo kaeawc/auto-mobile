@@ -1,4 +1,5 @@
 import type { BootedDevice, ExecResult } from "../../../models";
+import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
 import { ActionableError } from "../../../models/ActionableError";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import {
@@ -150,12 +151,21 @@ interface LocationOperationsDependencies {
   simctl: () => LocationSimulatorClient | null;
   routeRegistry: () => LocationRouteRegistry;
   consoleFactory: () => EmulatorConsoleClientFactory;
+  deviceTraits: () => DeviceTraits;
   canWriteLocation: () => boolean;
   onLocationApplied: () => (() => void) | undefined;
 }
 
 export class LocationOperations {
   constructor(private readonly dependencies: LocationOperationsDependencies) {}
+
+  /** Throws when the emulator flag cannot be read; callers report that as a probe failure. */
+  private async isAndroidEmulator(): Promise<boolean> {
+    const device = this.dependencies.device();
+    const adb = this.dependencies.adbFactory().create(device);
+    const traits = await this.dependencies.deviceTraits().read(adb, device.deviceId);
+    return traits.isEmulator === true;
+  }
 
   async writeLocation(input: SetDeviceLocationInput): Promise<DeviceLocationState> {
     if (input.mode === "stop") {
@@ -248,9 +258,7 @@ export class LocationOperations {
     }
     let previousRoute: EndedLocationRoute | undefined;
     try {
-      const adb = this.dependencies.adbFactory().create(this.dependencies.device());
-      const probe = await adb.executeCommand("shell getprop ro.kernel.qemu");
-      if (probe.stdout.trim() !== "1") {
+      if (!(await this.isAndroidEmulator())) {
         return {
           supported: false,
           error: "Location simulation requires an Android emulator (ro.kernel.qemu=1).",
@@ -337,11 +345,7 @@ export class LocationOperations {
         };
       }
       try {
-        const probe = await this.dependencies
-          .adbFactory()
-          .create(this.dependencies.device())
-          .executeCommand("shell getprop ro.kernel.qemu");
-        if (probe.stdout.trim() !== "1") {
+        if (!(await this.isAndroidEmulator())) {
           return {
             supported: false,
             error: "Location simulation requires an Android emulator (ro.kernel.qemu=1).",

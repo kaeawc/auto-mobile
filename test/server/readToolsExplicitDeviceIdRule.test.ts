@@ -579,8 +579,8 @@ for (const platform of ["android", "ios"] as const) {
       observed.set(name, ran);
       observedReadiness.set(platform, observed);
       expect(daemon.sessions.getAllSessions()).toEqual([]);
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
-      expect(h.manager.getCurrentPlatform()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
       expect(h.manager.getExplicitDevicePin()).toBeUndefined();
       expect(h.apply).not.toHaveBeenCalled();
       expect(h.getConfig).not.toHaveBeenCalled();
@@ -907,8 +907,8 @@ for (const platform of ["android", "ios"] as const) {
             expect(h.detect).toHaveBeenCalledTimes(1);
             expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([h.device]);
           }
-          expect(h.manager.getCurrentDevice()).toBeUndefined();
-          expect(h.manager.getCurrentPlatform()).toBeUndefined();
+          expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+          expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
           expect(h.manager.getExplicitDevicePin()).toBeUndefined();
           expect(h.apply).not.toHaveBeenCalled();
           expect(h.getConfig).not.toHaveBeenCalled();
@@ -1107,8 +1107,8 @@ for (const column of probeColumns) {
       const probes = h.adb.getExecutedCommands().filter((c) => c === "emu avd name");
       expect(probes).toHaveLength(column === "probe-running-id" ? 0 : 1);
       expect(h.boots).toHaveLength(stopped ? 1 : 0);
-      expect(h.manager.getCurrentDevice()).toBeUndefined();
-      expect(h.manager.getCurrentPlatform()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
       expect(h.manager.getExplicitDevicePin()).toBeUndefined();
       expect(h.apply).not.toHaveBeenCalled();
       expect(h.getConfig).not.toHaveBeenCalled();
@@ -1158,8 +1158,8 @@ test("a probed serial missing from the memoized raw scan is refreshed before rea
   expect(h.adb.getExecutedCommands().filter((c) => c === "emu avd name")).toHaveLength(1);
   expect(h.boots).toEqual([]);
   expect(daemon.sessions.getAllSessions()).toEqual([]);
-  expect(h.manager.getCurrentDevice()).toBeUndefined();
-  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
   expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   expect(h.apply).not.toHaveBeenCalled();
 });
@@ -1624,8 +1624,8 @@ async function onePlatformDecision(
     expect(h.ensure).toHaveBeenCalledTimes(name === "observe" && scenario === "running" ? 0 : 1);
   }
   expect(daemon.sessions.getAllSessions()).toEqual([]);
-  expect(h.manager.getCurrentDevice()).toBeUndefined();
-  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()?.platform).toBeUndefined();
   expect(h.manager.getExplicitDevicePin()).toBeUndefined();
   expect(h.apply).not.toHaveBeenCalled();
   expect(h.getConfig).not.toHaveBeenCalled();
@@ -1993,7 +1993,7 @@ for (const platform of ["android", "ios"] as const) {
               .getExecutedCommands()
               .filter((c) => /settings (put|delete)|cmd uimode/.test(c)),
           ).toEqual([]);
-          expect(current.manager.getCurrentDevice()).toBeUndefined();
+          expect(current.manager.getExplicitDevicePin()).toBeUndefined();
         } finally {
           blocker?.release();
           executionTracker.endExecution(execution.id);

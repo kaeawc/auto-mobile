@@ -1,5 +1,5 @@
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
-import { expect, spyOn, test } from "bun:test";
+import { afterEach, mock, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionPreservingRecoveryRunner } from "../../src/daemon/sessionPreservingRecovery";
@@ -11,6 +11,10 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const sessionId = "releasing-loss-session";
 const android: BootedDevice = {

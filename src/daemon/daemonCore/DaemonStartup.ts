@@ -454,7 +454,6 @@ export class DaemonStartup {
       this.host.services.sessionManager().assertDaemonCollaboratorsAttached();
       this.host.startHost().prepareHttpToken();
       await this.host.startHost().startHttpIngress();
-      this.host.startHost().publishHttpToken();
 
       // Initialize the device pool BEFORE the socket server so connecting clients see it.
       // Wait up to 5 seconds - emulators should already be running
@@ -494,6 +493,8 @@ export class DaemonStartup {
       // (the #6140 failure mode via a bypassed launch). This authorizes cleanup
       // of the control socket and PID file; each aux bind is tracked separately.
       this.host.identity.setSocketBindCommitted(true);
+      // Discovery publishes credentials only after authoritative control-socket ownership.
+      this.host.startHost().publishHttpToken();
       startupBenchmark.endPhase("socketServerStart");
     } catch (error) {
       // Restore the live incumbent's record on any pre-bind failure in the

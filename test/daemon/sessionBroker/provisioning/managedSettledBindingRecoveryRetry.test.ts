@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import {
   BrokerExecutionRelease,
   MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
@@ -9,6 +9,18 @@ import { logger } from "../../../../src/utils/logger";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../../helpers/fakeTimerStepping";
+
+let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">>;
+let infoSpy: ReturnType<typeof spyOn<typeof logger, "info">>;
+let debugSpy: ReturnType<typeof spyOn<typeof logger, "debug">>;
+beforeEach(() => {
+  warnSpy = spyOn(logger, "warn");
+  infoSpy = spyOn(logger, "info");
+  debugSpy = spyOn(logger, "debug");
+});
+afterEach(() => {
+  mock.restore();
+});
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -106,11 +118,11 @@ async function makeHarness() {
     },
   });
   const warnedAt: number[] = [];
-  const warn = spyOn(logger, "warn").mockImplementation(() => {
+  const warn = warnSpy.mockImplementation(() => {
     warnedAt.push(timer.now());
   });
-  const info = spyOn(logger, "info").mockImplementation(() => {});
-  const debug = spyOn(logger, "debug").mockImplementation(() => {});
+  const info = infoSpy.mockImplementation(() => {});
+  const debug = debugSpy.mockImplementation(() => {});
   cleanups.push(async () => {
     release.close();
     await release.whenIdle();

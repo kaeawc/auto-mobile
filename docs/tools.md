@@ -3255,7 +3255,10 @@ every `tasks/*` request, in the per-request capabilities:
 
 - A client that also lists the extension in its `initialize` capabilities sees
   `capabilities.extensions["io.modelcontextprotocol/tasks"]` in the `initialize` result. The
-  daemon speaks the 2025-era protocol, where `server/discover` does not exist.
+  daemon speaks the 2025-era protocol, where `server/discover` does not exist. This is an
+  AutoMobile extension of the spec: SEP-2663 leaves the Tasks extension undefined on
+  `2025-11-25`, but AutoMobile advertises and serves it on the 2025-era `initialize` to any
+  client that declares it, whatever `protocolVersion` that client sent (owner decision, #13143).
 - Tasks belong to the session key (the `x-auto-mobile-mcp-session-id` header). A request without
   one always runs synchronously, and another session key cannot read or cancel the task.
 - An opted-in call answers `{"resultType": "task", "taskId": …, "status": "working", "ttlMs":

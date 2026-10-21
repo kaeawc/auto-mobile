@@ -87,6 +87,8 @@ describe("wireSessionLifecycle", () => {
       "onSessionDeviceUnbound",
       "onSessionRelease",
       "onSessionDeviceUnbound",
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
       "onDeviceOwnershipChange",
       "setManagedExecutionRecoveryListener",
       "setLateRehydrationListener",

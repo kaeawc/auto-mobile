@@ -1014,6 +1014,34 @@ describe("DaemonClient adopts the daemon budget for its backstop to the daemon's
     }
   });
 
+  // #14489: the daemon measures its budget from its own receipt, which can trail the client's
+  // send by more than the response grace; the notice is written right after that receipt.
+  test.each([false, true])(
+    "a delayed larger budget notice anchors the backstop at its receipt, progress=%s",
+    async (withProgress) => {
+      const { client, timer, socket, notifyBudget } = setup();
+      const outcome = client
+        .callTool("tapOn", {}, withProgress ? "late-notice" : undefined)
+        .catch((error: unknown) => error);
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+      try {
+        expect(request.timeoutMs!).toBeLessThan(60_000);
+        timer.advanceTime(10_000);
+        notifyBudget(request.id, 60_000);
+        expect(timer.getPendingTimeouts()).toEqual([60_000 + responseGraceMs]);
+        // Sent at t=0, received t=10s, assigned 60s: the daemon may run until t=70s.
+        timer.advanceTime(60_000 + responseGraceMs - 1);
+        expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
+        expect(socket.getWrittenMessages(daemonRequestFrameSchema)).toHaveLength(1);
+        timer.advanceTime(1);
+        expect(await outcome).toBeInstanceOf(McpTimeoutError);
+      } finally {
+        await client.close();
+        await outcome;
+      }
+    },
+  );
+
   test.each([false, true])(
     "a smaller budget shortens the backstop, progress=%s",
     async (withProgress) => {
@@ -1025,8 +1053,10 @@ describe("DaemonClient adopts the daemon budget for its backstop to the daemon's
       try {
         timer.advanceTime(10_000);
         notifyBudget(request.id, 45_000);
-        expect(timer.getPendingTimeouts()).toEqual([35_000 + responseGraceMs]);
-        timer.advanceTime(35_000 + responseGraceMs - 1);
+        // Anchored at the notice's receipt (#14489), still well before the sent budget's backstop.
+        expect(timer.getPendingTimeouts()).toEqual([45_000 + responseGraceMs]);
+        expect(45_000).toBeLessThan(request.timeoutMs! - 10_000);
+        timer.advanceTime(45_000 + responseGraceMs - 1);
         expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
         timer.advanceTime(1);
         expect(await outcome).toBeInstanceOf(McpTimeoutError);
@@ -1041,15 +1071,16 @@ describe("DaemonClient adopts the daemon budget for its backstop to the daemon's
     },
   );
 
-  test("past announced deadline retains response grace with no negative delay", async () => {
+  test("a smaller notice arriving after its budget still waits that budget from receipt", async () => {
     const { client, timer, socket, notifyBudget } = setup();
     const outcome = client.callTool("openLink", {}).catch((error: unknown) => error);
     const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
     try {
+      // The daemon may have parsed the frame as late as now (#14489), so its 45s may only start here.
       timer.advanceTime(50_000);
       notifyBudget(request.id, 45_000);
-      expect(timer.getPendingTimeouts()).toEqual([responseGraceMs]);
-      timer.advanceTime(responseGraceMs - 1);
+      expect(timer.getPendingTimeouts()).toEqual([45_000 + responseGraceMs]);
+      timer.advanceTime(45_000 + responseGraceMs - 1);
       expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
       timer.advanceTime(1);
       expect(await outcome).toBeInstanceOf(McpTimeoutError);

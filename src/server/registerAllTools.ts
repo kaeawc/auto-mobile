@@ -31,6 +31,7 @@ import { registerStorageTools } from "./storageTools";
 import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerSessionLogTools } from "./sessionLogTools";
+import { registerPerformanceTraceTools } from "./performanceTraceTools";
 import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
@@ -102,6 +103,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerPreferenceTools();
   registerAppFileTools();
   registerSessionLogTools();
+  registerPerformanceTraceTools();
   registerDownloadsFixtureTools();
   registerFormTools();
   registerAccessibilityTools();

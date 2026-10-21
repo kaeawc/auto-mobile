@@ -20,7 +20,8 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
+`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `performanceTrace`,
+`phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
@@ -3076,6 +3077,7 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 | ⏺️ <code>recordDeviceGestures</code>                           | Records on-device user input (not tool calls) for <code>exportPlan</code>.                |
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                                       |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                                   |
+| ⏱️ <code>performanceTrace</code>                               | Records a native trace (xctrace on iOS, Perfetto on Android) and returns a summary.       |
 
 ### Network options
 
@@ -3152,6 +3154,36 @@ or `adb shell input` are injected and are not recorded by design; use
 A stop or `exportPlan` with no captured input fails with
 `reason: "no_user_input_captured"` and the same explanation; touch-track or
 recorder-stop failures retain their own errors.
+
+### Performance traces
+
+`performanceTrace` is disabled by default; enable it with `setToolEnabled`.
+`action: "start"` takes a `template` (`appLaunch`, `hitches`, `hangs`,
+`timeProfiler`, or `allocations`), an optional `appId`, and an optional
+`timeLimitMs` (1000–300000, default 30000). The recorder stops itself at the
+time limit. `action: "stop"` takes the `traceId` that start returned and returns
+the `artifactPath` with a bounded `summary`: `durationMs`, plus `launch`,
+`hitches`, `hangs`, `topFunctions`, or `allocations` depending on the template.
+The summary never includes raw tables. Anything that limited the summary is
+reported in `warnings`.
+
+- **iOS** (Simulator and device) runs `xcrun xctrace record` with the matching
+  Instruments template (App Launch, Animation Hitches, Hangs, Time Profiler,
+  Allocations). `appLaunch` launches `appId` under the recorder. Other templates
+  attach to the running app, or record all processes when it is not running;
+  `allocations` requires it to be running. Stop sends SIGINT so xctrace
+  finalizes the `.trace`. The summary is read with `xctrace export`.
+- **Android** runs `perfetto --background` with a template-mapped config
+  (atrace categories, FrameTimeline, `linux.perf` sampling, or heapprofd), then
+  pulls the `.perfetto-trace` to the host. The summary needs Perfetto's
+  `trace_processor_shell` on the host `PATH` (or `AUTOMOBILE_TRACE_PROCESSOR`);
+  without it, only the artifact is returned, with a warning.
+
+Only one trace records per device at a time. Releasing the owning session (the
+call's `sessionUuid`), or losing the device (its `deviceId`, or the device chosen
+by `platform`), stops the recorder, so no `xctrace` or `perfetto` process
+outlives the session. Artifacts are stored under the AutoMobile data directory
+in `performance-traces/`, next to `video-archive/`.
 
 ### Video recording quality and limits
 

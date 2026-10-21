@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypeChartRules.chartErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.pagerErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.stackErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.swipeActionsErrors
@@ -113,6 +114,7 @@ internal object PrototypeSpecInput {
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: dataActionErrors(context, value)
         ?: requestActionErrors(context)
+        ?: chartErrors(value, context)
         ?: swipeActionsErrors(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)

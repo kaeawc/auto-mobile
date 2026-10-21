@@ -9,7 +9,7 @@ import {
 import { type Timer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
 import { type StableDeviceTarget } from "./deadlines";
-import { type PooledAvdCapture } from "./teardownContracts";
+import { type PooledAvdCapture } from "../teardown/teardownContracts";
 import {
   type DeviceToolsDependencies,
   POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,

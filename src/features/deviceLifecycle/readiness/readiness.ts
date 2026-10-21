@@ -19,8 +19,11 @@ import {
 import { deviceLossCancellationReason as utilDeviceLossCancellationReason } from "../../../utils/deviceLossCancellationReason";
 import { lifecycleRequester } from "../lifecycleRequester";
 import { captureAutolockPolicy } from "../../../daemon/deviceAutolockPolicy";
-import { type SystemUiAnrRecoveryResult, rebootAndroidAfterSystemUiAnr } from "./systemUiRecovery";
-import { type StartDeviceArgs } from "./contracts";
+import {
+  type SystemUiAnrRecoveryResult,
+  rebootAndroidAfterSystemUiAnr,
+} from "../systemUiRecovery/systemUiRecovery";
+import { type StartDeviceArgs } from "../core/contracts";
 import { validateBootIdentity, validatePooledDeviceMapping } from "../boot/bootIdentity";
 import {
   clearColdBootShutdownMarker,
@@ -28,10 +31,10 @@ import {
   shouldClearIntentionalShutdownAfterFailure,
   stopUnownedColdBoot,
 } from "../boot/bootSettlement";
-import { type DeviceToolsDependencies, getDeviceToolsDependencies } from "./dependencies";
-import { DEVICE_SHUTDOWN_TIMEOUT_MS, runWithinShutdownDeadline } from "./deadlines";
+import { type DeviceToolsDependencies, getDeviceToolsDependencies } from "../core/dependencies";
+import { DEVICE_SHUTDOWN_TIMEOUT_MS, runWithinShutdownDeadline } from "../core/deadlines";
 import { waitForDeviceShutdown } from "../teardown/shutdownDiscovery";
-import { isUnknownAndroidRuntimeName } from "./androidIdentity";
+import { isUnknownAndroidRuntimeName } from "../identity/androidIdentity";
 
 export async function ensureRunnerReadyWithSystemUiAnrRecovery(
   boot: DeviceBootResult,

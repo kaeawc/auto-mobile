@@ -30,7 +30,7 @@ test/contracts/dbWriteBarrier.test.ts
 test/contracts/deviceClientRegistry.test.ts
 test/contracts/deviceHealthMarkers.test.ts
 test/contracts/deviceManager.test.ts
-test/contracts/deviceSessionManager.test.ts
+test/contracts/deviceReadiness.test.ts
 test/contracts/displayInventoryProvider.test.ts
 test/contracts/displayTransitionReader.test.ts
 test/contracts/elementParser.test.ts
@@ -1624,7 +1624,7 @@ test/scripts/writeBuildInfo.test.ts
 test/scripts/xctestRunnerDerivedDataEnvironment.test.ts
 test/server/AppCleanupService.test.ts
 test/server/CriticalSectionCoordinator.test.ts
-test/server/DeviceSessionManager.appearanceSync.test.ts
+test/server/DeviceReadiness.appearanceSync.test.ts
 test/server/NetworkState.test.ts
 test/server/ToolSelectionProfileRegistry.test.ts
 test/server/TopLevelUnionFlattener.property.test.ts
@@ -1912,9 +1912,9 @@ test/utils/CommandError.property.test.ts
 test/utils/CommandError.test.ts
 test/utils/CtrlProxyCodesignVerifier.test.ts
 test/utils/DeviceDetection.test.ts
-test/utils/DeviceSessionManager.incompleteScanSelection.test.ts
-test/utils/DeviceSessionManager.physicalScanBudget.test.ts
-test/utils/DeviceSessionManager.pinScanFailure.test.ts
+test/utils/DeviceReadiness.incompleteScanSelection.test.ts
+test/utils/DeviceReadiness.physicalScanBudget.test.ts
+test/utils/DeviceReadiness.pinScanFailure.test.ts
 test/utils/ExecSeam.test.ts
 test/utils/FileDownloader.test.ts
 test/utils/GitMetadataClient.test.ts

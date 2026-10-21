@@ -16,7 +16,7 @@ import { foreignOwnedSessionUuidFromResult } from "../../src/daemon/routedSessio
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -43,7 +43,7 @@ const ELAPSED_MS = 123;
 describe("a connection that closed while its explicit-sessionUuid call was in flight (#11348)", () => {
   let restoreHermeticServer: () => void;
   let restoreToolCallRepository: () => void;
-  let restoreDeviceSessionManager: () => void;
+  let restoreDeviceReadiness: () => void;
   let previousAutolock: string | undefined;
   let fixture: McpTestFixture | undefined;
   let timer: FakeTimer;
@@ -80,13 +80,13 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     });
     restoreToolCallRepository = () =>
       ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: original });
-    const previousDeviceSessionManager = ToolRegistry.getDeviceSessionManager();
-    const deviceSessionManager = new FakeDeviceSessionManager();
-    deviceSessionManager.setConnectedDevices([DEVICE]);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
-    restoreDeviceSessionManager = () =>
+    const previousDeviceReadiness = ToolRegistry.getDeviceReadiness();
+    const deviceReadiness = new FakeDeviceReadiness();
+    deviceReadiness.setConnectedDevices([DEVICE]);
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceReadiness });
+    restoreDeviceReadiness = () =>
       ToolRegistry.setCollaboratorsForTesting({
-        deviceSessionManager: previousDeviceSessionManager,
+        deviceReadiness: previousDeviceReadiness,
       });
 
     timer = new FakeTimer();
@@ -184,7 +184,7 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     DaemonState.getInstance().reset();
     manager.stopCleanupTimer();
     ToolRegistry.unregister(PLAIN_READ_PROBE);
-    restoreDeviceSessionManager();
+    restoreDeviceReadiness();
     restoreToolCallRepository();
     restoreHermeticServer();
     if (previousAutolock === undefined) {

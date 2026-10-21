@@ -15,14 +15,14 @@ import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { runOutsideRequestContext, runWithAbortSignal } from "../../../utils/AbortContext";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import { type runWithinShutdownDeadline } from "./deadlines";
+import { type runWithinShutdownDeadline } from "../core/deadlines";
 import { type waitForDeviceShutdown } from "../teardown/shutdownDiscovery";
 import {
   type shouldClearIntentionalShutdownAfterFailure,
   type cancelUnownedColdBoot,
 } from "../boot/bootSettlement";
-import { type isUnknownAndroidRuntimeName } from "./androidIdentity";
-import { type StartDeviceArgs } from "./contracts";
+import { type isUnknownAndroidRuntimeName } from "../identity/androidIdentity";
+import { type StartDeviceArgs } from "../core/contracts";
 import { type ColdBootSettlementCollector } from "../boot/bootIdentity";
 import { getShutdownInitiatingExecutionId } from "../teardown/shutdownPreparation";
 

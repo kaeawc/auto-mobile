@@ -20,15 +20,15 @@ type HighlightAdder = Pick<VisualHighlight, "addHighlight">;
 type HighlightDeviceReadiness = Pick<DeviceReadiness, "ensureDeviceReady">;
 
 export class VisualHighlightClient {
-  private readonly deviceSessionManager: HighlightDeviceReadiness;
+  private readonly deviceReadiness: HighlightDeviceReadiness;
   private readonly visualHighlightFactory: (device: BootedDevice) => HighlightAdder;
 
   constructor(
-    deviceSessionManager: HighlightDeviceReadiness = DeviceReadiness.getInstance(),
+    deviceReadiness: HighlightDeviceReadiness = DeviceReadiness.getInstance(),
     visualHighlightFactory: (device: BootedDevice) => HighlightAdder = (device) =>
       new VisualHighlight(device),
   ) {
-    this.deviceSessionManager = deviceSessionManager;
+    this.deviceReadiness = deviceReadiness;
     this.visualHighlightFactory = visualHighlightFactory;
   }
 
@@ -60,10 +60,7 @@ export class VisualHighlightClient {
         `Visual highlights are not supported on ${options.platform} devices.`,
       );
     }
-    const device = await this.deviceSessionManager.ensureDeviceReady(
-      options.platform,
-      options.deviceId,
-    );
+    const device = await this.deviceReadiness.ensureDeviceReady(options.platform, options.deviceId);
     return this.visualHighlightFactory(device);
   }
 }

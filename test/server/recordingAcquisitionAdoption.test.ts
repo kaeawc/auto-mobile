@@ -36,7 +36,7 @@ import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
@@ -137,7 +137,7 @@ describe("ownerless recording acquisition adoption", () => {
             : undefined,
       },
     });
-    const detector = new FakeDeviceSessionManager();
+    const detector = new FakeDeviceReadiness();
     detector.setConnectedDevices([device, free]);
     videoRecording.configure({ deviceDetector: detector });
     setSegmentedSessionTimer(timer);

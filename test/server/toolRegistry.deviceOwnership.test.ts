@@ -16,7 +16,7 @@ import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
   InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -56,7 +56,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   let originalCollaborators: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
-  let devices: FakeDeviceSessionManager;
+  let devices: FakeDeviceReadiness;
   let gate: Promise<void> | undefined;
   let dispatched: (() => void) | undefined;
   let callerSignal: AbortSignal | undefined;
@@ -101,11 +101,11 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
         },
       },
     });
-    const fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    fakeDeviceSessionManager.setConnectedDevices([held, free]);
-    devices = fakeDeviceSessionManager;
+    const fakeDeviceReadiness = new FakeDeviceReadiness();
+    fakeDeviceReadiness.setConnectedDevices([held, free]);
+    devices = fakeDeviceReadiness;
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });

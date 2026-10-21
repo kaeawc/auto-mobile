@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import type {
   IosPhysicalDeviceLister,
   PhysicalIosDeviceDiscovery,
@@ -11,7 +11,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-describe("DeviceSessionManager physical iOS scan budget (#11077)", () => {
+describe("DeviceReadiness physical iOS scan budget (#11077)", () => {
   const physical: BootedDevice = { deviceId: "udid-1", name: "iPhone", platform: "ios" };
 
   function setup() {
@@ -26,7 +26,7 @@ describe("DeviceSessionManager physical iOS scan budget (#11077)", () => {
       },
     };
     const timer = new FakeTimer();
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), new FakeSimctl(), {
         iosPhysicalDeviceLister: lister,
       }),

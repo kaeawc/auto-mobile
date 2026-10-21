@@ -14,7 +14,7 @@ import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
 } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
@@ -446,7 +446,7 @@ describe("daemon release wiring (#10975)", () => {
     // The device passes to a new owner, who pins it.
     const second = await scenario.acquire();
     expect(second).not.toBe(first);
-    DeviceSessionManager.getInstance().setExplicitDevicePin({
+    DeviceReadiness.getInstance().setExplicitDevicePin({
       deviceId: DEVICE_A,
       name: DEVICE_A,
       platform: "android",
@@ -457,16 +457,16 @@ describe("daemon release wiring (#10975)", () => {
       await scenario.daemon.manager.releaseSession(first, "device-killed", {
         expectedOwner: { session: captured, deviceId: DEVICE_A },
       });
-      expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE_A);
+      expect(DeviceReadiness.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE_A);
       expectHeld(second);
 
       // Released side: the successor's own idle release does clear its pin.
       expect(
         await scenario.idleUntilReleased(second, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
       ).toBeDefined();
-      expect(DeviceSessionManager.getInstance().getExplicitDevicePin()).toBeUndefined();
+      expect(DeviceReadiness.getInstance().getExplicitDevicePin()).toBeUndefined();
     } finally {
-      DeviceSessionManager.getInstance().clearExplicitDevicePin(DEVICE_A);
+      DeviceReadiness.getInstance().clearExplicitDevicePin(DEVICE_A);
     }
   });
 

@@ -1,7 +1,7 @@
 import type {
   DeviceClientProvider,
   DeviceClientSimctl,
-} from "../../src/daemon/readiness/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceReadiness";
 import { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { PlatformDeviceManager } from "../../src/utils/interfaces/DeviceUtils";

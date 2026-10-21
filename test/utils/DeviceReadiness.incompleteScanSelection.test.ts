@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import {
   AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
@@ -12,7 +12,7 @@ import { FakeSimctl } from "../fakes/FakeSimctl";
 // #11103: one adb/simctl listing failure must not read as "nothing is booted"
 // and start a fresh AVD / boot another simulator beside the attached device.
 
-describe("DeviceSessionManager selection on an incomplete booted-device scan", () => {
+describe("DeviceReadiness selection on an incomplete booted-device scan", () => {
   test("refuses to cold-boot an AVD when the Android listing is incomplete", async () => {
     const deviceUtils = new FakeDeviceUtils();
     deviceUtils.setBootedDevices("android", [
@@ -22,7 +22,7 @@ describe("DeviceSessionManager selection on an incomplete booted-device scan", (
       { name: "Pixel_9_Pro", platform: "android", isRunning: false },
     ]);
     deviceUtils.setAndroidDiscoveryIncomplete("adb devices timed out");
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), deviceUtils, new FakeSimctl()),
     );
 
@@ -50,7 +50,7 @@ describe("DeviceSessionManager selection on an incomplete booted-device scan", (
     ]);
     simctl.setBootedSimulators([{ deviceId: "BBBB", name: "iPhone B", platform: "ios" }]);
     simctl.setBootedSimulatorsError(new Error("simctl list timed out"));
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), simctl),
     );
 

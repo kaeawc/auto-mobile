@@ -132,7 +132,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       expect(manager.getSession(SESSION)?.assignedDevice).toBe(held.deviceId);
       expect(pool.getDevice(held.deviceId)?.sessionId).toBe(SESSION);
       expect(pool.getDevice(free.deviceId)?.sessionId ?? null).toBeNull();
-      expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
     });
 
     arranged("a control step is refused, typed, before any input reaches the device", async () => {

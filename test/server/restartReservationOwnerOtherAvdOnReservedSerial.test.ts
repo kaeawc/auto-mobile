@@ -14,7 +14,7 @@ import {
 import { restartResumeSessionForDevice } from "../../src/server/deviceToolsStartDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -102,9 +102,9 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    const deviceSessions = new FakeDeviceSessionManager();
+    const deviceSessions = new FakeDeviceReadiness();
     deviceSessions.setConnectedDevices([device]);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceSessions });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { recordToolCall: async () => {} },
     });

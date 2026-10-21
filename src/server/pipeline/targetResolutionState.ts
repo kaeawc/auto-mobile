@@ -38,14 +38,14 @@ export function createTargetResolution(
   runningReadAlreadyChecked: boolean,
 ): TargetResolution {
   const autolockEnabled = captureAutolockPolicy();
-  const { args, options, deviceSessionManager, signal } = input;
+  const { args, options, deviceReadiness, signal } = input;
   signal?.throwIfAborted();
   let connectedPlatformsPromise: Promise<ConnectedPlatformScan> | undefined;
   const getConnectedPlatforms = (refresh = false): Promise<ConnectedPlatformScan> => {
     if (refresh) {
       connectedPlatformsPromise = undefined;
     }
-    connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatformsWithStatus(signal, {
+    connectedPlatformsPromise ??= deviceReadiness.detectConnectedPlatformsWithStatus(signal, {
       platform: args.platform,
     });
     return connectedPlatformsPromise;

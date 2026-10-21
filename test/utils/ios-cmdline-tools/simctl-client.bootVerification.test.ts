@@ -1806,7 +1806,7 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.getSleepCallCount()).toBe(0);
   });
 
-  // The session auto-start path (DeviceSessionManager.findOrStartIosDevice ->
+  // The session auto-start path (DeviceReadiness.findOrStartIosDevice ->
   // SimCtlClient.bootSimulator) is the default when an MCP session begins with no
   // booted simulator. It previously ran a bare `simctl boot` plus a fixed 1s
   // sleep, so it bypassed verification entirely -- the very scenario #4094 is

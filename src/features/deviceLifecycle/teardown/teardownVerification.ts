@@ -18,7 +18,7 @@ import {
   isVirtualAndroidDevice,
   isUnknownAndroidRuntimeName,
   getValidatedPooledAndroidAvdName,
-} from "../core/androidIdentity";
+} from "../identity/androidIdentity";
 import {
   readTeardownBootedDiscovery,
   type TeardownInventoryDiscovery,

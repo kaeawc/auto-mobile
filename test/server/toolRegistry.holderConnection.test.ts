@@ -185,7 +185,7 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
       await fromConnection(OTHER_CONNECTION, "readProbe", { deviceId: held.deviceId });
       expect(reads).toEqual([{ readPath: true, sessionUuid: undefined }]);
       expect(tools.watcherResolutions).toBe(1);
-      expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
       expect(lastUsedAt()).toBe(before);
 
       await fromConnection(HOLDER_CONNECTION, "readProbe", { deviceId: held.deviceId });

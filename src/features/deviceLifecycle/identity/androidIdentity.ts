@@ -8,12 +8,12 @@ import {
 } from "../../../utils/android-cmdline-tools/EmulatorProcessStop";
 import { type Timer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
-import { type StableDeviceTarget } from "./deadlines";
+import { type StableDeviceTarget } from "../core/deadlines";
 import { type PooledAvdCapture } from "../teardown/teardownContracts";
 import {
   type DeviceToolsDependencies,
   POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
-} from "./dependencies";
+} from "../core/dependencies";
 
 export function isVirtualAndroidDevice(device: BootedDevice): boolean {
   return device.platform === "android" && isAndroidEmulatorSerial(device.deviceId);

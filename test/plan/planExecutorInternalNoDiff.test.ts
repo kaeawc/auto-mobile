@@ -6,7 +6,7 @@ import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/t
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 
 /**
  * Regression guard for issue #3053 part 2: PlanExecutor must mark its tool-to-tool
@@ -33,14 +33,14 @@ describe("PlanExecutor internal no-diff marker (#3053)", () => {
     // These tests exercise the daemon-less direct path; an initialized DaemonState left by another
     // file would route sess-1 through a real SessionManager and its file-backed database.
     DaemonState.getInstance().reset();
-    // Resolve the device through a fake instead of the process-wide DeviceSessionManager singleton,
+    // Resolve the device through a fake instead of the process-wide DeviceReadiness singleton,
     // whose connected-device cache and pins other files mutate.
-    const fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    fakeDeviceSessionManager.setConnectedDevices([
+    const fakeDeviceReadiness = new FakeDeviceReadiness();
+    fakeDeviceReadiness.setConnectedDevices([
       { name: "Pixel A", deviceId: "emulator-5554", platform: "android" },
     ]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     planExecutor = createDefaultPlanExecutor();
     capturedArgs = [];
   });

@@ -163,7 +163,7 @@ export class ToolRegistryClass {
   private readonly sessionBindingReleaseNotifier: SessionBindingReleaseHandler = {
     onSessionReleased: (sessionUuid) => this.notifySessionBindingReleased(sessionUuid),
   };
-  private deviceSessionManager: DeviceReadiness;
+  private deviceReadiness: DeviceReadiness;
   private cleanupService: AppCleanupService;
   private toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   private timer: Timer;
@@ -181,7 +181,7 @@ export class ToolRegistryClass {
   private removalEpoch = 0;
 
   constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
-    this.deviceSessionManager = DeviceReadiness.getInstance();
+    this.deviceReadiness = DeviceReadiness.getInstance();
     this.cleanupService = new DefaultAppCleanupService();
     this.toolCallRepository = new ToolCallRepository();
     this.timer = timer;
@@ -203,7 +203,7 @@ export class ToolRegistryClass {
    */
   getCollaboratorsForTesting(): ToolRegistryCollaborators {
     return {
-      deviceSessionManager: this.deviceSessionManager,
+      deviceReadiness: this.deviceReadiness,
       toolCallRepository: this.toolCallRepository,
       timer: this.timer,
       navigationToolCallRecorder: this.navigationToolCallRecorder,
@@ -218,13 +218,13 @@ export class ToolRegistryClass {
    * `setPipelineOverridesForTesting`.
    */
   setCollaboratorsForTesting(overrides: {
-    deviceSessionManager?: Partial<DeviceReadiness>;
+    deviceReadiness?: Partial<DeviceReadiness>;
     toolCallRepository?: Pick<ToolCallRepository, "recordToolCall">;
     timer?: Timer;
     navigationToolCallRecorder?: Partial<NavigationToolCallRecorder>;
   }): void {
-    this.deviceSessionManager =
-      (overrides.deviceSessionManager as DeviceReadiness | undefined) ?? this.deviceSessionManager;
+    this.deviceReadiness =
+      (overrides.deviceReadiness as DeviceReadiness | undefined) ?? this.deviceReadiness;
     this.toolCallRepository = overrides.toolCallRepository ?? this.toolCallRepository;
     this.timer = overrides.timer ?? this.timer;
     this.navigationToolCallRecorder =
@@ -376,7 +376,7 @@ export class ToolRegistryClass {
             name,
             args: handlerArgs,
             options,
-            deviceSessionManager: this.deviceSessionManager,
+            deviceReadiness: this.deviceReadiness,
             signal,
             timer: this.timer,
           });
@@ -972,8 +972,8 @@ export class ToolRegistryClass {
   }
 
   // Get the device session manager
-  getDeviceSessionManager(): DeviceReadiness {
-    return this.deviceSessionManager;
+  getDeviceReadiness(): DeviceReadiness {
+    return this.deviceReadiness;
   }
 
   // Allow tests to inject a cleanup implementation

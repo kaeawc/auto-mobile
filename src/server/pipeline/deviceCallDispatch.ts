@@ -492,18 +492,18 @@ export function bindingPlatformsFor(
  */
 export async function predictReadinessTarget(
   platform: SomePlatform,
-  deviceSessionManager: DeviceReadiness,
+  deviceReadiness: DeviceReadiness,
   getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
 ): Promise<string | undefined> {
   const { devices } = await getConnectedPlatforms();
-  const pin = deviceSessionManager.getExplicitDevicePin();
-  const current = deviceSessionManager.getCurrentDevice();
+  const pin = deviceReadiness.getExplicitDevicePin();
+  const current = deviceReadiness.getCurrentDevice();
   const platforms = new Set(devices.map((device) => device.platform));
   const targetPlatform =
     platform !== "either"
       ? platform
       : platforms.size > 1
-        ? (pin?.platform ?? deviceSessionManager.getCurrentPlatform())
+        ? (pin?.platform ?? deviceReadiness.getCurrentPlatform())
         : devices[0]?.platform;
   const candidates = devices.filter((device) => device.platform === targetPlatform);
   const connected = (deviceId: string | undefined) =>

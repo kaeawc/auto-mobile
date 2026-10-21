@@ -1,4 +1,10 @@
 import generatedDefinitions from "../../schemas/tool-definitions.json";
+import { resolveJsonSchemaReference } from "../../src/server/jsonSchemaReferences";
+import { flattenTopLevelUnion } from "../../src/server/TopLevelUnionFlattener";
+import {
+  advertiseBoundsForCompact,
+  BOUNDS_UNION_DESCRIPTION_PREFIX,
+} from "../../src/server/compactBoundsAdvertisement";
 import {
   startDeviceOutputSchema,
   pressButtonResultSchema,
@@ -946,11 +952,15 @@ interface CompactMetadataJsonSchema {
   additionalProperties?: unknown;
   [key: string]: unknown;
 }
-function schemaArms(schema: CompactMetadataJsonSchema): CompactMetadataJsonSchema[] {
+function schemaArms(
+  schema: CompactMetadataJsonSchema,
+  root: CompactMetadataJsonSchema = schema,
+): CompactMetadataJsonSchema[] {
+  schema = resolveJsonSchemaReference(root, schema) as CompactMetadataJsonSchema;
   return [
     schema,
-    ...[...(schema.anyOf ?? []), ...(schema.oneOf ?? []), ...(schema.allOf ?? [])].flatMap(
-      schemaArms,
+    ...[...(schema.anyOf ?? []), ...(schema.oneOf ?? []), ...(schema.allOf ?? [])].flatMap((arm) =>
+      schemaArms(arm, root),
     ),
   ];
 }
@@ -981,7 +991,7 @@ test("all action schemas allow compact metadata and duplicate-element omissions"
         continue;
       }
       observations++;
-      for (const observationArm of schemaArms(observation)) {
+      for (const observationArm of schemaArms(observation, definition.outputSchema)) {
         for (const field of fields) {
           expect(observationArm.required ?? []).not.toContain(field);
           if (observationArm.properties && !observationArm.properties[field]) {
@@ -990,7 +1000,7 @@ test("all action schemas allow compact metadata and duplicate-element omissions"
         }
         const hierarchy = observationArm.properties?.viewHierarchy;
         if (hierarchy) {
-          for (const hierarchyArm of schemaArms(hierarchy)) {
+          for (const hierarchyArm of schemaArms(hierarchy, definition.outputSchema)) {
             expect(hierarchyArm.required ?? []).not.toContain("insets");
             expect(hierarchyArm.required ?? []).not.toContain("systemInsets");
           }
@@ -999,4 +1009,59 @@ test("all action schemas allow compact metadata and duplicate-element omissions"
     }
   }
   expect(observations).toBeGreaterThan(0);
+});
+
+test("flattening resolves referenced branches and discriminators without constraining the merged enum", () => {
+  const schema = flattenTopLevelUnion({
+    $defs: {
+      leftKind: { const: "left" },
+      rightKind: { const: "right" },
+      left: {
+        type: "object",
+        properties: { kind: { $ref: "#/$defs/leftKind" }, a: { type: "string" } },
+        required: ["kind", "a"],
+        additionalProperties: false,
+      },
+      right: {
+        type: "object",
+        properties: { kind: { $ref: "#/$defs/rightKind" }, b: { type: "number" } },
+        required: ["kind", "b"],
+        additionalProperties: false,
+      },
+    },
+    oneOf: [{ $ref: "#/$defs/left" }, { $ref: "#/$defs/right" }],
+  });
+  expect(schema.required).toEqual(["kind"]);
+  expect(schema.properties).toEqual({
+    kind: { enum: ["left", "right"] },
+    a: { type: "string" },
+    b: { type: "number" },
+  });
+  expect(schema.if).toEqual({ properties: { kind: { const: "left" } }, required: ["kind"] });
+  expect(schema.then).toEqual({ required: ["a"] });
+  expect(schema.else).toMatchObject({ then: { required: ["b"] } });
+  expect(schema.additionalProperties).toBe(false);
+});
+
+test("compact bounds collapse reaches definitions and resolves referenced object arms", () => {
+  const input = {
+    type: "object",
+    properties: { first: { $ref: "#/$defs/bounds" }, second: { $ref: "#/$defs/bounds" } },
+    $defs: {
+      bounds: {
+        description: `${BOUNDS_UNION_DESCRIPTION_PREFIX} left, top, right, bottom`,
+        anyOf: [{ $ref: "#/$defs/object" }, { type: "array" }],
+      },
+      object: { type: "object", properties: { left: { type: "number" } } },
+    },
+  };
+  const snapshot = JSON.stringify(input);
+  const output = advertiseBoundsForCompact(input, false) as typeof input;
+  expect(output.$defs.bounds).toMatchObject({
+    type: "object",
+    properties: { left: { type: "number" } },
+  });
+  expect(output.$defs.bounds).not.toHaveProperty("anyOf");
+  expect(JSON.stringify(input)).toBe(snapshot);
+  expect(advertiseBoundsForCompact(input, true)).toBe(input);
 });

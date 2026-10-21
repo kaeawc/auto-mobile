@@ -1,3 +1,4 @@
+import { FakeDaemonHttpTokenStore } from "../../src/daemon/FakeDaemonHttpTokenStore";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
@@ -233,12 +234,17 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     const port = await freePort();
     const daemon = new Daemon(
       { port, host: "127.0.0.1" },
-      { timer: new FakeTimer(), httpToken: "test-http-token" },
+      {
+        timer: new FakeTimer(),
+        httpToken: "test-http-token",
+        httpTokenStore: new FakeDaemonHttpTokenStore(),
+      },
     );
     // The HTTP listener lifecycle is private; Daemon.start() would also boot devices and the DB.
     const call = async (method: string): Promise<void> => {
       await Reflect.get(daemon, method).call(daemon);
     };
+    daemon.testHooks.publishHttpToken();
     await Reflect.get(daemon, "httpIngress").start();
     await call("resolveStartupCompletion");
     await Promise.resolve();

@@ -20,7 +20,7 @@ import {
   type ProvisionDeviceArgs,
   type InternalProvisionDeviceArgs,
 } from "./contracts";
-import { type TeardownToolResponse } from "./teardownContracts";
+import { type TeardownToolResponse } from "../teardown/teardownContracts";
 import { provisionDeviceSchema } from "./schemas";
 
 export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undefined {

@@ -192,7 +192,7 @@ export class Daemon {
   private rejectStartupCompletion!: (reason: unknown) => void;
 
   private readonly mcpServices = new DaemonMcpServices({
-    httpToken: () => this.httpToken.value,
+    httpToken: () => this.httpToken,
     iosDoctorDependencies: this.iosDoctorDependencies,
     debug: () => this.debug,
     acceptanceDiscoveryCapability: () => this.acceptanceDiscoveryCapability,

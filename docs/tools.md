@@ -2037,6 +2037,11 @@ It is Android-only; iOS returns `status: "unsupported"`.
 - `waitForResult` (default `true`) reports the ordered-broadcast `resultCode` and
   `resultData` that `am broadcast` prints (`Broadcast completed: result=…`). With
   `false` they are left out; `am` still waits for delivery.
+- `am broadcast` reports `result=0` even when nothing received it, so the tool checks
+  first: an uninstalled `appId` fails with `package_not_installed`, and an explicit
+  `component` that `cmd package query-receivers` does not resolve fails with
+  `no_matching_receiver`; nothing is sent in either case (a check that cannot run falls
+  through to the broadcast).
 - A protected system broadcast (for example `BOOT_COMPLETED`), which the shell may
   not send, fails with `errorCode: "protected_broadcast"`. Other refusals report
   `permission_denied`, and output with no completion line reports

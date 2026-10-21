@@ -5441,6 +5441,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,

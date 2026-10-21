@@ -15,6 +15,7 @@ import {
   type PrototypeJson,
 } from "./prototypeJson";
 import { prototypeChartShape } from "./prototypeChartSchema";
+import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   anchorSchema,
@@ -25,7 +26,6 @@ import {
   hexColorSchema,
   iconNameSchema,
   iconVariantSchema,
-  imageAssetSchema,
   itemSchema,
   placementSchema,
   PROTOTYPE_COLOR_ROLES,
@@ -189,17 +189,7 @@ const commonNodeShape = {
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
-  transition: z
-    .enum(["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"])
-    .optional(),
-  // Animates styleWhen-driven alpha, offset, scale, rotation, background and color (#14208).
-  animate: z
-    .object({
-      durationMs: z.number().finite().int().min(0).max(2000).optional(),
-      easing: z.enum(["standard", "emphasized", "linear", "spring"]).optional(),
-    })
-    .strict()
-    .optional(),
+  ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
@@ -311,17 +301,7 @@ const textBaseSchema = z
   })
   .strict();
 const imageBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    ...gestureNodeShape,
-    type: z.enum(["image"]),
-    asset: imageAssetSchema,
-    contentScale: z.enum(["fit", "crop", "fill"]).optional(),
-    zoomable: z
-      .object({ maxScale: z.number().finite().min(1).max(8) })
-      .strict()
-      .optional(),
-  })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...prototypeImageShape })
   .strict();
 const iconBaseSchema = z
   .object({

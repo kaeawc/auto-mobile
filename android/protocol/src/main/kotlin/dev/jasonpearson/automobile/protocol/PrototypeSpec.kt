@@ -1202,6 +1202,7 @@ data class PrototypeChartNode(
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
+  override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,

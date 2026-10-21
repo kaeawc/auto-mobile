@@ -7781,7 +7781,14 @@
             "transition": {
               "rule": {
                 "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
+                "values": ["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
               },
               "optional": true
             },

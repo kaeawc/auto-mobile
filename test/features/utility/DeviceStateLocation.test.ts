@@ -17,6 +17,7 @@ import { setDeviceStateSchema } from "../../../src/server/utilityTools";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeEmulatorConsoleClient } from "../../fakes/FakeEmulatorConsoleClient";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDeviceTraits, androidDeviceTraits } from "../../fakes/FakeDeviceTraits";
 import { FakeDeviceClockAdapter } from "../../fakes/FakeDeviceClockAdapter";
@@ -99,7 +100,7 @@ describe("setDeviceState location", () => {
     expect(applied).toBe(false);
   });
 
-  for (const device of [android, { ...ios, deviceId: "00008110-0012345678901234" }]) {
+  for (const device of [android]) {
     test(`static and route writes do not mark ${device.deviceId}`, async () => {
       const timer = new FakeTimer();
       const routeRegistry = new LocationRouteRegistry(timer);
@@ -356,13 +357,23 @@ describe("setDeviceState location", () => {
     }).setState({
       location: point,
     });
-    const iosResult = await new DeviceState(physicalIos, { deviceTraits, simctl }).setState({
-      location: point,
-    });
+    const oldRunner = new FakeIOSCtrlProxy();
+    oldRunner.locationResult = {
+      success: false,
+      unsupported: true,
+      error: "Unknown command: request_location",
+      totalTimeMs: 0,
+    };
+    const iosResult = await new DeviceState(physicalIos, {
+      deviceTraits,
+      simctl,
+      iosRunnerLocation: oldRunner,
+    }).setState({ location: point });
     expect(androidResult.location?.supported).toBe(false);
     expect(androidResult.error).toContain("Use an Android emulator");
     expect(iosResult.location?.supported).toBe(false);
-    expect(iosResult.error).toContain("Use an iOS Simulator");
+    expect(iosResult.error).toContain("request_location");
+    expect(iosResult.error).toContain("iOS 16.4+");
     expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
@@ -563,10 +574,7 @@ describe("setDeviceState location", () => {
       ],
       durationMs: 1000,
     };
-    for (const device of [
-      { ...android, deviceId: "physical" },
-      { ...ios, deviceId: "physical" },
-    ]) {
+    for (const device of [{ ...android, deviceId: "physical" }]) {
       const result = await new DeviceState(device, { deviceTraits, timer, routeRegistry }).setState(
         {
           location: route,
@@ -668,3 +676,83 @@ beforeOutputSchema(() => {
   );
 });
 afterOutputSchema(() => setStateOutputSchemaSpy.mockRestore());
+
+describe("setDeviceState location on physical iOS through the runner (#14091)", () => {
+  const physicalIos: BootedDevice = { ...ios, deviceId: "00008110-0012345678901234" };
+
+  test("a static fix goes to the runner, never simctl, and marks the session", async () => {
+    const runner = new FakeIOSCtrlProxy();
+    const simctl = new FakeSimctl();
+    let applied = false;
+    const result = await new DeviceState(physicalIos, {
+      simctl,
+      iosRunnerLocation: runner,
+      routeRegistry: new LocationRouteRegistry(new FakeTimer()),
+      onLocationApplied: () => {
+        applied = true;
+      },
+    }).setState({ location: point });
+
+    expect(result.location).toMatchObject({
+      supported: true,
+      mode: "static",
+      method: "ios_ctrl_proxy",
+      latitude: point.latitude,
+      longitude: point.longitude,
+    });
+    expect(runner.locationHistory).toEqual([
+      { latitude: point.latitude, longitude: point.longitude },
+    ]);
+    expect(applied).toBe(true);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  test("a refused fix is a typed failure that does not mark the session", async () => {
+    const runner = new FakeIOSCtrlProxy();
+    runner.locationResult = { success: false, error: "device locked", totalTimeMs: 0 };
+    let applied = false;
+    const result = await new DeviceState(physicalIos, {
+      iosRunnerLocation: runner,
+      routeRegistry: new LocationRouteRegistry(new FakeTimer()),
+      onLocationApplied: () => {
+        applied = true;
+      },
+    }).setState({ location: point });
+    expect(result.location).toMatchObject({ supported: true, method: "ios_ctrl_proxy" });
+    expect(result.location?.error).toContain("device locked");
+    expect(applied).toBe(false);
+  });
+
+  test("route playback advances through the runner on the host timer", async () => {
+    const timer = new FakeTimer();
+    const routeRegistry = new LocationRouteRegistry(timer);
+    const runner = new FakeIOSCtrlProxy();
+    const result = await new DeviceState(physicalIos, {
+      timer,
+      routeRegistry,
+      iosRunnerLocation: runner,
+    }).setState({
+      location: {
+        mode: "route",
+        waypoints: [
+          { latitude: 0, longitude: 0 },
+          { latitude: 0, longitude: 1 },
+        ],
+        durationMs: 1000,
+        updateIntervalMs: 500,
+      },
+    });
+    expect(result.location).toMatchObject({
+      supported: true,
+      mode: "route",
+      method: "ios_ctrl_proxy",
+    });
+    timer.advanceTime(1000);
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    expect(runner.locationHistory.length).toBeGreaterThan(0);
+    expect(runner.locationHistory[0]).toMatchObject({ latitude: 0, longitude: 0 });
+    routeRegistry.stopAll();
+  });
+});

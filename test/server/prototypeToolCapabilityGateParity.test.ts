@@ -98,6 +98,13 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     activeKey: "active",
     child: label,
   }),
+  prototype_loading_states_v1: fixture({
+    type: "box",
+    id: "label",
+    style: { shimmer: true },
+    children: [{ type: "spacer" }],
+  }),
+  prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   // A chart reads a /data array, so the spec carries data and the data capability is advertised.
   prototype_chart_v1: {
     minimalSpec: { ...fixture(chart).minimalSpec, data: chartData },
@@ -158,6 +165,33 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
     }),
     with: ["prototype_network_v1"],
+  },
+  // `requires` is a root-level block a patch cannot introduce, and every module use must be
+  // declared there (#14294), so only the show half applies. A permission-only block needs just the
+  // vocabulary capability; a declared module also needs its own, with the vocabulary advertised.
+  prototype_platform_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { permissions: [{ name: "camera", purpose: "Scan a code" }] },
+    },
+    ops: [],
+  },
+  prototype_platform_test_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["test"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
   },
 };
 function fixture(root: { type: string; id: string } & Record<string, unknown>) {

@@ -104,6 +104,7 @@ object ValidTools {
         "resetAppLogs",
         "resetKeychain",
         "sendSms",
+        "mediaSession",
         "setDeviceResources",
         "setPosture",
         "setPreference",

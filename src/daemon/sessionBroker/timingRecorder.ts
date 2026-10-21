@@ -9,13 +9,51 @@ import type { ResetResult, SessionPreparationTiming } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
 import { nativeProfile } from "./profile";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
-import type { BrokerRequestRecord, BrokerResourceRecord, BrokerAdmissionInput } from "./store";
+import type {
+  BrokerAdmission,
+  BrokerRequestRecord,
+  BrokerResourceRecord,
+  BrokerAdmissionInput,
+} from "./store";
+
+function continuedAcquisitionTiming(
+  previous: SessionBrokerAcquisitionTiming,
+  request: BrokerRequestRecord,
+  resource: BrokerResourceRecord,
+  kind: "create" | "reuse" | "evict" | "wait",
+  now: number,
+  creationProfile: unknown,
+) {
+  if (
+    kind === "wait" ||
+    (previous.admission !== "wait" &&
+      previous.admission !== "reuse" &&
+      (kind !== "reuse" || previous.admission !== "evict-then-create"))
+  ) {
+    return {};
+  }
+  const acquisition: SessionBrokerAcquisitionTiming = {
+    ...previous,
+    admission: kind === "evict" ? "evict-then-create" : kind,
+    reuseCount: kind === "reuse" ? (resource.reuseCount ?? 0) : 0,
+    admissionWaitMs: now - previous.startedAtMs,
+    totalMs: now - previous.startedAtMs,
+    ...(kind === "reuse" ? { createMs: 0, bootMs: 0 } : {}),
+  };
+  return {
+    timing_json: JSON.stringify({ ...request.timing, acquisition }),
+    timing_profile_json: JSON.stringify(
+      nativeProfile(kind === "evict" ? { profile: creationProfile } : resource),
+    ),
+    timing_updated_at_ms: now,
+  };
+}
 
 export function pendingAcquisitionTiming(
   input: BrokerAdmissionInput,
   request: BrokerRequestRecord,
   resource: BrokerResourceRecord,
-  kind: "create" | "reuse" | "evict",
+  kind: "create" | "reuse" | "evict" | "wait",
   now: number,
   creationProfile?: unknown,
 ) {
@@ -24,23 +62,7 @@ export function pendingAcquisitionTiming(
   }
   const previous = request.timing?.acquisition;
   if (previous) {
-    if (kind !== "reuse" || previous.admission !== "evict-then-create") {
-      return {};
-    }
-    const acquisition: SessionBrokerAcquisitionTiming = {
-      ...previous,
-      admission: "reuse",
-      reuseCount: resource.reuseCount ?? 0,
-      admissionWaitMs: now - previous.startedAtMs,
-      totalMs: now - previous.startedAtMs,
-      createMs: 0,
-      bootMs: 0,
-    };
-    return {
-      timing_json: JSON.stringify({ ...request.timing, acquisition }),
-      timing_profile_json: JSON.stringify(nativeProfile(resource)),
-      timing_updated_at_ms: now,
-    };
+    return continuedAcquisitionTiming(previous, request, resource, kind, now, creationProfile);
   }
   const acquisition: SessionBrokerAcquisitionTiming = {
     admission: kind === "evict" ? "evict-then-create" : kind,
@@ -114,6 +136,12 @@ export class BrokerTimingRecorder {
     } catch (error) {
       logger.warn(`Could not record failed acquisition ${request.requestId}`, error);
       return false;
+    }
+  }
+
+  async recordRefusedAdmission(admission: BrokerAdmission): Promise<void> {
+    if (admission.kind === "refused") {
+      await this.recordFailedAcquisition(admission.request);
     }
   }
 

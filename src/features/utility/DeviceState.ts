@@ -1,3 +1,4 @@
+import type { IosRunnerLocationClient } from "./device-state/LocationOperations";
 import {
   defaultDeviceTraits,
   type DeviceTraits,
@@ -50,6 +51,8 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../models";
+import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
+import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { writeDeviceCameraPoster } from "./DeviceCameraPoster";
 import { AdbEmulatorSensorConsole, readEmulatorSensors } from "./EmulatorSensors";
 import type { QrPosterWriter } from "../../utils/qr/QrPosterWriter";
@@ -126,6 +129,7 @@ export class DeviceState {
   private deviceTraits: DeviceTraits;
   private readonly canWriteLocation: () => boolean;
   private readonly onLocationApplied?: () => void;
+  private readonly iosRunnerLocation?: IosRunnerLocationClient;
   private readonly cameraPosterQrWriter?: QrPosterWriter;
   private readonly cameraPosterFileExists?: (path: string) => boolean;
   private injectedNetworkFilterBridge?: NetworkFilterBridge;
@@ -148,6 +152,7 @@ export class DeviceState {
     deviceTraits: () => this.deviceTraits,
     canWriteLocation: () => this.canWriteLocation(),
     onLocationApplied: () => this.onLocationApplied,
+    runnerLocation: () => this.iosRunnerLocation,
   });
 
   private readonly connectivity = new ConnectivityOperations({
@@ -197,6 +202,7 @@ export class DeviceState {
     this.deviceTraits = dependencies.deviceTraits ?? defaultDeviceTraits;
     this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
     this.onLocationApplied = dependencies.onLocationApplied;
+    this.iosRunnerLocation = dependencies.iosRunnerLocation;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
     this.iosAppNetworkRule = dependencies.iosAppNetworkRule;
   }
@@ -209,7 +215,15 @@ export class DeviceState {
 
   async getState(
     include: readonly DeviceStateField[] = DEFAULT_DEVICE_STATE_FIELDS,
+    signal: AbortSignal | undefined = getAbortSignal(),
   ): Promise<DeviceStateResult> {
+    signal?.throwIfAborted();
+    return runWithAbortSignal(signal, () =>
+      awaitWhileRequestIsLive(this.readState(include), signal),
+    );
+  }
+
+  private async readState(include: readonly DeviceStateField[]): Promise<DeviceStateResult> {
     // An empty selection would otherwise read nothing and report success.
     if (include.length === 0) {
       return {
@@ -373,8 +387,13 @@ export class DeviceState {
     return this.location.writeLocation(input);
   }
 
-  getBiometricEnrollmentState(): Promise<BiometricEnrollmentState> {
-    return this.biometric.getBiometricEnrollmentState();
+  getBiometricEnrollmentState(
+    signal: AbortSignal | undefined = getAbortSignal(),
+  ): Promise<BiometricEnrollmentState> {
+    signal?.throwIfAborted();
+    return runWithAbortSignal(signal, () =>
+      awaitWhileRequestIsLive(this.biometric.getBiometricEnrollmentState(), signal),
+    );
   }
 
   setBiometricEnrollmentState(enrollment: BiometricEnrollment): Promise<BiometricEnrollmentState> {

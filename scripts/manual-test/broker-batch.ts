@@ -173,6 +173,7 @@ function expectationPlan(command: BrokerBatchCommand, deps: BrokerBatchOrchestra
       limits: host.limits,
       defaults: host.defaults,
       reuseCleanDevices: host.reuseCleanDevices,
+      reuse: host.reuse,
       clients,
     },
     { maxDevices: command.maxDevices, allowReuse: manifest?.broker?.allowReuse ?? false },

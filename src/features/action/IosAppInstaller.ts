@@ -117,7 +117,7 @@ export class IosAppInstaller {
   }
 
   /** Read CFBundleIdentifier from a simulator .app or physical-device .ipa. */
-  private async resolveAppBundleId(appPath: string): Promise<string | undefined> {
+  async resolveAppBundleId(appPath: string): Promise<string | undefined> {
     try {
       if (path.extname(appPath).toLowerCase() === ".ipa") {
         return await this.resolveIpaBundleId(appPath);

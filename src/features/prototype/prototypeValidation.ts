@@ -6,6 +6,8 @@ import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepe
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
+import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { prototypePlatformError } from "./prototypePlatform";
@@ -185,6 +187,16 @@ function searchBarConstraint(
   }
   return undefined;
 }
+/** `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness. */
+function emptyConditionConstraint(
+  data: Record<string, unknown>,
+  path: string,
+): PrototypeValidationError | undefined {
+  return Object.hasOwn(data, "empty") &&
+    (Object.hasOwn(data, "key") || Object.hasOwn(data, "platform"))
+    ? fail(keyPath(path, "empty"), "empty applies only to data conditions")
+    : undefined;
+}
 function visitObject(
   value: unknown,
   rule: Rule,
@@ -201,7 +213,7 @@ function visitObject(
     return textError;
   }
   const fields = rule.fields ?? {};
-  const searchBarError = searchBarConstraint(data, path);
+  const searchBarError = searchBarConstraint(data, path) ?? emptyConditionConstraint(data, path);
   if (searchBarError) {
     return searchBarError;
   }
@@ -616,26 +628,57 @@ function swipeActionsErrors(context: Context): PrototypeValidationError | undefi
   }
   return undefined;
 }
+/** Whether a `scroll` with the given axis rule encloses the node at `path`. */
+function insideScroll(context: Context, path: string, horizontal: boolean): boolean {
+  return context.nodes.some(
+    ({ value: ancestor, path: ancestorPath }) =>
+      ancestor.type === "scroll" &&
+      (ancestor.axis === "horizontal") === horizontal &&
+      path.startsWith(`${ancestorPath}.`),
+  );
+}
+/**
+ * A horizontal `scroll` measures its child with an infinite width, which the lazy horizontal pager
+ * and carousel layouts cannot take (#14165); the vertical rule is the same for vertical pagers.
+ */
+function horizontalLazyError(
+  node: Record<string, unknown>,
+  path: string,
+  context: Context,
+): PrototypeValidationError | undefined {
+  if (node.type === "carousel" && insideScroll(context, path, true)) {
+    return fail(path, "A carousel cannot appear inside a horizontal scroll");
+  }
+  if (node.type === "pager" && node.axis !== "vertical" && insideScroll(context, path, true)) {
+    return fail(path, "A horizontal pager cannot appear inside a horizontal scroll");
+  }
+  return undefined;
+}
+/** One pager's own checks; records its id in `pagers`. */
+function pagerNodeError(
+  value: Record<string, unknown>,
+  path: string,
+  context: Context,
+  pagers: Set<string>,
+): PrototypeValidationError | undefined {
+  if (value.type !== "pager" || typeof value.id !== "string") {
+    return undefined;
+  }
+  if (pagers.has(value.id)) {
+    return fail(`${path}.id`, "Duplicate pager id");
+  }
+  pagers.add(value.id);
+  return value.axis === "vertical" && insideScroll(context, path, false)
+    ? fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll")
+    : undefined;
+}
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
   for (const { value, path } of context.nodes) {
-    if (value.type !== "pager" || typeof value.id !== "string") {
-      continue;
-    }
-    if (pagers.has(value.id)) {
-      return fail(`${path}.id`, "Duplicate pager id");
-    }
-    pagers.add(value.id);
-    if (
-      value.axis === "vertical" &&
-      context.nodes.some(
-        ({ value: ancestor, path: ancestorPath }) =>
-          ancestor.type === "scroll" &&
-          ancestor.axis !== "horizontal" &&
-          path.startsWith(`${ancestorPath}.`),
-      )
-    ) {
-      return fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll");
+    const error =
+      horizontalLazyError(value, path, context) ?? pagerNodeError(value, path, context, pagers);
+    if (error) {
+      return error;
     }
   }
   for (const { value, path } of [...context.nodes, ...context.actions]) {
@@ -735,6 +778,8 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
+    prototypeLoadingStatesError(context.nodes) ??
+    prototypeMotionV2Error(context.nodes) ??
     prototypePlatformError(value, context.actions, platformArgumentError) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??

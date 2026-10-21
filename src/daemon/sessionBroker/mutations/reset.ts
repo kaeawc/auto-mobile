@@ -1,4 +1,5 @@
-import { ActionableError } from "../../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../../models/ActionableError";
+import { combineAbortSignals } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
@@ -11,14 +12,18 @@ import type {
   DeviceMutationJournal,
   DeviceMutationScope,
 } from "./types";
+import { DEVICE_MUTATION_KINDS } from "./types";
 
 export interface DeviceMutationResetContext {
   scope: DeviceMutationScope;
   signal: AbortSignal;
   assertOwned(): Promise<void>;
+  recordPhase?: (phase: string, durationMs: number) => void;
+  baseline?: DeviceBaseline;
 }
 
 export interface DeviceMutationResetPort extends DeviceMutationRevertSupport {
+  readonly certifiableKinds?: readonly string[];
   capture(context: DeviceMutationResetContext): Promise<DeviceBaseline>;
   revert(mutation: DeviceMutationInput, context: DeviceMutationResetContext): Promise<void>;
 }
@@ -38,6 +43,10 @@ export interface DeviceMutationResetOptions {
   assertOwned(): Promise<void>;
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   budgetMs: number;
+  signal?: AbortSignal;
+  propagateErrors?: boolean;
+  afterRevert?: (context: DeviceMutationResetContext) => Promise<void>;
+  recordPhase?: (phase: string, durationMs: number) => void;
 }
 
 export async function revertDeviceMutations(
@@ -53,20 +62,22 @@ export async function revertDeviceMutations(
   const controller = new AbortController();
   const context: DeviceMutationResetContext = {
     scope: { ...options.scope },
-    signal: controller.signal,
+    signal: combineAbortSignals(controller.signal, options.signal) ?? controller.signal,
+    recordPhase: options.recordPhase,
     assertOwned: async () => {
-      controller.signal.throwIfAborted();
+      context.signal.throwIfAborted();
       await options.assertOwned();
-      controller.signal.throwIfAborted();
+      context.signal.throwIfAborted();
     },
   };
   try {
     return await raceWithDeadline(() => runRevert(options, context), {
       timer: options.timer,
+      signal: context.signal,
       timeoutMs: options.budgetMs,
       label: "Device mutation reset",
       onTimeout: () =>
-        controller.abort(new ActionableError("Device mutation reset budget exceeded")),
+        controller.abort(new DOMException("Device mutation reset budget exceeded", "TimeoutError")),
     });
   } catch (error) {
     controller.abort(error);
@@ -74,6 +85,9 @@ export async function revertDeviceMutations(
       `Device mutation reset failed on ${options.scope.deviceId}: ${errorMessage(error)}`,
       error,
     );
+    if (options.propagateErrors) {
+      throw toActionableError(context.signal.reason ?? error, "Device mutation reset failed");
+    }
     return { status: "non_clean", reason: "reset_failed", details: [errorMessage(error)] };
   }
 }
@@ -82,11 +96,25 @@ async function runRevert(
   options: DeviceMutationResetOptions,
   context: DeviceMutationResetContext,
 ): Promise<DeviceMutationResetResult> {
-  await context.assertOwned();
   const baseline = await options.journal.getBaseline(context.scope);
   if (!baseline) {
     return { status: "non_clean", reason: "baseline_missing", details: [] };
   }
+  context.baseline = baseline;
+  const incomplete = DEVICE_MUTATION_KINDS.filter(
+    (kind) =>
+      !baseline.completeKinds.includes(kind) ||
+      (options.port.certifiableKinds !== undefined &&
+        !options.port.certifiableKinds.includes(kind)),
+  );
+  if (baseline.unobservable.length > 0 || incomplete.length > 0) {
+    return {
+      status: "non_clean",
+      reason: "non_revertible",
+      details: [...baseline.unobservable, ...incomplete],
+    };
+  }
+  await context.assertOwned();
   const entries = await options.journal.list(context.scope);
   await context.assertOwned();
   const current = await options.port.capture(context);
@@ -102,6 +130,8 @@ async function runRevert(
     await context.assertOwned();
     await options.port.revert(step.mutation, context);
   }
+  await context.assertOwned();
+  await options.afterRevert?.(context);
   await context.assertOwned();
   const verified = diffDeviceBaseline(baseline, await options.port.capture(context));
   await context.assertOwned();
@@ -130,5 +160,8 @@ export async function captureFirstDeviceBaseline(
   const baseline = await port.capture(context);
   await context.assertOwned();
   context.signal.throwIfAborted();
+  if (baseline.completeKinds.length === 0 && baseline.observations.length === 0) {
+    throw new ActionableError("Device baseline capture returned no observable inventory");
+  }
   await journal.captureBaseline(context.scope, baseline);
 }

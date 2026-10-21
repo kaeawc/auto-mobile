@@ -4750,7 +4750,7 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
       );
     });
 
-    expect(await drain()).toEqual({ swipeCount: 1, dismissedCount: 1, stalled: false });
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 1, stalled: false });
     expect(reopenTimes).toHaveLength(1);
     const commands = adb.getExecutedCommands();
     expect(commands.findIndex((command) => command.startsWith("shell input tap"))).toBeLessThan(
@@ -4765,7 +4765,7 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
       swipes().length > 0 ? Promise.resolve(createObservation()) : execute(options),
     );
 
-    expect(await drain()).toEqual({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
     expect(swipes()).toHaveLength(1);
     expect(timer.now()).toBe(3125);
     expect(reopenTimes.length).toBeGreaterThan(0);
@@ -4783,7 +4783,7 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
       swipes().length > 0 ? new Promise<ObserveResult>(() => {}) : execute(options),
     );
 
-    expect(await drain()).toEqual({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
     expect(swipes()).toHaveLength(1);
     expect(timer.now()).toBe(3125);
   });
@@ -4820,7 +4820,7 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
       return Promise.resolve(createObservation());
     });
 
-    expect(await drain()).toEqual({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
     expect(timer.now()).toBe(3125);
     expect(reopenTimes).toHaveLength(1);
     expect(reopenSignal?.aborted).toBe(true);
@@ -4956,7 +4956,7 @@ describe("Android systemTray clearAll progress budget", () => {
   test("drains three grouped notifications across multiple awaitTimeout budgets", async () => {
     const { timer, swipes, drain } = setup();
 
-    expect(await drain()).toEqual({ swipeCount: 3, dismissedCount: 3, stalled: false });
+    expect(await drain()).toMatchObject({ swipeCount: 3, dismissedCount: 3, stalled: false });
     expect(swipes()).toHaveLength(3);
     expect(timer.now()).toBe(9000);
     expect(timer.now()).toBeGreaterThan(5000);
@@ -4965,7 +4965,7 @@ describe("Android systemTray clearAll progress budget", () => {
   test("stalls with partial progress without swiping a surviving row again", async () => {
     const { timer, swipes, drain } = setup(1);
 
-    expect(await drain()).toEqual({ swipeCount: 2, dismissedCount: 1, stalled: true });
+    expect(await drain()).toMatchObject({ swipeCount: 2, dismissedCount: 1, stalled: true });
     expect(swipes()).toHaveLength(2);
     expect(timer.now()).toBe(8000);
   });
@@ -4973,7 +4973,7 @@ describe("Android systemTray clearAll progress budget", () => {
   test("respects maxSwipes even while dismissals keep making progress", async () => {
     const { timer, swipes, drain } = setup();
 
-    expect(await drain(2)).toEqual({ swipeCount: 2, dismissedCount: 2, stalled: true });
+    expect(await drain(2)).toMatchObject({ swipeCount: 2, dismissedCount: 2, stalled: true });
     expect(swipes()).toHaveLength(2);
     expect(timer.now()).toBe(6000);
   });

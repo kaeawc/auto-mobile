@@ -16,7 +16,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
@@ -159,32 +158,15 @@ class TextInputControllerTest {
     }
   }
 
-  private class FakeSender(private val events: MutableList<String>) :
-    TextInputController.ResponseSender {
-    var running = true
+  private class FakeSender(private val events: MutableList<String>) : FakeResultTransport() {
     val frames = mutableListOf<Pair<String, JsonObject>>()
-    val syncTypes = mutableListOf<String>()
 
-    override fun isRunning() = running
-
-    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
-      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
-      val type = frame.getValue("type").jsonPrimitive.content
+    override suspend fun sendFrame(frame: String) {
+      val parsed = Json.parseToJsonElement(frame).jsonObject
+      val type = parsed.getValue("type").jsonPrimitive.content
       events += "frame:$type"
-      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming"))
+      frames += type to JsonObject(parsed - setOf("type", "timestamp", "perfTiming"))
     }
-
-    override suspend fun broadcastWithPerfSync(
-      messageBuilder: (perfTiming: JsonElement?) -> String,
-    ) {
-      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
-      val type = frame.getValue("type").jsonPrimitive.content
-      syncTypes += type
-      events += "frame:$type"
-      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming"))
-    }
-
-    override fun connectionCount() = 1
   }
 
   private class Harness(
@@ -209,10 +191,12 @@ class TextInputControllerTest {
         timeProvider = timer,
         responses =
           TextInputResponseDependencies(
-            resultBroadcaster =
-              ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
             jsonCompact = Json { encodeDefaults = true },
-            responseSender = sender,
+            resultSender =
+              guardedResultSender(
+                sender,
+                ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+              ),
           ),
         config =
           TextInputConfig(
@@ -254,7 +238,6 @@ class TextInputControllerTest {
       assertEquals("r1", frame.str("requestId"))
       assertNull(frame["error"])
       assertTrue(h.host.keyboardHidden)
-      assertEquals(listOf("set_text_result"), h.sender.syncTypes)
       assertEquals(listOf("frame:set_text_result", "publishHierarchy"), events)
     }
 
@@ -330,7 +313,6 @@ class TextInputControllerTest {
       val frame = h.sender.only("insert_text_result")
       assertTrue(frame.bool("success"))
       assertNull(frame["partialApplication"])
-      assertEquals(listOf("insert_text_result"), h.sender.syncTypes)
       assertEquals(listOf("frame:insert_text_result", "publishHierarchy"), events)
       assertNull(h.controller.remembered())
     }
@@ -495,7 +477,6 @@ class TextInputControllerTest {
     assertTrue(frame.bool("success"))
     val state = frame.getValue("state").jsonObject
     assertEquals("hello", state.str("text"))
-    assertEquals(listOf("insert_text_state_result"), h.sender.syncTypes)
   }
 
   @Test
@@ -527,9 +508,8 @@ class TextInputControllerTest {
     assertTrue(frame.bool("success"))
     assertEquals("next", frame.str("action"))
     assertNull(frame["approximated"])
-    // IME actions settle the hierarchy before acknowledging, on the asynchronous socket path.
+    // IME actions settle the hierarchy before acknowledging.
     assertEquals(listOf("publishHierarchy", "frame:ime_action_result"), events)
-    assertTrue(h.sender.syncTypes.isEmpty())
   }
 
   @Test

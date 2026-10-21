@@ -4,6 +4,7 @@ import type { AppearanceMode } from "../../src/models";
 import type { AppearanceConfig } from "../../src/models/Appearance";
 import {
   AppearanceSyncScheduler,
+  type AppearanceSyncTarget,
   defaultAppearanceSyncDependencies,
 } from "../../src/daemon/AppearanceSyncScheduler";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -303,6 +304,42 @@ describe("AppearanceSyncScheduler resilience", () => {
     await syncing;
     finishApply();
     await tick;
+    await scheduler.stop();
+  });
+
+  test("a claim that lands while the previous holder's apply is in flight is re-run once it settles (#11363)", async () => {
+    let holder = "session-a";
+    const writes: Array<string | undefined> = [];
+    let finishFirst!: () => void;
+    const scheduler = new AppearanceSyncScheduler(new FakeTimer(), {
+      isEnabled: () => true,
+      getConfig: async () =>
+        ({ syncWithHost: false, defaultMode: "dark", applyOnConnect: true }) as AppearanceConfig,
+      resolveMode: async () => "dark",
+      getTargets: () => [{ ...makeTarget(1), sessionKey: holder }],
+      apply: (device) => {
+        writes.push((device as AppearanceSyncTarget).sessionKey);
+        return writes.length === 1
+          ? new Promise<void>((resolve) => {
+              finishFirst = resolve;
+            })
+          : Promise.resolve();
+      },
+    });
+    const first = scheduler.syncDevice({ ...makeTarget(1), sessionKey: "session-a" });
+    await flushMicrotasks();
+    expect(writes).toEqual(["session-a"]);
+
+    // The device changes hands while session-a's write is still running.
+    holder = "session-b";
+    await scheduler.syncDevice({ ...makeTarget(1), sessionKey: "session-b" });
+    expect(writes).toEqual(["session-a"]);
+
+    finishFirst();
+    await first;
+    await flushMicrotasks();
+    // The tick only re-applies a host-following config, so only the re-run claim can write b's mode.
+    expect(writes).toEqual(["session-a", "session-b"]);
     await scheduler.stop();
   });
 

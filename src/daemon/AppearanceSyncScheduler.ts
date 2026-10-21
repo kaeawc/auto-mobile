@@ -59,6 +59,8 @@ export class AppearanceSyncScheduler {
   private intervalHandle: NodeJS.Timeout | null = null;
   private lastAppliedModes = new Map<string, AppliedAppearance>();
   private readonly inFlightApplies = new Map<string, Promise<boolean>>();
+  // A claim that found an apply in flight on its device, re-run once that apply settles.
+  private readonly pendingClaims = new Map<string, AppearanceSyncTarget>();
   private pending: Promise<void> | null = null;
   private readonly timer: Timer;
   private readonly dependencies: AppearanceSyncDependencies;
@@ -115,19 +117,47 @@ export class AppearanceSyncScheduler {
         return;
       }
       const mode = await this.dependencies.resolveMode(config);
-      if (!this.stopped) {
-        await this.applyToDevice(
-          device,
-          mode,
-          config,
-          (current) => isOwedOnClaim(current) && isSameDecision(current, config),
-        );
+      if (this.stopped) {
+        return;
       }
+      const inFlight = this.inFlightApplies.get(device.deviceId);
+      if (inFlight) {
+        this.retryClaimAfter(inFlight, device);
+        return;
+      }
+      await this.applyToDevice(
+        device,
+        mode,
+        config,
+        (current) => isOwedOnClaim(current) && isSameDecision(current, config),
+      );
     } catch (error) {
       logger.warn(
         `[Appearance] Failed to apply appearance on claim to ${device.deviceId}: ${error}`,
       );
     }
+  }
+
+  /**
+   * Re-runs a claim that found another apply in flight on its device once that apply settles
+   * (#11363). The in-flight apply may have been decided for the previous holder and refused once
+   * the device changed hands, and the tick never re-applies an explicit mode, so dropping the claim
+   * would leave the new holder's mode unapplied. Only the latest claim per device is re-run.
+   */
+  private retryClaimAfter(inFlight: Promise<boolean>, device: AppearanceSyncTarget): void {
+    const alreadyQueued = this.pendingClaims.has(device.deviceId);
+    this.pendingClaims.set(device.deviceId, device);
+    if (alreadyQueued) {
+      return;
+    }
+    const rerun = (): void => {
+      const latest = this.pendingClaims.get(device.deviceId);
+      this.pendingClaims.delete(device.deviceId);
+      if (latest && !this.stopped) {
+        void this.syncDevice(latest);
+      }
+    };
+    void inFlight.then(rerun, rerun);
   }
 
   async stop(): Promise<void> {

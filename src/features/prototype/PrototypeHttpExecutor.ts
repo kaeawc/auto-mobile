@@ -77,6 +77,12 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECT_HOPS = 5;
 
 const BODYLESS_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
+const REQUEST_BODY_HEADERS = new Set([
+  "content-type",
+  "content-encoding",
+  "content-language",
+  "content-location",
+]);
 
 /**
  * The JSON text with every object's keys in sorted (UTF-16 code unit) order, recursively: the
@@ -199,9 +205,21 @@ function redirectedRequest(
     ...request,
     headers: from.origin === to.origin ? request.headers : undefined,
   };
-  return [301, 302, 303].includes(status) && !BODYLESS_METHODS.has(request.method)
-    ? { ...redirected, method: "GET", body: undefined }
-    : redirected;
+  const rewrite =
+    ((status === 301 || status === 302) && request.method === "POST") ||
+    (status === 303 && !BODYLESS_METHODS.has(request.method));
+  if (!rewrite) {
+    return redirected;
+  }
+  const headers =
+    redirected.headers === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(redirected.headers).filter(
+            ([name]) => !REQUEST_BODY_HEADERS.has(name.toLowerCase()),
+          ),
+        );
+  return { ...redirected, method: "GET", body: undefined, headers };
 }
 
 function redirectUrl(location: string, base: URL): URL | undefined {

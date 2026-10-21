@@ -251,10 +251,16 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "displayConfig", { increaseContrast: true });
     recordPlanCall(recorder, "displayConfig", { reduceMotion: false });
     recordPlanCall(recorder, "displayConfig", { boldText: true });
+    recordPlanCall(recorder, "displayConfig", { size: { width: 720, height: 1600 } });
+    recordPlanCall(recorder, "displayConfig", { navigationMode: "threeButton" });
+    recordPlanCall(recorder, "displayConfig", { displayCutout: "hole" });
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "keyboard",
       "clipboard",
       "systemTray",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
       "displayConfig",
       "displayConfig",
       "displayConfig",

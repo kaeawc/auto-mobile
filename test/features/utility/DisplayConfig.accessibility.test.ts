@@ -102,6 +102,9 @@ describe("displayConfig accessibility display preferences (#14088)", () => {
       magnification: true,
       magnificationScale: true,
       extraDim: true,
+      size: true,
+      navigationMode: true,
+      displayCutout: true,
     });
     expect(result.supportNotes).toBeUndefined();
   });

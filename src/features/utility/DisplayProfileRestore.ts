@@ -14,7 +14,12 @@ export type DisplayProfileFacet =
 /** How to put one facet back the way it was before the first display-profile change. */
 export type DisplayProfileRestoreAction =
   | { facet: "display"; values: SetDisplayConfigInput }
-  | { facet: "screenSize" | "cutout" | "navigationMode" | "forceDark"; commands: string[] }
+  | {
+      facet: "screenSize" | "cutout" | "navigationMode" | "forceDark";
+      commands: string[];
+      /** Logical display ids whose state `commands` restore; absent means the default display. */
+      scopes?: string[];
+    }
   | { facet: "posture"; posture: RequestedPosture };
 
 interface DisplayProfileRestoreEntry {
@@ -28,6 +33,27 @@ export interface OwnedDisplayProfileRestore {
   device: BootedDevice;
   /** In the order reset runs them: the reverse of the order apply first changed them. */
   actions: DisplayProfileRestoreAction[];
+}
+
+type CommandRestoreAction = Extract<DisplayProfileRestoreAction, { commands: string[] }>;
+
+const DEFAULT_DISPLAY_SCOPE = "0";
+
+/**
+ * A command facet is write-once per display: a second display (#14101) adds its own restore
+ * commands to the same facet, while a display already recorded keeps its first original.
+ */
+function mergeScopedCommands(existing: CommandRestoreAction, added: CommandRestoreAction): boolean {
+  const recorded = existing.scopes ?? [DEFAULT_DISPLAY_SCOPE];
+  const fresh = (added.scopes ?? [DEFAULT_DISPLAY_SCOPE]).filter(
+    (scope) => !recorded.includes(scope),
+  );
+  if (fresh.length === 0) {
+    return false;
+  }
+  existing.commands = [...existing.commands, ...added.commands];
+  existing.scopes = [...recorded, ...fresh];
+  return true;
 }
 
 /**
@@ -71,6 +97,9 @@ export class DisplayProfileRestoreRegistry {
       const added = Object.keys(action.values).some((key) => !(key in existing.values));
       existing.values = { ...action.values, ...existing.values };
       return added;
+    }
+    if (existing && "commands" in existing && "commands" in action) {
+      return mergeScopedCommands(existing, action);
     }
     if (existing) {
       return false;

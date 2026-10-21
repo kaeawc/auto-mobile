@@ -1,5 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
+import { createAndroidResetStrategy } from "../../../src/daemon/sessionBroker/service";
+import {
+  parseSessionBrokerHostConfig,
+  type SessionBrokerHostConfig,
+} from "../../../src/daemon/sessionBroker/hostConfig";
 import { ManagedDevicePort } from "../../../src/daemon/sessionBroker/managedDevicePort";
 import { AndroidSnapshotReset } from "../../../src/daemon/sessionBroker/androidSnapshotReset";
 import { FakeAndroidSnapshotPort } from "./fixtures/androidSnapshotReset";
@@ -67,6 +72,7 @@ describe("Android broker reset dispatch and recovery", () => {
   let timer: FakeTimer;
   let tracker: ExecutionTracker;
   let transportId: string;
+  let deviceName: string;
 
   beforeAll(async () => {
     const warm = await openSqliteBindingRegistry({ dbPath: ":memory:" });
@@ -78,6 +84,7 @@ describe("Android broker reset dispatch and recovery", () => {
     current = true;
     creates = 0;
     transportId = ANDROID_RESET_DEVICE.deviceId;
+    deviceName = ANDROID_RESET_DEVICE.name;
     timer = new FakeTimer();
     registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
@@ -143,7 +150,7 @@ describe("Android broker reset dispatch and recovery", () => {
             creates++;
             const result = await registry.commitBinding(key, assignment, {
               stableDeviceId: ANDROID_RESET_DEVICE.name,
-              deviceName: ANDROID_RESET_DEVICE.name,
+              deviceName,
               resolvedSpec: spec.requestedSpec,
               specFingerprint: "android-profile",
               state: "ready",
@@ -174,7 +181,7 @@ describe("Android broker reset dispatch and recovery", () => {
                 device: {
                   stableId: ANDROID_RESET_DEVICE.name,
                   transportId,
-                  name: ANDROID_RESET_DEVICE.name,
+                  name: deviceName,
                 },
                 sessionUuid: sessionId,
                 requestedSpec: spec.requestedSpec,
@@ -390,10 +397,119 @@ describe("Android broker reset dispatch and recovery", () => {
     const session = await ready();
     expect(host.inventoryCalls).toBe(0);
     expect(host.commands).toEqual([]);
-    expect(await broker.release(session)).toMatchObject({ outcome: "released" });
+    const receipt = await broker.release(session);
+    expect(receipt.outcome).toBe("released");
+    expect(receipt.timing?.reset?.fallbackReason).toBe(
+      "Android reset is destruction-only: no androidResetMode reset strategy is configured",
+    );
+    expect(receipt.timing?.reset?.fallbackReason).not.toContain("transport identity");
     expect(host.inventoryCalls).toBe(0);
     expect(host.commands).toEqual([]);
     expect((await options.store.listResources())[0]!.state).toBe("destroyed");
+  });
+
+  test("serial-like acquired name reports the avdName identity mismatch", async () => {
+    deviceName = "emulator-5554";
+    host.devices[0]!.name = deviceName;
+    const session = await ready();
+    const receipt = await broker.release(session);
+    expect(receipt.outcome).toBe("released");
+    expect((await options.store.listResources())[0]!.state).toBe("destroyed");
+    expect(receipt.timing?.reset?.fallbackReason).toContain("mismatched: avdName");
+  });
+
+  test.each([
+    { label: "omitted", mode: undefined, fallback: undefined, fails: false, destroyed: true },
+    {
+      label: "keep-booted",
+      mode: "keep-booted",
+      fallback: undefined,
+      fails: false,
+      destroyed: false,
+    },
+    { label: "snapshot", mode: "snapshot", fallback: undefined, fails: false, destroyed: false },
+    {
+      label: "snapshot fallback",
+      mode: "keep-booted",
+      fallback: "snapshot",
+      fails: false,
+      destroyed: false,
+    },
+    {
+      label: "failed snapshot fallback",
+      mode: "keep-booted",
+      fallback: "snapshot",
+      fails: true,
+      destroyed: true,
+    },
+  ] as const)("production factory dispatches $label configuration", async (scenario) => {
+    const cfg: SessionBrokerHostConfig = parseSessionBrokerHostConfig({
+      contractVersion: 1,
+      limits: {},
+      defaults: { android: androidDefaults() },
+      reuseAndroidCleanDevices: true,
+      androidResetMode: scenario.mode,
+      androidKeepBootedFallback: scenario.fallback,
+    });
+    const { adb } = androidBaselineRig();
+    const snapshotPort = new FakeAndroidSnapshotPort();
+    const snapshot =
+      cfg.androidResetMode === "snapshot" || cfg.androidKeepBootedFallback === "snapshot"
+        ? new AndroidSnapshotReset(snapshotPort, timer, {
+            prepareForIncarnationChange: async () => {},
+            invalidate: async () => {},
+            settleIncarnationChange: async () => {},
+          })
+        : undefined;
+    const fakePort = new FakeAndroidKeepBootedResetPort({
+      completeKinds: [...DEVICE_MUTATION_KINDS],
+      observations: [],
+      unobservable: [],
+    });
+    fakePort.beforeClean = async () => {
+      throw new Error("hard cleaning failure");
+    };
+    host.timer = timer;
+    host.strategy = createAndroidResetStrategy(cfg, {
+      journal: new FakeDeviceMutationJournal(timer),
+      timer,
+      snapshot,
+      port: () =>
+        cfg.androidKeepBootedFallback === "snapshot"
+          ? fakePort
+          : new AndroidDeviceMutationResetPort(adb),
+    });
+    if (cfg.androidResetMode === undefined) {
+      expect(host.strategy).toBeUndefined();
+    }
+    const session = await ready();
+    if (scenario.fails) {
+      snapshotPort.failures.add("load");
+      snapshotPort.failures.add("launch");
+    }
+    const receipt = await broker.release(session);
+    expect(receipt.outcome).toBe("released");
+    expect((await options.store.listResources())[0]!.state).toBe(
+      scenario.destroyed ? "destroyed" : "idle",
+    );
+    expect(creates).toBe(1);
+    expect(deleter.calls).toHaveLength(scenario.destroyed ? 1 : 0);
+    if (cfg.androidResetMode === undefined) {
+      expect(receipt.timing?.reset?.fallbackReason).toBe(
+        "Android reset is destruction-only: no androidResetMode reset strategy is configured",
+      );
+    } else if (!scenario.destroyed) {
+      expect(receipt.timing?.reset).toMatchObject({
+        outcome: scenario.fallback ? "fallback:snapshot" : "clean",
+        mode: scenario.fallback ?? scenario.mode,
+      });
+    }
+    if (scenario.fallback) {
+      expect(snapshotPort.calls).toContain("load");
+    }
+    if (scenario.fails) {
+      expect(snapshotPort.calls).toContain("launch");
+    }
   });
 
   test("hard cleaning followed by failed snapshot and wipe-data reset destroys the resource", async () => {
@@ -512,7 +628,13 @@ describe("Android broker reset dispatch and recovery", () => {
     host.booted = true;
     host.packageManager = true;
     host.failCommand = undefined;
-    expect(await broker.release(session)).toMatchObject({ outcome: "released" });
+    const receipt = await broker.release(session);
+    expect(receipt.outcome).toBe("released");
+    if (failure === "missing-transport") {
+      expect(receipt.timing?.reset?.fallbackReason).toBe(
+        "Android reset baseline was not captured at acquisition",
+      );
+    }
     expect((await options.store.listResources())[0]!.state).toBe("destroyed");
     expect(deleter.calls).toHaveLength(1);
   });

@@ -138,9 +138,9 @@ describe("InputText", () => {
       { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
     );
 
-    await expect(
-      inputText.execute("hello", undefined, false, undefined, controller.signal),
-    ).rejects.toBe(deviceLoss);
+    await expect(inputText.execute("hello", {}, { signal: controller.signal })).rejects.toBe(
+      deviceLoss,
+    );
   });
 
   test("forwards cancellation through post-input observation", async () => {
@@ -160,7 +160,7 @@ describe("InputText", () => {
     );
     observe.enableAutoVaryHierarchy();
 
-    await inputText.execute("hello", undefined, false, undefined, controller.signal);
+    await inputText.execute("hello", {}, { signal: controller.signal });
 
     expect(observe.getExecuteOptions()).not.toHaveLength(0);
     expect(

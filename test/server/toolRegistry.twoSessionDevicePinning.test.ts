@@ -4,6 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import {
   ToolRegistry,
@@ -116,13 +117,13 @@ describe("ToolRegistry two-session device pinning (#11810)", () => {
       { name: "rotate", deviceId: deviceB.deviceId },
     ]);
     expect(fakeReadiness.getEnsureDeviceReadyCallCount()).toBe(0);
-    expect(fakeReadiness.getSetCurrentDeviceCalls()).toEqual([]);
-    expect(fakeReadiness.getCurrentDevice()).toBeUndefined();
+    expect("getCurrentDevice" in fakeReadiness).toBe(false);
   });
 
   test("a sessionless call naming no device after session B's call is refused, not resolved to B's device", async () => {
     await arrangeHarness([deviceA, deviceB]);
     await rotate({ sessionUuid: "session-b" });
+    await fakeReadiness.ensureDeviceReady("android", deviceB.deviceId);
 
     await expect(rotate({ platform: "android" })).rejects.toBeInstanceOf(
       AmbiguousDeviceTargetError,
@@ -162,4 +163,29 @@ describe("ToolRegistry two-session device pinning (#11810)", () => {
     );
     expect(ran).toEqual([{ name: "rotate", deviceId: deviceC.deviceId }]);
   });
+
+  test.each(["android", "either"])(
+    "a header-keyed client's %s call reads and readies its own pin",
+    async (platform) => {
+      const connected: BootedDevice[] = [deviceA, deviceB, deviceC];
+      if (platform === "either") {
+        connected.push({ name: "iPhone", deviceId: "iphone", platform: "ios" });
+      }
+      await arrangeHarness(connected);
+      fakeReadiness.setExplicitDevicePin(deviceC, "header-client");
+
+      await runWithToolSelectionContext({ deviceConnectionKey: "header-client" }, () =>
+        rotate({ platform }),
+      );
+
+      expect(ran).toEqual([{ name: "rotate", deviceId: deviceC.deviceId }]);
+      expect(fakeReadiness.getLastOptions()?.connectionId).toBe("header-client");
+      expect(fakeReadiness.getExplicitDevicePin()).toBeUndefined();
+      await expect(
+        runWithToolSelectionContext({ deviceConnectionKey: "other-client" }, () =>
+          rotate({ platform: "android" }),
+        ),
+      ).rejects.toBeInstanceOf(AmbiguousDeviceTargetError);
+    },
+  );
 });

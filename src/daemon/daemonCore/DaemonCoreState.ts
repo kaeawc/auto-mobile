@@ -27,6 +27,7 @@ import type { DaemonStateWrites } from "../daemonContext";
 
 /** Live views of daemon-owned services and lifetime state; collaborators receive only named Picks. */
 export interface DaemonCoreServices {
+  deviceReadiness: () => DeviceReadiness;
   iosDeviceVerifier: () => () => Pick<DeviceReadiness, "verifyIosDevice">;
   httpIngress: () => DaemonHttpIngress;
   mcpDispatcher: () => ReturnType<typeof createDaemonMcpDispatcher>;

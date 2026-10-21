@@ -12,13 +12,15 @@ import dev.jasonpearson.automobile.protocol.PrototypeStyle
  * apart from CtrlProxy's other accessibility-overlay window, the highlight overlay, which shares
  * the type and the package.
  */
-const val PROTOTYPE_WINDOW_TITLE = "AutoMobile Prototype"
+internal const val PROTOTYPE_WINDOW_TITLE = "AutoMobile Prototype"
 
 /** Surface-specific title; direct host callers retain the legacy title. */
+@InternalAutoMobilePrototypeApi
 fun prototypeWindowTitle(surfaceId: String?): String =
   if (surfaceId == null) PROTOTYPE_WINDOW_TITLE else "$PROTOTYPE_WINDOW_TITLE:$surfaceId"
 
 /** The complete nonempty surface id after the title prefix, including any additional colons. */
+@InternalAutoMobilePrototypeApi
 fun prototypeIdOfTitle(title: CharSequence?): String? {
   val text = title?.toString() ?: return null
   val prefix = "$PROTOTYPE_WINDOW_TITLE:"
@@ -31,6 +33,7 @@ fun prototypeIdOfTitle(title: CharSequence?): String? {
  * (`prototype_window_metadata_v1`). [placement] is `fullscreen`, `sheet` or `floating`. [opaque] is
  * true only when nothing of the app can show through the prototype's own pixels.
  */
+@InternalAutoMobilePrototypeApi
 data class PrototypeWindowMetadata(
   val placement: String,
   val opaque: Boolean,
@@ -44,7 +47,7 @@ data class PrototypeWindowMetadata(
  * through it and a fullscreen window with that bar cannot claim to hide the whole app. Flip this
  * only if the bar becomes opaque.
  */
-const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
+internal const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
 
 /**
  * Derived from the render model the window actually draws. Opaque requires the window not to be
@@ -135,7 +138,7 @@ private fun PrototypeCornerRadius.isSquare(): Boolean =
  * layer's accessibility overlay, or the app layer's TYPE_APPLICATION_OVERLAY window, which
  * accessibility reports as [AccessibilityWindowInfo.TYPE_SYSTEM] (#10544).
  */
-fun isPrototypeWindowType(windowType: Int): Boolean =
+internal fun isPrototypeWindowType(windowType: Int): Boolean =
   windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY ||
     windowType == AccessibilityWindowInfo.TYPE_SYSTEM
 
@@ -144,6 +147,7 @@ fun isPrototypeWindowType(windowType: Int): Boolean =
  * `prototypeLayoutParams`, so it tells the prototype apart from the highlight prototype (same type
  * and package) and from SystemUI's type-3 windows (shade, status bar).
  */
+@InternalAutoMobilePrototypeApi
 fun hasPrototypeTitle(windowType: Int, title: CharSequence?): Boolean =
   isPrototypeWindowType(windowType) &&
     (title?.toString() == PROTOTYPE_WINDOW_TITLE || prototypeIdOfTitle(title) != null)
@@ -153,6 +157,7 @@ fun hasPrototypeTitle(windowType: Int, title: CharSequence?): Boolean =
  * is CtrlProxy's own (its root reports our package) and carries the interactive prototype's title,
  * so the highlight overlay and SystemUI windows are never mistaken for it.
  */
+@InternalAutoMobilePrototypeApi
 fun isPrototypeWindow(
   windowType: Int,
   title: CharSequence?,

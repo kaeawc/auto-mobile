@@ -277,6 +277,59 @@ describe("host inventory single-flight", () => {
     },
   );
 
+  test.each([
+    ["listDevices", "startDevice"],
+    ["listDevices", "killDevice"],
+    ["listDeviceImages", "startDevice"],
+    ["listDeviceImages", "killDevice"],
+  ])("%s on a new socket refreshes after %s on another socket", async (name, tool) => {
+    const h = harness();
+    h.server.allowRequests();
+    const socketA = new FakeSocket();
+    h.server.connect(socketA);
+    const first = h.server.dispatchRequest(
+      h.server.sessionIds[0],
+      socketA,
+      h.context({}, name).request,
+      h.timer.now(),
+    );
+    await waitForDiscoveries(h, 1);
+
+    const socketB = new FakeSocket();
+    h.server.connect(socketB);
+    h.server.localRequestHandler = async (request) =>
+      request.params?.name === tool ? {} : undefined;
+    expect(
+      await h.server.dispatchRequest(
+        h.server.sessionIds[1],
+        socketB,
+        h.context({}, tool).request,
+        h.timer.now(),
+      ),
+    ).toMatchObject({ success: true });
+
+    // C has never admitted a barrier; B's completion must still invalidate A's flight.
+    // No fake clock tick separates the requests.
+    const socketC = new FakeSocket();
+    h.server.connect(socketC);
+    const later = h.server.dispatchRequest(
+      h.server.sessionIds[2],
+      socketC,
+      h.context({}, name).request,
+      h.timer.now(),
+    );
+    try {
+      await waitForDiscoveries(h, 2);
+      const fresh: { content: [] } = { content: [] };
+      h.pending[1].resolve(fresh);
+      expect(await later).toMatchObject({ success: true, result: fresh });
+      expect(h.discoveries()).toBe(2);
+    } finally {
+      succeed(h);
+      await Promise.all([first, later]);
+    }
+  });
+
   test.each([60_000, 120_000])("listDeviceImages retains a %ims caller budget", async (budget) => {
     const h = harness();
     const context = h.context({}, "listDeviceImages");

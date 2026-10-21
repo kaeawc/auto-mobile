@@ -276,7 +276,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
   function expectNoDeviceWork(): void {
     expect(readiness).not.toHaveBeenCalled();
     expect(tools.deviceReadiness.getEnsureDeviceReadyCalls()).toBe(0);
-    expect(tools.deviceReadiness.getSetCurrentDeviceCalls()).toEqual([]);
+    expect(tools.deviceReadiness.getExplicitDevicePin()).toBeUndefined();
     expect(start).not.toHaveBeenCalled();
     expect(tools.runs).toEqual([]);
   }

@@ -21,7 +21,7 @@ import {
 } from "../../models";
 import { ElementResolver, type ElementResolution } from "../utility/ElementResolver";
 import { normalizeQuotes } from "../utility/TextMatcher";
-import { SearchableHierarchy } from "../utility/SearchableNode";
+import { SearchableHierarchy, matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -36,8 +36,7 @@ const FOCUS_READBACK_ATTEMPTS = 5;
 const FOCUS_READBACK_INTERVAL_MS = 100;
 
 function focusMatchesTarget(focused: Element | null | undefined, resourceId: string): boolean {
-  const id = focused?.["resource-id"];
-  return Boolean(id) && (id === resourceId || id?.endsWith(`:id/${resourceId}`) === true);
+  return matchesCtrlProxyResourceId(focused?.["resource-id"], resourceId);
 }
 
 /**
@@ -262,9 +261,7 @@ export class SetAccessibilityFocus {
     }
     const sharing = new Set(
       nodes
-        .filter(
-          (node) => node.nativeId === resourceId || node.nativeId?.endsWith(`:id/${resourceId}`),
-        )
+        .filter((node) => matchesCtrlProxyResourceId(node.nativeId, resourceId))
         .map((node) => node.source),
     ).size;
     if (sharing > 1) {

@@ -3,6 +3,7 @@ import { toActionableError } from "../models/ActionableError";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
 import { AdbCommandTimeoutError } from "../utils/android-cmdline-tools/AdbClient";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AndroidDeviceTraits } from "../utils/android-cmdline-tools/deviceTraits";
 import { logger } from "../utils/logger";
 import { packageListingContains } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { ActionableError } from "../models";
@@ -16,6 +17,7 @@ export interface AndroidCtrlProxyAccessibilityHost {
   cachedAvailability: { isAvailable: boolean; timestamp: number } | null;
   readonly timer: Timer;
   readonly adb: AdbExecutor;
+  readDeviceTraits(): Promise<AndroidDeviceTraits>;
   statusInspectionDeviceError(error: unknown): Error | undefined;
   isInstalled(): Promise<boolean>;
   isEnabled(_signal?: AbortSignal, options?: { bypassCache?: boolean }): Promise<boolean>;
@@ -575,20 +577,13 @@ export class AndroidCtrlProxyAccessibility {
    */
   private async isEmulator(): Promise<[boolean, boolean]> {
     try {
-      const result = await this.host.adb.executeCommand("shell getprop ro.kernel.qemu", {
-        noRetry: true,
-      });
-      const qemuProp = result.stdout.trim();
-      // ro.kernel.qemu is "1" on emulators, empty or "0" on physical devices
-      if (qemuProp === "1") {
+      const traits = await this.host.readDeviceTraits();
+      if (traits.isEmulator === true) {
         return [true, false];
       }
 
-      // Fallback: check ro.product.model for common emulator strings
-      const modelResult = await this.host.adb.executeCommand("shell getprop ro.product.model", {
-        noRetry: true,
-      });
-      const model = modelResult.stdout.trim().toLowerCase();
+      // Fallback: check the model for common emulator strings
+      const model = traits.model?.toLowerCase() ?? "";
       return [model.includes("emulator") || model.includes("sdk"), false];
     } catch (error) {
       const deviceError = this.host.statusInspectionDeviceError(error);

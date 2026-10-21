@@ -1,13 +1,9 @@
 import { readBooleanFlag } from "./flagTokens";
-import { ENV } from "../config/env";
+import { ENV, readEnvBool } from "../config/env";
 
 export const SKIP_CTRL_PROXY_DOWNLOAD_FLAG = "--skip-ctrl-proxy-download";
 export const LEGACY_SKIP_ACCESSIBILITY_DOWNLOAD_FLAG = "--skip-accessibility-download";
 export const SKIP_CTRL_PROXY_DOWNLOAD_ENV = ENV.SKIP_CTRL_PROXY_DOWNLOAD.name;
-
-export function isTruthyEnvValue(value: string | undefined): boolean {
-  return value === "1" || value?.toLowerCase() === "true";
-}
 
 export function shouldSkipCtrlProxyDownload(
   args: string[],
@@ -18,6 +14,6 @@ export function shouldSkipCtrlProxyDownload(
     readBooleanFlag(args, [
       SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
       LEGACY_SKIP_ACCESSIBILITY_DOWNLOAD_FLAG,
-    ]) ?? isTruthyEnvValue(env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])
+    ]) ?? readEnvBool(ENV.SKIP_CTRL_PROXY_DOWNLOAD, env)
   );
 }

@@ -495,7 +495,7 @@ describe("navigation tool session graph selection", () => {
   test("registered navigation tools resolve an omitted platform to the active iOS device", async () => {
     const fakeDevices = new FakeDeviceReadiness();
     fakeDevices.setConnectedDevices([device]);
-    fakeDevices.setCurrentDevice(device, "ios");
+    fakeDevices.setExplicitDevicePin(device);
     const originalDevices = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
     ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDevices });
     const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({

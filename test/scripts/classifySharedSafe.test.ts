@@ -28,6 +28,8 @@ const TIER_B: Record<string, string> = {
   envBracketWrite: `process.env["HOME"] = dir;`,
   envDelete: `delete process.env.HOME;`,
   singleton: `const manager = DeviceReadiness.getInstance();`,
+  getInstanceAssignment: `IOSCtrlProxyClient.getInstance = () => client;`,
+  installForTesting: `installDeviceDataStreamSocketServerForTesting(streamServer);`,
   resetInstance: `afterEach(() => NavigationGraphManager.resetInstance());`,
   db: `const db = await createTestDatabase();`,
   dbHarness: `import { useNavigationTestHarness } from "../helpers/navigationTestHarness";`,

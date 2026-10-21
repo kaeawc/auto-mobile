@@ -16,6 +16,7 @@ import { SESSION_BROKER_HOST_CONFIG_ENV } from "../../src/daemon/sessionBroker/h
 import { SESSION_CONFIG_ENV } from "../../src/devices/sessionConfig";
 import { shellQuote } from "../../src/utils/shellQuote";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { consolePortFromSerial } from "../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 import {
   getAdbServerScopedAutoMobileDir,
   getSharedAutoMobileDir,
@@ -228,6 +229,23 @@ function perDaemonOptionsRefusal(options: PrivateDaemonBatchOptions): string | u
   }
   return daemonArgsRefusal(options.daemonArgs ?? []);
 }
+function protectedEmulatorPortEnv(
+  protectedDevices: readonly string[] = [],
+): Record<string, string> {
+  if (protectedDevices.length === 0) {
+    return {};
+  }
+  const ports = new Set([5554]);
+  for (const selector of protectedDevices) {
+    const port = consolePortFromSerial(selector);
+    if (port !== null) {
+      ports.add(port);
+    }
+  }
+  return {
+    AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS: [...ports].sort((a, b) => a - b).join(","),
+  };
+}
 export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): PrivateDaemonSpec[] {
   // Invalid counts must be refusals, never an unbounded allocation.
   if (!Number.isInteger(options.count) || options.count < 1 || options.count > 8) {
@@ -246,6 +264,7 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
           (row) => [row.name, join(dir, row.subpath!)],
         ),
       ),
+      ...protectedEmulatorPortEnv(options.protectedDevices),
       ...options.extraEnv,
       ...options.daemonEnv?.[String(index)],
       AUTOMOBILE_DATA_DIR: join(dir, "data"),

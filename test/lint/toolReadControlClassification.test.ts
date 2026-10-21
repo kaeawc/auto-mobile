@@ -81,6 +81,10 @@ const CLASSIFICATION: Classification = {
       reads: [{ action: "list" }],
       controls: [{ action: "apply" }, { action: "reset" }],
     },
+    persona: {
+      reads: [{ action: "list" }, { action: "describe", persona: "samsung-oneui" }],
+      controls: [{ action: "apply" }, { action: "reset" }],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],

@@ -87,6 +87,7 @@ object ValidTools {
         "appLifecycle",
         "displayConfig",
         "displayProfile",
+        "persona",
         "getAndroid",
         "getApple",
         "getDataStore",

@@ -38,6 +38,7 @@ import { registerNetworkTools } from "./networkTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSensorTools } from "./sensorTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
+import { registerPersonaTools } from "./personaTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
 
 export interface RegisterAllToolsOptions {
@@ -108,6 +109,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerKillProfileTools();
   registerSensorTools();
   registerDisplayProfileTools();
+  registerPersonaTools();
   if (options.includeToolSelection ?? true) {
     registerToolSelectionTools();
   }

@@ -291,6 +291,20 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     };
   }
 
+  // The first capture in a process pays one-time costs (HTTP ingress and fetch warm-up, lazy
+  // module init) that otherwise land in the first timed test and push it past the 100 ms budget.
+  // Warm up outside it with the same device fake and cleanup as each test.
+  beforeAll(async () => {
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));
+    try {
+      await captureHandshake();
+    } finally {
+      PlatformDeviceManagerFactory.reset();
+      DaemonState.getInstance().reset();
+      ToolRegistry.clearTools();
+    }
+  });
+
   test("answers match the checked-in fixture", async () => {
     const captured = await captureHandshake();
     if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {

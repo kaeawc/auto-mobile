@@ -60,7 +60,6 @@ class StorageControllerTest {
       resultBroadcaster =
         ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
       timeProvider = FakeTimer(),
-      jsonCompact = json,
       responseSender = sender,
     )
 

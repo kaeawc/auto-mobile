@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.TraversalOrderData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -228,20 +229,14 @@ internal class FocusController(
     }
 
     resultBroadcaster.guard(requestId, "highlight_response") {
-      val errorJson = jsonCompact.encodeToString<String?>(error)
       responseSender.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"highlight_response","timestamp":${timeProvider.currentTimeMillis()}""")
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","success":$success""")
-          append(""","error":$errorJson""")
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+        highlightResponseFrame(
+          timeProvider.currentTimeMillis(),
+          requestId,
+          success,
+          error,
+          perfTiming,
+        )
       }
       Log.d(
         TAG,
@@ -262,27 +257,17 @@ internal class FocusController(
     }
 
     resultBroadcaster.guard(requestId, "current_focus_result") {
+      val elementJson = focusedElement?.let {
+        jsonCompact.encodeToString(serializer<UIElementInfo>(), it)
+      }
       responseSender.broadcastWithPerf { perfTiming ->
-        buildString {
-          append(
-            """{"type":"current_focus_result","timestamp":${timeProvider.currentTimeMillis()}""",
-          )
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (focusedElement != null) {
-            val elementJson =
-              jsonCompact.encodeToString(serializer<UIElementInfo>(), focusedElement)
-            append(""","focusedElement":$elementJson""")
-          } else {
-            append(""","focusedElement":null""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+        currentFocusResultFrame(
+          timeProvider.currentTimeMillis(),
+          requestId,
+          totalTimeMs,
+          elementJson,
+          perfTiming,
+        )
       }
       Log.d(
         TAG,
@@ -323,26 +308,24 @@ internal class FocusController(
     }
 
     resultBroadcaster.guard(requestId, "traversal_order_result") {
+      val result =
+        TraversalOrderData(
+          elements =
+            traversalResult.elements.map {
+              jsonCompact.encodeToString(serializer<UIElementInfo>(), it)
+            },
+          focusedIndex = traversalResult.focusedIndex,
+          totalCount = traversalResult.totalCount,
+          truncationReasons = traversalResult.truncationReasons,
+        )
       responseSender.broadcastWithPerf { perfTiming ->
-        buildString {
-          append(
-            """{"type":"traversal_order_result","timestamp":${timeProvider.currentTimeMillis()}""",
-          )
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          val resultJson =
-            jsonCompact.encodeToString(
-              serializer<TraversalOrderResult>(),
-              traversalResult,
-            )
-          append(""","result":$resultJson""")
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+        traversalOrderResultFrame(
+          timeProvider.currentTimeMillis(),
+          requestId,
+          totalTimeMs,
+          result,
+          perfTiming,
+        )
       }
       Log.d(
         TAG,

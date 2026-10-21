@@ -1150,7 +1150,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       asyncActionRunner = asyncActionRunner,
       resultBroadcaster = resultBroadcaster,
       timeProvider = timeProvider,
-      jsonCompact = jsonCompact,
       responseSender =
         object : StorageController.ResponseSender {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()

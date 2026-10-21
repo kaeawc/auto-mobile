@@ -54,13 +54,18 @@ data class ErrorResponse(
 // Push Events (unsolicited messages)
 // =============================================================================
 
+/**
+ * [data] is the serialized hierarchy, embedded on the wire as an object (#11877). [frameContext] is
+ * present only when the hierarchy was extracted in the frame context that is still current.
+ */
 @Serializable
 @SerialName("hierarchy_update")
 data class HierarchyUpdateEvent(
   override val timestamp: Long,
-  val data: String, // JSON string of hierarchy data
-  val perfTiming: String? = null,
+  @Serializable(with = RawJsonSerializer::class) val data: String,
   val requestId: String? = null,
+  val frameContext: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -267,20 +272,26 @@ data class FrameMetricsData(
   val totalFrames: Int,
 )
 
+/**
+ * Encoded with explicit nulls (#11877): a null [key] is a file clear and a [JsonNull] [value] a
+ * removal, so both stay on the wire. [previousValue] is omitted (Kotlin null) for a legacy SDK that
+ * did not capture it and is [JsonNull] for a genuine "no prior value"; the host tells them apart.
+ */
 @Serializable
 @SerialName("storage_changed")
+@OptIn(ExperimentalSerializationApi::class)
 data class StorageChangedEvent(
   override val timestamp: Long,
   val packageName: String,
   val fileName: String,
-  val data: String? = null, // Legacy JSON string of preferences
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val data: String? = null, // Legacy JSON string
   val key: String? = null,
   val value: JsonElement? = null,
   val valueType: String? = null,
-  val previousValue: JsonElement? = null,
-  val changeType: String? = null,
-  val eventTimestamp: Long? = null,
-  val sequenceNumber: Long? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val changeType: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val previousValue: JsonElement? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val eventTimestamp: Long? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val sequenceNumber: Long? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -786,44 +797,60 @@ data class DeviceInfoResult(
 // Accessibility Focus Results
 // =============================================================================
 
+/**
+ * [focusedElement] is the serialized element, embedded on the wire as an object (#11877). A success
+ * frame writes an explicit `null` when nothing has focus; an error frame omits it.
+ */
 @Serializable
 @SerialName("current_focus_result")
+@OptIn(ExperimentalSerializationApi::class)
 data class CurrentFocusResult(
   override val timestamp: Long,
-  val requestId: String? = null,
-  val focusedElement: String? = null, // JSON string of focused element
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val totalTimeMs: Long,
-  val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  @Serializable(with = RawJsonSerializer::class) val focusedElement: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
 @SerialName("traversal_order_result")
+@OptIn(ExperimentalSerializationApi::class)
 data class TraversalOrderResult(
   override val timestamp: Long,
-  val requestId: String? = null,
-  val result: TraversalOrderData? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val totalTimeMs: Long,
-  val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val result: TraversalOrderData? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
+/** [elements] are serialized elements, each embedded on the wire as an object (#11877). */
 @Serializable
 @OptIn(ExperimentalSerializationApi::class)
 data class TraversalOrderData(
-  val elements: List<String>, // JSON strings of elements
+  val elements: List<@Serializable(with = RawJsonSerializer::class) String>,
   val focusedIndex: Int?,
   val totalCount: Int,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val truncationReasons: List<String>? = null,
 )
 
+/** A success frame writes an explicit `"error":null`, so this is encoded with explicit nulls. */
 @Serializable
 @SerialName("highlight_response")
+@OptIn(ExperimentalSerializationApi::class)
 data class HighlightResponse(
   override val timestamp: Long,
-  val requestId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val success: Boolean,
   val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 /**
@@ -1079,27 +1106,31 @@ data class SdkCapabilitiesResult(
   val state: SdkCapabilitiesState,
 ) : WebSocketResponse()
 
+// Storage results (#11877): field order is the wire order; absent optionals are omitted.
+
 @Serializable
 @SerialName("preference_files")
 data class PreferenceFilesResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val packageName: String,
-  val files: List<String>? = null,
+  val success: Boolean,
+  val files: List<StorageFileInfo>? = null,
   val error: String? = null,
 ) : WebSocketResponse()
 
+/** Encoded with explicit nulls so an entry's null `value` stays on the wire as `"value":null`. */
 @Serializable
 @SerialName("preferences")
+@OptIn(ExperimentalSerializationApi::class)
 data class PreferencesResult(
   override val timestamp: Long,
-  val requestId: String? = null,
-  val success: Boolean,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val packageName: String,
   val fileName: String,
-  val data: String? = null, // JSON string of preferences
-  val error: String? = null,
+  val success: Boolean,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val entries: List<StorageEntry>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -1107,9 +1138,10 @@ data class PreferencesResult(
 data class SubscribeStorageResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val packageName: String,
   val fileName: String,
+  val success: Boolean,
+  val subscriptionId: String? = null,
   val error: String? = null,
 ) : WebSocketResponse()
 
@@ -1118,9 +1150,9 @@ data class SubscribeStorageResult(
 data class UnsubscribeStorageResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val packageName: String,
   val fileName: String,
+  val success: Boolean,
   val error: String? = null,
 ) : WebSocketResponse()
 
@@ -1129,13 +1161,13 @@ data class UnsubscribeStorageResult(
 data class GetPreferenceResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val packageName: String,
   val fileName: String,
   val key: String,
+  val success: Boolean,
+  val found: Boolean = false,
   val value: String? = null,
   val valueType: String? = null,
-  val found: Boolean = false,
   val error: String? = null,
 ) : WebSocketResponse()
 
@@ -1144,10 +1176,10 @@ data class GetPreferenceResult(
 data class SetPreferenceResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val packageName: String,
   val fileName: String,
   val key: String,
+  val success: Boolean,
   val error: String? = null,
 ) : WebSocketResponse()
 
@@ -1156,10 +1188,10 @@ data class SetPreferenceResult(
 data class RemovePreferenceResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val packageName: String,
   val fileName: String,
   val key: String,
+  val success: Boolean,
   val error: String? = null,
 ) : WebSocketResponse()
 
@@ -1168,9 +1200,9 @@ data class RemovePreferenceResult(
 data class ClearPreferencesResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val packageName: String,
   val fileName: String,
+  val success: Boolean,
   val error: String? = null,
 ) : WebSocketResponse()
 

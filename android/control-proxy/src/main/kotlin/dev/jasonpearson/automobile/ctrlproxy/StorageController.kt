@@ -9,8 +9,6 @@ import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.ctrlproxy.storage.buildStorageChangedMessage
 import dev.jasonpearson.automobile.protocol.SetPreference
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 /**
  * SharedPreferences, DataStore and storage-subscription requests, with the late-created
@@ -21,17 +19,8 @@ internal class StorageController(
   asyncActionRunner: AsyncActionRunner,
   resultBroadcaster: ResultBroadcaster,
   private val timeProvider: TimeProvider,
-  private val jsonCompact: Json,
   private val responseSender: ResponseSender,
-) :
-  StorageRequests(
-    manager,
-    asyncActionRunner,
-    resultBroadcaster,
-    timeProvider,
-    jsonCompact,
-    responseSender,
-  ) {
+) : StorageRequests(manager, asyncActionRunner, resultBroadcaster, timeProvider, responseSender) {
   /** Keeps the service's late-bound WebSocket server behind one seam. */
   interface ResponseSender {
     fun isRunning(): Boolean
@@ -58,12 +47,7 @@ internal class StorageController(
       // prior value so the TS telemetry ingest can skip its per-insert previous-value
       // lookup (#3000), quoting it by its OWN type so a removed/type-changed STRING
       // stays valid JSON. An absent prior value is emitted as JSON null.
-      val message =
-        buildStorageChangedMessage(
-          event,
-          timeProvider.currentTimeMillis(),
-          jsonCompact,
-        )
+      val message = buildStorageChangedMessage(event, timeProvider.currentTimeMillis())
       responseSender.broadcast(message)
       Log.d(TAG, "Broadcasted storage change to ${responseSender.connectionCount()} clients")
     } catch (e: CancellationException) {
@@ -81,9 +65,8 @@ internal open class StorageRequests(
   private val asyncActionRunner: AsyncActionRunner,
   resultBroadcaster: ResultBroadcaster,
   timeProvider: TimeProvider,
-  jsonCompact: Json,
   responseSender: StorageController.ResponseSender,
-) : StorageResponses(resultBroadcaster, timeProvider, jsonCompact, responseSender) {
+) : StorageResponses(resultBroadcaster, timeProvider, responseSender) {
   private companion object {
     const val TAG = "CtrlProxy"
   }
@@ -295,7 +278,6 @@ internal open class StorageRequests(
 internal open class StorageResponses(
   private val resultBroadcaster: ResultBroadcaster,
   private val timeProvider: TimeProvider,
-  private val jsonCompact: Json,
   private val responseSender: StorageController.ResponseSender,
 ) {
   private companion object {
@@ -314,22 +296,15 @@ internal open class StorageResponses(
     }
 
     resultBroadcaster.guard(requestId, "preference_files") {
-      val message = buildString {
-        append("""{"type":"preference_files","timestamp":${timeProvider.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        if (files != null) {
-          append(""","success":true,"files":${jsonCompact.encodeToString(files)}""")
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
+      responseSender.broadcast(
+        preferenceFilesResultFrame(
+          timeProvider.currentTimeMillis(),
+          requestId,
+          packageName,
+          files,
+          error,
+        ),
+      )
       Log.d(TAG, "Broadcasted preference files to ${responseSender.connectionCount()} clients")
     }
   }
@@ -347,23 +322,14 @@ internal open class StorageResponses(
     }
 
     resultBroadcaster.guard(requestId, "preferences") {
-      val message = buildString {
-        append("""{"type":"preferences","timestamp":${timeProvider.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (entries != null) {
-          append(""","success":true,"entries":${jsonCompact.encodeToString(entries)}""")
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
+      responseSender.broadcast(
+        preferencesResultFrame(
+          timeProvider.currentTimeMillis(),
+          StorageTarget(requestId, packageName, fileName),
+          entries,
+          error,
+        ),
+      )
       Log.d(TAG, "Broadcasted preferences to ${responseSender.connectionCount()} clients")
     }
   }
@@ -381,27 +347,14 @@ internal open class StorageResponses(
     }
 
     resultBroadcaster.guard(requestId, "subscribe_storage_result") {
-      val message = buildString {
-        append(
-          """{"type":"subscribe_storage_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (subscriptionId != null) {
-          append(
-            ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}""",
-          )
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
+      responseSender.broadcast(
+        subscribeStorageResultFrame(
+          timeProvider.currentTimeMillis(),
+          StorageTarget(requestId, packageName, fileName),
+          subscriptionId,
+          error,
+        ),
+      )
       Log.d(
         TAG,
         "Broadcasted subscribe storage result to ${responseSender.connectionCount()} clients",
@@ -421,19 +374,13 @@ internal open class StorageResponses(
     }
 
     resultBroadcaster.guard(requestId, "unsubscribe_storage_result") {
-      val message = buildString {
-        append(
-          """{"type":"unsubscribe_storage_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","success":$success""")
-        append("}")
-      }
-      responseSender.broadcast(message)
+      responseSender.broadcast(
+        unsubscribeStorageResultFrame(
+          timeProvider.currentTimeMillis(),
+          StorageTarget(requestId, packageName, fileName),
+          success,
+        ),
+      )
       Log.d(
         TAG,
         "Broadcasted unsubscribe storage result to ${responseSender.connectionCount()} clients",
@@ -448,34 +395,9 @@ internal open class StorageResponses(
     }
 
     resultBroadcaster.guard(outcome.requestId, "get_preference_result") {
-      val message = buildString {
-        append(
-          """{"type":"get_preference_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (outcome.requestId != null) {
-          appendJsonStringField("requestId", outcome.requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(outcome.packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(outcome.fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(outcome.key)}""")
-        if (outcome.error != null) {
-          append(
-            ""","success":false,"found":false,"error":${jsonCompact.encodeToString(outcome.error)}""",
-          )
-        } else if (outcome.entry != null) {
-          append(""","success":true,"found":true""")
-          if (outcome.entry.value != null) {
-            append(""","value":${jsonCompact.encodeToString(outcome.entry.value)}""")
-          } else {
-            append(""","value":null""")
-          }
-          append(""","valueType":${jsonCompact.encodeToString(outcome.entry.type)}""")
-        } else {
-          append(""","success":true,"found":false""")
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
+      responseSender.broadcast(
+        getPreferenceResultFrame(timeProvider.currentTimeMillis(), outcome),
+      )
       Log.d(
         TAG,
         "Broadcasted get preference result to ${responseSender.connectionCount()} clients",
@@ -496,24 +418,14 @@ internal open class StorageResponses(
     }
 
     resultBroadcaster.guard(requestId, "set_preference_result") {
-      val message = buildString {
-        append(
-          """{"type":"set_preference_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
+      responseSender.broadcast(
+        setPreferenceResultFrame(
+          timeProvider.currentTimeMillis(),
+          StorageTarget(requestId, packageName, fileName),
+          key,
+          error,
+        ),
+      )
       Log.d(
         TAG,
         "Broadcasted set preference result to ${responseSender.connectionCount()} clients",
@@ -534,24 +446,14 @@ internal open class StorageResponses(
     }
 
     resultBroadcaster.guard(requestId, "remove_preference_result") {
-      val message = buildString {
-        append(
-          """{"type":"remove_preference_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
+      responseSender.broadcast(
+        removePreferenceResultFrame(
+          timeProvider.currentTimeMillis(),
+          StorageTarget(requestId, packageName, fileName),
+          key,
+          error,
+        ),
+      )
       Log.d(
         TAG,
         "Broadcasted remove preference result to ${responseSender.connectionCount()} clients",
@@ -571,23 +473,13 @@ internal open class StorageResponses(
     }
 
     resultBroadcaster.guard(requestId, "clear_preferences_result") {
-      val message = buildString {
-        append(
-          """{"type":"clear_preferences_result","timestamp":${timeProvider.currentTimeMillis()}""",
-        )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      responseSender.broadcast(message)
+      responseSender.broadcast(
+        clearPreferencesResultFrame(
+          timeProvider.currentTimeMillis(),
+          StorageTarget(requestId, packageName, fileName),
+          error,
+        ),
+      )
       Log.d(
         TAG,
         "Broadcasted clear preferences result to ${responseSender.connectionCount()} clients",

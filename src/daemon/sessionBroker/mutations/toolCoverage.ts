@@ -64,6 +64,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
     [
       "accessibilityFocus",
       "appLifecycle",
+      "audit",
       "crashApp",
       "dragAndDrop",
       "dragPath",

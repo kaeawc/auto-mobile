@@ -1088,6 +1088,56 @@
       },
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "cleared": {
+          "type": "number"
+        },
+        "remaining": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "deviceSynced": {
+          "type": "boolean",
+          "const": false
+        },
+        "warning": {
+          "type": "string"
+        },
+        "notInstalled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mockId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["mockId", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "deviceConfirmed": {
+          "type": "boolean",
+          "const": false
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["cleared", "remaining"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -4105,6 +4155,44 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "graph": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "scheme": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "paths": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": ["scheme", "host", "paths"],
+            "additionalProperties": {}
+          }
+        },
+        "truncated": {
+          "type": "boolean",
+          "const": true
+        },
+        "maxEvents": {
+          "type": "number"
+        }
+      },
+      "required": ["graph"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
@@ -8973,6 +9061,56 @@
       "required": ["host", "path"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "mockId": {
+          "type": "string"
+        },
+        "mocked": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "deviceSynced": {
+          "type": "boolean",
+          "const": false
+        },
+        "warning": {
+          "type": "string"
+        },
+        "notInstalled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mockId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["mockId", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "deviceConfirmed": {
+          "type": "boolean",
+          "const": false
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["mockId", "mocked"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -9264,6 +9402,73 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "capturing": {
+          "type": "boolean"
+        },
+        "notifFilter": {
+          "type": "string",
+          "enum": ["all", "errors", "slow"]
+        },
+        "notifDebounceMs": {
+          "type": "number"
+        },
+        "slowThresholdMs": {
+          "type": "number"
+        },
+        "simulatingErrors": {
+          "type": "object",
+          "properties": {
+            "errorType": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number"
+            },
+            "remainingSeconds": {
+              "type": "number"
+            }
+          },
+          "required": ["errorType", "remainingSeconds"],
+          "additionalProperties": {}
+        },
+        "deviceSynced": {
+          "type": "boolean",
+          "const": false
+        },
+        "warning": {
+          "type": "string"
+        },
+        "notInstalled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mockId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["mockId", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "deviceConfirmed": {
+          "type": "boolean",
+          "const": false
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["capturing", "notifFilter", "notifDebounceMs", "slowThresholdMs"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true

@@ -210,7 +210,7 @@
     "js-tiktoken": "^1.0.21",
     "js-yaml": "^5.1.0",
     "knip": "^6.0.0",
-    "kysely": "0.29.6",
+    "kysely": "0.29.7",
     "oxc-parser": "0.154.0",
     "oxfmt": "0.73.0",
     "oxlint": "1.88.0",

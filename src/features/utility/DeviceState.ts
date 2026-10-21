@@ -46,6 +46,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../models";
 import { writeDeviceCameraPoster } from "./DeviceCameraPoster";
+import { AdbEmulatorSensorConsole, readEmulatorSensors } from "./EmulatorSensors";
 import type { QrPosterWriter } from "../../utils/qr/QrPosterWriter";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultLocationRouteRegistry, LocationRouteRegistry } from "./LocationRoutePlayer";
@@ -242,6 +243,14 @@ export class DeviceState {
         : {}),
       ...(include.includes("networkCondition")
         ? { networkCondition: await this.readNetworkCondition() }
+        : {}),
+      ...(include.includes("sensors")
+        ? {
+            sensors: await readEmulatorSensors(
+              this.device,
+              () => new AdbEmulatorSensorConsole(this.adbFactory.create(this.device)),
+            ),
+          }
         : {}),
     };
   }

@@ -15,6 +15,7 @@ import type {
   SetDeviceClockInput,
 } from "../DeviceClock";
 import type { DeviceCameraPosterState, SetDeviceCameraPosterInput } from "../DeviceCameraPoster";
+import type { DeviceSensorsState } from "../EmulatorSensors";
 import {
   locationInputError,
   type DeviceLocationState,
@@ -54,6 +55,7 @@ export interface DeviceStateResult {
   location?: DeviceLocationState;
   clock?: DeviceClockState;
   cameraPoster?: DeviceCameraPosterState;
+  sensors?: DeviceSensorsState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -84,6 +86,7 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "biometrics",
   "networkCondition",
   "clock",
+  "sensors",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -128,6 +131,7 @@ export interface SelectedDeviceStates {
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
   clock?: DeviceClockState;
+  sensors?: DeviceSensorsState;
 }
 
 /**

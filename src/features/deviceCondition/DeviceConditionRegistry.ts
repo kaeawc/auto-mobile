@@ -1,3 +1,4 @@
+import type { BootedDevice } from "../../models";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -5,6 +6,7 @@ import {
   DeviceConditionController,
   type DeviceConditionInjector,
 } from "./DeviceConditionController";
+import { resolvePowerFaultInjector } from "./powerFaultInjectors";
 import {
   deviceConditionInputIsMeaningful,
   type DeviceConditionInput,
@@ -20,6 +22,13 @@ import {
 export interface DeviceConditionOwner {
   deviceId: string;
   sessionUuid?: string;
+  /**
+   * The booted device, carried on an apply so the resolver can build device-scoped
+   * injectors. Release/rebind restore calls key by `deviceId` and omit it — they
+   * run already-registered resets and never re-resolve, so the apply-time device
+   * captured in the controller's resolver closure is the one that matters.
+   */
+  device?: BootedDevice;
 }
 
 /** Resolves the injector for a condition key; children register real injectors here (#14060, …). */
@@ -193,15 +202,18 @@ export class DeviceConditionRegistry {
   }
 }
 
-/** No injector is registered yet; children (#14060, #14062, #14063, …) replace this. */
-const noInjectorResolver: DeviceConditionInjectorResolver = () => undefined;
+/**
+ * Default resolver: power-domain fault injectors (#14063) on an Android device.
+ * Root/integrity injectors (#14060, #14062) add their keys here as they land.
+ * Returns undefined for a key with no injector, which the controller reports as
+ * `unsupported` rather than silently dropping.
+ */
+const defaultInjectorResolver: DeviceConditionInjectorResolver = (owner, key) =>
+  owner.device ? resolvePowerFaultInjector(owner.device, key) : undefined;
 
 /**
  * Process-wide registry for the `deviceCondition` surface. It lives in the feature
  * layer (not `src/server`) so both the tool handler and the daemon's release
- * cleanup can import it without crossing the import-direction tiers. It is
- * resolver-driven, so injector children register their injectors by replacing the
- * resolver without touching this module; until then every non-`unset` condition
- * reports unsupported.
+ * cleanup can import it without crossing the import-direction tiers.
  */
-export const defaultDeviceConditionRegistry = new DeviceConditionRegistry(noInjectorResolver);
+export const defaultDeviceConditionRegistry = new DeviceConditionRegistry(defaultInjectorResolver);

@@ -1,5 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { handleDeviceConditionCall } from "../../src/server/deviceConditionTool";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+  handleDeviceConditionCall,
+  registerDeviceConditionFeatureFlags,
+  withDeviceConditionDispatch,
+} from "../../src/server/deviceConditionTool";
 import { DeviceConditionRegistry } from "../../src/features/deviceCondition/DeviceConditionRegistry";
 import type { BootedDevice } from "../../src/models";
 import { toolText, toolStructured } from "../helpers/toolResponse";
@@ -85,5 +89,56 @@ describe("handleDeviceConditionCall (#14050)", () => {
     expect(structured.success).toBe(true);
     expect(structured.deviceCondition.version).toBe(1);
     expect(structured.deviceCondition.active).toEqual([]);
+  });
+});
+
+describe("deviceCondition setDeviceState wiring", () => {
+  afterEach(() => registerDeviceConditionFeatureFlags({ isEnabled: () => false }));
+
+  test("refuses mixing deviceCondition with screenLock", async () => {
+    const response = await handleDeviceConditionCall(
+      device,
+      {
+        deviceCondition: { rootState: "unset" },
+        screenLock: { type: "pin", credential: "1357" },
+        sessionUuid: "s",
+      },
+      { featureFlags: flagOn, registry: freshRegistry() },
+    );
+    expect(toolStructured(response).success).toBe(false);
+    expect(toolText(response)).toMatch(/cannot be combined/);
+  });
+
+  test("reads the registered feature flags when none are injected", async () => {
+    registerDeviceConditionFeatureFlags(flagOn);
+    const response = await handleDeviceConditionCall(
+      device,
+      { deviceCondition: {}, sessionUuid: "s" },
+      { registry: freshRegistry() },
+    );
+    expect(toolText(response)).toMatch(/reset or at least one condition/);
+  });
+
+  test("fails closed when no feature flags are registered", async () => {
+    const response = await handleDeviceConditionCall(
+      device,
+      { deviceCondition: { rootState: "unset" }, sessionUuid: "s" },
+      { registry: freshRegistry() },
+    );
+    expect(toolText(response)).toMatch(/feature flag/);
+  });
+
+  test("dispatches only deviceCondition calls away from the wrapped handler", async () => {
+    const calls: string[] = [];
+    const handler = withDeviceConditionDispatch(
+      async (_device: BootedDevice, args: { deviceCondition?: unknown; clock?: unknown }) => {
+        calls.push(JSON.stringify(args));
+        return "wrapped";
+      },
+    );
+    expect(await handler(device, { clock: { reset: true } })).toBe("wrapped");
+    const routed = await handler(device, { deviceCondition: { rootState: "unset" } });
+    expect(routed).not.toBe("wrapped");
+    expect(calls).toEqual([JSON.stringify({ clock: { reset: true } })]);
   });
 });

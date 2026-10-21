@@ -5,7 +5,10 @@ import type {
   DeviceConditionApplyOutcome,
   DeviceConditionInjector,
 } from "../../../src/features/deviceCondition/DeviceConditionController";
-import type { DeviceConditionKey } from "../../../src/features/deviceCondition/DeviceConditionTypes";
+import type {
+  DeviceConditionInput,
+  DeviceConditionKey,
+} from "../../../src/features/deviceCondition/DeviceConditionTypes";
 
 class FakeInjector implements DeviceConditionInjector {
   resetCount = 0;
@@ -29,16 +32,16 @@ class FakeInjector implements DeviceConditionInjector {
 
 function makeRegistry() {
   const timer = new FakeTimer();
-  const injector = new FakeInjector("faults.a");
+  const injector = new FakeInjector("faults.battery");
   const registry = new DeviceConditionRegistry(
-    (_owner, key) => (key === "faults.a" ? injector : undefined),
+    (_owner, key) => (key === "faults.battery" ? injector : undefined),
     timer,
   );
   return { registry, timer, injector };
 }
 
 const owner = { deviceId: "emulator-5554", sessionUuid: "session-1" };
-const applyA = { faults: { a: "on" } };
+const applyA: DeviceConditionInput = { faults: { battery: "unplug" } };
 
 /** Flush the microtasks a timer-fired async restore chains through. */
 async function flush(): Promise<void> {
@@ -99,11 +102,11 @@ describe("DeviceConditionRegistry (#14050)", () => {
 
   test("restoreSession restores every device a session touched", async () => {
     const timer = new FakeTimer();
-    const a = new FakeInjector("faults.a");
-    const b = new FakeInjector("faults.a");
+    const a = new FakeInjector("faults.battery");
+    const b = new FakeInjector("faults.battery");
     const injectors: Record<string, FakeInjector> = { "emulator-5554": a, "emulator-5556": b };
     const registry = new DeviceConditionRegistry(
-      (o, key) => (key === "faults.a" ? injectors[o.deviceId] : undefined),
+      (o, key) => (key === "faults.battery" ? injectors[o.deviceId] : undefined),
       timer,
     );
     await registry.apply({ deviceId: "emulator-5554", sessionUuid: "s" }, applyA);

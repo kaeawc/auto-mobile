@@ -32,11 +32,16 @@ export interface DeviceConditionInput {
   rootState?: typeof DEVICE_CONDITION_UNSET;
   integrityState?: typeof DEVICE_CONDITION_UNSET;
   /**
-   * Fault injectors keyed by name. The wire schema accepts no keys yet (no fault
-   * injector has landed), but the internal type already carries string values so
-   * the controller and its tests can express a fault change without a cast.
+   * Power-domain fault injectors (#14063), each optional and each clearable with
+   * `"unset"`. More fault families add their key here as they land. Kept as named
+   * optional fields (not an open record) so the advertised contract is explicit.
    */
-  faults?: Record<string, string>;
+  faults?: {
+    battery?: "unplug" | "low" | "full" | typeof DEVICE_CONDITION_UNSET;
+    lowPower?: "on" | typeof DEVICE_CONDITION_UNSET;
+    doze?: "on" | typeof DEVICE_CONDITION_UNSET;
+    thermal?: "throttling" | "critical" | typeof DEVICE_CONDITION_UNSET;
+  };
   expiresInSeconds?: number;
   reset?: true;
 }
@@ -60,10 +65,27 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
         "Integrity-signal state. Only 'unset' (clear) is available until an integrity injector lands.",
       ),
     faults: z
-      .object({})
+      .object({
+        battery: z
+          .enum(["unplug", "low", "full", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe("Battery fault via `dumpsys battery` (unplug / low 15% / full), or unset."),
+        lowPower: z
+          .enum(["on", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe("Toggle `settings global low_power`, restored to its prior value, or unset."),
+        doze: z
+          .enum(["on", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe("Force deep Doze via `dumpsys deviceidle force-idle`, or unset."),
+        thermal: z
+          .enum(["throttling", "critical", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe("Override thermal status via `cmd thermalservice override-status`, or unset."),
+      })
       .strict()
       .optional()
-      .describe("Fault injectors keyed by name. None are available yet."),
+      .describe("Power-domain fault injectors (Android only, behind the feature flag)."),
     expiresInSeconds: z
       .number()
       .int()
@@ -95,9 +117,12 @@ export function deviceConditionChanges(input: DeviceConditionInput): DeviceCondi
   if (input.integrityState !== undefined) {
     changes.push({ key: "integrityState", value: input.integrityState });
   }
-  const faults: Record<string, string> = input.faults ?? {};
+  const faults = input.faults ?? {};
   for (const name of Object.keys(faults).sort()) {
-    changes.push({ key: `faults.${name}`, value: faults[name] });
+    const value = (faults as Record<string, string | undefined>)[name];
+    if (value !== undefined) {
+      changes.push({ key: `faults.${name}`, value });
+    }
   }
   return changes;
 }

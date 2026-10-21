@@ -90,10 +90,12 @@
     "accessibility",
     "audit",
     "accessibilityFocus",
+    "accessibilityAction",
     "network",
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -184,10 +186,12 @@
     "accessibility",
     "audit",
     "accessibilityFocus",
+    "accessibilityAction",
     "network",
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "setToolEnabled"
   ],
   "cli": [
@@ -252,6 +256,7 @@
     "getNotificationPolicy",
     "setNotificationPolicy",
     "accessibilityFocus",
+    "accessibilityAction",
     "accessibility",
     "audit",
     "putAppFile",
@@ -271,6 +276,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "setSensor",
     "getPreference",
     "setPreference",
     "deviceSnapshot",

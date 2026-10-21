@@ -3,11 +3,10 @@ import Foundation
     import FoundationNetworking
 #endif
 
-/// URLSession performs its own DNS lookup after this preflight. There is a resolve-then-connect
-/// TOCTOU window: these answers do not pin its connection. Remote-address metrics are checked
-/// before delivering a response, but cannot prevent a connection or undo a transmitted request.
-/// Network-load metrics must include a remote address; proxy connections are refused.
-/// Network.framework pinning would require a separate HTTP/TLS transport and is outside this client.
+/// PrototypePinnedHttpClient is the enforcing transport: it resolves once and dials a checked IP.
+/// URLSession performs its own DNS lookup after this preflight, so these answers do not pin its
+/// connection. Remote-address metrics cannot prevent a connection or undo a transmitted request.
+/// Its network-load metrics must include a remote address; proxy connections are refused.
 struct PrototypeRequestEgressCheck: Sendable {
     let policy: PrototypeEgressPolicy
     let resolver: any HostResolving

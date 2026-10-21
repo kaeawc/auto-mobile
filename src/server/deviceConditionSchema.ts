@@ -1,4 +1,5 @@
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { stripInternalToolParams } from "./internalToolParams";
 import {
   deviceConditionInputSchema,
   type DeviceConditionInput,
@@ -48,7 +49,7 @@ export type DeviceConditionParseResult =
 
 /** Validate an embedded `deviceCondition` value and format failures for the handler. */
 export function parseDeviceConditionInput(value: unknown): DeviceConditionParseResult {
-  const parsed = deviceConditionInputSchema.safeParse(value);
+  const parsed = deviceConditionInputSchema.safeParse(stripInternalToolParams(value));
   if (parsed.success) {
     return { ok: true, value: parsed.data };
   }

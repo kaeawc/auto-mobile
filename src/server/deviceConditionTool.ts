@@ -1,9 +1,6 @@
 import type { BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import {
-  FeatureFlagService,
-  type FeatureFlagReader,
-} from "../features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../features/featureFlags/FeatureFlagService";
 import {
   DeviceConditionRegistry,
   defaultDeviceConditionRegistry,
@@ -30,6 +27,7 @@ export interface DeviceConditionCallFields {
   clock?: unknown;
   location?: unknown;
   cameraPoster?: unknown;
+  screenLock?: unknown;
 }
 
 export interface DeviceConditionToolDeps {
@@ -46,7 +44,21 @@ const OTHER_DEVICE_STATE_FIELDS: readonly (keyof DeviceConditionCallFields)[] = 
   "clock",
   "location",
   "cameraPoster",
+  "screenLock",
 ];
+
+/** Fail closed until the composition root registers the process's feature flags. */
+const FLAGS_UNREGISTERED: FeatureFlagReader = { isEnabled: () => false };
+let registeredFeatureFlags: FeatureFlagReader = FLAGS_UNREGISTERED;
+
+/**
+ * Composition-root seam (#11806): `createMcpServer` registers the process
+ * `FeatureFlagService` here instead of this handler calling `getInstance()`.
+ * Until then the `device-condition` flag reads as disabled, its default.
+ */
+export function registerDeviceConditionFeatureFlags(featureFlags: FeatureFlagReader): void {
+  registeredFeatureFlags = featureFlags;
+}
 
 function refuse(device: BootedDevice, error: string) {
   return createStructuredToolResponse({
@@ -102,14 +114,14 @@ export async function handleDeviceConditionCall(
     return refuse(device, `Invalid deviceCondition: ${parsed.error}`);
   }
   const input: DeviceConditionInput = parsed.value;
-  const featureFlags = deps.featureFlags ?? FeatureFlagService.getInstance();
+  const featureFlags = deps.featureFlags ?? registeredFeatureFlags;
   const refusal = deviceConditionRefusal(args, input, featureFlags);
   if (refusal !== undefined) {
     return refuse(device, refusal);
   }
   const registry = deps.registry ?? defaultDeviceConditionRegistry;
   const result = await registry.apply(
-    { deviceId: device.deviceId, sessionUuid: args.sessionUuid },
+    { deviceId: device.deviceId, sessionUuid: args.sessionUuid, device },
     input,
   );
   return createStructuredToolResponse({
@@ -123,4 +135,17 @@ export async function handleDeviceConditionCall(
     deviceCondition: result,
     ...(result.error ? { error: result.error } : {}),
   });
+}
+
+/**
+ * Route a `setDeviceState` call that carries `deviceCondition` to
+ * {@link handleDeviceConditionCall}; every other call goes to `handler`.
+ */
+export function withDeviceConditionDispatch<Args extends DeviceConditionCallFields, Result>(
+  handler: (device: BootedDevice, args: Args) => Promise<Result>,
+) {
+  return async (device: BootedDevice, args: Args) =>
+    args.deviceCondition !== undefined
+      ? handleDeviceConditionCall(device, args)
+      : handler(device, args);
 }

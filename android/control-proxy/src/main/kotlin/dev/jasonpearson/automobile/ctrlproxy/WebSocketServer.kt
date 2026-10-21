@@ -344,6 +344,8 @@ class WebSocketServer(
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
+    // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
+    add("prototype_chat_scroll_v1")
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands.
     add("prototype_emit_context_v1")
     // Prototype checks expose validity and guard actions; older APKs ignore these spec fields.
@@ -386,6 +388,11 @@ class WebSocketServer(
     // prototype.
     add("screenshot_hide_prototype_v1")
     add("prototype_menus_v1")
+    // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
+    // page directions, press_and_hold, set_progress with progress, custom with customAction) and
+    // lists the node's available actions in a refusal (#14077). Older APKs refuse them as
+    // unsupported, so hosts require this flag before sending one.
+    add("semantic_node_actions_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.

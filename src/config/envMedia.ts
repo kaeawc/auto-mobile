@@ -335,7 +335,7 @@ export const MEDIA_ENV = {
     kind: "int",
     default: "see docs",
     min: 1,
-    doc: "observe MCP budget in ms: daemon decides; explicit client or daemon value applies; daemon wins if both set. Client connection timeout does not floor it.",
+    doc: "observe MCP budget in ms: daemon decides; explicit client or daemon value applies; daemon wins if both set. The client connection timeout (default 120 s) is bypassed only when an explicit value is set in the client or daemon process; with neither set it still floors the budget.",
   },
   WEBRTC_STREAM_SOCKET_PATH: {
     name: "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",

@@ -7,6 +7,7 @@ import {
   type SimulatorProfileStore,
 } from "./SimulatorProfileStore";
 import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 import { PlistClient, type PlistReader } from "./PlistClient";
 import { SimCtlClient, type AppleDeviceType } from "./SimCtlClient";
 
@@ -139,7 +140,7 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
           optionalNumber((values as Record<string, unknown>).mainScreenHeightDPI),
       } satisfies SimulatorDeviceTypeProfile;
       this.profiles.set(deviceTypeId, profile);
-      await this.persist();
+      this.persist();
       return profile;
     } catch (error) {
       // Display dimensions are optional best-effort enrichment, so a failed lookup is safe to swallow.
@@ -171,9 +172,9 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
           onTimeout: () => controller.abort(),
         },
       )
-        .then(async (types) => {
+        .then((types) => {
           this.listedTypes = types;
-          await this.persist();
+          this.persist();
           return types;
         })
         .catch((error) => {
@@ -217,10 +218,25 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
     }
   }
 
-  private persist(): Promise<void> {
+  /**
+   * Resolves once every snapshot queued so far has been written or has failed.
+   * Discovery never waits on this; it exists so callers that need the cache on
+   * disk (tests, a restart in the same process) can observe completion.
+   */
+  flushPersistence(): Promise<void> {
+    return this.publication;
+  }
+
+  /**
+   * Queue a cache snapshot without blocking discovery (#14514): a stalled
+   * AUTOMOBILE_DATA_DIR must not delay or drop the live result. The queue never
+   * rejects, so leaving it un-awaited cannot become an unhandled rejection.
+   */
+  private persist(): void {
     if (!this.store || !this.cacheKey) {
-      return Promise.resolve();
+      return;
     }
+    const store = this.store;
     const contents = JSON.stringify({
       version: 1,
       key: this.cacheKey,
@@ -230,13 +246,13 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
     // Serialize snapshots so a slower earlier write cannot discard newer profiles.
     this.publication = this.publication.then(async () => {
       try {
-        await this.store?.write(contents);
+        await store.write(contents);
       } catch (error) {
-        // Persistence is an optional startup optimization, never a discovery requirement.
-        logger.debug(`Failed to persist simulator profiles: ${String(error)}`);
+        // Persistence is an optional startup optimization, never a discovery requirement;
+        // warn so an unwritable data directory still leaves a trace.
+        logger.warn(`Failed to persist simulator profiles: ${errorMessage(error)}`);
       }
     });
-    return this.publication;
   }
 }
 

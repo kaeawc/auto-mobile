@@ -95,7 +95,7 @@ internal enum class PrototypeRenderWork {
 internal val LocalPrototypeRenderWorkProbe =
   staticCompositionLocalOf<((PrototypeRenderWork, String) -> Unit)?> { null }
 
-val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
+internal val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
 
 /** Font assets are remembered once per distinct authored family, outside the string builder. */
 @Composable
@@ -191,6 +191,7 @@ fun PrototypeRuntimeContent(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
+@InternalAutoMobilePrototypeApi
 fun PrototypeSpecContent(
   root: PrototypeRenderNode,
   theme: PrototypeSpecTheme? = null,
@@ -410,6 +411,30 @@ private fun RenderPrototypeModal(
     else -> RenderPrototypeSheet(node, modifier, interact)
   }
 }
+
+/**
+ * The largest scroll viewport an unbounded parent can hand a nested same-axis scroll. Compose
+ * rejects a scroll measured with an infinite maximum along its axis, which is what a `scroll`
+ * inside a `scroll` gets. Capping it gives the inner viewport its content's size, so it has nothing
+ * of its own to scroll and the ancestor scrolls it; a bounded viewport passes through unchanged.
+ * 32766 px fits Compose's packed constraints whenever the cross axis is at most 65534 px.
+ */
+internal const val NESTED_SCROLL_VIEWPORT_MAX_PX = 32_766
+
+internal fun Modifier.boundedScrollViewport(vertical: Boolean): Modifier =
+  layout { measurable, constraints ->
+    val bounded = if (vertical) constraints.hasBoundedHeight else constraints.hasBoundedWidth
+    val viewport =
+      when {
+        bounded -> constraints
+        vertical ->
+          constraints.copy(maxHeight = maxOf(constraints.minHeight, NESTED_SCROLL_VIEWPORT_MAX_PX))
+        else ->
+          constraints.copy(maxWidth = maxOf(constraints.minWidth, NESTED_SCROLL_VIEWPORT_MAX_PX))
+      }
+    val placeable = measurable.measure(viewport)
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+  }
 
 @Composable
 private fun RenderPrototypeNode(
@@ -718,9 +743,11 @@ private fun RenderPrototypeNodeContent(
       val source = node.source as? PrototypeScrollNode
       val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
       val scrolling =
-        if (source?.axis == "horizontal") modifier.horizontalScroll(scroll)
-        else if (refresh != null) Modifier.verticalScroll(scroll)
-        else modifier.verticalScroll(scroll)
+        if (source?.axis == "horizontal")
+          modifier.boundedScrollViewport(vertical = false).horizontalScroll(scroll)
+        else if (refresh != null)
+          Modifier.boundedScrollViewport(vertical = true).verticalScroll(scroll)
+        else modifier.boundedScrollViewport(vertical = true).verticalScroll(scroll)
       val content: @Composable BoxScope.() -> Unit = {
         node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
       }

@@ -6,6 +6,7 @@ import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepe
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
@@ -718,6 +719,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
+    prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
     prototypeChatScrollError(context.nodes, context.actions) ??
     pagerErrors(context) ??

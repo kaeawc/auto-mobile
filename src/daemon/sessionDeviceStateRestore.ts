@@ -43,7 +43,6 @@ import {
 } from "./sessionManager";
 import { SessionNetworkConditionLifecycle } from "./sessionNetworkConditionLifecycle";
 import { SessionReleaseTeardown } from "./sessionReleaseTeardown";
-export { runDeviceStateMutationExclusive } from "./queuedDeviceStateRestore";
 export {
   type BiometricRestoreTarget,
   type IosAppNetworkRuleSessionState,

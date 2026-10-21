@@ -49,6 +49,7 @@ import { executionTracker } from "../executionTracker";
 import { type DeviceStateChangeNotifier } from "../deviceStateChangeNotifier";
 import { appearanceSyncTargets } from "../appearanceSyncTargets";
 import { NetworkState } from "../../utils/NetworkState";
+import { defaultAppLinksRestoreRegistry } from "../../features/utility/appLinks/AppLinkRestore";
 import { resolveToolSelectionBaseSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { EmulatorLossIncidentRepository } from "../../db/emulatorLossIncidentRepository";
@@ -171,6 +172,7 @@ export class DaemonSessions {
         stopLocationRouteForRemovedDevice(deviceId);
         defaultMockLocationClearRegistry.retireDevice(deviceId);
         NetworkState.getInstance().retireDevice(deviceId);
+        defaultAppLinksRestoreRegistry.retireDevice(deviceId);
         defaultKillProfileRestoreRegistry.retireDevice(deviceId);
         defaultEmulatorSensorRestoreRegistry.retireDevice(deviceId);
         defaultDisplayProfileRestoreRegistry.retireDevice(deviceId);

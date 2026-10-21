@@ -1,0 +1,42 @@
+# TEMPORARY diagnostic for #13998 / #14019 (removed before merge): run the
+# affected BATS files on a GitHub-hosted ubuntu-24.04 runner, where the PR
+# BATS job (Namespace) does not reproduce the host-slots test 10 failure.
+name: "ZZ Diag BATS (GitHub-hosted)"
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zz-diag-bats-gh-hosted.yml"
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+      - name: "Install BATS"
+        run: |
+          git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
+          sudo /tmp/bats-core/install.sh /usr/local
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: scripts/ci/install-bun-deps.sh
+      - name: "Environment"
+        run: |
+          nproc; git --version; bash --version | head -1; readlink -f "$(command -v awk)"; cat /proc/sys/kernel/pid_max
+          ps -o pid,ppid,comm -p 1; grep -i subreaper /proc/self/status || true
+      - name: "Repeat affected files"
+        run: |
+          rc=0
+          for i in 1 2 3 4 5; do
+            for f in test/bats/test-ts-host-slots.bats test/bats/test-ts-signal-cleanup.bats test/bats/check-no-new-direct-security.bats; do
+              echo "=== $i $f"
+              timeout 240 bats "$f" > /tmp/bats.out 2>&1 || rc=1
+              grep -v '^ok ' /tmp/bats.out || true
+            done
+          done
+          exit "$rc"

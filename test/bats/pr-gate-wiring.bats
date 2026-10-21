@@ -694,3 +694,21 @@ wiring_requires_yq() {
   tasks="$(yq -r '.jobs."jvm-consumer-checks".steps[] | select(.uses == "./.github/actions/gradle-task-run" and .with."release-keystore-base64" != null) | .with."gradle-tasks"' "$WF")"
   [[ "$tasks" == *":control-proxy:assembleRelease"* ]]
 }
+
+@test "Android lint selection retains both paths of renames" {
+  wiring_requires_yq
+  run yq -r '.jobs.detekt.steps[] | select(.name == "Select Android lint modules") | .run' "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'git diff --no-renames --name-only "${BASE_SHA}...HEAD"'* ]]
+}
+
+@test "Android baseline guard fetches and compares the actual PR base through env" {
+  wiring_requires_yq
+  local step='.jobs.detekt.steps[] | select(.name == "Check Android lint baselines only shrink")'
+  [ "$(yq -r "$step | .env.BASE_REF" "$WF")" = '${{ github.base_ref }}' ]
+  run yq -r "$step | .run" "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'git fetch origin "${BASE_REF}"'* ]]
+  [[ "$output" == *'--base-ref "origin/${BASE_REF}"'* ]]
+  [[ "$output" != *'${{ github.'* ]]
+}

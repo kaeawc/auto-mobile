@@ -154,6 +154,17 @@ describe("device mutation reset contract", () => {
     });
   });
 
+  test("a known unobservable baseline short-circuits before native capture", async () => {
+    const incompleteScope = { ...SCOPE, incarnation: "unobservable" };
+    await journal.captureBaseline(incompleteScope, { ...BASELINE, unobservable: ["account"] });
+    expect(await revertDeviceMutations({ ...options, scope: incompleteScope })).toMatchObject({
+      status: "non_clean",
+      reason: "non_revertible",
+    });
+    expect(port.captureCount).toBe(0);
+    expect(port.reverted).toEqual([]);
+  });
+
   test("journaled mutations outside the observable baseline cannot falsely verify clean", async () => {
     port.snapshot.completeKinds = port.snapshot.completeKinds.filter((kind) => kind !== "keychain");
     await journal.record(SCOPE, { ...CLIPBOARD, kind: "keychain" });

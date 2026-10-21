@@ -110,11 +110,24 @@ const hostConfig = z
       .default([]),
     reuseCleanDevices: z.boolean().default(false),
     reuseAndroidCleanDevices: z.boolean().default(false),
+    androidResetMode: z.enum(["keep-booted"]).optional(),
+    androidKeepBootedMaxUses: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   })
   .strict()
   .refine((config) => config.defaults.ios !== undefined || config.defaults.android !== undefined, {
     message: "At least one platform must have an explicit default policy",
-  });
+  })
+  .refine(
+    (config) =>
+      (config.androidResetMode === undefined && config.androidKeepBootedMaxUses === undefined) ||
+      (config.reuseAndroidCleanDevices &&
+        config.defaults.android !== undefined &&
+        config.androidResetMode === "keep-booted"),
+    {
+      message:
+        "Android reset keys require Android defaults, reuseAndroidCleanDevices and keep-booted mode",
+    },
+  );
 
 export type SessionBrokerHostConfig = z.infer<typeof hostConfig>;
 

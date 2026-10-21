@@ -11,6 +11,7 @@ import type {
   DeviceMutationJournal,
   DeviceMutationScope,
 } from "./types";
+import { DEVICE_MUTATION_KINDS } from "./types";
 
 export interface DeviceMutationResetContext {
   scope: DeviceMutationScope;
@@ -19,6 +20,7 @@ export interface DeviceMutationResetContext {
 }
 
 export interface DeviceMutationResetPort extends DeviceMutationRevertSupport {
+  readonly certifiableKinds?: readonly string[];
   capture(context: DeviceMutationResetContext): Promise<DeviceBaseline>;
   revert(mutation: DeviceMutationInput, context: DeviceMutationResetContext): Promise<void>;
 }
@@ -38,6 +40,7 @@ export interface DeviceMutationResetOptions {
   assertOwned(): Promise<void>;
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   budgetMs: number;
+  signal?: AbortSignal;
 }
 
 export async function revertDeviceMutations(
@@ -53,16 +56,19 @@ export async function revertDeviceMutations(
   const controller = new AbortController();
   const context: DeviceMutationResetContext = {
     scope: { ...options.scope },
-    signal: controller.signal,
+    signal: options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal,
     assertOwned: async () => {
-      controller.signal.throwIfAborted();
+      context.signal.throwIfAborted();
       await options.assertOwned();
-      controller.signal.throwIfAborted();
+      context.signal.throwIfAborted();
     },
   };
   try {
     return await raceWithDeadline(() => runRevert(options, context), {
       timer: options.timer,
+      signal: context.signal,
       timeoutMs: options.budgetMs,
       label: "Device mutation reset",
       onTimeout: () =>
@@ -82,11 +88,24 @@ async function runRevert(
   options: DeviceMutationResetOptions,
   context: DeviceMutationResetContext,
 ): Promise<DeviceMutationResetResult> {
-  await context.assertOwned();
   const baseline = await options.journal.getBaseline(context.scope);
   if (!baseline) {
     return { status: "non_clean", reason: "baseline_missing", details: [] };
   }
+  const incomplete = DEVICE_MUTATION_KINDS.filter(
+    (kind) =>
+      !baseline.completeKinds.includes(kind) ||
+      (options.port.certifiableKinds !== undefined &&
+        !options.port.certifiableKinds.includes(kind)),
+  );
+  if (baseline.unobservable.length > 0 || incomplete.length > 0) {
+    return {
+      status: "non_clean",
+      reason: "non_revertible",
+      details: [...baseline.unobservable, ...incomplete],
+    };
+  }
+  await context.assertOwned();
   const entries = await options.journal.list(context.scope);
   await context.assertOwned();
   const current = await options.port.capture(context);

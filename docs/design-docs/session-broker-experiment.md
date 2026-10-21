@@ -118,12 +118,12 @@ erases it, and boots that same simulator. Fresh inventory must confirm the exact
 type, runtime, availability, and expected state; durable ownership and native
 binding checks fence every mutation. Any failure falls back to journaled
 destruction. `reuseCleanDevices` continues to opt in only to iOS reuse. Android
-has its own `reuseAndroidCleanDevices` flag, defaulting to false. Even when that
-flag and Android defaults are configured, the production reset always falls back
-to destruction: package equality cannot prove restoration of settings, files,
-accounts, permissions, existing app data, system updates, or other users.
-Any observed package-list difference is evidence of untracked changes and also
-requires destruction, never uninstall-and-pool. Optional baseline capture failure
+has its own `reuseAndroidCleanDevices` flag, defaulting to false. With Android
+defaults and `androidResetMode: "keep-booted"`, release runs best-effort cleaning
+and health checks before returning the resource to idle. This is operational
+cleanup, not proof of isolation or restoration of all device state.
+Without a mutation-aware strategy, any observed package-list difference requires
+destruction, never uninstall-and-pool. Optional baseline capture failure
 logs a warning without failing acquisition; release then destroys the device.
 Baselines and activity subscriptions are scoped to the broker resource, not its
 recyclable adb serial.
@@ -132,13 +132,131 @@ The native activity guard is deliberately conservative: the existing execution
 end event does not identify the tool, so any admitted non-read session use
 (including package-install tools) disables minimal reset. Read-only sessions can
 not reuse either, since adb and Gradle activity are unobservable. The narrow
-`AndroidResetStrategy.reset(device, baselinePackages, assertOwned)` hook remains
-injectable for a qualified wipe/snapshot implementation in #14364 and #14365.
-Strategies must restore all unobservable state and fence native work using
-`assertOwned`; package, target, and CtrlProxy checks are additional safeguards,
-not isolation proof. No production strategy is configured. Android reuse must
-remain disabled until native two-session contamination qualification passes.
-Fake strategy tests are not evidence of native isolation.
+`AndroidResetStrategy` hook remains injectable for qualified implementations in
+#14364 and #14365, with optional fenced capture and resource-retirement hooks.
+Strategies fence native work using `assertOwned`; target, boot,
+package-manager and CtrlProxy checks are safeguards, not isolation proof.
+Fake strategy tests are not evidence of native isolation. The keep-booted mode
+does not require a complete baseline diff or post-cleaning state certification.
+
+### Android keep-booted adapter boundary
+
+The optional operator field `androidResetMode: "keep-booted"` selects the journal
+strategy only when `reuseAndroidCleanDevices` and Android defaults are also
+configured; ignored reset keys are rejected by configuration validation.
+Omitting the mode preserves destruction-only behavior. The
+`androidResetMode` enum currently contains only `keep-booted`; the parallel
+#14365 snapshot lane must add `snapshot` when integrating its strategy. Optional
+`androidKeepBootedMaxUses` is a positive integer (default 20); reaching that count
+retires to a configured baseline strategy or destruction, not keep-booted idle.
+Counts are resource-local and disappear on destruction. Restart loses the
+in-memory reset receipt. A persisted baseline without that receipt marks the
+incarnation retired: its next release requires destruction and cannot reset the
+counter or use a fallback to re-enter idle.
+Production journal incarnation contains the broker resource ID, stable native
+device identity and kernel boot UUID, not the per-release binding generation.
+A recycled emulator serial or reboot cannot transfer the original baseline to
+a replaced incarnation. Binding generations still fence reset ownership.
+
+Owner decision for #14358 / #14364:
+
+> i actually don't care about readback and having evidence, i just want to run whatever cleaning operations
+
+The Android port captures package membership for all installed packages and users,
+but captures package identities and runtime grants only for third-party apps to
+avoid a per-system-package `dumpsys` sweep. It also captures global/system/secure
+settings dumps (global once; system/secure per user),
+display overrides, locale, timezone, an account-inventory SHA-256 digest (never
+raw account names), and file inventories under `/sdcard/Download`, `DCIM`,
+`Pictures`, `Movies`, and `Documents`. The pool-entry baseline persists across
+sessions of that incarnation. Certification metadata describes observation
+limits but never blocks Android keep-booted cleaning.
+
+On every release, journal reverts run in reverse order, followed by unconditional
+baseline cleaning so journal operations cannot reintroduce baseline drift:
+
+- Enumerate every current user with `pm list users` and uninstall each third-party
+  package absent from that user's pool-entry baseline using `pm uninstall --user`.
+- Keep baseline app data and preinstalled test fixtures. Never run `pm clear` by
+  default, including known-empty app-data journal entries. Revoke currently granted
+  runtime permissions that were not granted at baseline, for retained third-party
+  apps in each user. Do not run device-wide `pm reset-permissions` or revoke baseline
+  grants.
+- Restore changed or missing global/system/secure keys; delete added keys. A failed
+  non-critical settings put/delete warns and continues. A failed connectivity,
+  adb/developer, or accessibility setting restoration is a hard failure.
+- Remove added regular files under the inventoried `/sdcard` roots with existing
+  canonical-path/symlink guards; preserve baseline paths even if contents changed.
+- Clear the clipboard when the platform supports it. Unsupported capability output
+  warns and skips; failures of a supported clear are hard failures.
+
+Unplannable journal entries warn and skip rather than vetoing reuse. Failed
+non-critical journal settings restoration also warns and continues. Every command
+is ownership-fenced, cancellable, bounded and non-retrying. Boot completion,
+package-manager responsiveness and CtrlProxy reachability are checked after
+cleaning; the CtrlProxy probe gets one attempt with an explicit signal and a
+two-second deadline. Commands have a two-second budget except package uninstall,
+which gets ten seconds, and baseline file hashing, which gets up to 30 seconds;
+all remain inside the enclosing 30-second cleaning/capture cap. Timeout or
+cancellation aborts cleaning and waits up to two more seconds for settlement
+before fallback or failure; an exhausted drain never starts snapshot fallback.
+Journal replay preserves baseline packages even if an entry says its prior was
+absent. Settings put/delete explicitly target the captured user, including user 0.
+Successful release reports `mode: "keep-booted"`, `outcome: "clean"`,
+and `journal`, `clean`, and `health` phase timings before broker idle settlement.
+No post-cleaning baseline equality/readback certification is required.
+
+Hard cleaning failures or failed health checks use an injected snapshot-compatible
+fallback if configured, otherwise journaled destruction. Ownership loss never
+publishes idle or runs a fallback under a stale fence. `maxUses` still retires via
+fallback or destruction. Fallback health checks must also pass before idle; its
+report uses snapshot mode and a fallback reason. Production in this lane has no
+snapshot fallback configured.
+
+**Limits:** this policy does not remove accounts/account secrets, reset retained
+app databases or other app data, undo system package updates, rebuild overwritten
+or deleted baseline files, comprehensively restore AppOps/permission flags, remove
+users, or clean arbitrary/secondary-user shared storage and media-provider state.
+It intentionally accepts residual state when cleaning commands and health checks
+succeed. Keep-booted is not equivalent to snapshot restore or wipe-data isolation.
+
+Journal prior-value shapes for supported targeted reverts are:
+
+- `installed-app`: package key, absent prior (force-stop then uninstall).
+- `permission`: `runtime:<user>:<package>:<permission>` with a boolean prior, or
+  `appops:<user>:<package>:<operation>` with a mode prior (absent means default).
+  `pm reset-permissions` is device-wide, not package-scoped; do not use it to
+  restore unrelated retained-package permissions.
+- Settings: `global|secure|system:<key>` with a string or absent prior, restored
+  with `settings put` or `settings delete`. Supported connectivity/DND settings
+  use the corresponding platform service rather than merely changing the key.
+- Display: `display:density`, `display:size` and `display:night-mode`; clock:
+  `timezone` via the platform alarm service.
+- `shared-file`: an absent-prior `/sdcard` file, with canonical-path/symlink guards
+  before removal and a media-scan request. Existing file contents cannot be rebuilt.
+- `preference`: app-data clearing is skipped to preserve fixtures;
+  `location`: absent-prior `provider:gps|network|fused`; `clipboard`: empty prior.
+
+System locale restoration, system package update rollback, account removal,
+notification cancellation, existing app/file data and network shaping are not
+qualified revert adapters. Unplannable entries are skipped and logged.
+Package removals require explicit `user:<id>:<package>` mutation keys; unscoped
+package keys are not revertible. Force-stop and uninstall commands
+target that explicit user, never every user.
+No tool instrumentation is silently enabled; the journal's pending-adapter ledger
+still applies. Every native command is fenced, cancellable, bounded and non-retrying.
+Replay and baseline cleaning do not require certification. The strategy retains
+journal entries through health checks and broker settlement; fenced retirement
+pruning deletes incarnation baselines and all associated session entries on
+retirement. Preparation captures the partial native baseline regardless of
+certification coverage. Capture is capped at the cleaning budget (30 seconds by
+default) within the remaining preparation budget; file hashing commands have a
+30-second cap, still subject to the enclosing capture/reset deadline.
+The injected fallback has its own 30-second budget and receives `signal` and
+`timeoutMs` in the shared reset context. The sibling #14365 strategy must adopt
+these fields, abort/settle native restore on cancellation, and fence every command.
+This lane neither selects nor implements snapshots.
+Native two-session contamination and matched p50 timing qualification are not run.
 
 Native zero-pooling qualification passed on October 12, 2026, using broker
 commit `6fb70c201` on this macOS host with iPhone 17 Pro / iOS 26.5:

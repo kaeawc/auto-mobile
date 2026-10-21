@@ -12,6 +12,56 @@ import {
   FakeAndroidResetHost,
 } from "./fixtures/androidReset";
 describe("AndroidBaselineReset", () => {
+  test("other strategies receive the remaining capture deadline without a journal cap", async () => {
+    const host = new FakeAndroidResetHost();
+    const timer = new FakeTimer();
+    let captureBudget: number | undefined;
+    host.onInventory = () => timer.advanceTime(100);
+    host.strategy = {
+      capture: async (_device, context) => {
+        captureBudget = context.timeoutMs;
+        timer.advanceTime(3000);
+        context.signal.throwIfAborted();
+        await context.assertOwned();
+      },
+      reset: async () => {},
+    };
+    const reset = new AndroidBaselineReset(host);
+    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer,
+      timeoutMs: 10_000,
+    });
+    expect(captureBudget).toBe(9900);
+  });
+
+  test("pruning failure neither retains activity nor hides the original capture error", async () => {
+    const host = new FakeAndroidResetHost();
+    let failCapture = false;
+    host.strategy = {
+      capture: async () => {
+        if (failCapture) {
+          throw new Error("original capture failure");
+        }
+      },
+      forget: async () => {
+        throw new Error("SQLite unavailable");
+      },
+      reset: async () => {},
+    };
+    const reset = new AndroidBaselineReset(host);
+    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a");
+    await reset.forget("resource-a");
+    expect(host.closed).toBe(1);
+    await expect(
+      reset.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+    ).rejects.toThrow("original session baseline");
+    failCapture = true;
+    await expect(
+      reset.capture("resource-b", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-b"),
+    ).rejects.toThrow("original capture failure");
+    expect(host.closed).toBe(2);
+  });
+
   test("native activity guard ignores reads and foreign sessions but rejects admitted session use", () => {
     const tracker = new ExecutionTracker(new FakeTimer(), new CountingIdGenerator("execution"));
     const activity = watchAndroidResetSession(tracker, "session-a");
@@ -198,7 +248,7 @@ describe("AndroidBaselineReset", () => {
     const reset = new AndroidBaselineReset(host);
     await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a");
     await reset.capture("resource-b", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-b");
-    reset.forget("resource-a");
+    await reset.forget("resource-a");
     expect(host.closed).toBe(1);
     expect(
       await reset.reset("resource-b", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),

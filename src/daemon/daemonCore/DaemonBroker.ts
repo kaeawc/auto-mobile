@@ -97,7 +97,8 @@ export function sessionBrokerAndroidResetPorts(
 ): NonNullable<OpenSessionBrokerServiceOptions["androidReset"]> {
   return {
     inventory: (options) => readiness().listBootedAndroidDevices(options),
-    ctrlProxyReady: (device) => readiness().verifyAndroidCtrlProxyServiceReady(device),
+    ctrlProxyReady: (device, options) =>
+      readiness().verifyAndroidCtrlProxyServiceReady(device, options),
   };
 }
 

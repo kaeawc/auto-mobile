@@ -259,15 +259,22 @@ test("all unchanged handler explains that no changes were needed", async () => {
   });
 });
 
-test.each([
-  "",
-  fixture("dumpsys-package-not-installed"),
-  egg.replace("requested permissions:", "unreadable permissions:"),
-])("unparseable pre-read fails without pm", async (capture) => {
-  const h = harness(capture);
-  await expect(
-    h.action.execute("com.android.egg", { permissions: [read], userId: 0 }),
-  ).rejects.toThrow("permission state");
+test.each(["", fixture("dumpsys-package-not-installed")])(
+  "unparseable pre-read fails without pm",
+  async (capture) => {
+    const h = harness(capture);
+    await expect(
+      h.action.execute("com.android.egg", { permissions: [read], userId: 0 }),
+    ).rejects.toThrow("permission state");
+    expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(false);
+  },
+);
+
+test("a missing requested-permissions section returns a per-permission rejection without pm", async () => {
+  const h = harness(egg.replace("requested permissions:", "unreadable permissions:"));
+  const result = await h.action.execute("com.android.egg", { permissions: [read], userId: 0 });
+  expect(result.success).toBe(false);
+  expect(result.results[0].error).toContain("not requested");
   expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(false);
 });
 

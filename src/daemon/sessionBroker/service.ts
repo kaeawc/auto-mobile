@@ -38,7 +38,11 @@ import {
   AndroidBaselineReset,
   watchAndroidResetSession,
   type AndroidBaselineResetDependencies,
+  type AndroidResetStrategy,
 } from "./androidBaselineReset";
+import { AndroidKeepBootedReset } from "./androidKeepBootedReset";
+import { AndroidDeviceMutationResetPort } from "./androidDeviceMutationResetPort";
+import type { DeviceMutationJournal } from "./mutations/types";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { executionTracker } from "../executionTracker";
@@ -135,7 +139,12 @@ export async function openSessionBrokerService(
       );
     }
     const store = options.registry.sessionBrokerStore(scopeKey);
-    const reset = nativeBaselineReset(options.config, options.androidReset, options.timer);
+    const reset = nativeBaselineReset(
+      options.config,
+      options.androidReset,
+      options.timer,
+      options.registry.deviceMutationJournal(),
+    );
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
@@ -189,6 +198,7 @@ function nativeBaselineReset(
   config: SessionBrokerHostConfig,
   androidReset: OpenSessionBrokerServiceOptions["androidReset"],
   timer: Timer,
+  journal: DeviceMutationJournal,
 ) {
   if (config.reuseAndroidCleanDevices && config.defaults.android && !androidReset) {
     throw new ActionableError("Android baseline reset requires the daemon readiness ports");
@@ -198,7 +208,19 @@ function nativeBaselineReset(
         ios: config.reuseCleanDevices ? nativeIosBaselineReset() : undefined,
         android:
           config.reuseAndroidCleanDevices && config.defaults.android
-            ? nativeAndroidBaselineReset(androidReset!, timer)
+            ? nativeAndroidBaselineReset(
+                androidReset!,
+                timer,
+                config.androidResetMode === "keep-booted"
+                  ? new AndroidKeepBootedReset({
+                      journal,
+                      timer,
+                      maxUses: config.androidKeepBootedMaxUses,
+                      port: (device) =>
+                        new AndroidDeviceMutationResetPort(defaultAdbClientFactory.create(device)),
+                    })
+                  : undefined,
+              )
             : undefined,
       }
     : undefined;
@@ -226,6 +248,7 @@ function nativeIosBaselineReset(): IosBaselineReset {
 function nativeAndroidBaselineReset(
   ports: NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>,
   timer: Timer,
+  strategy?: AndroidResetStrategy,
 ): AndroidBaselineReset {
   const configReader = new FileAvdConfigReader();
   const inventory = boundAndroidResetInventory(ports.inventory, timer);
@@ -250,6 +273,7 @@ function nativeAndroidBaselineReset(
     adb: (device) => defaultAdbClientFactory.create(device),
     watchSession: (sessionId) => watchAndroidResetSession(executionTracker, sessionId),
     ctrlProxyReady: ports.ctrlProxyReady,
+    strategy,
   });
 }
 

@@ -294,7 +294,7 @@ export function toolHasOutputSchema(tool: Pick<RegisteredTool, "outputSchema">):
 
 /** The collaborators a test may read and swap on the ToolRegistry singleton. */
 export interface ToolRegistryCollaborators {
-  deviceSessionManager: DeviceReadiness;
+  deviceReadiness: DeviceReadiness;
   toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   timer: Timer;
   navigationToolCallRecorder: NavigationToolCallRecorder;

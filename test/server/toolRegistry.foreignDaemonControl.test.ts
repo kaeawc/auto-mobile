@@ -94,7 +94,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
       return await ensureDeviceReady(...args);
     };
     originals = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });

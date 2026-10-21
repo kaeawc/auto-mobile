@@ -137,7 +137,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
     const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([iosDevice, { ...iosDevice, deviceId: "IOS-OTHER" }]);
     const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
     });

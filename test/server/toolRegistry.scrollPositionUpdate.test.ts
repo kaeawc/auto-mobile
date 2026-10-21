@@ -34,7 +34,7 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
-  >["deviceSessionManager"];
+  >["deviceReadiness"];
   let daemonSessionManager: SessionManager | undefined;
   let restorePipelineOverrides: (() => void) | undefined;
   let spiedSessionIds: string[];
@@ -85,8 +85,8 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceReadiness = new FakeDeviceReadiness();
-    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -103,7 +103,7 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

@@ -105,7 +105,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     fakeDeviceReadiness.setConnectedDevices([held, free]);
     devices = fakeDeviceReadiness;
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });

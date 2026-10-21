@@ -42,7 +42,7 @@ describe("ToolRegistry display inventory resolution", () => {
     ToolRegistry.clearTools();
     fakeManager = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeManager });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { recordToolCall: async () => {} },
     });

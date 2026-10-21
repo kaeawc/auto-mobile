@@ -66,7 +66,7 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
     fakeDeviceReadiness = new FakeDeviceReadiness();
     fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},

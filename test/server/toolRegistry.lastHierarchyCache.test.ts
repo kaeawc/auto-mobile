@@ -52,7 +52,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
-  >["deviceSessionManager"];
+  >["deviceReadiness"];
   let originalAfterToolCall: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
   >["afterToolCall"];
@@ -111,8 +111,8 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     fakeDeviceReadiness = new FakeDeviceReadiness();
-    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     // #6866: the after-tool-call pipeline now settles a navigation-class action's
     // embedded observation against the DEVICE before finalizing. These tests drive
     // stub handlers with canned observations against a fake device, so swap in a
@@ -134,7 +134,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
     ToolRegistry.setPipelineOverridesForTesting({ afterToolCall: originalAfterToolCall });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();

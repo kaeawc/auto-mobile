@@ -480,7 +480,7 @@ describe("ToolRegistry device-aware pipeline", () => {
     const log = new FakeLogger();
     const registry = new ToolRegistryClass(undefined, log);
 
-    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    registry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     registry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},
@@ -525,7 +525,7 @@ describe("ToolRegistry device-aware pipeline", () => {
     const controller = new AbortController();
     const fakeManager = new FakeDeviceReadiness();
     fakeManager.setConnectedDevices([device]);
-    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    registry.setCollaboratorsForTesting({ deviceReadiness: fakeManager });
     registry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},
@@ -578,7 +578,7 @@ describe("ToolRegistry device-aware pipeline", () => {
       await resolutionGate;
       return device;
     };
-    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    registry.setCollaboratorsForTesting({ deviceReadiness: fakeManager });
     registry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},

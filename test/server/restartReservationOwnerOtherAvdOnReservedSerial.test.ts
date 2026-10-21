@@ -104,7 +104,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
     const deviceSessions = new FakeDeviceReadiness();
     deviceSessions.setConnectedDevices([device]);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceSessions });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { recordToolCall: async () => {} },
     });

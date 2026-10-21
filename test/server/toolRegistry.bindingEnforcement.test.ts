@@ -86,7 +86,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
     const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([slotA, slotB, free]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });

@@ -116,7 +116,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
       },
     );
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });

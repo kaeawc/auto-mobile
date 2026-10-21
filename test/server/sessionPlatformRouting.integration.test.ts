@@ -29,9 +29,7 @@ function requireFixture(): McpTestFixture {
   }
   return fixtureOrUndefined;
 }
-let originalManager: ReturnType<
-  typeof ToolRegistry.getCollaboratorsForTesting
->["deviceSessionManager"];
+let originalManager: ReturnType<typeof ToolRegistry.getCollaboratorsForTesting>["deviceReadiness"];
 let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
@@ -67,10 +65,10 @@ beforeEach(async () => {
   ToolRegistry.clearTools();
   clearDirectSessionDevices();
   received.length = 0;
-  originalManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+  originalManager = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
   const manager = new FakeDeviceReadiness();
   manager.setConnectedDevices([android, ios]);
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: manager });
   const fixture = new McpTestFixture();
   fixtureOrUndefined = fixture;
   await fixture.setup();
@@ -116,7 +114,7 @@ afterEach(async () => {
     restorePipelineOverrides = undefined;
     PlatformDeviceManagerFactory.setInstance(null);
     ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalRepository });
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalManager });
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
   }
@@ -154,7 +152,7 @@ test("direct setActiveDevice rebinds the default to a free device", async () => 
   const other: BootedDevice = { deviceId: "emulator-5556", platform: "android", name: "Other" };
   const manager = new FakeDeviceReadiness();
   manager.setConnectedDevices([android, ios, other]);
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: manager });
   registerUtilityTools({ legacyDeviceSelection: () => manager });
   // Leave `other` out of the fake booted list so the legacy handler's
   // resumeCtrlProxyIfCurrentlyBooted call exits before touching CtrlProxy.

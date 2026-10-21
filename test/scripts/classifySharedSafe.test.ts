@@ -217,6 +217,13 @@ const PROVEN_SPIES: Record<string, string> = {
   immediate: `test("x", () => { spyOn(o, "f").mockRestore(); });`,
   stored: `let spy; beforeEach(() => { spy = spyOn(o, "f"); }); afterEach(() => { spy.mockRestore(); });`,
   afterAll: `let spy; beforeEach(() => { spy = spyOn(o, "f"); }); afterAll(() => spy.mockRestore());`,
+  // A beforeEach spy restored only in afterAll needs an invariant target (#14515):
+  // Bun reuses the spy on an already-spied method, so one restore suffices.
+  afterAllImported: `import { logger } from "../src/logger"; let spy; beforeEach(() => { spy = spyOn(logger, "warn"); }); afterAll(() => spy.mockRestore());`,
+  afterAllTopLevelConst: `const fake = new Fake(); let spy; beforeEach(() => { spy = spyOn(fake.inner, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterEachPerTestTarget: `const targets = [a, b]; let i = 0; let spy; beforeEach(() => { spy = spyOn(targets[i++], "f"); }); afterEach(() => spy.mockRestore());`,
+  testAfterAllImported: `import { logger } from "../src/logger"; let spy; test("x", () => { spy = spyOn(logger, "warn"); }); afterAll(() => spy.mockRestore());`,
+  afterAllRestoreAllPerTestTarget: `import { mock } from "bun:test"; const targets = [a, b]; let i = 0; beforeEach(() => { spyOn(targets[i++], "f"); }); afterAll(() => mock.restore());`,
   chained: `let spy; beforeEach(() => { spy = spyOn(o, "f").mockImplementation(() => {}); }); afterEach(() => spy.mockRestore());`,
   restoreAll: `import { mock } from "bun:test"; beforeEach(() => { spyOn(o, "f"); }); afterEach(() => { mock.restore(); });`,
   globalAfterAll: `test("x", () => { spyOn(o, "f"); }); afterAll(() => restoreAllMocks());`,
@@ -271,6 +278,17 @@ const UNPROVEN_SPIES: Record<string, string> = {
   concurrent: `test.concurrent("x", () => { spyOn(o, "f").mockRestore(); });`,
   filteredArray: `test("x", () => { const spies = [spyOn(o, "f")]; for (const spy of spies) { if (ok) spy.mockRestore(); } });`,
   aliasedBeforeAll: `import { spyOn as watch } from "bun:test"; beforeAll(() => watch(o, "f")); afterAll(() => mock.restore());`,
+  // afterAll restores only the last spy a repeated beforeEach, test.each row or
+  // test left in the handle (#14515).
+  afterAllPerTestTarget: `const targets = [a, b]; let i = 0; let spy; beforeEach(() => { spy = spyOn(targets[i++], "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllLetTarget: `let target; let spy; beforeEach(() => { target = pick(); spy = spyOn(target, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllLocalTarget: `let spy; beforeEach(() => { const fake = new Fake(); spy = spyOn(fake, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllCallTarget: `let spy; beforeEach(() => { spy = spyOn(make(), "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllReassignedPath: `const deps = { client }; let spy; beforeEach(() => { deps.client = new Fake(); spy = spyOn(deps.client, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllComputedMethod: `let spy; beforeEach(() => { spy = spyOn(o, pickMethod()); }); afterAll(() => spy.mockRestore());`,
+  testsReassignAfterAll: `let spy; test("a", () => { spy = spyOn(a, "f"); }); test("b", () => { spy = spyOn(b, "f"); }); afterAll(() => spy.mockRestore());`,
+  testEachReassignAfterAll: `let spy; test.each([a, b])("x", (t) => { spy = spyOn(t, "f"); }); afterAll(() => spy.mockRestore());`,
+  afterAllResetCollection: `let spies = []; beforeEach(() => { spies = []; spies.push(spyOn(make(), "f")); }); afterAll(() => { spies.forEach(spy => spy.mockRestore()); });`,
 };
 
 describe("spy restore proof", () => {

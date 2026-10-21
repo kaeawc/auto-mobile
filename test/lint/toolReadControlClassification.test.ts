@@ -151,6 +151,8 @@ const CLASSIFICATION: Classification = {
     // Starts a device-side recorder.
     "videoRecording",
     "wakeAndUnlock",
+    // Moves an app's task between window modes; may turn on freeform settings.
+    "windowMode",
   ],
 };
 

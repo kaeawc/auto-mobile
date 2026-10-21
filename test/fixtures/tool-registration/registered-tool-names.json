@@ -73,6 +73,7 @@
     "phoneCall",
     "sendSms",
     "mediaSession",
+    "windowMode",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -166,6 +167,7 @@
     "phoneCall",
     "sendSms",
     "mediaSession",
+    "windowMode",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -281,7 +283,8 @@
     "sendSms",
     "mediaSession",
     "resetAppLogs",
-    "stageSessionDownloads"
+    "stageSessionDownloads",
+    "windowMode"
   ],
   "measurementScripts": [
     "observe",

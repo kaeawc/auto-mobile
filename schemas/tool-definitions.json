@@ -2646,7 +2646,8 @@
               "terminateApp",
               "uninstallApp",
               "videoRecording",
-              "wakeAndUnlock"
+              "wakeAndUnlock",
+              "windowMode"
             ]
           }
         }
@@ -2777,7 +2778,8 @@
               "terminateApp",
               "uninstallApp",
               "videoRecording",
-              "wakeAndUnlock"
+              "wakeAndUnlock",
+              "windowMode"
             ]
           }
         }
@@ -21006,7 +21008,8 @@
               "terminateApp",
               "uninstallApp",
               "videoRecording",
-              "wakeAndUnlock"
+              "wakeAndUnlock",
+              "windowMode"
             ]
           }
         }
@@ -27295,7 +27298,8 @@
             "terminateApp",
             "uninstallApp",
             "videoRecording",
-            "wakeAndUnlock"
+            "wakeAndUnlock",
+            "windowMode"
           ]
         },
         "toolNames": {
@@ -27392,7 +27396,8 @@
               "terminateApp",
               "uninstallApp",
               "videoRecording",
-              "wakeAndUnlock"
+              "wakeAndUnlock",
+              "windowMode"
             ]
           }
         },
@@ -33828,6 +33833,432 @@
       },
       "required": ["message"],
       "additionalProperties": {}
+    }
+  },
+  {
+    "name": "windowMode",
+    "description": "Android: put an app's task into fullscreen, picture-in-picture (enter via HOME; the app must support PiP), freeform (optional bounds) or split screen with a second app, and read the mode and bounds back. Returns a restore receipt for the previous mode and any freeform settings it turned on. observe reports each task's windowingMode and bounds in backStack.tasks.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Package whose task to move",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "mode": {
+          "description": "\"fullscreen\"; {pip: enter|exit}; {freeform: {bounds?}} (turns on freeform settings, receipted); {splitScreen: {with?, position?}}",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "fullscreen"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "pip": {
+                  "type": "string",
+                  "enum": ["enter", "exit"]
+                }
+              },
+              "required": ["pip"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "freeform": {
+                  "type": "object",
+                  "properties": {
+                    "bounds": {
+                      "description": "Window bounds in display pixels",
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "top": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "right": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "bottom": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": ["left", "top", "right", "bottom"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": ["freeform"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "splitScreen": {
+                  "type": "object",
+                  "properties": {
+                    "with": {
+                      "description": "Second app's package; required on API 32+",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "position": {
+                      "description": "appId's side: primary is top/left (default)",
+                      "type": "string",
+                      "enum": ["primary", "secondary"]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": ["splitScreen"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "restore": {
+          "description": "A returned restore receipt: puts the window back, then the settings. Same boot only",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "fullscreen"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "pip": {
+                      "type": "string",
+                      "enum": ["enter", "exit"]
+                    }
+                  },
+                  "required": ["pip"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "freeform": {
+                      "type": "object",
+                      "properties": {
+                        "bounds": {
+                          "description": "Window bounds in display pixels",
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "top": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "right": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "bottom": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["left", "top", "right", "bottom"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["freeform"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "splitScreen": {
+                      "type": "object",
+                      "properties": {
+                        "with": {
+                          "description": "Second app's package; required on API 32+",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "position": {
+                          "description": "appId's side: primary is top/left (default)",
+                          "type": "string",
+                          "enum": ["primary", "secondary"]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["splitScreen"],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "deviceId": {
+                  "type": "string"
+                },
+                "bootId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$"
+                },
+                "entries": {
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "enum": ["enable_freeform_support", "force_resizable_activities"]
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^\\d+$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["key", "value"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["deviceId", "bootId", "entries"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "windowingMode": {
+          "description": "The app task's mode after the call: fullscreen, pinned, freeform, multi-window, ...",
+          "type": "string"
+        },
+        "taskId": {
+          "type": "number"
+        },
+        "bounds": {
+          "description": "The app task's bounds in display pixels",
+          "$ref": "#/$defs/__schema0"
+        },
+        "previous": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "windowingMode": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "bounds": {
+              "$ref": "#/$defs/__schema3"
+            }
+          },
+          "required": ["taskId", "windowingMode"],
+          "additionalProperties": false
+        },
+        "partner": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "windowingMode": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "bounds": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "appId": {
+              "type": "string"
+            }
+          },
+          "required": ["taskId", "windowingMode", "appId"],
+          "additionalProperties": false
+        },
+        "method": {
+          "description": "The shell command whose read-back reached the mode",
+          "type": "string"
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": ["reached", "not_reached", "failed"]
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["command", "outcome"],
+            "additionalProperties": false
+          }
+        },
+        "settingsChanged": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "settingsRestored": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "restore": {
+          "description": "Pass back as restore to put the window and the freeform settings back",
+          "type": "object",
+          "properties": {
+            "mode": {},
+            "settings": {
+              "type": "object",
+              "properties": {
+                "deviceId": {
+                  "type": "string"
+                },
+                "bootId": {
+                  "type": "string"
+                },
+                "entries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["key", "value"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["deviceId", "bootId", "entries"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["success", "message", "appId", "attempts", "settingsChanged"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            }
+          },
+          "required": ["left", "top", "right", "bottom"],
+          "additionalProperties": false
+        },
+        "__schema1": {
+          "type": "number"
+        },
+        "__schema2": {
+          "type": "string"
+        },
+        "__schema3": {
+          "$ref": "#/$defs/__schema0"
+        }
+      }
     }
   }
 ]

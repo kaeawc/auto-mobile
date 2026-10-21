@@ -141,6 +141,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "tapOn",
   "terminateApp",
   "wakeAndUnlock",
+  "windowMode",
 ] as const;
 
 describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
@@ -297,6 +298,18 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
   ["mediaSession", { action: { dispatch: "pause" } }],
   ["mediaSession", { action: { volume: { stream: "music", level: 5 } } }],
   ["mediaSession", { action: "get", waitFor: { mediaState: "playing", timeoutMs: 3000 } }],
+  [
+    "windowMode",
+    {
+      appId: "com.example",
+      mode: { freeform: { bounds: { left: 0, top: 0, right: 800, bottom: 1200 } } },
+    },
+  ],
+  [
+    "windowMode",
+    { appId: "com.example", mode: { splitScreen: { with: "com.other", position: "secondary" } } },
+  ],
+  ["windowMode", { appId: "com.example", mode: "fullscreen" }],
   ["setNotificationPolicy", { appId: "com.example", policyAccess: true }],
   [
     "setPreference",
@@ -341,6 +354,7 @@ const RECORDED_TOOLS_9966 = [
   "phoneCall",
   "sendSms",
   "mediaSession",
+  "windowMode",
   "setNotificationPolicy",
   "setPreference",
   "resetKeychain",

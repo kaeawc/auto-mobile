@@ -106,6 +106,7 @@ object ValidTools {
         "tapAny",
         "tapAt",
         "wakeAndUnlock",
+        "windowMode",
       )
 
   val DEPRECATED_FIELDS = setOf("generated", "appId", "parameters", "description")

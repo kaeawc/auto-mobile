@@ -251,6 +251,7 @@ describe("auxiliary stream degradation", () => {
     let binds = 0;
     let probes = 0;
     let fullRecoveries = 0;
+    let identityRepublishes = 0;
     let callbacks = 0;
     const start = () =>
       identity.startAuxiliarySocket("observation-stream", async () => {
@@ -281,6 +282,10 @@ describe("auxiliary stream degradation", () => {
       httpServer: () => ({ listening: true }),
       socketServerListening: () => true,
       observationStreamHealthy: () => health.isHealthy(),
+      onObservationStreamRestored: async () => {
+        identityRepublishes++;
+        return true;
+      },
       databaseHealthProbe: () => ({
         check: async () => {
           probes++;
@@ -310,15 +315,18 @@ describe("auxiliary stream degradation", () => {
       expect(probes).toBe(4);
       expect(binds).toBe(5);
       expect(fullRecoveries).toBe(0);
+      expect(identityRepublishes).toBe(0);
       holderAlive = false;
       await tick();
       expect(health.isHealthy()).toBe(true);
       expect(getUnavailableAuxiliarySockets()).toEqual([]);
       expect(callbacks).toBe(5);
+      expect(identityRepublishes).toBe(1);
       await tick();
       expect(binds).toBe(6);
       expect(probes).toBe(6);
       expect(fullRecoveries).toBe(0);
+      expect(identityRepublishes).toBe(1);
     } finally {
       await check.stop();
     }
@@ -434,6 +442,15 @@ describe("auxiliary stream degradation", () => {
         linkSync: (from, to) => {
           if (paths.has(to)) {
             throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+          }
+          paths.add(to);
+        },
+        copyFileExclusiveSync: (from, to) => {
+          if (paths.has(to)) {
+            throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+          }
+          if (!paths.has(from)) {
+            throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
           }
           paths.add(to);
         },

@@ -980,10 +980,10 @@ export class SessionBroker {
       code: request.errorCode ?? "session_preparation_failed",
       message: request.error ?? "",
       retryable,
-      // Eviction retains capacity for redrive; a new request may try again after cleanup.
       ...(retryable && request.errorCode === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
-      // These stored terminal failures require a new request ID to retry preparation.
-      ...(retryable && ["capacity_exhausted", "cancelled"].includes(request.errorCode ?? "")
+      // Stored terminal failures (incl. eviction, after cleanup) retry only under a new request ID.
+      ...(retryable &&
+      ["capacity_exhausted", "cancelled", "eviction_pending"].includes(request.errorCode ?? "")
         ? { retryRequires: "new_request_id" as const }
         : {}),
     };

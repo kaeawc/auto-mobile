@@ -65,6 +65,16 @@ function harness() {
       }
       contents.set(to, text);
     },
+    copyExclusive: (from, to) => {
+      if (contents.has(to)) {
+        throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+      }
+      const text = contents.get(from);
+      if (text === undefined) {
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      }
+      contents.set(to, text);
+    },
     stat: () => currentInode,
     lstat: () => ({ isFile: () => true, size: 100 }),
   };
@@ -171,6 +181,26 @@ describe("auxiliary socket owner records", () => {
       expect([...h.contents.keys()]).toEqual([sidecarPath]);
     });
   }
+
+  test("restores a successor sidecar via exclusive copy when link throws EPERM", () => {
+    const h = harness();
+    h.owner.publish(socketPath, "Appearance", inode);
+    const successor = JSON.stringify({ ...record, pid: 742, processGenerationToken: "linux:new" });
+    h.setBeforeLink(() => {
+      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    });
+    const read = h.files.read;
+    h.files.read = (path) => {
+      const text = read(path);
+      if (path === sidecarPath) {
+        h.contents.set(path, successor);
+      }
+      return text;
+    };
+    h.owner.remove(socketPath);
+    expect(h.contents.get(sidecarPath)).toBe(successor);
+    expect([...h.contents.keys()]).toEqual([sidecarPath]);
+  });
 
   test("leaves metadata intact if the socket inode has changed", () => {
     const h = harness();

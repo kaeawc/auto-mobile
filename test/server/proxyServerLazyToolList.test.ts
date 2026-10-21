@@ -22,6 +22,9 @@ isolateToolRegistry();
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
 beforeAll(async () => {
+  // Issue #14016: JUnit excludes beforeAll. Warm registration and discovery here,
+  // then clear the registry so each test still registers its own tool surface.
+  registerMcpTools(false);
   const availabilitySpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   const daemonManager = new FakeDaemonManager();
   daemonManager.statusResult = {
@@ -41,12 +44,16 @@ beforeAll(async () => {
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
+    await client.listTools();
+    getStaticToolDefinitions();
+    ToolRegistry.getAllTools({ includeUnavailable: true });
     await proxy.callTool("observe", {});
   } finally {
     await client.close();
     await server.close();
     await proxy.close();
     availabilitySpy.mockRestore();
+    ToolRegistry.clearTools();
   }
 });
 

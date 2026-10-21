@@ -12,7 +12,7 @@ import {
   resolveAppearanceMode,
   updateAppearanceConfig,
 } from "./appearanceManager";
-import { DeviceReadiness } from "./readiness/DeviceReadiness";
+import { resolveDirectSessionDevice } from "../utils/directSessionDeviceRegistry";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {
   DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
@@ -48,9 +48,9 @@ const AUTOMATIC_SYNC_DISABLED_WARNING =
 
 export interface AppearanceDeviceSource {
   getPooledDevices(): BootedDevice[];
-  getCurrentDevice(): BootedDevice | undefined;
-  /** Session registry owner, including derived device-label session IDs. */
-  getSessionForDevice(deviceId: string): string | null;
+  getSessionDevice(sessionUuid: string | undefined): BootedDevice | undefined;
+  /** Daemon registry owner (including label sessions), or the caller's matching direct registration. */
+  getSessionForDevice(deviceId: string, sessionUuid?: string): string | null;
   /**
    * The registry that admits control calls on a holder's session. A source without one (direct
    * mode, or a fake that models no session lifecycle) admits every apply.
@@ -76,9 +76,27 @@ const defaultDeviceSource: AppearanceDeviceSource = {
       platform: device.platform,
     }));
   },
-  getCurrentDevice: () => DeviceReadiness.getInstance().getCurrentDevice(),
-  getSessionForDevice: (deviceId) => {
-    return defaultDaemonContext.sessionManager()?.getSessionForDevice(deviceId) ?? null;
+  getSessionDevice: (sessionUuid) => {
+    if (!sessionUuid) {
+      return undefined;
+    }
+    const manager = defaultDaemonContext.sessionManager();
+    if (!manager) {
+      return resolveDirectSessionDevice(sessionUuid)?.device;
+    }
+    const deviceId = manager.getDeviceForSession(sessionUuid);
+    const device = deviceId ? defaultDaemonContext.devicePool()?.getDevice(deviceId) : undefined;
+    return device
+      ? { deviceId: device.id, name: device.name, platform: device.platform }
+      : undefined;
+  },
+  getSessionForDevice: (deviceId, sessionUuid) => {
+    const manager = defaultDaemonContext.sessionManager();
+    if (manager) {
+      return manager.getSessionForDevice(deviceId);
+    }
+    const direct = sessionUuid ? resolveDirectSessionDevice(sessionUuid) : undefined;
+    return direct?.device.deviceId === deviceId ? direct.sessionUuid : null;
   },
   getSessionManager: () => defaultDaemonContext.sessionManager(),
 };
@@ -362,20 +380,20 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       targets.set(device.deviceId, device);
     }
 
-    const current = this.deviceSource.getCurrentDevice();
-    if (current) {
-      targets.set(current.deviceId, current);
+    const sessionDevice = this.deviceSource.getSessionDevice(sessionUuid);
+    if (sessionDevice) {
+      targets.set(sessionDevice.deviceId, sessionDevice);
     }
 
     if (this.authenticator.isAuthenticationEnforced?.() === false) {
       // AUTOMOBILE_DAEMON_STREAM_AUTH=0 leaves no verified caller identity;
-      // preserve the existing all-pooled-plus-current targeting in auth-off mode.
+      // target pooled devices plus the requesting session's direct device.
       return [...targets.values()];
     }
 
     const callerBase = this.configKey(sessionUuid);
     const owned = [...targets.values()].filter((device) => {
-      const owner = this.deviceSource.getSessionForDevice(device.deviceId);
+      const owner = this.deviceSource.getSessionForDevice(device.deviceId, sessionUuid);
       if (!callerBase || !owner) {
         return false;
       }

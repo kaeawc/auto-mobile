@@ -588,8 +588,16 @@ describe("daemon file cleanup", () => {
   const scratch = useScratchRoot("daemonFiles-");
 
   for (const sync of [false, true]) {
-    for (const newerAtRestore of [false, true]) {
-      test(`handoff: successor published after final PID ownership read survives (sync=${sync}, newerAtRestore=${newerAtRestore})`, async () => {
+    for (const scenario of [
+      { name: "link restores", newerAtRestore: false },
+      { name: "link EEXIST preserves newest", newerAtRestore: true },
+      { name: "EPERM restores via exclusive copy", linkError: "EPERM" },
+      { name: "ENOTSUP restores via exclusive copy", linkError: "ENOTSUP" },
+      { name: "EPERM copy EEXIST preserves newest", linkError: "EPERM", newerAtRestore: true },
+      { name: "EPERM copy EIO retains successor", linkError: "EPERM", copyError: "EIO" },
+      { name: "link EIO retains successor without copy", linkError: "EIO" },
+    ]) {
+      test(`handoff: successor published after final PID ownership read survives (${scenario.name}, sync=${sync})`, async () => {
         const storage = new FakeLockFileSystem();
         const pidFilePath = "/daemon/owner.pid";
         const original: PidFileData = {
@@ -602,11 +610,13 @@ describe("daemon file cleanup", () => {
         const successor = { ...original, pid: 200 };
         const newest = { ...original, pid: 300 };
         storage.seed(pidFilePath, JSON.stringify(original));
+        storage.linkError = scenario.linkError;
         storage.failure = (operation) => {
-          if (operation === "link" && newerAtRestore) {
+          const restoreOperation = scenario.linkError ? "copyExclusive" : "link";
+          if (operation === restoreOperation && scenario.newerAtRestore) {
             storage.seed(pidFilePath, JSON.stringify(newest));
           }
-          return undefined;
+          return operation === "copyExclusive" ? scenario.copyError : undefined;
         };
         let reads = 0;
         const persistedOwners: (PidFileData | null)[] = [];
@@ -617,6 +627,7 @@ describe("daemon file cleanup", () => {
           unlinkSync: (path) => storage.unlink(path),
           renameSync: (from, to) => storage.rename(from, to),
           linkSync: (from, to) => storage.link(from, to),
+          copyFileExclusiveSync: (from, to) => storage.copyExclusive(from, to),
           readPid: (path = pidFilePath) => {
             const value: PidFileData = JSON.parse(storage.readText(path));
             if (path === pidFilePath && ++reads === 3) {
@@ -638,13 +649,17 @@ describe("daemon file cleanup", () => {
         const removed = sync
           ? cleanupDaemonFilesSync(options, files)
           : await cleanupDaemonFiles(options, files);
-        expect(storage.exists(pidFilePath)).toBe(true);
-        expect(JSON.parse(storage.readText(pidFilePath))).toEqual(
-          newerAtRestore ? newest : successor,
-        );
         expect(removed).toBe(false);
         expect(persistedOwners).toEqual([original]);
-        expect(storage.paths()).toEqual([pidFilePath]);
+        const retained = scenario.copyError !== undefined || scenario.linkError === "EIO";
+        const expectedPath = retained ? `${pidFilePath}.reap-${process.pid}-id-1` : pidFilePath;
+        expect(storage.paths()).toEqual([expectedPath]);
+        expect(JSON.parse(storage.readText(expectedPath))).toEqual(
+          scenario.newerAtRestore ? newest : successor,
+        );
+        expect(storage.operations.filter(({ op }) => op === "copyExclusive")).toHaveLength(
+          scenario.linkError && scenario.linkError !== "EIO" ? 1 : 0,
+        );
       });
     }
   }

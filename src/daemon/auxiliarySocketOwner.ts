@@ -1,4 +1,13 @@
-import { linkSync, lstatSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import {
+  constants,
+  copyFileSync,
+  linkSync,
+  lstatSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { z } from "zod";
 import { DAEMON_VERSION } from "./constants";
 import { writePrivateJsonFileAtomicSync } from "./atomicJsonFile";
@@ -38,6 +47,7 @@ export interface AuxiliarySocketOwnerFiles {
   remove(path: string): void;
   rename(from: string, to: string): void;
   link(from: string, to: string): void;
+  copyExclusive(from: string, to: string): void;
   stat(path: string): { dev: number; ino: number };
 }
 const defaultFiles: AuxiliarySocketOwnerFiles = {
@@ -47,6 +57,7 @@ const defaultFiles: AuxiliarySocketOwnerFiles = {
   remove: unlinkSync,
   rename: renameSync,
   link: linkSync,
+  copyExclusive: (from, to) => copyFileSync(from, to, constants.COPYFILE_EXCL),
   stat: statSync,
 };
 

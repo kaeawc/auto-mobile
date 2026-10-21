@@ -11,6 +11,22 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const GIB = 1024 ** 3;
 
+test.each(["admitted", "external Booting"])(
+  "a heavy %s simulator preserves its measured RSS through row-index matching",
+  (kind) => {
+    const { report } = setup([
+      simulator("heavy", 6, kind === "external Booting" ? "Booting" : "Booted"),
+      simulator("settled", 1.5),
+    ]);
+    const boots = kind === "admitted" ? [{ deviceId: "heavy", handedOff: false }] : [];
+    const bytes = estimatePerSimulatorBytes(report, boots);
+    expect(bytes).toBe(3.75 * GIB);
+    expect(
+      resolveCapacityLimits({}, { totalMemoryBytes: 16 * GIB, cpuCount: 8 }, bytes).maxBooted,
+    ).toBe(2);
+  },
+);
+
 function simulator(udid: string, gib?: number, state = "Booted"): SimulatorCost {
   return {
     udid,

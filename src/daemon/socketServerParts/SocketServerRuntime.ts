@@ -83,6 +83,7 @@ export type SocketServerConstructorArgs = [
     sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     /** Environment used for daemon request budgets; defaults to this process. */
     requestTimeoutEnv?: NodeJS.ProcessEnv;
+    clearConnectionDevicePin?: (connectionId: string) => void;
     onFrameTrace?: (event: SocketFrameTraceEvent) => void;
     /**
      * Runs forwards in process (#11820). The daemon passes its own, so shutdown can close the
@@ -138,6 +139,7 @@ export class SocketServerRuntime {
   sessionReleaseUnsubscribe: (() => void) | null = null;
   socketPath: string;
   daemonState: SocketDaemonStateAccess;
+  readonly clearConnectionDevicePin: ((connectionId: string) => void) | undefined;
   /**
    * The loopback MCP client that a socket transport most recently bound with a
    * device session. Follow-up requests can omit their session UUID, so reuse
@@ -270,6 +272,7 @@ export class SocketServerRuntime {
 
     this.socketPath = socketPath;
     this.daemonState = daemonState;
+    this.clearConnectionDevicePin = handshakeConfig.clearConnectionDevicePin;
     this.timer = timer;
     this.requestTimeoutEnv = handshakeConfig.requestTimeoutEnv;
     this.onFrameTrace = handshakeConfig.onFrameTrace;

@@ -11,7 +11,6 @@ import {
   startVideoRecording,
   stopVideoRecording,
 } from "../daemon/videoRecordingManager";
-import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
 import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
@@ -599,7 +598,7 @@ export function registerVideoRecordingTools(
   const ctx: RecordingToolContext = {
     deviceDetector: dependencies.deviceDetector ?? {
       detectConnectedPlatforms: (signal) =>
-        DeviceReadiness.getInstance().detectConnectedPlatforms(signal),
+        ToolRegistry.getDeviceReadiness().detectConnectedPlatforms(signal),
     },
     requesterResolver: dependencies.requesterResolver ?? daemonRecordingRequesterResolver,
   };

@@ -174,11 +174,11 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 2,
       reason: "Pre-boot serial validation and start lifecycle target reconcile their discoveries.",
     },
-    "src/features/deviceLifecycle/core/shutdownDiscovery.ts": {
+    "src/features/deviceLifecycle/teardown/shutdownDiscovery.ts": {
       calls: 1,
       reason: "Shutdown preflight routes its discovery through the funnel.",
     },
-    "src/features/deviceLifecycle/core/teardownDiscovery.ts": {
+    "src/features/deviceLifecycle/teardown/teardownDiscovery.ts": {
       calls: 1,
       reason: "Teardown precondition routes its discovery through the funnel.",
     },
@@ -352,8 +352,8 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/daemon/socketServer/inputDeviceGating.ts",
       "src/server/bootedDeviceResources.ts",
       "src/features/deviceLifecycle/core/bootIdentity.ts",
-      "src/features/deviceLifecycle/core/shutdownDiscovery.ts",
-      "src/features/deviceLifecycle/core/teardownDiscovery.ts",
+      "src/features/deviceLifecycle/teardown/shutdownDiscovery.ts",
+      "src/features/deviceLifecycle/teardown/teardownDiscovery.ts",
       "src/server/deviceToolsStartupLease.ts",
       "src/server/deviceToolsListing.ts",
       "src/server/provisioning/provisioningBoot.ts",

@@ -76,8 +76,9 @@ signal_lane() {
   local helper owner result
   for helper in groups chunks; do
     : > "$STUB_CALLS"
-    sleep 60 3>&- &
-    owner=$!
+    # Not a child of this shell: a killed child lingers as a zombie until reaped, and kill -0
+    # succeeds on a zombie, so the helper under test could still see its owner as alive.
+    owner="$(bash -c 'sleep 60 > /dev/null 2>&1 3>&- & echo $!')"
     owned_pids+=("$owner")
     export AUTOMOBILE_TEST_TS_PARENT_PID="$owner"
     export STUB_KILL_PARENT=1 AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=1

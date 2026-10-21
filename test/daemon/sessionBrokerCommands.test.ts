@@ -211,6 +211,14 @@ describe("session broker release command", () => {
     expect(client.closeCalls).toBe(1);
   });
 
+  test("returns cleanup_pending without retrying or claiming cleanup is complete", async () => {
+    const receipt = { sessionUuid: SESSION_UUID, outcome: "cleanup_pending" as const };
+    const client = new FakeBrokerCommandClient(receipt);
+    expect(await releaseBrokerSession(releaseArgs, () => client)).toEqual(receipt);
+    expect(client.calls).toHaveLength(1);
+    expect(client.closeCalls).toBe(1);
+  });
+
   test("closes after a failed call and redacts the owner token from JSON diagnostics", async () => {
     const client = new FakeBrokerCommandClient(
       undefined,

@@ -92,6 +92,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     child: label,
   }),
   prototype_rich_text_v1: fixture({ type: "text", id: "label", spans: [{ text: "Hello" }] }),
+  prototype_chat_scroll_v1: fixture({
+    type: "scroll",
+    id: "label",
+    reverse: true,
+    child: { type: "spacer" },
+  }),
   prototype_menus_v1: fixture({
     type: "menu",
     id: "label",

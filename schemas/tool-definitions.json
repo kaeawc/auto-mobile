@@ -16318,6 +16318,52 @@
                             "properties": {
                               "type": {
                                 "type": "string",
+                                "enum": ["scrollTo"]
+                              },
+                              "scroll": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "to": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": ["start", "end"]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "key": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": ["key"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "animated": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["type", "scroll", "to"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
                                 "enum": ["replace"]
                               },
                               "stack": {
@@ -19488,6 +19534,23 @@
                       },
                       "required": ["stateKey", "onRefresh"],
                       "additionalProperties": false
+                    },
+                    "reverse": {
+                      "type": "boolean"
+                    },
+                    "stickToEnd": {
+                      "type": "boolean"
+                    },
+                    "atEndKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                    },
+                    "onStartReached": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"

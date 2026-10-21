@@ -568,21 +568,13 @@ internal class HierarchyController(
           ?: perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
 
       val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
-        buildString {
-          append(
-            """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString""",
-          )
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          if (contextAtExtraction != null && contextAtExtraction == host.currentFrameContext()) {
-            appendJsonStringField("frameContext", contextAtExtraction, jsonCompact)
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+        hierarchyUpdateFrame(
+          timestamp = System.currentTimeMillis(),
+          hierarchyJson = jsonString,
+          requestId = requestId,
+          frameContext = contextAtExtraction?.takeIf { it == host.currentFrameContext() },
+          perfTiming = perfTiming,
+        )
       }
 
       withContext(PerfRequestContext(null)) {

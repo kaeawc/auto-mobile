@@ -291,6 +291,22 @@ describe("device mutation reset contract", () => {
     expect(await journal.getBaseline(fresh.scope)).toEqual(BASELINE);
   });
 
+  test("an empty unobservable capture is never persisted as an immutable baseline", async () => {
+    const context = {
+      scope: { ...SCOPE, incarnation: "fresh" },
+      signal: new AbortController().signal,
+      assertOwned: async () => {},
+    };
+    port.snapshot = { completeKinds: [], observations: [], unobservable: ["installed-app"] };
+    await expect(captureFirstDeviceBaseline(journal, port, context)).rejects.toThrow(
+      "no observable inventory",
+    );
+    expect(await journal.getBaseline(context.scope)).toBeNull();
+    port.snapshot = structuredClone(BASELINE);
+    await captureFirstDeviceBaseline(journal, port, context);
+    expect(await journal.getBaseline(context.scope)).toEqual(BASELINE);
+  });
+
   test("non-positive or overflowing reset budgets are rejected before device access", async () => {
     for (const budgetMs of [0, -1, Infinity, 2_147_483_648]) {
       await expect(revertDeviceMutations({ ...options, budgetMs })).rejects.toThrow(

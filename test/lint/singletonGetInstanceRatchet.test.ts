@@ -36,7 +36,7 @@ const REMAINING_GET_INSTANCE_CALLS: Readonly<Record<string, number>> = {
   FeatureFlagService: 11,
   ImageCache: 4,
   IosCtrlProxyBuilder: 2,
-  IOSCtrlProxyClient: 66,
+  IOSCtrlProxyClient: 64,
   IOSCtrlProxyManager: 11,
   NavigationGraphManager: 16,
   NavigationScreenshotManager: 4,

@@ -84,6 +84,140 @@ describe("push backpressure", () => {
       spy.mockRestore();
     }
   });
+  it.each(["screenshot_update", "hierarchy_update", "telemetry_push"])(
+    "serializes a broadcast payload once for three byte-identical subscriber lines (%s)",
+    (type) => {
+      const server = new Server();
+      const ids = ["first", 'quoted-"\\\n💧', "third"];
+      const sockets = ids.map((id) => {
+        const socket = new FakePushSocket<Frame>();
+        server.add(socket, id);
+        return socket;
+      });
+      let serializations = 0;
+      const data = {
+        value: 42,
+        toJSON() {
+          serializations++;
+          return { value: this.value };
+        },
+      };
+      const screenshotBase64 = "x".repeat(16 * 1024);
+      server.push({ type, data, screenshotBase64 });
+      expect(serializations).toBe(1);
+      for (const [index, socket] of sockets.entries()) {
+        expect(socket.writes).toEqual([
+          JSON.stringify({
+            type,
+            data: { value: 42 },
+            screenshotBase64,
+            subscriptionId: ids[index],
+          }) + "\n",
+        ]);
+      }
+    },
+  );
+
+  it("snapshots a lossless broadcast once while both subscribers wait for drain", () => {
+    const { server, socket } = rig();
+    const peer = new FakePushSocket<Frame>();
+    server.add(peer, "peer");
+    peer.writeReturnValue = false;
+    server.push({ type: "ping" });
+    let serializations = 0;
+    const data = {
+      value: 1,
+      toJSON() {
+        serializations++;
+        return { value: this.value };
+      },
+    };
+    server.push({ type: "telemetry_push", data });
+    expect(serializations).toBe(1);
+    data.value = 99;
+    for (const [subscriber, subscriptionId] of [
+      [socket, "sub"],
+      [peer, "peer"],
+    ] as const) {
+      subscriber.drain();
+      expect(subscriber.writes.at(-1)).toBe(
+        JSON.stringify({ type: "telemetry_push", data: { value: 1 }, subscriptionId }) + "\n",
+      );
+    }
+    expect(serializations).toBe(1);
+  });
+
+  it("flushes the stored latest state line without serializing its payload again", () => {
+    const { server, socket } = rig();
+    server.push({ type: "ping" });
+    let serializations = 0;
+    const data = {
+      value: 1,
+      toJSON() {
+        serializations++;
+        return { value: this.value };
+      },
+    };
+    server.push({ type: "screenshot_update", value: 0 });
+    server.push({ type: "screenshot_update", data });
+    const expected =
+      JSON.stringify({
+        type: "screenshot_update",
+        data: { value: 1 },
+        subscriptionId: "sub",
+      }) + "\n";
+    expect(serializations).toBe(1);
+    data.value = 99;
+    socket.drain();
+    expect(socket.writes).toEqual([
+      JSON.stringify({ type: "ping", subscriptionId: "sub" }) + "\n",
+      expected,
+    ]);
+    expect(serializations).toBe(1);
+  });
+
+  it("rechecks stored screenshots against the byte cap while flushing", () => {
+    const { server, socket } = rig();
+    server.push({ type: "ping" });
+    server.reply(socket, { type: "pong" });
+    server.push({ type: "screenshot_update", value: 1 });
+    server.push({ type: "screenshot_update", value: 2 });
+    socket.onWrite = () => {
+      socket.bufferedBytes = PUSH_SOCKET_WRITABLE_LIMIT_BYTES + 1;
+    };
+    socket.drain();
+    expect(socket.responses).toEqual([
+      { type: "ping", subscriptionId: "sub" },
+      { type: "pong" },
+      {
+        type: "frames_dropped",
+        subscriptionId: "sub",
+        droppedType: "screenshot_update",
+        reason: "backpressure",
+      },
+    ]);
+  });
+
+  it("retires each failing subscriber when payload serialization throws", () => {
+    const server = new Server();
+    const sockets = [new FakePushSocket<Frame>(), new FakePushSocket<Frame>()];
+    for (const [index, socket] of sockets.entries()) {
+      server.add(socket, `sub-${index}`);
+    }
+    const data = {
+      value: 0,
+      toJSON() {
+        throw new Error("cannot serialize");
+      },
+    };
+    server.push({ type: "hierarchy_update", data });
+    expect(server.getSubscriberCount()).toBe(0);
+    for (const socket of sockets) {
+      expect(socket.destroyed).toBe(true);
+      expect(socket.writes).toEqual([]);
+    }
+  });
+
   it("holds only the latest frame per type and subscription until drain", () => {
     const { server, socket } = rig();
     server.push({ type: "screenshot_update", value: 0 });

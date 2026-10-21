@@ -309,10 +309,14 @@ export class SocketTextInput {
       }
     };
     const deadline = this.state.timer.now() + timeoutMs;
-    const client =
+    const target =
       platform === "android"
-        ? AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory)
-        : IOSCtrlProxyClient.getInstance(targetDevice);
+        ? {
+            platform,
+            client: AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory),
+          }
+        : { platform, client: IOSCtrlProxyClient.getInstance(targetDevice) };
+    const { client } = target;
     // Append emits real key events on Android. iOS invokes its focused-field insert
     // primitive, falling back on runners that predate that command to untargeted
     // requestSetText, which is the same XCUITest typeText-at-caret operation.
@@ -323,14 +327,14 @@ export class SocketTextInput {
     // queue. An unbounded adb subprocess here would therefore wedge every later
     // input for this device, not just this one request.
     let appendCharsSent: number | undefined;
-    if (append && platform === "android") {
+    if (append && target.platform === "android") {
       const textResult = await this.callbacks.executeAndroidAppendText({
         targetDevice,
         text,
         deadline,
         totalTimeoutMs: timeoutMs,
         frameContext,
-        client: client as AndroidCtrlProxyClient,
+        client: target.client,
         signal,
         onDispatch,
       });
@@ -347,18 +351,17 @@ export class SocketTextInput {
       }
       appendCharsSent = textResult.charsSent;
     } else {
+      // Outside the Android append branch, an append request is an iOS one.
+      const iosAppendClient = append && target.platform === "ios" ? target.client : null;
       const textResult = await this.callbacks.holdDispatchedInputRequest(
         signal,
         deadline - this.state.timer.now(),
         (fenced, dispatched) =>
-          append
-            ? (client as IOSCtrlProxyClient).requestAppendText(
-                text,
-                timeoutMs,
-                undefined,
-                frameContext,
-                { abortSignal: fenced, onDispatch: dispatched },
-              )
+          iosAppendClient
+            ? iosAppendClient.requestAppendText(text, timeoutMs, undefined, frameContext, {
+                abortSignal: fenced,
+                onDispatch: dispatched,
+              })
             : client.requestSetText(text, {
                 timeoutMs,
                 frameContext,
@@ -509,7 +512,7 @@ export class SocketTextInput {
       : { ...retry, charsSent: confirmed + retry.charsSent };
   }
   async validateAppendFrameContext(
-    client: AndroidCtrlProxy,
+    client: Pick<AndroidCtrlProxy, "validateFrameContext">,
     frameContext: string,
     deadline: number,
     totalTimeoutMs: number,

@@ -18,6 +18,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeEmulatorConsoleClient } from "../../fakes/FakeEmulatorConsoleClient";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDeviceTraits, androidDeviceTraits } from "../../fakes/FakeDeviceTraits";
 import { FakeDeviceClockAdapter } from "../../fakes/FakeDeviceClockAdapter";
 import { DeviceClockRestoreRegistry } from "../../../src/features/utility/DeviceClock";
 import {
@@ -44,6 +45,10 @@ const route = {
   durationMs: 1000,
   updateIntervalMs: 500,
 };
+// Emulator by default; a test flips the flag to exercise the physical/unsupported branch.
+const deviceTraits = new FakeDeviceTraits();
+beforeOutputSchema(() => deviceTraits.setTraits(androidDeviceTraits()));
+
 const flush = async (): Promise<void> => {
   for (let index = 0; index < 12; index++) {
     await Promise.resolve();
@@ -57,6 +62,7 @@ describe("setDeviceState location", () => {
     const simctl = new FakeSimctl();
     let applied = 0;
     const state = new DeviceState(ios, {
+      deviceTraits,
       timer,
       routeRegistry,
       simctl,
@@ -80,6 +86,7 @@ describe("setDeviceState location", () => {
     );
     let applied = false;
     const state = new DeviceState(ios, {
+      deviceTraits,
       simctl,
       timer: new FakeTimer(),
       routeRegistry: new LocationRouteRegistry(new FakeTimer()),
@@ -97,10 +104,11 @@ describe("setDeviceState location", () => {
       const timer = new FakeTimer();
       const routeRegistry = new LocationRouteRegistry(timer);
       const adbFactory = new FakeAdbClientFactory();
-      adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+      deviceTraits.setTraits(androidDeviceTraits());
       const simctl = new FakeSimctl();
       let applied = false;
       const state = new DeviceState(device, {
+        deviceTraits,
         timer,
         routeRegistry,
         adbFactory,
@@ -123,11 +131,12 @@ describe("setDeviceState location", () => {
       const timer = new FakeTimer();
       const routeRegistry = new LocationRouteRegistry(timer);
       const adbFactory = new FakeAdbClientFactory();
-      adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+      deviceTraits.setTraits(androidDeviceTraits());
       const consoleClient = new FakeEmulatorConsoleClient();
       const simctl = new FakeSimctl();
       let admitted = true;
       const state = new DeviceState(device, {
+        deviceTraits,
         timer,
         routeRegistry,
         adbFactory,
@@ -156,10 +165,11 @@ describe("setDeviceState location", () => {
   test("a combined clock request propagates location admission refusal", async () => {
     const timer = new FakeTimer();
     const adbFactory = new FakeAdbClientFactory();
-    adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+    deviceTraits.setTraits(androidDeviceTraits());
     const consoleClient = new FakeEmulatorConsoleClient();
     const clockAdapter = new FakeDeviceClockAdapter();
     const state = new DeviceState(android, {
+      deviceTraits,
       timer,
       adbFactory,
       consoleFactory: () => consoleClient,
@@ -187,6 +197,7 @@ describe("setDeviceState location", () => {
     timer.advanceTime(0);
     await flush();
     const state = new DeviceState(ios, {
+      deviceTraits,
       timer,
       routeRegistry,
       simctl,
@@ -221,7 +232,7 @@ describe("setDeviceState location", () => {
       }
     }
     const simctl = new DelayedSimCtl();
-    const state = new DeviceState(ios, { timer, routeRegistry, simctl });
+    const state = new DeviceState(ios, { deviceTraits, timer, routeRegistry, simctl });
     await state.setState({ location: route });
     timer.advanceTime(0);
     await flush();
@@ -241,8 +252,9 @@ describe("setDeviceState location", () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
     const adbFactory = new FakeAdbClientFactory();
-    adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+    deviceTraits.setTraits(androidDeviceTraits());
     const state = new DeviceState(android, {
+      deviceTraits,
       timer,
       routeRegistry,
       adbFactory,
@@ -250,7 +262,7 @@ describe("setDeviceState location", () => {
     });
     await state.setState({ location: route });
     expect(routeRegistry.isActive(android.deviceId)).toBe(true);
-    adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "0\n");
+    deviceTraits.setTraits(androidDeviceTraits({ isEmulator: false }));
     const rejected = await state.setState({ location: route });
     expect(rejected.location?.supported).toBe(false);
     expect(routeRegistry.isActive(android.deviceId)).toBe(true);
@@ -267,7 +279,7 @@ describe("setDeviceState location", () => {
       timer.advanceTime(delta);
       await flush();
     }
-    const state = new DeviceState(ios, { timer, routeRegistry });
+    const state = new DeviceState(ios, { deviceTraits, timer, routeRegistry });
     expect((await state.setState({ location: { mode: "stop" } })).location).toMatchObject({
       stopped: false,
       previousRoute: { endedReason: "failed", lastError: "offline" },
@@ -278,10 +290,11 @@ describe("setDeviceState location", () => {
   });
   test("uses Android emulator console with longitude first", async () => {
     const adbFactory = new FakeAdbClientFactory();
-    adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+    deviceTraits.setTraits(androidDeviceTraits());
     const consoleClient = new FakeEmulatorConsoleClient();
     const ports: number[] = [];
     const result = await new DeviceState(android, {
+      deviceTraits,
       adbFactory,
       consoleFactory: (port) => {
         ports.push(port);
@@ -302,7 +315,9 @@ describe("setDeviceState location", () => {
     const simctl = new FakeSimctl();
     const args = ["location", ios.deviceId, "set", "37.7749,-122.4194"];
     simctl.setCommandArgsResult(args, "");
-    const result = await new DeviceState(ios, { simctl }).setState({ location: point });
+    const result = await new DeviceState(ios, { deviceTraits, simctl }).setState({
+      location: point,
+    });
     expect(result.success).toBe(true);
     expect(result.location).toMatchObject({ supported: true, ...point, method: "ios_simctl" });
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([{ args, timeoutMs: undefined }]);
@@ -319,6 +334,7 @@ describe("setDeviceState location", () => {
       { ...point, longitude: Infinity },
     ]) {
       const result = await new DeviceState(android, {
+        deviceTraits,
         adbFactory,
         consoleFactory: () => consoleClient,
       }).setState({ location });
@@ -334,10 +350,15 @@ describe("setDeviceState location", () => {
     const physicalAndroid = { ...android, deviceId: "R123456" };
     const simctl = new FakeSimctl();
     const physicalIos = { ...ios, deviceId: "00008110-001234567890801E" };
-    const androidResult = await new DeviceState(physicalAndroid, { adbFactory }).setState({
+    const androidResult = await new DeviceState(physicalAndroid, {
+      deviceTraits,
+      adbFactory,
+    }).setState({
       location: point,
     });
-    const iosResult = await new DeviceState(physicalIos, { simctl }).setState({ location: point });
+    const iosResult = await new DeviceState(physicalIos, { deviceTraits, simctl }).setState({
+      location: point,
+    });
     expect(androidResult.location?.supported).toBe(false);
     expect(androidResult.error).toContain("Use an Android emulator");
     expect(iosResult.location?.supported).toBe(false);
@@ -349,10 +370,11 @@ describe("setDeviceState location", () => {
   for (const ErrorType of [Error, ActionableError]) {
     test(`maps a ${ErrorType.name} console or simctl command failure`, async () => {
       const adbFactory = new FakeAdbClientFactory();
-      adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+      deviceTraits.setTraits(androidDeviceTraits());
       const consoleClient = new FakeEmulatorConsoleClient();
       consoleClient.failNext("geoFix", new ErrorType("Command exited with code 1"));
       const androidResult = await new DeviceState(android, {
+        deviceTraits,
         adbFactory,
         consoleFactory: () => consoleClient,
       }).setState({ location: point });
@@ -364,7 +386,9 @@ describe("setDeviceState location", () => {
         ["location", ios.deviceId, "set", "37.7749,-122.4194"],
         new ErrorType("Command exited with code 1"),
       );
-      const iosResult = await new DeviceState(ios, { simctl }).setState({ location: point });
+      const iosResult = await new DeviceState(ios, { deviceTraits, simctl }).setState({
+        location: point,
+      });
       expect(iosResult.success).toBe(false);
       expect(iosResult.error).toContain("Command exited with code 1");
     });
@@ -390,7 +414,7 @@ describe("setDeviceState location", () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
     const simctl = new FakeSimctl();
-    const state = new DeviceState(ios, { timer, routeRegistry, simctl });
+    const state = new DeviceState(ios, { deviceTraits, timer, routeRegistry, simctl });
     const result = await state.setState({
       location: {
         mode: "route",
@@ -431,7 +455,7 @@ describe("setDeviceState location", () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
     const simctl = new FakeSimctl();
-    const state = new DeviceState(ios, { timer, routeRegistry, simctl });
+    const state = new DeviceState(ios, { deviceTraits, timer, routeRegistry, simctl });
     await state.setState({ location: route });
     timer.advanceTime(0);
     await flush();
@@ -462,7 +486,7 @@ describe("setDeviceState location", () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
     const simctl = new FakeSimctl();
-    const state = new DeviceState(ios, { timer, routeRegistry, simctl });
+    const state = new DeviceState(ios, { deviceTraits, timer, routeRegistry, simctl });
     let release: Parameters<SessionManager["onSessionRelease"]>[0] | undefined;
     let unbound: Parameters<SessionManager["onSessionDeviceUnbound"]>[0] | undefined;
     registerLocationRouteSessionCleanup(
@@ -505,6 +529,7 @@ describe("setDeviceState location", () => {
 
   test("route rejects invalid inputs with ActionableError before platform access", async () => {
     const state = new DeviceState(android, {
+      deviceTraits,
       routeRegistry: new LocationRouteRegistry(new FakeTimer()),
     });
     const two = [
@@ -542,15 +567,18 @@ describe("setDeviceState location", () => {
       { ...android, deviceId: "physical" },
       { ...ios, deviceId: "physical" },
     ]) {
-      const result = await new DeviceState(device, { timer, routeRegistry }).setState({
-        location: route,
-      });
+      const result = await new DeviceState(device, { deviceTraits, timer, routeRegistry }).setState(
+        {
+          location: route,
+        },
+      );
       expect(result.location?.supported).toBe(false);
       expect(routeRegistry.stop(device.deviceId)).toBe(false);
     }
     const adbFactory = new FakeAdbClientFactory();
-    adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "0\n");
+    deviceTraits.setTraits(androidDeviceTraits({ isEmulator: false }));
     const nonEmulator = await new DeviceState(android, {
+      deviceTraits,
       timer,
       routeRegistry,
       adbFactory,
@@ -563,9 +591,10 @@ describe("setDeviceState location", () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
     const adbFactory = new FakeAdbClientFactory();
-    adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+    deviceTraits.setTraits(androidDeviceTraits());
     const consoleClient = new FakeEmulatorConsoleClient();
     const state = new DeviceState(android, {
+      deviceTraits,
       timer,
       routeRegistry,
       adbFactory,

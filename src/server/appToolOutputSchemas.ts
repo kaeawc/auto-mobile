@@ -181,9 +181,27 @@ export const crashAppResultSchema = z.object({
   confirmed: z.boolean(),
   evidence: z
     .object({
-      source: z.enum(["android_logcat", "ios_unified_log"]),
+      source: z.enum(["android_logcat", "ios_unified_log", "android_dropbox", "ios_crash_report"]),
       summary: z.string(),
     })
+    .optional(),
+  crashReport: z
+    .discriminatedUnion("status", [
+      z.object({
+        status: z.literal("found"),
+        source: z.enum(["ios_ips", "android_dropbox"]),
+        reportPath: z.string(),
+        exceptionType: z.string(),
+        exceptionCode: z.string().optional(),
+        exceptionMessage: z.string().optional(),
+        terminationReason: z.string().optional(),
+        appVersion: z.string().optional(),
+        frames: z.array(z.string()),
+        failureOccurrenceId: z.string().optional(),
+      }),
+      z.object({ status: z.literal("notFound") }),
+      z.object({ status: z.literal("unsupported"), reason: z.string() }),
+    ])
     .optional(),
   userId: z.number().int().nonnegative().optional(),
   error: z.string().optional(),

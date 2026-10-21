@@ -65,3 +65,50 @@ describe("redactToolSecrets", () => {
     expect(redacted).toContain(TOOL_SECRET_PLACEHOLDER);
   });
 });
+
+describe("redactToolSecrets setDeviceState screenLock", () => {
+  const PIN = "7391";
+
+  test("replaces the credential and currentCredential and keeps the lock type", () => {
+    const set = { screenLock: { type: "pin", credential: PIN }, sessionUuid: "s-1" };
+    expect(redactToolSecrets("setDeviceState", set)).toEqual({
+      screenLock: { type: "pin", credential: TOOL_SECRET_PLACEHOLDER },
+      sessionUuid: "s-1",
+    });
+    expect(set.screenLock.credential).toBe(PIN);
+    expect(
+      redactToolSecrets("setDeviceState", { screenLock: { type: "none", currentCredential: PIN } }),
+    ).toEqual({ screenLock: { type: "none", currentCredential: TOOL_SECRET_PLACEHOLDER } });
+  });
+
+  test("leaves setDeviceState calls without a screen lock untouched", () => {
+    const dnd = { doNotDisturb: { enabled: true } };
+    expect(redactToolSecrets("setDeviceState", dnd)).toBe(dnd);
+  });
+
+  test("the request log and plan log redaction cover a screen lock", () => {
+    expect(
+      JSON.stringify(
+        redactTypedTextArguments("setDeviceState", {
+          screenLock: { type: "password", credential: "s3cret-pass" },
+        }),
+      ),
+    ).not.toContain("s3cret-pass");
+    const plan = [
+      "name: lock",
+      "steps:",
+      "  - tool: setDeviceState",
+      "    screenLock:",
+      "      type: pin",
+      `      credential: "${PIN}"`,
+      "  - tool: setDeviceState",
+      "    params:",
+      "      screenLock:",
+      "        type: none",
+      `        currentCredential: "${PIN}"`,
+    ].join("\n");
+    const redacted = redactPlanYamlTypedText(plan);
+    expect(redacted).not.toContain(PIN);
+    expect(redacted).toContain(TOOL_SECRET_PLACEHOLDER);
+  });
+});

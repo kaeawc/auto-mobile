@@ -42,7 +42,7 @@ internal val LocalPrototypeImageCache = compositionLocalOf<PrototypeImageCache?>
 internal val LocalPrototypeImageVersion = compositionLocalOf<Long?> { null }
 
 /** A [Bitmap] the cache can account for. */
-class BitmapPrototypeImage(val bitmap: Bitmap) : PrototypeDecodedImage {
+internal class BitmapPrototypeImage(val bitmap: Bitmap) : PrototypeDecodedImage {
   val imageBitmap: ImageBitmap = bitmap.asImageBitmap()
 
   override val width: Int
@@ -61,6 +61,7 @@ class BitmapPrototypeImage(val bitmap: Bitmap) : PrototypeDecodedImage {
  * decoding, so it is verified on a device rather than in JVM unit tests; the sampling, caching and
  * fallback logic around it is unit tested with a fake decoder.
  */
+@InternalAutoMobilePrototypeApi
 class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECODED_PIXELS) :
   PrototypeImageDecoder {
   override fun decode(bytes: ByteArray, target: PrototypeImageTarget): PrototypeDecodedImage? =

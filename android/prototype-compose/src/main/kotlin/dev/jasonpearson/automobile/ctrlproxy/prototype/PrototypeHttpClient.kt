@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonElement
  * One HTTP call of a prototype `request` action, with every binding already resolved and the query
  * merged into [url]. [timeoutMs] is the effective timeout (the authored one, or the default).
  */
+@InternalAutoMobilePrototypeApi
 data class PrototypeHttpRequest(
   val requestId: String,
   val prototypeId: String,
@@ -25,11 +26,13 @@ data class PrototypeHttpRequest(
  * does not care which one ran. Never throws except for cancellation: every failure is a typed
  * [PrototypeRequestResponse.Failed].
  */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeHttpClient {
   suspend fun execute(request: PrototypeHttpRequest): PrototypeRequestResponse
 }
 
 /** The transport behind each `via` value. */
+@InternalAutoMobilePrototypeApi
 class PrototypeHttpClients(val host: PrototypeHttpClient, val device: PrototypeHttpClient) {
   fun forVia(via: String): PrototypeHttpClient = if (via == VIA_DEVICE) device else host
 

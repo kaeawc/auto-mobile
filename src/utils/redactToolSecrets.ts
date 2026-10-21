@@ -28,8 +28,19 @@ const redactInstallAppKeystore: SecretRedactor = (args) => {
   return keystore === bundle.keystore ? args : { ...args, bundle: { ...bundle, keystore } };
 };
 
+/** setDeviceState `screenLock.credential` / `currentCredential` (lock-screen PIN, password or pattern). */
+const redactSetDeviceStateScreenLock: SecretRedactor = (args) => {
+  const screenLock = args.screenLock;
+  if (!isRecord(screenLock)) {
+    return args;
+  }
+  const redacted = redactFields(screenLock, ["credential", "currentCredential"]);
+  return redacted === screenLock ? args : { ...args, screenLock: redacted };
+};
+
 const SECRET_REDACTORS: ReadonlyMap<string, SecretRedactor> = new Map([
   ["installApp", redactInstallAppKeystore],
+  ["setDeviceState", redactSetDeviceStateScreenLock],
 ]);
 
 /**

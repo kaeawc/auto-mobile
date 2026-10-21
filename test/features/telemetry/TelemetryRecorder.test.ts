@@ -1,6 +1,7 @@
 import { event as prototypeEvent } from "../../helpers/prototypeTestEvent";
 import { FakeTelemetryRepository as FakeRepository } from "../../fakes/FakeTelemetryRepository";
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import {
   TelemetryRecorder,
   type TelemetryRepository,
@@ -25,6 +26,18 @@ class FakePushTarget implements TelemetryPushTarget {
     this.pushedEvents.push(event);
   }
 }
+
+const layoutEvent: Parameters<TelemetryRecorder["recordLayoutEvent"]>[0] = {
+  timestamp: 7000,
+  applicationId: "com.example",
+  subType: "hierarchy_change",
+  composableName: null,
+  composableId: null,
+  recompositionCount: 1,
+  durationMs: null,
+  likelyCause: null,
+  detailsJson: null,
+};
 
 describe("TelemetryRecorder", () => {
   let repo: FakeRepository;
@@ -492,7 +505,7 @@ describe("TelemetryRecorder", () => {
   it("recordLayoutEvent stores to repository with context and screenName", async () => {
     recorder.setContext("d3", "s3");
 
-    await recorder.recordLayoutEvent({
+    const persisted = await recorder.recordLayoutEvent({
       timestamp: 7000,
       applicationId: "com.example",
       subType: "recomposition",
@@ -505,11 +518,60 @@ describe("TelemetryRecorder", () => {
       screenName: "HomeScreen",
     });
 
+    expect(persisted).toBe(true);
     expect(repo.layoutEvents).toHaveLength(1);
     expect(repo.layoutEvents[0].deviceId).toBe("d3");
     expect(repo.layoutEvents[0].sessionId).toBe("s3");
     expect(repo.layoutEvents[0].composableName).toBe("UserList");
     expect(repo.layoutEvents[0].screenName).toBe("HomeScreen");
+  });
+
+  it("reports failed layout persistence without losing the live socket event", async () => {
+    repo.shouldThrow = true;
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await recorder.recordLayoutEvent(layoutEvent)).toBe(false);
+      expect(repo.layoutEvents).toHaveLength(0);
+      expect(pushTarget.pushedEvents.map((event) => event.category)).toEqual(["layout"]);
+      expect(warning).toHaveBeenCalled();
+      repo.shouldThrow = false;
+      expect(await recorder.recordLayoutEvent(layoutEvent)).toBe(true);
+      expect(repo.layoutEvents).toHaveLength(1);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("does not confirm a layout write skipped by shutdown draining", async () => {
+    const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
+    const drainingRecorder = new TelemetryRecorder(
+      repo,
+      () => pushTarget,
+      () => barrier,
+    );
+    barrier.beginDrain();
+    expect(await drainingRecorder.recordLayoutEvent(layoutEvent)).toBe(false);
+    expect(repo.layoutEvents).toHaveLength(0);
+    expect(pushTarget.pushedEvents.map((event) => event.category)).toEqual(["layout"]);
+  });
+
+  it("waits for repository completion before confirming a layout write", async () => {
+    const pending = Promise.withResolvers<void>();
+    const write = spyOn(repo, "recordLayoutEvent").mockImplementationOnce(() => pending.promise);
+    let settled = false;
+    const recording = recorder.recordLayoutEvent(layoutEvent).then((persisted) => {
+      settled = true;
+      return persisted;
+    });
+    try {
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      pending.resolve();
+      expect(await recording).toBe(true);
+    } finally {
+      pending.resolve();
+      write.mockRestore();
+    }
   });
 
   it("recordLayoutEvent pushes category layout to socket", async () => {
@@ -638,6 +700,7 @@ describe("TelemetryRecorder", () => {
 
   describe("batched ingestion (issue #3138)", () => {
     class FakeBatchRepo implements BatchTelemetryRepository {
+      failLayout = false;
       logBatches: RecordLogEventInput[][] = [];
       osBatches: RecordOsEventInput[][] = [];
       navBatches: RecordNavigationEventInput[][] = [];
@@ -652,9 +715,38 @@ describe("TelemetryRecorder", () => {
         this.navBatches.push(i);
       }
       async recordLayoutEvents(i: RecordLayoutEventInput[]): Promise<void> {
+        if (this.failLayout) {
+          throw new Error("layout batch lost");
+        }
         this.layoutBatches.push(i);
       }
     }
+
+    it("never confirms buffered adds, including after a lost batch and a later successful flush", async () => {
+      const batchRepo = new FakeBatchRepo();
+      const buffer = new TelemetryEventBuffer(batchRepo, new FakeTimer());
+      const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await bufferedRecorder.recordLayoutEvent(layoutEvent)).toBe(false);
+        expect(batchRepo.layoutBatches).toHaveLength(0);
+        batchRepo.failLayout = true;
+        await bufferedRecorder.flushBuffer();
+        expect(batchRepo.layoutBatches).toHaveLength(0);
+        expect(warning).toHaveBeenCalled();
+        batchRepo.failLayout = false;
+        expect(await bufferedRecorder.recordLayoutEvent(layoutEvent)).toBe(false);
+        await bufferedRecorder.flushBuffer();
+        expect(batchRepo.layoutBatches).toHaveLength(1);
+        expect(batchRepo.layoutBatches[0]).toHaveLength(1);
+        expect(pushTarget.pushedEvents.map((event) => event.category)).toEqual([
+          "layout",
+          "layout",
+        ]);
+      } finally {
+        warning.mockRestore();
+      }
+    });
 
     it("routes log/os/nav/layout through the buffer and coalesces into one batch per kind", async () => {
       const batchRepo = new FakeBatchRepo();

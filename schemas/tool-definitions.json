@@ -12303,11 +12303,11 @@
           "enum": ["normal", "bigPicture"]
         },
         "imagePath": {
-          "description": "Host image path for bigPicture",
+          "description": "Android: host image path for bigPicture. iOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
           "type": "string"
         },
         "actions": {
-          "description": "Android action buttons",
+          "description": "Android action buttons; iOS buttons come from the registered category",
           "type": "array",
           "items": {
             "type": "object",
@@ -12328,8 +12328,21 @@
           }
         },
         "channelId": {
-          "description": "Android channel ID / iOS APNs category",
+          "description": "Android channel ID; iOS APNs category when category is omitted",
           "type": "string"
+        },
+        "category": {
+          "description": "iOS: aps.category naming a UNNotificationCategory the app registered",
+          "type": "string",
+          "minLength": 1
+        },
+        "payload": {
+          "description": "iOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
         },
         "appId": {
           "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted",

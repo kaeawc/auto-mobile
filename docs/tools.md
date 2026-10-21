@@ -2447,7 +2447,38 @@ On iOS both tools need the app under test to embed the AutoMobile iOS SDK in a
 DEBUG build and be in the foreground: `phoneCall` reports the call through
 CallKit, and `sendSms` posts an SMS-style local notification. Without the SDK
 they return an error that says so.
-`postNotification.channelId` supplies the Android channel ID or iOS APNs category.
+`postNotification.channelId` supplies the Android channel ID, and the iOS APNs
+category when `category` is omitted.
+
+On the iOS Simulator (#14097), `postNotification` builds a `simctl push` payload:
+`aps.alert` from `title`/`body` and `aps.sound: "default"`.
+
+- `category` sets `aps.category`. An app that registered a `UNNotificationCategory`
+  with that identifier shows the category's action buttons. `actions` cannot
+  create buttons on iOS, so they are ignored with a warning.
+- `imagePath` (a host path, resolved like Android's, or any URL) adds
+  `aps.mutable-content: 1` and sends the image URL under the top-level key
+  `automobile-image-url` (a host path becomes a `file://` URL). The image appears
+  only if the app's Notification Service Extension downloads and attaches it, and
+  the result carries a warning saying so.
+- `payload` is a raw APNs JSON object for custom keys, `interruption-level`,
+  `relevance-score`, `thread-id`, and similar. Its top-level keys and its `aps`
+  fields override the generated ones; `Simulator Target Bundle` always names
+  `appId`. The merged JSON must fit the 4096-byte `simctl push` limit; a larger
+  payload is refused before `simctl` runs. Custom keys reach the app's
+  `userInfo`.
+- On Android, `category` and `payload` are ignored with a warning. Physical iOS
+  devices remain unsupported: real APNs delivery is out of scope.
+
+Live Activity research (#14097), unverified: `simctl push` addresses an app
+bundle, while ActivityKit update and end pushes (`aps.event`, `aps.content-state`)
+are addressed to an activity's push token on the
+`<bundle>.push-type.liveactivity` topic. A `payload` carrying those fields is
+therefore expected to arrive as an ordinary push to the app rather than update a
+running Live Activity. This has not been confirmed against a current Xcode
+Simulator; until it is, do not rely on `postNotification` to drive Live
+Activities.
+
 `imageType` selects `normal` (default) or `bigPicture`; `imagePath` is the host
 image path for `bigPicture`. The host reads only the file's first bytes and
 rejects files over 16 MiB. It accepts PNG, JPEG, WebP, GIF and BMP everywhere,

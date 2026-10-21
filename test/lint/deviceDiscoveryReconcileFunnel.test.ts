@@ -119,8 +119,9 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "The booted-device inventory scan (moved verbatim out of AndroidEmulatorClient); an Android discovery producer that runs below the pool.",
     },
     "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
-      calls: 7,
-      reason: "Android emulator discovery producer; runs below the pool.",
+      calls: 8,
+      reason:
+        "Android emulator discovery producer; runs below the pool. Includes the startup-validation serial-listed probe (#13970), a local launch decision never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/EmulatorLaunchCoordinator.ts": {
       calls: 2,

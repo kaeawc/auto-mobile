@@ -35,6 +35,16 @@ function seededAndroid(): FakeAdbClientFactory {
   client.setCommandResult("shell getprop ro.build.version.sdk", "34\n");
   client.setCommandResult(CONTRAST_GET, "null\n");
   client.setCommandResult("shell settings get secure font_weight_adjustment", "null\n");
+  for (const key of [
+    "accessibility_display_inversion_enabled",
+    "accessibility_display_daltonizer_enabled",
+    "accessibility_display_daltonizer",
+    "accessibility_display_magnification_enabled",
+    "accessibility_display_magnification_scale",
+    "reduce_bright_colors_activated",
+  ]) {
+    client.setCommandResult(`shell settings get secure ${key}`, "null\n");
+  }
   for (const key of ANIMATION_KEYS) {
     client.setCommandResult(`shell settings get global ${key}`, "1.0\n");
   }
@@ -74,6 +84,11 @@ describe("displayConfig accessibility display preferences (#14088)", () => {
       increaseContrast: true,
       reduceMotion: false,
       boldText: false,
+      colorInversion: false,
+      colorCorrection: "off",
+      magnification: false,
+      magnificationScale: 2,
+      extraDim: false,
     });
     expect(result.supported).toEqual({
       fontScale: true,
@@ -82,6 +97,11 @@ describe("displayConfig accessibility display preferences (#14088)", () => {
       increaseContrast: true,
       reduceMotion: true,
       boldText: true,
+      colorInversion: true,
+      colorCorrection: true,
+      magnification: true,
+      magnificationScale: true,
+      extraDim: true,
     });
     expect(result.supportNotes).toBeUndefined();
   });
@@ -99,11 +119,21 @@ describe("displayConfig accessibility display preferences (#14088)", () => {
       increaseContrast: false,
       reduceMotion: false,
       boldText: false,
+      colorInversion: false,
+      colorCorrection: "off",
+      magnification: false,
+      magnificationScale: 2,
+      extraDim: false,
     });
     expect(result.applied).toEqual({
       increaseContrast: true,
       reduceMotion: false,
       boldText: false,
+      colorInversion: false,
+      colorCorrection: "off",
+      magnification: false,
+      magnificationScale: 2,
+      extraDim: false,
     });
     expect(commands(adbFactory)).toContain(
       "shell settings put secure high_text_contrast_enabled 1",

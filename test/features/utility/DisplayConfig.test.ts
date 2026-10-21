@@ -642,6 +642,11 @@ describe("DisplayConfig platform gating", () => {
       increaseContrast: false,
       reduceMotion: false,
       boldText: false,
+      colorInversion: false,
+      colorCorrection: false,
+      magnification: false,
+      magnificationScale: false,
+      extraDim: false,
     });
     expect(result.error).toContain("iOS");
     expect(simctlArgvCalls(simctl)).toEqual([]);

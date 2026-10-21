@@ -521,14 +521,14 @@ export class DisplayConfig {
     const explicit = hasDisplayField(input) || requestedAccessibilityFields(input).length > 0;
     if (input.reset === true && explicit) {
       return this.invalidRequest(
-        "reset cannot be combined with an explicit fontScale, density, theme, increaseContrast, " +
-          "reduceMotion, or boldText: reset restores the platform defaults and recorded baselines. " +
+        "reset cannot be combined with an explicit fontScale, density, theme, or accessibility " +
+          "display preference: reset restores the platform defaults and recorded baselines. " +
           "Send reset on its own, or send only the explicit fields you want to change.",
       );
     }
     if (input.reset !== true && !explicit) {
       return this.invalidRequest(
-        "At least one of fontScale, density, theme, increaseContrast, reduceMotion, boldText, or " +
+        "At least one of fontScale, density, theme, an accessibility display preference, or " +
           "reset must be provided to set display config.",
       );
     }

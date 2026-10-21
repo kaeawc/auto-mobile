@@ -55,6 +55,54 @@ application fixtures and credentials; an unconfigured AVD cannot validate push,
 login, attachments, or huddles. These are evidence requirements, not claims of
 compatibility from a package list.
 
+## Linux GPU renderer qualification
+
+Repeated post-ready `SIGSEGV` emulator exits on Linux hosts (#12453) were seen
+with `-gpu swangle -feature -Vulkan` on emulator 37.2.12.0 and a
+`medium_phone` Android 15/API 35 Google APIs `x86_64` image. The cause is still
+open: no native backtrace was captured, and the crash has not been reproduced.
+
+The manual `Linux Qualification` workflow
+(`.github/workflows/linux-qualification.yml`, scripts under
+`scripts/ci/linux-qualification/`) runs each GPU mode under three workloads:
+AutoMobile tools, a raw `adb` control, and a heartbeat-only control. Run
+38902077979 (main `f1fd091b81`, two cycles per cell, emulator 37.2.12.0,
+`android-35;google_apis;x86_64`, GitHub-hosted `ubuntu-latest`, no GPU) gave:
+
+| GPU mode               | AutoMobile             | Raw adb control        | Heartbeat only         |
+| ---------------------- | ---------------------- | ---------------------- | ---------------------- |
+| `swiftshader_indirect` | 2/2 clean              | 2/2 clean              | 2/2 clean              |
+| `swangle`              | 2/2 clean              | 2/2 clean              | 2/2 clean              |
+| `angle_indirect`       | 2/2 clean              | 2/2 clean              | 2/2 clean              |
+| `host`                 | fails at renderer init | fails at renderer init | fails at renderer init |
+
+No software or indirect GPU cell crashed after readiness. `-gpu host` stops
+before readiness with `Failed to get EGL display` / `Could not start renderer`
+because the runner has no GPU render node. That is a startup failure, not the
+post-ready signature. Two clean cycles per cell is weak evidence: it does not
+clear `swangle`, and it does not cover the original hosts' exact configuration.
+
+Recommended Linux configuration until the cause is known:
+
+- Use `-gpu swiftshader_indirect` on headless hosts without a GPU. CI uses it
+  (`.github/actions/android-emulator/action.yml`), and it is the configuration
+  with the most clean runs. Pass it with
+  `AUTOMOBILE_EMULATOR_ARGS='["-gpu","swiftshader_indirect"]'`.
+- Use `-gpu host` only where `/dev/dri/renderD*` and a working EGL/Vulkan driver
+  exist.
+- Treat `-gpu swangle -feature -Vulkan` as unqualified. It is the only flag
+  difference between the crashing hosts and CI.
+
+When an emulator exits unexpectedly, the loss incident keeps the process exit
+signal and a bounded, redacted `outputTail` of emulator output from launch
+onward. `outputUnavailable: "adopted"` marks an emulator AutoMobile did not
+launch, so no output was tracked. Slot recovery (`onLoss`) stays off by default
+and never substitutes a different device.
+
+Still needed to close #12453: the original hosts' GPU mode and image compared
+against this matrix, more cycles per cell, and a self-hosted host with a GPU
+render node for the `host` row.
+
 ## Measurement protocol
 
 `scripts/android/benchmark-emulator-resources.sh` accepts an explicit serial,

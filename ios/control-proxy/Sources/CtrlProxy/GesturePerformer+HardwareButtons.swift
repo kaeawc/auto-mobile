@@ -88,7 +88,9 @@ import os
             _ deviceButton: XCUIDevice.Button,
             name: String,
             hardware: String
-        ) throws {
+        )
+            throws
+        {
             guard XCUIDevice.shared.hasHardwareButton(deviceButton) else {
                 throw GestureError.notSupported("\(name) button requires a device with \(hardware)")
             }

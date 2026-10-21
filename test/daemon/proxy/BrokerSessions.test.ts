@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { BrokerSessions, type BrokerSessionsPort } from "../../../src/daemon/proxy/BrokerSessions";
 import type { DaemonClientLike } from "../../../src/daemon/client";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
@@ -439,10 +439,16 @@ describe("BrokerSessions", () => {
     test(`release retry leaves transport headroom with ${remainingMs}ms remaining`, async () => {
       let attempts = 0;
       const retryAfterMs = BROKER_EXECUTION_RELEASE_TIMEOUT_MS - remainingMs;
-      const { brokerSessions, client, timer } = rig(({ method, params }) => {
+      // The proxy's per-call timeout is whatever remains of the release budget at call time.
+      const releases: Array<{ replyBudgetMs: number; timeoutMs: number }> = [];
+      const { brokerSessions, timer } = rig(({ method, params }) => {
         if (method !== "daemon/releaseBrokerSession") {
           return ready;
         }
+        releases.push({
+          replyBudgetMs: Number(params.replyBudgetMs),
+          timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS - timer.now(),
+        });
         if (++attempts === 1) {
           return { ...handoffPending, retryAfterMs };
         }
@@ -454,23 +460,18 @@ describe("BrokerSessions", () => {
         });
       });
       await brokerSessions.hold("request-1", "session-1");
-      const releaseCall = spyOn(client, "callDaemonMethod");
+      expect(timer.now()).toBe(0);
 
       await brokerSessions.releaseAll();
 
-      const releases = releaseCall.mock.calls.filter(
-        ([method]) => method === "daemon/releaseBrokerSession",
-      );
-      releaseCall.mockRestore();
       expect(releases).toHaveLength(2);
-      const [, firstParams, firstOptions] = releases[0]!;
-      expect(firstOptions?.timeoutMs).toBe(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
-      expect(firstParams.replyBudgetMs).toBe(firstOptions!.timeoutMs! - 500);
-      const [, finalParams, finalOptions] = releases[1]!;
-      expect(finalOptions?.timeoutMs).toBe(remainingMs);
-      expect(finalParams.replyBudgetMs).toBeGreaterThan(0);
-      expect(finalParams.replyBudgetMs).toBeLessThan(finalOptions!.timeoutMs!);
-      expect(finalParams.replyBudgetMs).toBe(replyBudgetMs);
+      const [first, final] = releases;
+      expect(first!.timeoutMs).toBe(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
+      expect(first!.replyBudgetMs).toBe(first!.timeoutMs - 500);
+      expect(final!.timeoutMs).toBe(remainingMs);
+      expect(final!.replyBudgetMs).toBeGreaterThan(0);
+      expect(final!.replyBudgetMs).toBeLessThan(final!.timeoutMs);
+      expect(final!.replyBudgetMs).toBe(replyBudgetMs);
       expect(timer.getSleepHistory()).toEqual([retryAfterMs]);
       expect(timer.now()).toBe(retryAfterMs + replyBudgetMs);
       expect(timer.getPendingTimeoutCount()).toBe(0);

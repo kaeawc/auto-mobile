@@ -28439,7 +28439,13 @@
         },
         "errorCode": {
           "type": "string",
-          "enum": ["protected_broadcast", "permission_denied", "broadcast_failed"]
+          "enum": [
+            "package_not_installed",
+            "no_matching_receiver",
+            "protected_broadcast",
+            "permission_denied",
+            "broadcast_failed"
+          ]
         },
         "error": {
           "type": "string"

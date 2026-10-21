@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import { access } from "fs/promises";
 import { homedir, platform } from "os";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
+import { readProcessEnvByName } from "../../config/processEnvironment";
 
 /**
  * Interface for system detection operations
@@ -51,7 +52,7 @@ export class DefaultSystemDetection implements SystemDetection {
   }
 
   getEnvVar(name: string): string | undefined {
-    return process.env[name];
+    return readProcessEnvByName(name);
   }
 
   fileExistsSync(path: string): boolean {

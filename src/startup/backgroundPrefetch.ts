@@ -1,7 +1,6 @@
-import { ENV, readEnvRaw } from "../config/env";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 import { ScreenCaptureHelperProvider } from "../features/screen-stream/ScreenCaptureHelperProvider";
 import { prefetchVideoServerJar } from "../features/webrtc/videoServerJar";
-import { WEBRTC_ENV } from "../features/webrtc/webrtcStreamingConfig";
 import {
   SKIP_CTRL_PROXY_DOWNLOAD_ENV,
   SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
@@ -93,7 +92,7 @@ function prefetchWebRtcHelpers(modules: ServerModules): void {
   void prefetchVideoServerJar();
   if (
     process.platform === "darwin" &&
-    process.env[WEBRTC_ENV.WHIP_ENDPOINT]?.trim() &&
+    readEnvTrimmed(ENV.WEBRTC_WHIP_ENDPOINT) &&
     !readEnvRaw(ENV.IOS_SCREEN_CAPTURE_HELPER)
   ) {
     void ScreenCaptureHelperProvider.getInstance()

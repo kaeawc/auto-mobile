@@ -48,6 +48,7 @@ import {
   daemonDeviceLeaseRelinquishPort,
 } from "./deviceLeaseActivitySources";
 import { decideOwnerRelinquish } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
+import { screenLockRestoreResult } from "./screenLockSessionCleanup";
 import type {
   DaemonStateAccess,
   DevicePoolStats,
@@ -515,12 +516,17 @@ async function releaseSessionWithoutDevice(
   );
 }
 
-function keepAwakeRestoreResult(
+/** Restores a release reports in its result: keep-awake settings and the session's screen lock. */
+async function releaseRestoreReports(
+  state: DaemonStateAccess,
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
 ) {
   const keepAwakeRestore = manager.getKeepAwakeRestoreReport?.(sessionId);
-  return keepAwakeRestore ? { keepAwakeRestore } : {};
+  return {
+    ...(keepAwakeRestore ? { keepAwakeRestore } : {}),
+    ...(await screenLockRestoreResult(sessionId, { registry: state.getScreenLockRegistry?.() })),
+  };
 }
 
 /**
@@ -578,7 +584,7 @@ async function releaseUnknownSession(
     result: {
       message: `Session ${sessionId} already released or never existed`,
       alreadyReleased: true,
-      ...keepAwakeRestoreResult(manager, sessionId),
+      ...(await releaseRestoreReports(state, manager, sessionId)),
     },
   };
 }
@@ -626,7 +632,7 @@ async function releaseBoundSession(
       message: `Session ${sessionId} released`,
       device: deviceId,
       alreadyReleased: false,
-      ...keepAwakeRestoreResult(manager, sessionId),
+      ...(await releaseRestoreReports(state, manager, sessionId)),
     },
   };
 }

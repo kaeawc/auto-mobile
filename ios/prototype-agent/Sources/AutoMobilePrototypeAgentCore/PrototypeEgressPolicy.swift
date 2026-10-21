@@ -12,6 +12,25 @@ struct PrototypeEgressPolicy: Sendable {
         case block
     }
 
+    enum AddressClass: String, Equatable, Sendable {
+        case blocked
+        case `private`
+        case `public`
+    }
+
+    private static let blockedV4: [ClosedRange<UInt32>] = [
+        0x0000_0000 ... 0x00FF_FFFF, 0x7F00_0000 ... 0x7FFF_FFFF,
+        0xA9FE_0000 ... 0xA9FE_FFFF, 0x0A00_0201 ... 0x0A00_0206,
+        0x0A00_0302 ... 0x0A00_0302, 0xE000_0000 ... 0xFFFF_FFFF,
+    ]
+    private static let privateV4: [ClosedRange<UInt32>] = [
+        0x0A00_0000 ... 0x0AFF_FFFF, 0xAC10_0000 ... 0xAC1F_FFFF,
+        0xC0A8_0000 ... 0xC0A8_FFFF, 0x6440_0000 ... 0x647F_FFFF,
+        0xC000_0000 ... 0xC000_00FF, 0xC000_0200 ... 0xC000_02FF,
+        0xC633_6400 ... 0xC633_64FF, 0xCB00_7100 ... 0xCB00_71FF,
+        0xC612_0000 ... 0xC613_FFFF,
+    ]
+
     let daemonPorts: Set<Int>
 
     init(daemonPorts: Set<Int> = Set(3000 ... 3010).union([8765])) {
@@ -37,13 +56,23 @@ struct PrototypeEgressPolicy: Sendable {
         return ipv4(host) != nil || ipv6(host) != nil
     }
 
+    /// Produce a socket-safe literal after applying the same host normalization and
+    /// legacy IPv4 parsing used by the policy. Names and malformed literals have no address.
+    static func canonicalLiteral(_ raw: String) -> String? {
+        let host = normalized(raw)
+        if let address = ipv4(host) {
+            return [24, 16, 8, 0].map { String((address >> $0) & 0xFF) }.joined(separator: ".")
+        }
+        return ipv6(host) == nil ? nil : host
+    }
+
     private func checkHost(_ raw: String, port: Int, requiresIP: Bool) -> Bool {
         let host = Self.normalized(raw)
         guard !host.isEmpty, !host.contains("%"), host != "localhost", !host.hasSuffix(".localhost") else {
             return false
         }
-        if let address = Self.ipv4(host) { return allowsIPv4(address, port: port) }
-        if let bytes = Self.ipv6(host) { return allowsIPv6(bytes, port: port) }
+        if let address = Self.ipv4(host) { return permits(Self.classifyV4(address), port: port) }
+        if let bytes = Self.ipv6(host) { return permits(Self.classifyV6(bytes), port: port) }
         // Names ending in a number can be interpreted as legacy IPv4 by URL/DNS implementations.
         // Refuse invalid or ambiguous numeric spellings rather than passing them to DNS.
         let last = host.split(separator: ".", omittingEmptySubsequences: false).last ?? ""
@@ -88,54 +117,62 @@ struct PrototypeEgressPolicy: Sendable {
     }
 
     private static func ipv6(_ text: String) -> [UInt8]? {
+        guard !text.utf8.contains(0) else { return nil }
         var address = in6_addr()
         guard text.withCString({ inet_pton(AF_INET6, $0, &address) }) == 1 else { return nil }
         return withUnsafeBytes(of: address) { Array($0) }
     }
 
-    private func allowsIPv4(_ address: UInt32, port: Int) -> Bool {
-        let first = address >> 24
-        if first == 0 || first == 127 || address >> 16 == 0xA9FE ||
-            (0x0A00_0201 ... 0x0A00_0206).contains(address) || address == 0x0A00_0302 { return false }
-        let local = first == 10 || address >> 20 == 0xAC1 || address >> 16 == 0xC0A8 ||
-            address >> 22 == 0x191
-        return !local || !daemonPorts.contains(port)
+    static func classify(_ literal: String) -> AddressClass {
+        guard !literal.utf8.contains(0) else { return .blocked }
+        var address = in_addr()
+        if literal.withCString({ inet_pton(AF_INET, $0, &address) }) == 1 {
+            let bytes = withUnsafeBytes(of: address) { Array($0) }
+            return classifyV4(v4Value(bytes))
+        }
+        guard !literal.contains("%"), let bytes = ipv6(literal) else { return .blocked }
+        return classifyV6(bytes)
     }
 
-    private func allowsIPv6(_ bytes: [UInt8], port: Int) -> Bool {
-        if bytes[0] == 0xFE, bytes[1] & 0xC0 == 0x80 || bytes[1] & 0xC0 == 0xC0 { return false }
-        if Array(bytes.prefix(4)) == [0x20, 0x01, 0, 0] { return false }
-        if bytes.allSatisfy({ $0 == 0 }) || (bytes.prefix(15).allSatisfy { $0 == 0 } && bytes[15] == 1) {
-            return false
+    private func permits(_ kind: AddressClass, port: Int) -> Bool {
+        kind == .public || (kind == .private && !daemonPorts.contains(port))
+    }
+
+    private static func v4Value(_ bytes: [UInt8]) -> UInt32 {
+        bytes.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+    }
+
+    private static func classifyV4(_ address: UInt32) -> AddressClass {
+        if blockedV4.contains(where: { $0.contains(address) }) { return .blocked }
+        return privateV4.contains(where: { $0.contains(address) }) ? .private : .public
+    }
+
+    private static func classifyV6(_ bytes: [UInt8]) -> AddressClass {
+        let words = stride(from: 0, to: 16, by: 2).map { UInt16(bytes[$0]) << 8 | UInt16(bytes[$0 + 1]) }
+        if bytes.prefix(6).elementsEqual([0, 0x64, 0xFF, 0x9B, 0, 1]) {
+            let layouts = [[6, 7, 9, 10], [7, 9, 10, 11], [9, 10, 11, 12], [12, 13, 14, 15]]
+            let classes = layouts.map { classifyV4(v4Value($0.map { bytes[$0] })) }
+            if classes.contains(.blocked) { return .blocked }
+            return classes.contains(.private) ? .private : .public
         }
-        var embedded: [UInt8]?
-        if bytes.prefix(12).allSatisfy({ $0 == 0 }) ||
-            (bytes.prefix(10).allSatisfy { $0 == 0 } && bytes[10] == 0xFF && bytes[11] == 0xFF) ||
-            (Array(bytes.prefix(12)) == [0, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0]) ||
-            (Array(bytes.prefix(12)) == [0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0, 0])
+        let lowPrefixes: [[UInt16]] = [
+            [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0xFFFF],
+            [0, 0, 0, 0, 0xFFFF, 0], [0x64, 0xFF9B, 0, 0, 0, 0],
+        ]
+        let lowBits = lowPrefixes.contains { words.prefix(6).elementsEqual($0) }
+        if words[0] == 0x2002 { return classifyV4(v4Value(Array(bytes[2 ..< 6]))) }
+        if lowBits { return classifyV4(v4Value(Array(bytes[12 ..< 16]))) }
+        if words[0] == 0x2001 && words[1] == 0 ||
+            words[0] & 0xFFC0 == 0xFEC0 || words[0] & 0xFFC0 == 0xFE80 ||
+            words[0] & 0xFF00 == 0xFF00 { return .blocked }
+        if words[0] & 0xFE00 == 0xFC00 ||
+            words[0] == 0x3FFF && words[1] & 0xF000 == 0 ||
+            words.prefix(4).elementsEqual([0x100, 0, 0, 0]) ||
+            words.prefix(3).elementsEqual([0x2001, 2, 0]) ||
+            words.prefix(2).elementsEqual([0x2001, 0xDB8]) || words[0] == 0x5F00
         {
-            embedded = Array(bytes[12 ..< 16])
-        } else if Array(bytes.prefix(6)) == [0, 0x64, 0xFF, 0x9B, 0, 1] {
-            // RFC 6052 layouts split IPv4 around the reserved octet at byte 8.
-            // Recognize zero-suffix /48, /56 and /64 layouts, then /96 subprefixes.
-            if bytes[6 ..< 12].allSatisfy({ $0 == 0 }) {
-                embedded = Array(bytes[12 ..< 16])
-            } else if bytes[8] == 0, bytes.suffix(5).allSatisfy({ $0 == 0 }) {
-                embedded = [bytes[6], bytes[7], bytes[9], bytes[10]]
-            } else if bytes[8] == 0, bytes.suffix(4).allSatisfy({ $0 == 0 }) {
-                embedded = [bytes[7], bytes[9], bytes[10], bytes[11]]
-            } else if bytes[8] == 0, bytes.suffix(3).allSatisfy({ $0 == 0 }) {
-                embedded = Array(bytes[9 ..< 13])
-            } else {
-                embedded = Array(bytes[12 ..< 16])
-            }
-        } else if bytes[0] == 0x20, bytes[1] == 0x02 {
-            embedded = Array(bytes[2 ..< 6])
+            return .private
         }
-        if let embedded {
-            let address = embedded.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
-            if !allowsIPv4(address, port: port) { return false }
-        }
-        return bytes[0] & 0xFE != 0xFC || !daemonPorts.contains(port)
+        return .public
     }
 }

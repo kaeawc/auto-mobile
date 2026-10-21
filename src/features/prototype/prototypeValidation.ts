@@ -636,22 +636,31 @@ function horizontalLazyError(
   }
   return undefined;
 }
+/** One pager's own checks; records its id in `pagers`. */
+function pagerNodeError(
+  value: Record<string, unknown>,
+  path: string,
+  context: Context,
+  pagers: Set<string>,
+): PrototypeValidationError | undefined {
+  if (value.type !== "pager" || typeof value.id !== "string") {
+    return undefined;
+  }
+  if (pagers.has(value.id)) {
+    return fail(`${path}.id`, "Duplicate pager id");
+  }
+  pagers.add(value.id);
+  return value.axis === "vertical" && insideScroll(context, path, false)
+    ? fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll")
+    : undefined;
+}
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
   for (const { value, path } of context.nodes) {
-    const lazyError = horizontalLazyError(value, path, context);
-    if (lazyError) {
-      return lazyError;
-    }
-    if (value.type !== "pager" || typeof value.id !== "string") {
-      continue;
-    }
-    if (pagers.has(value.id)) {
-      return fail(`${path}.id`, "Duplicate pager id");
-    }
-    pagers.add(value.id);
-    if (value.axis === "vertical" && insideScroll(context, path, false)) {
-      return fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll");
+    const error =
+      horizontalLazyError(value, path, context) ?? pagerNodeError(value, path, context, pagers);
+    if (error) {
+      return error;
     }
   }
   for (const { value, path } of [...context.nodes, ...context.actions]) {

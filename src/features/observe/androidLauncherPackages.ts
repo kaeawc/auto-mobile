@@ -11,6 +11,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { KNOWN_ANDROID_LAUNCHER_PACKAGES } from "./androidLauncherRegistry";
+import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 
 /**
  * Verify that a "go home" action actually landed on the home screen by
@@ -318,6 +319,7 @@ export async function isForegroundLauncher(
 /** Best-effort stability signal for surfaces whose gfxinfo is empty. */
 export class QuietTreeStability {
   private reader?: ViewHierarchyRequestReader;
+  private lastUpdatedAt?: number;
 
   constructor(
     private readonly device: BootedDevice,
@@ -371,6 +373,7 @@ export class QuietTreeStability {
           timeoutMs: remainingMs,
           requireFreshExtraction: true,
           skipWaitForFresh: true,
+          ...(this.lastUpdatedAt === undefined ? {} : { minTimestamp: this.lastUpdatedAt + 1 }),
           signal: readSignal,
         }),
       {
@@ -381,6 +384,9 @@ export class QuietTreeStability {
         onTimeout: () => controller.abort(),
       },
     );
+    if (!tree.hierarchy.error) {
+      this.lastUpdatedAt = hierarchyUpdatedAtToMillis(tree) ?? this.lastUpdatedAt;
+    }
     return tree.fresh === true && !tree.hierarchy.error ? hierarchyFingerprint(tree) : null;
   }
 

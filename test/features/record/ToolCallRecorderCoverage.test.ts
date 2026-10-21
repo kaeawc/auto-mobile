@@ -102,6 +102,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "biometricAuth",
   "changeLocalization",
   "clipboard",
+  "compareScreenshot",
   "crashApp",
   "displayConfig",
   "dragAndDrop",

@@ -266,5 +266,6 @@ export const TEMP_SUBDIRS = {
   TOOL_OUTPUTS: "tool_outputs",
   WINDOW: "window",
   CACHE: "cache",
+  VISUAL_BASELINES: "visual-baselines",
   STATE: "state",
 } as const;

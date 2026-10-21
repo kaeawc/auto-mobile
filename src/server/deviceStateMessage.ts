@@ -11,6 +11,7 @@ export function deviceStateMessage(result: DeviceStateResult): string {
     connectivityMessage(result),
     biometricsMessage(result),
     networkConditionMessage(result),
+    sensorsMessage(result),
     screenLockMessage(result),
   ].filter((section): section is string => section !== undefined);
   return sections.length > 0 ? sections.join("; ") : "Read device state";
@@ -50,6 +51,11 @@ function biometricsMessage(result: DeviceStateResult): string | undefined {
 function networkConditionMessage(result: DeviceStateResult): string | undefined {
   const profile = result.networkCondition?.supported ? result.networkCondition.profile : undefined;
   return profile === undefined ? undefined : `Network ${profile}`;
+}
+
+function sensorsMessage(result: DeviceStateResult): string | undefined {
+  const sensors = result.sensors?.supported ? result.sensors.sensors : undefined;
+  return sensors === undefined ? undefined : `${sensors.length} emulator sensors read`;
 }
 
 function screenLockMessage(result: DeviceStateResult): string | undefined {

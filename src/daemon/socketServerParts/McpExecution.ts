@@ -124,6 +124,7 @@ export class McpExecution {
     this.inventoryForward = new HostInventoryForward(state.timer, state.idGenerator);
     this.discoveryCache = new ControlDiscoveryCache(
       () => this.state.mcpDispatcher.refreshResources?.() ?? Promise.resolve(),
+      state.timer,
     );
   }
   private get callbacks(): Callbacks {

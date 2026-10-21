@@ -1,6 +1,9 @@
 import type { DaemonNotification, DaemonResponse } from "../types";
 import { ListChangedBroadcaster, type ListChangedKind } from "../listChangedBroadcast";
 import type { McpForwardContext } from "../socketServerParts/socketServerContracts";
+import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import type { Timer } from "../../utils/SystemTimer";
 
 import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../constants";
 import type { GestureFrameKind, InputRouteEntry, InputRouteHandler } from "../inputRoutes";
@@ -169,6 +172,13 @@ export function serializeControlFrame(frame: DaemonResponse | DaemonNotification
   );
 }
 
+function discoveryListKind(method: string): ListChangedKind | undefined {
+  if (method === "tools/list") {
+    return "tools";
+  }
+  return method === "resources/list" ? "resources" : undefined;
+}
+
 interface Entry {
   readonly socketSessionId: string;
   readonly generation: number;
@@ -183,7 +193,12 @@ interface Entry {
  */
 export class ControlDiscoveryCache {
   private readonly entries = new Map<string, Entry>();
-  constructor(private readonly refreshResources: () => Promise<void>) {}
+  // One refresh at a time: a hit that stopped waiting leaves it running for the next hit to share.
+  private inFlightRefresh: Promise<void> | undefined;
+  constructor(
+    private readonly refreshResources: () => Promise<void>,
+    private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+  ) {}
   // Bound retention across disconnected/churning scopes; eviction only makes the next read cold.
   private static readonly MAX_ENTRIES = 128;
 
@@ -196,12 +211,7 @@ export class ControlDiscoveryCache {
   }
 
   async read(context: McpForwardContext, load: () => Promise<unknown>): Promise<unknown> {
-    const kind: ListChangedKind | undefined =
-      context.request.method === "tools/list"
-        ? "tools"
-        : context.request.method === "resources/list"
-          ? "resources"
-          : undefined;
+    const kind = discoveryListKind(context.request.method);
     if (!kind) {
       return await load();
     }
@@ -220,7 +230,10 @@ export class ControlDiscoveryCache {
       // Devices/apps can change outside AutoMobile. Keep the list refresher contract on hits,
       // outside the caller's async context just as the loopback server would run it. Misses
       // still refresh in the MCP handler; a changed generation below falls through to it.
-      await this.refreshResources();
+      if (!(await this.awaitWarmRefresh(context))) {
+        // Past the deadline: McpExecution's budget check reports the MCP timeout, so never cold-load.
+        return entry.result;
+      }
       context.signal?.throwIfAborted();
     }
     const generation = ListChangedBroadcaster.generation(kind);
@@ -234,6 +247,35 @@ export class ControlDiscoveryCache {
     context.signal?.throwIfAborted();
     this.retain(kind, key, generation, result, context.socketSessionId);
     return result;
+  }
+
+  /**
+   * Wait for the warm hit's resource refresh, bounded by the request's cancellation and its MCP
+   * deadline (#14522), so a stalled installed-app or device refresh cannot pin the keyed execution
+   * lane. Resolves false when the deadline passes first; an abort rejects with its reason.
+   */
+  private async awaitWarmRefresh(context: McpForwardContext): Promise<boolean> {
+    const refresh = (this.inFlightRefresh ??= this.refreshResources().finally(() => {
+      this.inFlightRefresh = undefined;
+    }));
+    const expired = new Error("warm resources/list refresh passed the MCP deadline");
+    try {
+      await raceWithDeadline(refresh, {
+        timer: this.timer,
+        signal: context.signal,
+        timeoutMs: Math.max(0, context.deadline.value - this.timer.now()),
+        label: "Warm resources/list refresh",
+        timeoutError: () => expired,
+      });
+      return true;
+    } catch (error) {
+      if (error !== expired) {
+        throw error;
+      }
+      // The caller turns the spent budget into the request's MCP timeout; this only stops waiting.
+      logger.debug(`[DiscoveryCache] ${expired.message}; the refresh keeps running.`);
+      return false;
+    }
   }
 
   private retain(

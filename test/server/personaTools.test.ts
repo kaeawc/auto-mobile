@@ -81,6 +81,15 @@ describe("persona tool (#14055)", () => {
     );
   });
 
+  test("apply and reset refuse a non-Android device before anything changes", async () => {
+    const simulator: BootedDevice = { name: "sim", platform: "ios", deviceId: "SIM-1" };
+    await expect(
+      handler(simulator, { action: "apply", persona: "pixel-baseline" }),
+    ).rejects.toThrow("Android-only");
+    await expect(handler(simulator, { action: "reset" })).rejects.toThrow("Android-only");
+    expect(executors.calls).toEqual([]);
+  });
+
   test("apply returns a structured result naming the persona version", async () => {
     const response = await handler(emulator, {
       action: "apply",

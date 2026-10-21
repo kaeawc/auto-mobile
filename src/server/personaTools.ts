@@ -156,6 +156,11 @@ export const createPersonaHandler =
         ...readOnlyResult(device, args),
       });
     }
+    if (device.platform !== "android") {
+      throw new ActionableError(
+        "persona apply and reset are Android-only; select an Android device.",
+      );
+    }
     const personaId = args.action === "apply" ? requirePersona(args) : undefined;
     const sessionManager = args.sessionUuid
       ? (deps.sessionManager ?? (() => defaultDaemonContext.sessionManager()))()

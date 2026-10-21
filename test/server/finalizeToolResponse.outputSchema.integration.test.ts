@@ -77,6 +77,8 @@ function minimalFieldValue(schema: unknown): unknown {
       return definition.values?.[0];
     case "array":
       return [];
+    case "record":
+      return {};
     case "object":
       return Object.fromEntries(
         Object.entries(definition.shape ?? {})

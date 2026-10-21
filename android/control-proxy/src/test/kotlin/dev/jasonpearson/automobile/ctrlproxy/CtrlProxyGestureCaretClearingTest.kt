@@ -27,9 +27,16 @@ import org.robolectric.shadows.ShadowAccessibilityService
 import org.robolectric.shadows.ShadowLog
 import org.robolectric.util.ReflectionHelpers
 
+/**
+ * Every gesture action clears the text caret before the framework dispatches it.
+ *
+ * This was the overload-parity test that policed `CtrlProxyActions`' default-method overload
+ * ladders. Those are gone (#11878): each action takes one typed request, so the parity hazard no
+ * longer exists and only the caret behavior is left to pin.
+ */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30], shadows = [CaretObservingAccessibilityServiceShadow::class])
-class CtrlProxyGestureOverloadParityTest {
+class CtrlProxyGestureCaretClearingTest {
   private lateinit var fixture: CtrlProxyGestureServiceFixture
   private val actions: CtrlProxyActions
     get() = fixture.actions

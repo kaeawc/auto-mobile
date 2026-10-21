@@ -4741,6 +4741,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -4811,6 +4817,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -4897,6 +4909,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5037,6 +5055,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -5113,6 +5137,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5221,6 +5251,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -5297,6 +5333,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5399,6 +5441,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -5497,6 +5545,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -5591,6 +5645,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -5699,6 +5759,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -5775,6 +5841,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -6669,6 +6741,20 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeAnimate": [
+      {
+        "name": "durationMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "easing",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeAppBarAction": [
       {
         "name": "icon",
@@ -6859,6 +6945,12 @@
       {
         "name": "valid",
         "type": "object:PrototypeValidityKeys",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "empty",
+        "type": "boolean",
         "nullable": true,
         "hasDefault": true
       }
@@ -7753,6 +7845,24 @@
         "hasDefault": true
       },
       {
+        "name": "shimmer",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scale",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "rotation",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "alignment",
         "type": "string",
         "nullable": true,
@@ -8017,6 +8127,14 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeZoomable": [
+      {
+        "name": "maxScale",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.SavedPrototypeEntry": [
       {
         "name": "id",
@@ -8241,6 +8359,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -8347,6 +8471,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8471,6 +8601,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -8577,6 +8713,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -8667,6 +8809,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8769,6 +8917,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -8845,6 +8999,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -8947,6 +9107,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -8974,6 +9140,12 @@
         "name": "contentScale",
         "type": "string",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "zoomable",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeZoomable",
+        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -9051,6 +9223,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9159,6 +9337,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -9235,6 +9419,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9403,6 +9593,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -9507,6 +9703,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9711,6 +9913,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -9793,6 +10001,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -9927,6 +10141,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -10043,6 +10263,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -10119,6 +10345,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -10265,6 +10497,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -10381,6 +10619,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -10473,6 +10717,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -10537,6 +10787,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -10625,6 +10881,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -10733,6 +10995,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -10815,6 +11083,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },
@@ -10995,6 +11269,12 @@
         "hasDefault": true
       },
       {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "anchor",
         "type": "polymorphic",
         "nullable": true,
@@ -11103,6 +11383,12 @@
       {
         "name": "transition",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
         "nullable": true,
         "hasDefault": true
       },

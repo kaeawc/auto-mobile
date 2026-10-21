@@ -136,17 +136,20 @@ export interface SessionReleaseCommitHost {
   readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState>;
 }
 
+export interface ReleaseSessionInternalRequest {
+  sessionId: string;
+  session: Session;
+  reason: ReleaseReasonState;
+  shouldCommit?: ReleaseCommitFence;
+  options: SessionReleaseOptions;
+  operation?: SessionReleaseOperation;
+}
+
 export class SessionReleaseCommit {
   constructor(private readonly host: SessionReleaseCommitHost) {}
 
-  async releaseSessionInternal(
-    sessionId: string,
-    session: Session,
-    reason: ReleaseReasonState,
-    shouldCommit: ReleaseCommitFence | undefined,
-    options: SessionReleaseOptions,
-    operation?: SessionReleaseOperation,
-  ): Promise<string | null> {
+  async releaseSessionInternal(request: ReleaseSessionInternalRequest): Promise<string | null> {
+    const { sessionId, session, reason, shouldCommit, options, operation } = request;
     const enter = (stage: SessionReleaseStage) => setReleaseStage(operation, stage);
     try {
       enter("teardown");

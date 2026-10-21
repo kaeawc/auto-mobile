@@ -7,8 +7,10 @@ import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
+import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
+import { prototypePlatformError } from "./prototypePlatform";
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
@@ -185,12 +187,13 @@ function searchBarConstraint(
   }
   return undefined;
 }
-/** `empty` tests a `/data` value (#14207); a state key condition has no emptiness. */
+/** `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness. */
 function emptyConditionConstraint(
   data: Record<string, unknown>,
   path: string,
 ): PrototypeValidationError | undefined {
-  return Object.hasOwn(data, "empty") && Object.hasOwn(data, "key")
+  return Object.hasOwn(data, "empty") &&
+    (Object.hasOwn(data, "key") || Object.hasOwn(data, "platform"))
     ? fail(keyPath(path, "empty"), "empty applies only to data conditions")
     : undefined;
 }
@@ -719,6 +722,21 @@ function layoutErrors(
   );
 }
 
+/** A literal platform-call argument against its `platformModules` rule (#14294). */
+function platformArgumentError(
+  value: unknown,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
+  const context: Context = {
+    nodes: [],
+    actions: [],
+    images: 0,
+    nesting: { container: 0, condition: 0, action: 0 },
+  };
+  return walk(value, rule, path, context, 0);
+}
+
 /** Action, container and state checks, after the layout checks pass. */
 function behaviourErrors(
   value: unknown,
@@ -730,6 +748,8 @@ function behaviourErrors(
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
     prototypeLoadingStatesError(context.nodes) ??
+    prototypeMotionV2Error(context.nodes) ??
+    prototypePlatformError(value, context.actions, platformArgumentError) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
     prototypeChatScrollError(context.nodes, context.actions) ??

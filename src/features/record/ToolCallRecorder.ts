@@ -51,6 +51,14 @@ const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 
 /**
+ * `action` values that only read state unless the call also waits (`waitFor`): a wait
+ * holds a replayed plan until the device reaches a state, so it is a step (#14117).
+ */
+const READ_ONLY_ACTIONS_UNLESS_WAITING: Readonly<Record<string, ReadonlySet<string>>> = {
+  mediaSession: new Set(["get"]),
+};
+
+/**
  * Tools that read current values unless one of these set fields is present:
  * displayConfig changes a value only with a set field, accessibility reports
  * the TalkBack/VoiceOver state when neither toggle is given.
@@ -79,6 +87,14 @@ export function isReadOnlyCall(toolName: string, params: Record<string, unknown>
   const setFields = READ_UNLESS_SET_FIELDS[toolName];
   if (setFields) {
     return setFields.every((field) => params[field] === undefined);
+  }
+  const readUnlessWaiting = READ_ONLY_ACTIONS_UNLESS_WAITING[toolName];
+  if (readUnlessWaiting) {
+    return (
+      params.waitFor === undefined &&
+      typeof params.action === "string" &&
+      readUnlessWaiting.has(params.action)
+    );
   }
   const readOnly = READ_ONLY_ACTIONS[toolName];
   return readOnly !== undefined && typeof params.action === "string" && readOnly.has(params.action);

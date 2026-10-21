@@ -73,13 +73,10 @@ export type {
   DaemonStateAccess,
   DevicePoolStats,
   DaemonMethodResult,
-  ListedDeviceSessionRecord,
   DaemonRequestContext,
   InitializedDaemonMethodHandler,
 } from "./daemonRequestHandlersParts/contracts";
-export { lookupReleasedSessionReason } from "./daemonRequestHandlersParts/sessionReporting";
 export {
-  handleTokenOwnedSessions,
   isTokenOwnedOrClaimPending,
   type HeartbeatMiss,
   resolveHeartbeatMiss,

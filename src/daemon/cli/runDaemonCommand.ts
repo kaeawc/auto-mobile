@@ -59,11 +59,7 @@ import {
   printDaemonUsageError,
 } from "./daemonCommandArguments";
 export {
-  DAEMON_JSON_FLAG,
-  type DaemonHeartbeatCommandArgs,
   parseDaemonHeartbeatCommandArgs,
-  parseRestartAdmittedMaintenanceToken,
-  parseAcceptanceSessionRestartScope,
   parseDaemonReleaseLivenessCommandArgs,
   printUnknownDaemonCommand,
   daemonCommandArgumentError,

@@ -280,7 +280,9 @@ enum PrototypeDataResolver {
 
     private static func resolveCondition(_ value: JSONValue, data: [String: JSONValue]?) -> JSONValue {
         guard case var .object(fields) = value else { return value }
-        if fields["data"] != nil {
+        // A `{platform}` condition (#14294) reads device-owned state this agent does not keep yet,
+        // so it compares against a missing value: only `notEquals` holds.
+        if fields["data"] != nil || fields["platform"] != nil {
             let form = PrototypeDataValues.holds(fields, data: data) ? "all" : "any"
             return .object([form: .array([])])
         }

@@ -167,6 +167,18 @@ animated highlight over its background and reads "Loading" to accessibility; it 
 
 The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent does not draw shimmer yet (#14689).
 
+## Motion v2
+
+(needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default
+300; \`standard\`, \`emphasized\`, \`linear\` or \`spring\`) animates changes to its \`alpha\`,
+\`offset\`, \`scale\`, \`rotation\`, \`background\` and \`color\`, typically from \`styleWhen\`; without
+it they are instant. Style \`scale\` (0-4) and \`rotation\` (degrees, -360..360) draw about the
+node's centre without moving siblings. \`transition\` also takes \`slideStart\` / \`slideEnd\`
+(slide in from that edge, mirrored right to left: drawers) and \`scale\`. An \`image\` with
+\`zoomable: {maxScale}\` (1-8) pinches, pans when zoomed and toggles 1x/2x on a double tap, with
+accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
+\`motion: "none"\` or animator scale 0. The iOS agent does not support it yet (#14684).
+
 ## Charts
 
 \`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
@@ -807,7 +819,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
 | \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
-| \`Requires key or data\` | Supply one condition source with exactly one comparison. |
+| \`Requires key or data or platform\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
 | \`Substituted text total limit exceeded\` | Reduce bindable fields, replacement lengths or repeat items; see \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\`. |
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |

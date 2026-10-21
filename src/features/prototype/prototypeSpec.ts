@@ -15,6 +15,7 @@ import {
   type PrototypeJson,
 } from "./prototypeJson";
 import { prototypeChartShape } from "./prototypeChartSchema";
+import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   anchorSchema,
@@ -25,7 +26,6 @@ import {
   hexColorSchema,
   iconNameSchema,
   iconVariantSchema,
-  imageAssetSchema,
   itemSchema,
   placementSchema,
   PROTOTYPE_COLOR_ROLES,
@@ -35,17 +35,19 @@ import {
   styleSchema,
   styleWhenEntrySchema,
 } from "./prototypePresentationSchemas";
+import {
+  bindPrototypePlatformFollowUps,
+  platformActionSchema,
+  prototypePlatformHandlersSchema,
+  prototypeRequiresSchema,
+} from "./prototypePlatformSchema";
 import { bindPrototypeRequestFollowUps, requestActionSchema } from "./prototypeRequestSchema";
 import { prototypeStorageSchema } from "./prototypeStorageSchema";
 import { record } from "./prototypeTemplate";
 export {
-  anchorSchema,
-  placementSchema,
   PROTOTYPE_COLOR_ROLES,
   type PrototypeAnchor,
-  type PrototypeCondition,
   type PrototypeData,
-  type PrototypeDataValue,
 } from "./prototypePresentationSchemas";
 export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
 export const {
@@ -133,6 +135,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
   requestActionSchema,
+  platformActionSchema,
   z
     .object({ type: z.enum(["push"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
@@ -154,25 +157,13 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 bindPrototypeRequestFollowUps(() => actionSchema);
+bindPrototypePlatformFollowUps(() => actionSchema);
 const gestureNodeShape = {
   onLongPress: z.array(actionSchema).min(1).max(32).optional(),
   onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
 };
-export const prototypeCheckSchema = z.union([
-  z.object({ message: z.string().min(1), required: z.literal(true) }).strict(),
-  z.object({ message: z.string().min(1), minLength: z.number().finite().int().min(0) }).strict(),
-  z.object({ message: z.string().min(1), maxLength: z.number().finite().int().min(0) }).strict(),
-  z.object({ message: z.string().min(1), min: z.number().finite() }).strict(),
-  z.object({ message: z.string().min(1), max: z.number().finite() }).strict(),
-  z
-    .object({
-      message: z.string().min(1),
-      format: z.enum(["email", "phone", "digits", "decimal", "url"]),
-    })
-    .strict(),
-  z.object({ message: z.string().min(1), pattern: z.string().max(128) }).strict(),
-]);
-export type PrototypeCheck = z.infer<typeof prototypeCheckSchema>;
+export { prototypeCheckSchema, type PrototypeCheck } from "./prototypeCheckSchema";
+import { prototypeCheckSchema } from "./prototypeCheckSchema";
 const enabledShape = { enabledWhen: conditionSchema.optional() };
 const checksShape = {
   ...enabledShape,
@@ -189,7 +180,7 @@ const commonNodeShape = {
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
-  transition: z.enum(["none", "fade", "expand", "slide"]).optional(),
+  ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
@@ -301,13 +292,7 @@ const textBaseSchema = z
   })
   .strict();
 const imageBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    ...gestureNodeShape,
-    type: z.enum(["image"]),
-    asset: imageAssetSchema,
-    contentScale: z.enum(["fit", "crop", "fill"]).optional(),
-  })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...prototypeImageShape })
   .strict();
 const iconBaseSchema = z
   .object({
@@ -907,6 +892,8 @@ const specSchema = z
       .optional(),
     motion: z.enum(["none", "standard"]).optional(),
     storage: prototypeStorageSchema.optional(),
+    requires: prototypeRequiresSchema.optional(),
+    platform: prototypePlatformHandlersSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();
@@ -970,6 +957,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "appendData",
   "removeData",
   "request",
+  "platform",
   "scrollTo",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;

@@ -75,7 +75,7 @@ type SimctlAppearanceRunner = Pick<SimCtl, "executeCommandArgs">;
  * boldText; issue #14088) live in {@link AccessibilityDisplayPreferences} and
  * are merged into the same read/apply/previous/reset results here.
  */
-export { DEFAULT_FONT_SCALE, type DisplayTheme, type FontScaleInput } from "./displayConfigTypes";
+export { type DisplayTheme, type FontScaleInput } from "./displayConfigTypes";
 export {
   parseFontScale,
   parseFontScaleSnapshot,

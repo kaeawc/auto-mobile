@@ -30,7 +30,6 @@ import {
   resolveAccessibilityHierarchyArgs,
   type AccessibilityHierarchyRequest,
 } from "../hierarchyReadArgs";
-export type { ConvertedNode } from "./IosHierarchyConverter";
 
 /**
  * Default per-request timeout for fetching the iOS accessibility hierarchy —

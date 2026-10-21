@@ -2,7 +2,9 @@ import { lazySessionReleasePool } from "./releaseSessionAndDevice";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { registerLocationRouteSessionCleanup } from "../features/utility/LocationRoutePlayer";
+import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
 import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
+import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -23,6 +25,7 @@ import {
   registerNetworkStateSessionCleanup,
 } from "./networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
+import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
@@ -94,7 +97,10 @@ export function wireSessionLifecycle(
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
   registerNetworkStateSessionCleanup(sessionManager);
+  registerAppLinksSessionCleanup(sessionManager);
+  registerKillProfileSessionCleanup(sessionManager);
   registerEmulatorSensorSessionCleanup(sessionManager);
+  registerDisplayProfileSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {

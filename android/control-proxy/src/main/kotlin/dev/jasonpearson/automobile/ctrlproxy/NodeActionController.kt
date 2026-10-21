@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.os.Build
+import android.os.Bundle
 import android.text.Spanned
 import android.text.style.ClickableSpan
 import android.util.Log
@@ -209,6 +210,7 @@ internal class NodeActionController(
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
+    arguments: NodeActionArguments = NodeActionArguments(),
   ) {
     host.forgetRememberedInsert()
     val startTime = timeProvider.currentTimeMillis()
@@ -217,7 +219,7 @@ internal class NodeActionController(
     Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
     perfProvider.serial("performAction")
 
-    NodeActionOperation(requestId, action, startTime)
+    NodeActionOperation(requestId, action, startTime, arguments)
       .run(
         NodeActionTarget(effectiveSelector, resourceId, targetDescription),
       )
@@ -227,6 +229,7 @@ internal class NodeActionController(
     private val requestId: String?,
     private val action: String,
     private val startTime: Long,
+    private val arguments: NodeActionArguments,
   ) {
     suspend fun run(target: NodeActionTarget) {
       try {
@@ -264,7 +267,8 @@ internal class NodeActionController(
       }
 
       perfProvider.startOperation("executeAction")
-      val (alreadySatisfied, actionError, success) = executeNodeAction(action, targetNode)
+      val (alreadySatisfied, actionError, success) =
+        executeNodeAction(action, targetNode, arguments)
       perfProvider.endOperation("executeAction")
 
       targetNode.recycle()
@@ -272,8 +276,8 @@ internal class NodeActionController(
 
       Log.d(TAG, "Action completed: success=$success")
 
-      // Wait for UI to settle after click/long_click/scroll, then extract fresh hierarchy
-      if (success && action in listOf("click", "long_click", "scroll_forward", "scroll_backward")) {
+      // Wait for UI to settle after any visible action, then extract fresh hierarchy
+      if (success && action !in NON_VISUAL_NODE_ACTIONS) {
         refreshHierarchyAfterNodeAction()
       }
 
@@ -333,19 +337,37 @@ private data class NodeActionOutcome(
 private fun executeNodeAction(
   action: String,
   targetNode: AccessibilityNodeInfo,
+  arguments: NodeActionArguments,
 ): NodeActionOutcome {
+  val actions = targetNode.actionList
   val decision =
     decideNodeAction(
       action,
-      targetNode.isAccessibilityFocused,
-      targetNode.actionList?.map { it.id },
+      NodeActionState(
+        targetNode.isAccessibilityFocused,
+        actions?.map { it.id },
+        actions?.mapNotNull { entry -> entry.label?.toString()?.let { entry.id to it } }?.toMap()
+          ?: emptyMap(),
+      ),
+      Build.VERSION.SDK_INT,
+      arguments,
     )
   val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
   val actionError = (decision as? NodeActionDecision.Refused)?.message
   val success =
     alreadySatisfied ||
-      (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
+      (decision is NodeActionDecision.Perform && performNodeDecision(targetNode, decision))
   return NodeActionOutcome(alreadySatisfied, actionError, success)
+}
+
+private fun performNodeDecision(
+  targetNode: AccessibilityNodeInfo,
+  decision: NodeActionDecision.Perform,
+): Boolean {
+  val progress = decision.progress ?: return targetNode.performAction(decision.actionId)
+  val arguments =
+    Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, progress) }
+  return targetNode.performAction(decision.actionId, arguments)
 }
 
 private fun accessibilityLinkError(text: String, occurrence: Int): String? =

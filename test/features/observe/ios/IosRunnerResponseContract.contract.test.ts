@@ -166,6 +166,7 @@ const typedResults: Record<string, Record<string, unknown>> = {
     totalTimeMs: 17,
   },
   clipboard_result: { success: true, text: "fixture text", action: "", totalTimeMs: 17 },
+  location_result: { success: true, totalTimeMs: 17 },
 };
 const genericTypes = new Set([
   "tap_coordinates_result",

@@ -90,6 +90,12 @@ export const DEVICES_ENV = {
     default: "unset",
     doc: "Extra whitespace-separated arguments appended to emulator launches.",
   },
+  EMULATOR_EXCLUDED_CONSOLE_PORTS: {
+    name: "AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS",
+    kind: "string",
+    default: "5554 on broker hosts; otherwise empty",
+    doc: "Excluded even emulator console ports (5554–5682) or emulator serials, comma/whitespace-separated; explicit blank disables exclusions.",
+  },
   SKIP_CTRL_PROXY_DOWNLOAD: {
     name: "AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD",
     kind: "bool",

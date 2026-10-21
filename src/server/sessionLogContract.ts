@@ -65,6 +65,8 @@ export interface SessionLogAppGroupRequest {
 export interface UnifiedLogWindowRequest {
   lastSeconds: number;
   level: UnifiedLogLevel;
+  /** Executable name also matched, for apps that log under a subsystem other than their bundle id (#14739). */
+  processName?: string;
 }
 
 export interface SessionLogCollectionRequest {

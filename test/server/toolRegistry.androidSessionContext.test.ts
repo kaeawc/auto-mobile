@@ -8,6 +8,10 @@ import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/t
 import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+} from "../../src/utils/directSessionDeviceRegistry";
 
 isolateToolRegistry();
 
@@ -62,6 +66,7 @@ describe("ToolRegistry Android session context", () => {
   });
 
   afterEach(() => {
+    clearDirectSessionDevices();
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
@@ -102,6 +107,7 @@ describe("ToolRegistry Android session context", () => {
 
   test("allows sessionUuid when multiple Android devices are booted", async () => {
     fakeDeviceReadiness.setConnectedDevices([androidDeviceA, androidDeviceB]);
+    registerDirectSessionDevice("session-123", androidDeviceA);
     const tool = registerTool("androidSessionAllowedTool");
 
     const response = await tool.handler({ platform: "android", sessionUuid: "session-123" });

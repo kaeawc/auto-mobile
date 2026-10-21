@@ -12,7 +12,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { DefaultAppCleanupService } from "../../src/server/AppCleanupService";
 import { ActionableError } from "../../src/models";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import type {
   ObservationArtifactPayload,
   ObservationArtifactWriter,
@@ -475,12 +475,12 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {
-    const fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    fakeDeviceSessionManager.setConnectedDevices([device]);
+    const fakeDeviceReadiness = new FakeDeviceReadiness();
+    fakeDeviceReadiness.setConnectedDevices([device]);
     const log = new FakeLogger();
     const registry = new ToolRegistryClass(undefined, log);
 
-    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
     registry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},
@@ -523,7 +523,7 @@ describe("ToolRegistry device-aware pipeline", () => {
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     const controller = new AbortController();
-    const fakeManager = new FakeDeviceSessionManager();
+    const fakeManager = new FakeDeviceReadiness();
     fakeManager.setConnectedDevices([device]);
     registry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
     registry.setCollaboratorsForTesting({
@@ -571,7 +571,7 @@ describe("ToolRegistry device-aware pipeline", () => {
     });
     let handlerCalls = 0;
 
-    const fakeManager = new FakeDeviceSessionManager();
+    const fakeManager = new FakeDeviceReadiness();
     fakeManager.setConnectedDevices([device]);
     fakeManager.ensureDeviceReady = async () => {
       markResolutionStarted?.();

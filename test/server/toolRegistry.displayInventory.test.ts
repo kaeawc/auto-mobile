@@ -8,7 +8,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -36,11 +36,11 @@ describe("ToolRegistry display inventory resolution", () => {
   let restoreInventory: () => void;
   let ctrlProxyStub: CtrlProxySetupStub;
   let sessionManager: SessionManager | undefined;
-  let fakeManager: FakeDeviceSessionManager;
+  let fakeManager: FakeDeviceReadiness;
 
   beforeEach(() => {
     ToolRegistry.clearTools();
-    fakeManager = new FakeDeviceSessionManager();
+    fakeManager = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
     ToolRegistry.setCollaboratorsForTesting({

@@ -30,7 +30,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { snapshotPlatformDeviceManagerFactory } from "../helpers/platformDeviceManagerSnapshot";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import {
   resolveTargetDisplay,
@@ -536,7 +536,7 @@ arranged("invalid pin on a different target leaves original binding intact", asy
 
 arranged("direct mode display refuses before device selection; omitted is unchanged", async () => {
   DaemonState.getInstance().reset();
-  const manager = DeviceSessionManager.getInstance();
+  const manager = DeviceReadiness.getInstance();
   const ready = spyOn(manager, "ensureDeviceReady").mockResolvedValue(device);
   const pin = spyOn(manager, "setExplicitDevicePin").mockImplementation(() => {});
   try {
@@ -1223,7 +1223,7 @@ arranged(
   "legacy setActiveDevice without display matches main's entire JSON envelope and registration",
   async () => {
     DaemonState.getInstance().reset();
-    const manager = DeviceSessionManager.getInstance();
+    const manager = DeviceReadiness.getInstance();
     const ready = spyOn(manager, "ensureDeviceReady").mockResolvedValue(device);
     const pin = spyOn(manager, "setExplicitDevicePin").mockImplementation(() => {});
     try {

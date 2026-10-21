@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { createExecResult } from "../../src/utils/execResult";
@@ -44,7 +44,7 @@ function physicalDevicectlListing(): string {
   return JSON.stringify(listing);
 }
 
-describe("DeviceSessionManager iOS readiness discovery (#11063)", () => {
+describe("DeviceReadiness iOS readiness discovery (#11063)", () => {
   beforeEach(resetSimctlSharedListing);
   afterEach(resetSimctlSharedListing);
 
@@ -60,7 +60,7 @@ describe("DeviceSessionManager iOS readiness discovery (#11063)", () => {
       },
       { timer: new FakeTimer(), platform: "darwin" },
     );
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), simctl),
     );
     const pinned: BootedDevice = {
@@ -85,7 +85,7 @@ describe("DeviceSessionManager iOS readiness discovery (#11063)", () => {
     let timer: FakeTimer;
     let devicectlCalls: number;
     let devicectlFails: boolean;
-    let manager: DeviceSessionManager;
+    let manager: DeviceReadiness;
 
     beforeEach(() => {
       timer = new FakeTimer();
@@ -108,7 +108,7 @@ describe("DeviceSessionManager iOS readiness discovery (#11063)", () => {
         tmpdir: () => "/fake",
         logger: { warn: () => {}, debug: () => {} },
       });
-      manager = DeviceSessionManager.createInstance(
+      manager = DeviceReadiness.createInstance(
         new FakeDeviceClientProvider(
           new FakeAdbExecutor(),
           new FakeDeviceUtils(),

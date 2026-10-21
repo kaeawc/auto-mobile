@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -66,7 +66,7 @@ function harness(
   const providedClient: AndroidCtrlProxy = clientFactory?.(device, adb) ?? fakeClient;
   const waitForConnection = spyOn(fakeClient, "waitForConnection");
   const appearance = mock(async () => {});
-  const manager = DeviceSessionManager.createInstance(
+  const manager = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, devices, new FakeSimctl(), {
       window,
       ctrlProxyManager: actualCtrlProxyManager,
@@ -125,7 +125,7 @@ function installAdbForwardEvidence(
   );
 }
 
-describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", () => {
+describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => {
   test.each(["read", "control"] as const)(
     "F4a connected responsive %s uses no forward evidence",
     async (intent) => {

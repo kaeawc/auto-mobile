@@ -2,7 +2,7 @@ import { createDevicePoolDependencies } from "../../helpers/devicePoolDependenci
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
-import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
@@ -48,8 +48,8 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     platform: "android",
   };
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: ReturnType<
+  let fakeDeviceReadiness: FakeDeviceReadiness;
+  let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
   >["deviceSessionManager"];
   let daemonSessionManager: SessionManager | undefined;
@@ -74,7 +74,7 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
   const baseSchema = z.record(z.string(), z.unknown());
 
   async function setupAutolockedSession(): Promise<string> {
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA]);
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
@@ -92,9 +92,9 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    fakeDeviceReadiness = new FakeDeviceReadiness();
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -105,7 +105,7 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceReadiness });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

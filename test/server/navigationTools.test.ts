@@ -30,7 +30,7 @@ import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -493,7 +493,7 @@ describe("navigation tool session graph selection", () => {
   });
 
   test("registered navigation tools resolve an omitted platform to the active iOS device", async () => {
-    const fakeDevices = new FakeDeviceSessionManager();
+    const fakeDevices = new FakeDeviceReadiness();
     fakeDevices.setConnectedDevices([device]);
     fakeDevices.setCurrentDevice(device, "ios");
     const originalDevices = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;

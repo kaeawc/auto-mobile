@@ -2,7 +2,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -49,8 +49,8 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     platform: "android",
   };
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: ReturnType<
+  let fakeDeviceReadiness: FakeDeviceReadiness;
+  let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
   >["deviceSessionManager"];
   let originalAfterToolCall: ReturnType<
@@ -83,7 +83,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
    * resolved autolock sessionId whose cache the tool call will populate.
    */
   async function setupAutolockedSession(): Promise<string> {
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    fakeDeviceReadiness.setConnectedDevices([androidA]);
 
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -110,9 +110,9 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    fakeDeviceReadiness = new FakeDeviceReadiness();
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
     // #6866: the after-tool-call pipeline now settles a navigation-class action's
     // embedded observation against the DEVICE before finalizing. These tests drive
     // stub handlers with canned observations against a fake device, so swap in a
@@ -134,7 +134,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceReadiness });
     ToolRegistry.setPipelineOverridesForTesting({ afterToolCall: originalAfterToolCall });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();

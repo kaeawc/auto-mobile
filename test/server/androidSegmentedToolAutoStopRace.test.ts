@@ -12,7 +12,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -95,7 +95,7 @@ describe("segmented recording: auto-stop racing a caller-driven stop (#10018 x #
     starts = [];
     stops = [];
     finalSegmentStop = undefined;
-    const devices = new FakeDeviceSessionManager();
+    const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([androidDevice]);
     videoRecording.configure({ deviceDetector: devices });
     await setVideoRecordingManagerDependencies({

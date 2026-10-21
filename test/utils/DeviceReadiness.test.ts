@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  DeviceSessionManager,
+  DeviceReadiness,
   createDefaultDeviceClientProvider,
-} from "../../src/daemon/readiness/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceReadiness";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -42,9 +42,9 @@ import * as path from "path";
 import * as os from "os";
 
 function createTestSessionManager(
-  ...[provider, adbFactory, options]: Parameters<typeof DeviceSessionManager.createInstance>
-): DeviceSessionManager {
-  return DeviceSessionManager.createInstance(provider, adbFactory, {
+  ...[provider, adbFactory, options]: Parameters<typeof DeviceReadiness.createInstance>
+): DeviceReadiness {
+  return DeviceReadiness.createInstance(provider, adbFactory, {
     ...options,
     appearanceOnConnectDependencies: {
       isSyncEnabled: () => true,
@@ -106,7 +106,7 @@ function makeReadyWindow(): FakeWindow {
   return w;
 }
 
-describe("DeviceSessionManager", () => {
+describe("DeviceReadiness", () => {
   const device: BootedDevice = {
     name: "device-1",
     deviceId: "device-1",
@@ -681,7 +681,7 @@ describe("DeviceSessionManager", () => {
   });
 });
 
-describe("DeviceSessionManager iOS push-update cache invalidation", () => {
+describe("DeviceReadiness iOS push-update cache invalidation", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDeviceUtils: FakeDeviceUtils;
   let originalAppearanceDefaults: AppearanceConfigInput;
@@ -852,7 +852,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
   });
 });
 
-describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
+describe("DeviceReadiness legacy iOS auto-start readiness", () => {
   const iosDevice: BootedDevice = {
     deviceId: "ios-ready-1",
     name: "iPhone 15",
@@ -864,7 +864,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     iosClient: FakeIOSCtrlProxy,
     useConfiguredReadinessTimeout: boolean = false,
     lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
-  ): DeviceSessionManager {
+  ): DeviceReadiness {
     const fakeAdb = new FakeAdbExecutor();
     const fakeDeviceUtils = new FakeDeviceUtils();
     const fakeSimctl = new FakeSimctl();
@@ -1112,7 +1112,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
   });
 });
 
-describe("DeviceSessionManager iOS presentation policy", () => {
+describe("DeviceReadiness iOS presentation policy", () => {
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
@@ -1211,7 +1211,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
   });
 });
 
-describe("DeviceSessionManager dual-platform resolution", () => {
+describe("DeviceReadiness dual-platform resolution", () => {
   const androidDevice: BootedDevice = {
     name: "emulator-5554",
     deviceId: "emulator-5554",
@@ -1972,7 +1972,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 });
 
-describe("DeviceSessionManager device-list error formatting (#4227)", () => {
+describe("DeviceReadiness device-list error formatting (#4227)", () => {
   // These messages exist to tell the caller which identifier to use instead.
   // Joining BootedDevice objects renders "[object Object]", destroying the only
   // actionable part of the error.

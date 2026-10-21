@@ -27,7 +27,7 @@ const TIER_B: Record<string, string> = {
   envWrite: `process.env.AUTOMOBILE_DATA_DIR = dir;`,
   envBracketWrite: `process.env["HOME"] = dir;`,
   envDelete: `delete process.env.HOME;`,
-  singleton: `const manager = DeviceSessionManager.getInstance();`,
+  singleton: `const manager = DeviceReadiness.getInstance();`,
   resetInstance: `afterEach(() => NavigationGraphManager.resetInstance());`,
   db: `const db = await createTestDatabase();`,
   dbHarness: `import { useNavigationTestHarness } from "../helpers/navigationTestHarness";`,

@@ -19,7 +19,7 @@ import {
   type AuditRunnerInput,
   type ToolRegistryCollaborators,
 } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -49,7 +49,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let readinessRequests: number;
-  let devices: FakeDeviceSessionManager;
+  let devices: FakeDeviceReadiness;
   let fakeDeviceUtils: FakeDeviceUtils;
   let visibleDevices: BootedDevice[];
 
@@ -84,7 +84,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
         },
       },
     });
-    devices = new FakeDeviceSessionManager();
+    devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([claimed, free]);
     devices.setCurrentDevice(claimed, "android");
     readinessRequests = 0;

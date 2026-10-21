@@ -972,7 +972,7 @@ export class ToolRegistryClass {
   }
 
   // Get the device session manager
-  getDeviceSessionManager(): DeviceReadiness {
+  getDeviceReadiness(): DeviceReadiness {
     return this.deviceSessionManager;
   }
 

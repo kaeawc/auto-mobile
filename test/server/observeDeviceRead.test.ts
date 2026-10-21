@@ -19,7 +19,7 @@ import {
 import { observeSchema, registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { observationScreenshotEvidence } from "../../src/features/observe/screenshot/observationScreenshotEvidence";
 import {
@@ -226,7 +226,7 @@ describe("session-free observe device read", () => {
   });
 
   test("returns observation and screenshot path without session acquisition or ownership changes", async () => {
-    const manager = new FakeDeviceSessionManager();
+    const manager = new FakeDeviceReadiness();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const calls: string[] = [];
@@ -425,7 +425,7 @@ describe("session-free observe device read", () => {
 
   test("session all omits snapshot references and resource notifications", async () => {
     const sessionUuid = "aggregate-owner";
-    const manager = new FakeDeviceSessionManager();
+    const manager = new FakeDeviceReadiness();
     manager.setConnectedDevices([device]);
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     registerDirectSessionDevice(sessionUuid, device);
@@ -475,7 +475,7 @@ describe("session-free observe device read", () => {
 
   test("matching deviceId and sessionUuid use the session observe pipeline", async () => {
     const sessionUuid = "observe-session";
-    const manager = new FakeDeviceSessionManager();
+    const manager = new FakeDeviceReadiness();
     manager.setConnectedDevices([device]);
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
@@ -565,7 +565,7 @@ describe("session-free observe device read", () => {
         platform: "ios",
       };
       const sessionUuid = "ios-observe-session";
-      const manager = new FakeDeviceSessionManager();
+      const manager = new FakeDeviceReadiness();
       manager.setConnectedDevices([iosDevice]);
       ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
       ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
@@ -659,7 +659,7 @@ describe("session-free observe device read", () => {
   });
 
   test("a plan observe step with injected deviceId keeps normal readiness and screenshot mode", async () => {
-    const manager = new FakeDeviceSessionManager();
+    const manager = new FakeDeviceReadiness();
     manager.setConnectedDevices([device]);
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
@@ -691,7 +691,7 @@ describe("session-free observe device read", () => {
   });
 
   test("real screen device read returns hierarchy without shared-state writes or session calls", async () => {
-    const manager = new FakeDeviceSessionManager();
+    const manager = new FakeDeviceReadiness();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const timer = new FakeTimer();
@@ -986,7 +986,7 @@ describe("session-free observe device read", () => {
   });
 
   test("denies a device read before capture and does not acquire a session", async () => {
-    const manager = new FakeDeviceSessionManager();
+    const manager = new FakeDeviceReadiness();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     let captures = 0;
@@ -1018,7 +1018,7 @@ describe("session-free observe device read", () => {
   });
 
   test("withholds an observation if ownership changes during capture", async () => {
-    const manager = new FakeDeviceSessionManager();
+    const manager = new FakeDeviceReadiness();
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const after = spyOn(ToolRegistry.getCollaboratorsForTesting().afterToolCall, "handle");

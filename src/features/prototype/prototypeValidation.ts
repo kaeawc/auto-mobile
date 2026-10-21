@@ -7,6 +7,7 @@ import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeRequestsError } from "./prototypeRequest";
+import { prototypePlatformError } from "./prototypePlatform";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
@@ -703,6 +704,21 @@ function layoutErrors(
   );
 }
 
+/** A literal platform-call argument against its `platformModules` rule (#14294). */
+function platformArgumentError(
+  value: unknown,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
+  const context: Context = {
+    nodes: [],
+    actions: [],
+    images: 0,
+    nesting: { container: 0, condition: 0, action: 0 },
+  };
+  return walk(value, rule, path, context, 0);
+}
+
 /** Action, container and state checks, after the layout checks pass. */
 function behaviourErrors(
   value: unknown,
@@ -713,6 +729,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
+    prototypePlatformError(value, context.actions, platformArgumentError) ??
     pagerErrors(context) ??
     stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats)

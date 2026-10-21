@@ -100,7 +100,7 @@ struct PrototypeSpec: Decodable {
     let authoredRoot: JSONValue
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage
+        case id, window, state, data, theme, motion, root, storage, requires, platform
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -131,6 +131,13 @@ struct PrototypeSpec: Decodable {
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
+        // The platform vocabulary (#14294) is checked as a backstop; the agent does not run it yet.
+        try PrototypePlatformValidator.validate(
+            requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
+            handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
+            root: raw,
+            state: menuState ?? [:]
+        )
         root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:])
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and

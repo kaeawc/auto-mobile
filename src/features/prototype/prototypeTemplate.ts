@@ -223,6 +223,22 @@ function mapBinding(value: unknown, at: string, visit: FieldVisitor): unknown {
     : visit(value, at, "emitBinding");
 }
 
+function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
+  mapField(action, "name", path, "emitName", visit);
+  mapField(action, "context", path, "emitContext", visit);
+  if (record(action.context)) {
+    action.context = Object.fromEntries(
+      Object.entries(record(action.context)!).map(([name, value]) => {
+        const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+          ? `${path}.context.${name}`
+          : `${path}.context[${JSON.stringify(name)}]`;
+        return [name, mapBinding(value, at, visit)];
+      }),
+    );
+  }
+  mapKeyList(action, "requireValid", path, visit);
+}
+
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   switch (action.type) {
     case "setState":
@@ -230,19 +246,7 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       mapField(action, "value", path, "operand", visit);
       break;
     case "emit":
-      mapField(action, "name", path, "emitName", visit);
-      mapField(action, "context", path, "emitContext", visit);
-      if (record(action.context)) {
-        action.context = Object.fromEntries(
-          Object.entries(record(action.context)!).map(([name, value]) => {
-            const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
-              ? `${path}.context.${name}`
-              : `${path}.context[${JSON.stringify(name)}]`;
-            return [name, mapBinding(value, at, visit)];
-          }),
-        );
-      }
-      mapKeyList(action, "requireValid", path, visit);
+      mapEmitAction(action, path, visit);
       break;
     case "toggle":
     case "increment":
@@ -261,6 +265,9 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "request":
       mapRequestAction(action, path, visit);
+      break;
+    case "platform":
+      mapPlatformAction(action, path, visit);
       break;
     default:
       break;
@@ -298,6 +305,24 @@ function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void 
   mapRequestEntries(action, "query", path, visit);
   if (action.body !== undefined) {
     action.body = mapBinding(action.body, `${path}.body`, visit);
+  }
+  mapField(action, "into", path, "requestInto", visit);
+  mapField(action, "statusKey", path, "key", visit);
+  for (const field of ["onSuccess", "onError"]) {
+    mapList(action, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  }
+}
+
+/** A `platform` call (#14294): each argument is a value binding, `into` the request grammar. */
+function mapPlatformAction(action: Raw, path: string, visit: FieldVisitor): void {
+  const args = record(action.args);
+  if (args) {
+    action.args = Object.fromEntries(
+      Object.entries(args).map(([name, value]) => [
+        name,
+        mapBinding(value, memberPath(`${path}.args`, name), visit),
+      ]),
+    );
   }
   mapField(action, "into", path, "requestInto", visit);
   mapField(action, "statusKey", path, "key", visit);

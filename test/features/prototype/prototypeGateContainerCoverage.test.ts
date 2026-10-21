@@ -13,6 +13,10 @@ import { prototypeChecksFields } from "../../../src/features/prototype/prototype
 
 type Node = Record<string, unknown>;
 const label = { type: "text", text: "Hello" };
+const platformCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
+};
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
@@ -82,6 +86,8 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
   },
+  prototype_platform_v1: platformCall,
+  prototype_platform_test_v1: platformCall,
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.

@@ -114,8 +114,8 @@ internal object PrototypeStateBindings {
   }
 
   /**
-   * `statusKey` must be a declared state key holding a string, because the runtime writes
-   * `loading`, `success` and `error` to it.
+   * `statusKey` (on `request` and `platform`) must be a declared state key holding a string,
+   * because the runtime writes `loading`, `success` and `error` to it.
    */
   fun requestStatusKeyError(
     action: JsonObject,
@@ -140,7 +140,7 @@ internal object PrototypeStateBindings {
         }
         continue
       }
-      if (value.text("type") == "request") {
+      if (value.text("type") == "request" || value.text("type") == "platform") {
         requestStatusKeyError(value, path, state)?.let {
           return it.forItem(item)
         }

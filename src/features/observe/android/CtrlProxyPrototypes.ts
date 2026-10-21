@@ -34,6 +34,12 @@ import {
   isPrototypeRequestEventName,
   prototypeRequestEventOf,
 } from "../../prototype/prototypeRequestEvent";
+import {
+  isPrototypePlatformCallEventName,
+  isPrototypePlatformDeliveredEventName,
+  prototypePlatformCallEventOf,
+  prototypePlatformDeliveredEventOf,
+} from "../../prototype/prototypePlatformEvent";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
@@ -200,6 +206,22 @@ export function parsePrototypeStacks(value: unknown): PrototypeEvent["stacks"] {
 }
 export const prototypeStacksSchema = z.unknown().optional().transform(parsePrototypeStacks);
 
+type ReservedEmit = Pick<PrototypeEvent, "kind" | "name" | "payload">;
+
+/** Undefined for an unreserved event, null for a valid reserved payload, else the issue. */
+function reservedEmitPayloadIssue(event: ReservedEmit): string | null | undefined {
+  if (isPrototypeRequestEventName(event)) {
+    return prototypeRequestEventOf(event) === undefined ? "Invalid request event" : null;
+  }
+  if (isPrototypePlatformCallEventName(event)) {
+    return prototypePlatformCallEventOf(event) === undefined ? "Invalid platform event" : null;
+  }
+  if (isPrototypePlatformDeliveredEventName(event)) {
+    return prototypePlatformDeliveredEventOf(event) === undefined ? "Invalid platform event" : null;
+  }
+  return undefined;
+}
+
 /** One `prototype_event` push of a kind this host knows. */
 export const prototypeEventSchema = prototypeEventEnvelopeSchema
   .extend({
@@ -226,14 +248,12 @@ export const prototypeEventSchema = prototypeEventEnvelopeSchema
       }
       return;
     }
-    // A finished request (#12523) is an emit under a reserved name and must carry its payload.
-    if (isPrototypeRequestEventName(event)) {
-      if (prototypeRequestEventOf(event) === undefined) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["payload"],
-          message: "Invalid request event",
-        });
+    // A finished request (#12523) or platform call or event (#14294) is an emit under a reserved
+    // name and must carry its payload.
+    const reserved = reservedEmitPayloadIssue(event);
+    if (reserved !== undefined) {
+      if (reserved !== null) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["payload"], message: reserved });
       }
       return;
     }

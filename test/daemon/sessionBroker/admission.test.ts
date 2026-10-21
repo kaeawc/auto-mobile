@@ -18,6 +18,65 @@ function resource(
 }
 
 describe("selectAdmission ordering and hard caps", () => {
+  test("waits for a compatible resetting resource within the create-time threshold", () => {
+    expect(
+      selectAdmission(
+        {
+          activeOrAcquiringSessions: 0,
+          resetWaitThresholdMs: 500,
+          resources: [{ ...resource("reset", "resetting", 0, true), expectedReadyMs: 200 }],
+        },
+        { totalDeviceCap: 1 },
+      ),
+    ).toEqual({ kind: "wait", resourceId: "reset", waitMs: 200 });
+  });
+
+  test.each([
+    { compatible: true, expectedReadyMs: undefined },
+    { compatible: false, expectedReadyMs: 100 },
+    { compatible: true, expectedReadyMs: 0 },
+    { compatible: true, expectedReadyMs: 501 },
+  ])("does not wait with unsuitable reset readiness %p", (readiness) => {
+    expect(
+      selectAdmission(
+        {
+          activeOrAcquiringSessions: 0,
+          resetWaitThresholdMs: 500,
+          resources: [{ ...resource("reset", "resetting", 0), ...readiness }],
+        },
+        {},
+      ),
+    ).toEqual({ kind: "create" });
+  });
+
+  test("does not wait when p90 reset readiness exceeds the create-time threshold", () => {
+    expect(
+      selectAdmission(
+        {
+          activeOrAcquiringSessions: 0,
+          resetWaitThresholdMs: 500,
+          resources: [{ ...resource("reset", "resetting", 0, true), expectedReadyMs: 800 }],
+        },
+        {},
+      ),
+    ).toEqual({ kind: "create" });
+  });
+
+  test("idle reuse and session caps take precedence over reset wait", () => {
+    const snapshot = {
+      activeOrAcquiringSessions: 1,
+      resetWaitThresholdMs: 500,
+      resources: [
+        resource("idle", "idle", 1, true),
+        { ...resource("reset", "resetting", 0, true), expectedReadyMs: 100 },
+      ],
+    };
+    expect(selectAdmission(snapshot, {})).toEqual({ kind: "reuse", resourceId: "idle" });
+    expect(selectAdmission(snapshot, { sessionCap: 1 })).toEqual({
+      kind: "refuse",
+      reason: "session-cap-reached",
+    });
+  });
   test("omitted limits are unbounded", () => {
     expect(selectAdmission({ activeOrAcquiringSessions: 500, resources: [] }, {})).toEqual({
       kind: "create",
@@ -178,6 +237,17 @@ describe("selectAdmission ordering and hard caps", () => {
         { totalDeviceCap: 0 },
       ),
     ).toEqual({ kind: "evict", resourceId: "idle" });
+    // Nor does it wait for a resetting resource it could not hand out once ready.
+    expect(
+      selectAdmission(
+        {
+          activeOrAcquiringSessions: 0,
+          resetWaitThresholdMs: 500,
+          resources: [{ ...resource("reset", "resetting", 0, true), expectedReadyMs: 200 }],
+        },
+        { totalDeviceCap: 0 },
+      ),
+    ).toEqual({ kind: "refuse", reason: "total-device-cap-exceeded" });
   });
 });
 

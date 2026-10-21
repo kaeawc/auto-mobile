@@ -1001,6 +1001,26 @@
       }
     },
     {
+      "name" : "location_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "location_result"
+      }
+    },
+    {
       "name" : "error_deadline_completed_late",
       "wire" : {
         "error" : "Command request_swipe exceeded deadline at 5000ms (gesture completed after its deadline; outcome is indeterminate)",
@@ -1271,6 +1291,7 @@
     "launch_app_result",
     "list_databases_result",
     "list_tables_result",
+    "location_result",
     "magic_tap_result",
     "multi_finger_swipe_result",
     "path_gesture_result",

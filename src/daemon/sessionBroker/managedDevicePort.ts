@@ -62,6 +62,7 @@ export interface ManagedDevicePortDependencies {
       device: BootedDevice,
       profile: Extract<BrokerNativeProfile, { platform: "ios" }>,
       assertOwned: () => Promise<void>,
+      signal?: AbortSignal,
     ) => Promise<"clean" | ResetOutcome>;
     android?: Pick<AndroidBaselineReset, "canCapture" | "capture" | "reset" | "forget">;
   };
@@ -346,7 +347,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     };
   }
 
-  async reset(resource: BrokerResourceRecord): Promise<ResetResult> {
+  async reset(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<ResetResult> {
     this.assertResource(resource, "resetting");
     const profile = nativeProfile(resource);
     const ios = this.dependencies.resetBaseline?.ios;
@@ -366,6 +367,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       stableDeviceId: assignment.stableDeviceId,
     };
     const assertOwned = async () => {
+      signal?.throwIfAborted();
       if (!(await isCurrent(resource))) {
         throw new ActionableError("Clean reset no longer owns its durable resource revision");
       }
@@ -389,6 +391,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
           { platform: "ios", deviceId: expected.stableDeviceId, name },
           profile,
           assertOwned,
+          signal,
         );
       }
       const acquired = this.androidDevices.get(resource.resourceId);

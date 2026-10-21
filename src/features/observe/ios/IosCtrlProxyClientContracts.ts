@@ -38,6 +38,8 @@ import type {
   CtrlProxyHierarchyResponse,
   CtrlProxyHighlightResult,
   CtrlProxyHingeAngleResult,
+  CtrlProxyLocationRequest,
+  CtrlProxyLocationResult,
   CtrlProxyAppearanceResult,
   CtrlProxyImeActionResult,
   CtrlProxyKeyboardResult,
@@ -299,6 +301,12 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
   ): Promise<CtrlProxyRotateResult>;
 
   requestSetHingeAngle(angle: number, timeoutMs?: number): Promise<CtrlProxyHingeAngleResult>;
+
+  requestLocation(
+    request: CtrlProxyLocationRequest,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyLocationResult>;
 
   requestAppearance(
     appearance?: "light" | "dark",

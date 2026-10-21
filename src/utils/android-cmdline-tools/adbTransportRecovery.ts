@@ -2,7 +2,8 @@ import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason"
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { adbFailureOutput } from "./adbFailureOutput";
 import { isPreDispatchError } from "./adbCommandRetryPolicy";
-import { DeviceLostError, deviceLostErrorFromAbortSignal } from "../../models/DeviceLostError";
+import { DeviceLostError } from "../../models/DeviceLostError";
+import { deviceLostErrorFromAbortSignal } from "../deviceLossAbortRegistry";
 import { sequenceBackoff, type BackoffPolicy } from "../Backoff";
 import { type Timer } from "../SystemTimer";
 import { DefaultRetryExecutor } from "../retry/RetryExecutor";

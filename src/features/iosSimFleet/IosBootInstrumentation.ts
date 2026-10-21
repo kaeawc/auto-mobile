@@ -7,6 +7,11 @@ import { deviceResourceProfileFingerprint } from "../../utils/deviceResourceDrif
 import type { SimulatorWorkloadProfile } from "../../models/DeviceResourceReconciliation";
 import type { BootDurationHistory } from "./BootDurationHistory";
 import { assertCapacityGranted, type SimulatorCapacityGate } from "./CapacityGate";
+import {
+  BootReservationScope,
+  type BootReservationOptions,
+  type BootSlotReservation,
+} from "../../devices/bootAdmission/BootSlotReservation";
 
 /** iOS-only override of the boot admission gate switch (#11181); see `isBootCapacityGateEnabled`. */
 export { IOS_SIM_CAPACITY_GATE_ENV } from "../bootAdmission/BootAdmissionGate";
@@ -32,6 +37,15 @@ export interface FleetBootInstrumentationOptions {
 export class FleetBootInstrumentation implements IosBootInstrumentation {
   constructor(private readonly options: FleetBootInstrumentationOptions) {}
 
+  async reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation> {
+    return this.options.gate
+      ? this.options.gate.reserveBoot(options)
+      : new BootReservationScope<void>().hold(
+          () => {},
+          () => {},
+        );
+  }
+
   async run<T>(request: IosBootRequest, boot: (remainingMs: number) => Promise<T>): Promise<T> {
     const { history, timer, gate } = this.options;
     const profileId = bootProfileId(request.profile);
@@ -48,6 +62,7 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
     }
     const finishedAtMs = timer.now();
     history.record({
+      reason: request.reason ?? "create",
       udid: request.udid,
       profileId,
       durationMs: finishedAtMs - bootStartedAtMs,
@@ -63,7 +78,7 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
   ): Promise<BootAdmissionResult<unknown>["releaseAdmission"]> {
     const result = await gate.admitBoot(
       { runtime: request.runtime, profileId, excludeUdids: [request.udid] },
-      { signal: request.signal, bootUdid: request.udid },
+      { signal: request.signal, bootUdid: request.udid, reason: request.reason },
     );
     assertCapacityGranted(result);
     if (result.decision.outcome === "reuse-warm") {

@@ -311,7 +311,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -646,7 +646,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 10000
           },
           "optional": true
@@ -742,7 +742,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 10000
           },
           "optional": true
@@ -818,7 +818,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 1000
           },
           "optional": true
@@ -859,7 +859,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 1000
           },
           "optional": true
@@ -1100,7 +1100,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -2863,7 +2863,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -10499,7 +10499,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -10545,7 +10545,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 1000
           },
           "optional": true

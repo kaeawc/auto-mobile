@@ -200,6 +200,7 @@ export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinat
         dispose();
         release();
       },
+      release,
     };
   }
 

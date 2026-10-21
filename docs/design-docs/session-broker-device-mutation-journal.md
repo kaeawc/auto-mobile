@@ -11,8 +11,11 @@ their reasons. Its registry enumeration test includes mixed, hidden and SDK
 tools, and rejects a new control tool without an explicit justification.
 
 Acceptance criteria 2 (production record-before-act) and 3 (journal-backed
-release/read-through) remain unmet. No production caller writes this journal or
-invokes reset yet; #14359 must not close as fully delivered on this slice. The
+release/read-through) remain unmet. No production tool writes mutation intents.
+The optional #14364 Android keep-booted strategy captures partial baselines and
+runs best-effort cleaning; unobservable state does not veto Android reuse under
+the owner decision. Production record-before-act remains unwired, so
+#14359 must not close as fully delivered on this slice. The
 allowlist distinguishes `pending-adapter` device/composite/lifecycle operations
 from `notJournaled` host-only exemptions. Neither status proves journaling or
 enforces record-before-act in production.
@@ -58,6 +61,17 @@ and enforces one total budget through the injected Timer and an abort signal.
 Timing out does not make an uncancellable native command disappear: the platform
 adapter must fence or drain that in-flight operation before physical reuse.
 
+Keep-booted bounds its own journal capture to the 30-second cleaning budget (or
+the remaining preparation deadline, whichever is shorter); other strategies and
+fallback capture receive the remaining preparation deadline. Reset fallback has
+its own budget and abort signal. After timeout or cancellation, the owner awaits
+cleaning or fallback settlement with a separate two-second drain bound before
+returning a failure that permits device destruction. An adapter that never settles
+exhausts that drain and fails without starting snapshot fallback; adapters must
+honor cancellation to guarantee native commands have stopped before teardown.
+Resource pruning is best-effort: database
+failures log a warning without retaining in-memory sessions or skipping teardown.
+
 The runner returns `non_clean` for unknown/unsupported kinds, incomplete state,
 missing baselines, ownership failures, timeout, failed writes or failed readback.
 The owning reset dispatch must invoke its erase/destruction fallback, never
@@ -77,7 +91,9 @@ be complete or explicitly unobservable; omission fails closed just like an
 explicit blind spot. Complete device settings include all six existing
 default-setting keys and locale/appearance.
 Every journaled kind also needs observable baseline coverage before a journal
-reset can be certified. Missing/changing inventories, duplicate keys and any
+reset can be certified. These certification requirements apply to the generic
+journal reset, not Android's best-effort keep-booted policy. Missing/changing
+inventories, duplicate keys and any
 unobservable state force fallback even if the observed values happen to match.
 Platform adapters must report blind spots instead of claiming a partial scan is
 complete, including app data/containers and changes induced by UI, raw commands

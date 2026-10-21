@@ -809,7 +809,7 @@ test("broker init records explicit reuse permission in the broker manifest", asy
 });
 
 test("broker start revalidates host caps and pooling before host probes or launch", async () => {
-  for (const edit of ["hard-cap", "recorded-cap", "idle-pool", "reuse"]) {
+  for (const edit of ["hard-cap", "recorded-cap", "idle-pool", "reuse", "erase", "keep-booted"]) {
     const f = brokerFixture();
     expect(
       await runPrivateDaemonCommand(parsed([...brokerInitArgs(), "--max-devices", "1"]), {
@@ -836,6 +836,10 @@ test("broker start revalidates host caps and pooling before host probes or launc
     }
     if (edit === "reuse") {
       host.reuseCleanDevices = true;
+    }
+    if (edit === "erase" || edit === "keep-booted") {
+      host.reuseCleanDevices = false;
+      host.reuse = { ios: { mode: edit } };
     }
     f.files.set(path, JSON.stringify(host));
     f.writes.length = 0;

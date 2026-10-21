@@ -83,8 +83,8 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     this.isExecOwnerLive = dependencies.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
   }
 
-  /** Whether the binding is empty, so acquisition may create a retained iOS device. */
-  private async bindingCanCreate(resource: BrokerResourceRecord): Promise<boolean> {
+  /** Whether the binding is empty, so acquisition could create a retained device. */
+  private async bindingCanCreateDevice(resource: BrokerResourceRecord): Promise<boolean> {
     try {
       const assignment = await this.dependencies.registry.getAssignment(this.key(resource));
       return assignment === null || assignment.stableDeviceId === null;
@@ -128,7 +128,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     // Only an empty iOS binding can create a retained device for one warm readiness retry.
     // Reserve one third (at most a runner provisioning window) for that retry; an occupied
     // binding's reuse/adoption cannot produce retained creation evidence and gets the full budget.
-    const canCreate = profile.platform === "ios" && (await this.bindingCanCreate(resource));
+    const canCreate = profile.platform === "ios" && (await this.bindingCanCreateDevice(resource));
     const remainingMs = deadlineMs - timer.now();
     const retryReserveMs = canCreate
       ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)

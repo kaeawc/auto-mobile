@@ -1,4 +1,3 @@
-import { ENV, readEnvRaw } from "../config/env";
 import {
   installStdinShutdownHandlers,
   installStdoutShutdownHandler,
@@ -84,19 +83,21 @@ export async function runStdioServer(
 }
 
 /** Start auxiliary services only in direct mode. */
-async function startDirectModeServices(modules: ServerModules): Promise<void> {
+export async function startDirectModeServices(
+  modules: Pick<
+    ServerModules,
+    | "startVideoRecordingSocketServer"
+    | "startDeviceGestureRecordingSocketServer"
+    | "startDeviceSnapshotSocketServer"
+    | "startAppearanceSocketServer"
+    | "startWebRtcStreamSocketServer"
+  >,
+): Promise<void> {
   await modules.startVideoRecordingSocketServer();
   await modules.startDeviceGestureRecordingSocketServer();
   await modules.startDeviceSnapshotSocketServer();
   await modules.startAppearanceSocketServer();
   await modules.startWebRtcStreamSocketServer();
-  modules.startAppearanceSyncScheduler({
-    getTargets: () => {
-      const current = modules.DeviceReadiness.getInstance().getCurrentDevice();
-      return current?.platform === "android" ? [current] : [];
-    },
-    isEnabled: () => modules.isAppearanceSyncEnabled(readEnvRaw(ENV.APPEARANCE_SYNC)),
-  });
 }
 
 /**

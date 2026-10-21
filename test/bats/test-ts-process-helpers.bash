@@ -13,19 +13,29 @@ setup_test_ts_stubs() {
   export STUB_BIN="$BATS_TEST_TMPDIR/bin"
   unset AUTOMOBILE_HOST_TEST_SLOTS AUTOMOBILE_UNIT_RANDOM_SEED AUTOMOBILE_UNIT_TEST_CHUNK_FILES
   unset AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE AUTOMOBILE_TEST_TS_PARENT_PID RUNNER_OS
+  unset AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS
   mkdir -p "$STUB_BIN"
   : > "$AUTOMOBILE_UNIT_SHARED_ALLOWLIST"
   echo 0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
   cat > "$STUB_BIN/bun" <<'STUB'
 #!/usr/bin/env bash
+if [[ "$1" == */scripts/lib/changedUnitTests.ts ]]; then
+  printf '%s\n' "$2" >> "$STUB_CALLS.selection"
+  printf '%s\n' "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" > "$STUB_CALLS.selection-timeout"
+  if [[ "${STUB_SELECTION_HOLD:-}" == 1 ]]; then sleep 60; fi
+  for ((i=0; i<${STUB_SELECTED_COUNT:-12}; i+=1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+  exit "${STUB_SELECTION_STATUS:-0}"
+fi
 if [[ "$1" == */scripts/lib/runner-calibration.ts && "$2" == probe ]]; then
   printf '%s\n' "$4" >> "$STUB_CALLS.probes"
+  printf '%s\t75\t25\n' "$4" >> "$3"
   exit 0
 fi
 if [[ "$1" == --config=* ]]; then shift; fi
 [[ "$1" == test ]] || exit 0
 if [[ -n "${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}" ]]; then exit 99; fi
 printf '%s %s\n' "$$" "$*" >> "$STUB_CALLS"
+printf '%s\n' "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" >> "$STUB_CALLS.test-timeout"
 if [[ "${STUB_KILL_PARENT:-}" == 1 ]]; then
   kill -TERM "$AUTOMOBILE_TEST_TS_PARENT_PID"
   # The owner is an orphan, so init (or a subreaper) reaps it asynchronously.

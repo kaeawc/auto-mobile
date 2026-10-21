@@ -158,6 +158,7 @@
         "src/**",
         "test/**",
         "scripts/test-ts.sh",
+        "scripts/lib/changedUnitTests.ts",
         "package.json",
         "bunfig.toml",
         "android/**/README.md",
@@ -170,6 +171,7 @@
         "AUTOMOBILE_TEST_MODE",
         "AUTOMOBILE_UNIT_TEST_BASE_REF",
         "AUTOMOBILE_UNIT_TEST_WORKERS",
+        "AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS",
         "AUTOMOBILE_TEST_TIMEOUT_MS",
         "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
       ],

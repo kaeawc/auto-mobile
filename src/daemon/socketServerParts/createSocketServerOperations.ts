@@ -153,6 +153,7 @@ function bindMcpBindings(target: McpBindings): Pick<McpBindings, keyof McpBindin
     selectorSessionIds: target.selectorSessionIds.bind(target),
     releaseBindingsIfSocketDisconnected: target.releaseBindingsIfSocketDisconnected.bind(target),
     releaseDevicePoolMcpSessionBindings: target.releaseDevicePoolMcpSessionBindings.bind(target),
+    clearConnectionDevicePin: target.clearConnectionDevicePin.bind(target),
     recordBoundMcpClientKey: target.recordBoundMcpClientKey.bind(target),
     isSessionOwnedByOtherConnection: target.isSessionOwnedByOtherConnection.bind(target),
     honoursBoundSessionMarker: target.honoursBoundSessionMarker.bind(target),

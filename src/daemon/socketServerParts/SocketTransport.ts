@@ -99,6 +99,7 @@ type Callbacks = Pick<
   | "forgetSocketDiscovery"
   | "clearBoundMcpClientKey"
   | "releaseDevicePoolMcpSessionBindings"
+  | "clearConnectionDevicePin"
   | "forgetLateSessionToolBindings"
   | "abortRequestControllers"
   | "writeFrameData"
@@ -405,6 +406,7 @@ export class SocketTransport {
     this.state.resourceSubscriptions.delete(sessionId);
     this.callbacks.clearBoundMcpClientKey(sessionId);
     this.callbacks.releaseDevicePoolMcpSessionBindings(sessionId);
+    this.callbacks.clearConnectionDevicePin(sessionId);
     this.state.daemonState.getBrokerConnectionScopes?.().unbind(sessionId);
     this.state.releaseToolCallRecording(sessionId);
     this.state.forgetSessionToolBindings(sessionId);

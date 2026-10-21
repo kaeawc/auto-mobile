@@ -56,7 +56,7 @@ function setup(failure?: "update" | "sync") {
     },
     {
       getPooledDevices: () => [{ deviceId: "device", name: "device", platform: "android" }],
-      getCurrentDevice: () => undefined,
+      getSessionDevice: () => undefined,
       getSessionForDevice: () => null,
     },
     dependencies,

@@ -151,4 +151,15 @@ describe("ToolRegistry two-session device pinning (#11810)", () => {
 
     expect(ran).toEqual([{ name: "rotate", deviceId: deviceC.deviceId }]);
   });
+
+  test("a connection pin steers only that connection's sessionless calls", async () => {
+    await arrangeHarness([deviceA, deviceB, deviceC]);
+    fakeReadiness.setExplicitDevicePin(deviceC, "conn-a");
+
+    await rotate({ platform: "android", __mcpSessionId: "conn-a" });
+    await expect(rotate({ platform: "android", __mcpSessionId: "conn-b" })).rejects.toBeInstanceOf(
+      AmbiguousDeviceTargetError,
+    );
+    expect(ran).toEqual([{ name: "rotate", deviceId: deviceC.deviceId }]);
+  });
 });

@@ -494,9 +494,10 @@ export async function predictReadinessTarget(
   platform: SomePlatform,
   deviceReadiness: DeviceReadiness,
   getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
+  connectionId?: string,
 ): Promise<string | undefined> {
   const { devices } = await getConnectedPlatforms();
-  const pin = deviceReadiness.getExplicitDevicePin();
+  const pin = deviceReadiness.getExplicitDevicePin(connectionId);
   const current = deviceReadiness.getCurrentDevice();
   const platforms = new Set(devices.map((device) => device.platform));
   const targetPlatform =

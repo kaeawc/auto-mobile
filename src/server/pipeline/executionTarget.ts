@@ -251,6 +251,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
     await this.enforceSessionUuidForMultipleDevices({
       platform,
+      connectionId: mcpSessionId,
       sessionUuid: state.sessionUuid,
       providedDeviceId,
       deviceReadiness,
@@ -260,6 +261,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     });
     await this.enforceSessionUuidForAutolock({
       platform,
+      connectionId: mcpSessionId,
       sessionUuid: state.sessionUuid,
       providedDeviceId,
       deviceReadiness,
@@ -606,6 +608,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         platform,
         deviceReadiness,
         state.getConnectedPlatforms,
+        state.mcpSessionId,
       );
     }
     const heldRead = await this.heldReadTarget(state, readinessTarget);
@@ -656,6 +659,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       deviceId,
       {
         sessionId: sessionUuid,
+        connectionId: state.mcpSessionId,
         // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
         // (owner decision 2026-10-12, #11964)
         intent: readOnly && !sessionUuid ? "read" : undefined,
@@ -861,6 +865,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
   private async enforceSessionUuidForMultipleDevices(input: {
     platform: SomePlatform;
+    connectionId?: string;
     sessionUuid: string | undefined;
     providedDeviceId: string | undefined;
     deviceReadiness: DeviceReadiness;
@@ -877,7 +882,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal?.throwIfAborted();
     const scan = await getConnectedPlatforms();
     const connectedPlatforms = scan.devices;
-    const explicitPin = this.getValidExplicitPin(deviceReadiness, scan);
+    const explicitPin = this.getValidExplicitPin(deviceReadiness, scan, input.connectionId);
     if (this.hasActiveDeviceForNamedPlatform(platform, explicitPin)) {
       return;
     }
@@ -917,8 +922,9 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private getValidExplicitPin(
     deviceReadiness: DeviceReadiness,
     scan: ConnectedPlatformScan,
+    connectionId?: string,
   ): BootedDevice | undefined {
-    const explicitPin = deviceReadiness.getExplicitDevicePin();
+    const explicitPin = deviceReadiness.getExplicitDevicePin(connectionId);
     if (!explicitPin) {
       return undefined;
     }
@@ -931,6 +937,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return explicitPin;
     }
     if (isScanAuthoritativeFor(scan, explicitPin)) {
+      // Proven device absence invalidates that device's pins on every connection.
       deviceReadiness.clearExplicitDevicePin(explicitPin.deviceId);
       return undefined;
     }
@@ -974,6 +981,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
   private async enforceSessionUuidForAutolock({
     platform,
+    connectionId,
     sessionUuid,
     providedDeviceId,
     deviceReadiness,
@@ -983,6 +991,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     readOnly,
   }: {
     platform: SomePlatform;
+    connectionId?: string;
     sessionUuid: string | undefined;
     providedDeviceId: string | undefined;
     deviceReadiness: DeviceReadiness;
@@ -1001,7 +1010,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal?.throwIfAborted();
     const scan = await getConnectedPlatforms();
     const connectedPlatforms = scan.devices;
-    const explicitPin = this.getValidExplicitPin(deviceReadiness, scan);
+    const explicitPin = this.getValidExplicitPin(deviceReadiness, scan, connectionId);
     if (explicitPin && (platform === "either" || platform === explicitPin.platform)) {
       return;
     }

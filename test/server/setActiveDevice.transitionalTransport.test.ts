@@ -35,6 +35,30 @@ afterEach(() => {
   expect(DaemonState.getInstance().isInitialized()).toBe(false);
 });
 
+test("legacy selection passes the connection id to readiness and records its pin", async () => {
+  const pins = new Map<string | undefined, BootedDevice>();
+  const connectionIds: Array<string | undefined> = [];
+  const legacy: LegacyDeviceSelection = {
+    getCurrentDevice: () => undefined,
+    getCurrentPlatform: () => undefined,
+    ensureDeviceReady: async (_platform, _deviceId, options) => {
+      connectionIds.push(options?.connectionId);
+      return device;
+    },
+    setExplicitDevicePin: (selected, connectionId) => {
+      pins.set(connectionId, selected);
+    },
+  };
+  const select = createSetActiveDeviceHandler({
+    legacyDeviceSelection: () => legacy,
+    resumeCtrlProxy: async () => {},
+  });
+  await select({ deviceId: device.deviceId, __mcpSessionId: "conn-a" });
+  expect(connectionIds).toEqual(["conn-a"]);
+  expect(pins.get("conn-a")).toEqual(device);
+  expect(pins.has(undefined)).toBe(false);
+});
+
 function arrange(
   states: (string | undefined)[],
   failures: number,

@@ -3,6 +3,7 @@ import type { SendCommandOptions } from "../DeviceServiceUtils";
 import type {
   AndroidActionDispatcher,
   AndroidActivateAccessibilityLinkRequest,
+  AndroidAccessibilityActionRequest,
 } from "./AndroidActionDispatcher";
 import type { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
 import type { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
@@ -690,6 +691,13 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return (await this.getSupportedCommands())?.includes(name) === true;
   }
 
+  /** Perform a semantic or custom accessibility action on a node (#14077). */
+  async requestAccessibilityAction(
+    request: AndroidAccessibilityActionRequest,
+  ): Promise<A11yActionResult> {
+    return this.getActionDispatcher().requestAccessibilityAction(request);
+  }
+
   async supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean> {
     return this.getActionDispatcher().supportsAccessibilityLinkActivation(perf);
   }
@@ -797,6 +805,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     | "supportsNodeActionSelectors"
     | "supportsAccessibilityLinkActivation"
     | "requestActivateAccessibilityLink"
+    | "requestAccessibilityAction"
     | "sendClientCommand"
   >;
   protected abstract getClientRequests(): AndroidClientRequests;

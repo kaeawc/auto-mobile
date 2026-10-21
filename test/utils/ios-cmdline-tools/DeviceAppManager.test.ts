@@ -322,6 +322,45 @@ describe("DeviceAppManager", () => {
     expect(hash).toBe(fixtureHash);
   });
 
+  // #14094: getDeepLinks on a physical device needs the copy failure, not a null.
+  test.each([false, true])(
+    "withInstalledAppBundle copy failure (surfaceLookupErrors=%s)",
+    async (surfaceLookupErrors) => {
+      const exec = async (command: string) => {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath && command.includes("device info apps")) {
+          const apps = [{ bundleIdentifier: bundleId, bundleURL: "file:///private/var/A.app" }];
+          await fs.writeFile(jsonPath, JSON.stringify({ apps }), "utf-8");
+        }
+        if (command.includes("device copy from")) {
+          throw Object.assign(new Error("Command failed: xcrun devicectl device copy from"), {
+            stderr: "ERROR: The device is locked.",
+          });
+        }
+        return createExecResult("", "");
+      };
+      const inspector = new DeviceAppManager({
+        platform: () => "darwin",
+        execute: (file, args) => exec([file, ...args].join(" ")),
+        readFile: async (path) => fs.readFile(path, "utf-8"),
+        mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+        rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+        readdir: async (path) => fs.readdir(path),
+        stat: async (path) => fs.stat(path),
+        tmpdir,
+        logger: createFakeLogger(),
+      });
+      const read = inspector.withInstalledAppBundle("device-udid", bundleId, async () => "read", {
+        surfaceLookupErrors,
+      });
+      if (surfaceLookupErrors) {
+        await expect(read).rejects.toThrow("ERROR: The device is locked.");
+      } else {
+        expect(await read).toBeNull();
+      }
+    },
+  );
+
   test("computes simulator app hash via simctl get_app_container", async () => {
     const workDir = await createTempDir();
     const fixtureApp = await createFixtureApp(workDir);

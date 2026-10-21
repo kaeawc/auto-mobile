@@ -41,6 +41,19 @@ shows while it is true. A pull sets the key to true and runs \`onRefresh\` like 
 \`baseRevision\`) sets it back to false to hide the indicator. Declare the key in \`state\` as a
 boolean; a horizontal scroll with \`refresh\` is rejected. The pull is a swipe down from the top of
 the scroll (\`swipeOn\` with the prototype layer) and \`observe\` reports the scroll as usual.
+
+### Chat lists
+
+A vertical \`scroll\` can be a conversation view (needs \`prototype_chat_scroll_v1\`, Android only for
+now): \`reverse: true\` anchors it at the end of its content, so the newest row sits at the bottom;
+\`stickToEnd: true\` follows rows appended while it is at the end; \`atEndKey\` names a declared
+boolean state key the runtime keeps true while it is at the end (show a "new messages" pill with
+\`visibleWhen {key, equals: false}\`); \`onStartReached\` runs each time the start is reached, to load
+older history. \`scrollTo {scroll, to: "start" | "end" | {key: <repeat.key value>}, animated?}\` moves
+the scroll whose \`id\` is \`scroll\` (exactly one); \`{key}\` scrolls to that repeat row. A composer is a
+row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`iconButton\`, with
+\`safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}\`. Rows off screen are absent from
+\`observe\`; \`swipeOn lookFor\` still finds them.
 `;
 
 /**

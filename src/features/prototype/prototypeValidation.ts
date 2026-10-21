@@ -8,6 +8,7 @@ import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeRequestsError } from "./prototypeRequest";
+import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
@@ -715,6 +716,7 @@ function behaviourErrors(
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
     prototypeMotionV2Error(context.nodes) ??
+    prototypeChatScrollError(context.nodes, context.actions) ??
     pagerErrors(context) ??
     stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats)

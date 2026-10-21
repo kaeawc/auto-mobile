@@ -133,6 +133,17 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.enum(["pop"]), stack: z.string().min(1) }).strict(),
   z.object({ type: z.enum(["popToRoot"]), stack: z.string().min(1) }).strict(),
   z
+    .object({
+      type: z.enum(["scrollTo"]),
+      scroll: z.string().min(1),
+      to: z.union([
+        z.enum(["start", "end"]),
+        z.object({ key: z.union([z.string(), z.number().finite(), z.boolean()]) }).strict(),
+      ]),
+      animated: z.boolean().optional(),
+    })
+    .strict(),
+  z
     .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
 ]);
@@ -586,6 +597,11 @@ const scrollBaseSchema = z
     type: z.enum(["scroll"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
     refresh: scrollRefreshSchema.optional(),
+    // Chat lists (#14232): anchored at the end, following new rows, reporting the end position.
+    reverse: z.boolean().optional(),
+    stickToEnd: z.boolean().optional(),
+    atEndKey: stateKeySchema.optional(),
+    onStartReached: z.array(actionSchema).min(1).max(32).optional(),
   })
   .strict();
 // Pager distances share the contract's 10000 dp dimension ceiling.
@@ -946,6 +962,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "appendData",
   "removeData",
   "request",
+  "scrollTo",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

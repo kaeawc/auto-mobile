@@ -12,6 +12,7 @@ import {
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_MOTION_V2_CAPABILITY,
+  PROTOTYPE_CHAT_SCROLL_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_MENUS_CAPABILITY,
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
@@ -65,6 +66,10 @@ import {
 } from "./prototypeSearchBar";
 import { prototypeMotionV2Fields, prototypeMotionV2UnsupportedMessage } from "./prototypeMotionV2";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
+import {
+  prototypeChatScrollFields,
+  prototypeChatScrollUnsupportedMessage,
+} from "./prototypeChatScroll";
 import { prototypeMenuFields, prototypeMenusUnsupportedMessage } from "./prototypeData";
 import {
   prototypeEmitContextFields,
@@ -147,6 +152,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_MOTION_V2_CAPABILITY,
     fields: prototypeMotionV2Fields,
     unsupportedMessage: prototypeMotionV2UnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_CHAT_SCROLL_CAPABILITY,
+    fields: prototypeChatScrollFields,
+    unsupportedMessage: prototypeChatScrollUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_RICH_TEXT_CAPABILITY,

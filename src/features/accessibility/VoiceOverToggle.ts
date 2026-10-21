@@ -43,6 +43,11 @@ export class VoiceOverToggle {
    * from the request is reported: an unreadable state cannot be restored to, and
    * the toggle still proceeds exactly as before.
    */
+  async getEnabled(): Promise<boolean | null> {
+    this.detector.invalidateCache(this.device.deviceId);
+    return this.detector.resolveState(this.device.deviceId, this.clientProvider());
+  }
+
   private async reportPreviousState(
     enabled: boolean,
     options: ScreenReaderToggleOptions | undefined,
@@ -52,8 +57,7 @@ export class VoiceOverToggle {
     }
     let previous: boolean | null = null;
     try {
-      this.detector.invalidateCache(this.device.deviceId);
-      previous = await this.detector.resolveState(this.device.deviceId, this.clientProvider());
+      previous = await this.getEnabled();
     } catch (error) {
       logger.warn(`[VoiceOverToggle] Could not read VoiceOver state: ${errorMessage(error)}`);
     }

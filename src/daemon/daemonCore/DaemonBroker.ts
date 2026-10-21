@@ -411,6 +411,7 @@ export class DaemonBroker {
       acquisition: acquisition.acquisition,
       release,
       journal: acquisition.journalFor(registry),
+      mutationSessions: this.host.services.sessionManager(),
       owner: this.bindingJournalOwner(),
       timer: this.host.services.timer(),
       sessionDisposition: (sessionUuid) =>

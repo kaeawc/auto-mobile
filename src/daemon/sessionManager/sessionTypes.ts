@@ -7,6 +7,7 @@ import type { TimingData } from "../../utils/PerformanceTracker";
 import type { DeferredRebindCleanup } from "../acquisitionReceipt";
 import type { DeviceReadinessLevel } from "../readiness/DeviceReadiness";
 import type { SessionRecoveryLiveness } from "./recoveryTypes";
+import type { MutationRecorder } from "../sessionBroker/mutations/recorder";
 import type {
   BiometricEnrollmentSessionState,
   ClockSessionState,
@@ -83,6 +84,7 @@ export interface HeldDeviceSession {
  * Each JUnitRunner test process gets a unique session UUID.
  */
 export interface Session {
+  mutationRecorder?: MutationRecorder;
   sessionId: string; // UUID provided by JUnitRunner
   assignedDevice: string; // Device ID this session is using
   stableDeviceId?: string; // Durable identity: Android AVD name or iOS simulator UDID

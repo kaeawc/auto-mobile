@@ -374,6 +374,7 @@ export class SessionRebinding {
   ): Session {
     return {
       ...session,
+      mutationRecorder: undefined,
       assignedDevice,
       stableDeviceId,
       platform,

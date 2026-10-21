@@ -1671,14 +1671,16 @@ internal constructor(
     val keys = extras.keySet()
     if (keys.isNullOrEmpty()) return null
 
-    val map = mutableMapOf<String, String>()
+    var map: MutableMap<String, String>? = null
     for (key in keys) {
+      if (VolatileExtras.isNeverShipped(key)) continue
       val value = extras.get(key)
       if (value != null) {
+        if (map == null) map = linkedMapOf()
         map[key] = value.toString()
       }
     }
-    return if (map.isEmpty()) null else map
+    return map
   }
 
   private fun extractTestTag(extras: Map<String, String>?): String? = testTagFromExtras(extras)

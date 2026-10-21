@@ -68,6 +68,13 @@ describe("launcher flags: both forms parse identically", () => {
   );
 });
 
+test("debug flags read the injected environment, not process.env", () => {
+  const parsed = parseArgs([], log, { AUTOMOBILE_DEBUG: "1", AUTOMOBILE_DEBUG_PERF: "true" });
+  expect(parsed.debug).toBe(true);
+  expect(parsed.debugPerf).toBe(true);
+  expect(launch([]).debug).toBe(false);
+});
+
 describe("shared launcher readers accept both forms", () => {
   test("ctrl-proxy download skip: =true skips, =false overrides the env var", () => {
     const env = { AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: "1" };

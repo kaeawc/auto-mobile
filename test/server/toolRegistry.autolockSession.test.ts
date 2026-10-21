@@ -1,3 +1,7 @@
+import {
+  registerDirectSessionDevice,
+  unregisterDirectSession,
+} from "../../src/utils/directSessionDeviceRegistry";
 import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -92,6 +96,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   });
 
   afterEach(() => {
+    unregisterDirectSession("session-123");
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
@@ -256,6 +261,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
 
     const tool = registerTool("autolockWithSession");
+    registerDirectSessionDevice("session-123", androidA);
 
     const response = await tool.handler({ platform: "android", sessionUuid: "session-123" });
     expect(response).toEqual({ success: true });
@@ -366,7 +372,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     const tool = registerTool("autolockAfterResolution");
 
     await tool.handler({ deviceId: androidA.deviceId });
-    expect(fakeDeviceReadiness.getSetCurrentDeviceCalls()).toEqual([androidA]);
+    expect(fakeDeviceReadiness.getExplicitDevicePin()).toBeUndefined();
     await expect(tool.handler({})).rejects.toThrow(
       "Device pool autolock is enabled and multiple devices are available.",
     );
@@ -401,7 +407,6 @@ describe("ToolRegistry autolock session enforcement", () => {
   test("allows the call when a device was pinned via setActiveDevice", async () => {
     setAutolock(true);
     fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
-    fakeDeviceReadiness.setCurrentDevice(androidA, "android");
     fakeDeviceReadiness.setExplicitDevicePin(androidA);
 
     const tool = registerTool("autolockActiveDevice");
@@ -414,20 +419,20 @@ describe("ToolRegistry autolock session enforcement", () => {
   test("an explicit pin survives a later deviceId-only resolution", async () => {
     setAutolock(true);
     fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
-    fakeDeviceReadiness.setCurrentDevice(androidA, "android");
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
     fakeDeviceReadiness.setExplicitDevicePin(androidA);
     const tool = registerTool("autolockPinnedAfterOtherDevice");
 
     await tool.handler({ platform: "android", deviceId: androidB.deviceId });
-    expect(fakeDeviceReadiness.getCurrentDevice()?.deviceId).toBe(androidB.deviceId);
+    expect(fakeDeviceReadiness.getExplicitDevicePin()?.deviceId).toBe(androidA.deviceId);
     await tool.handler({ platform: "android" });
-    expect(fakeDeviceReadiness.getCurrentDevice()?.deviceId).toBe(androidA.deviceId);
+    expect(fakeDeviceReadiness.getExplicitDevicePin()?.deviceId).toBe(androidA.deviceId);
   });
 
   test("a released explicit pin no longer exempts an untargeted call", async () => {
     setAutolock(true);
     fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
-    fakeDeviceReadiness.setCurrentDevice(androidA, "android");
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
     fakeDeviceReadiness.setExplicitDevicePin(androidA);
     fakeDeviceReadiness.clearExplicitDevicePin(androidA.deviceId);
     const tool = registerTool("autolockAfterRelease");
@@ -441,7 +446,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   test("a removed explicit pin is invalidated before the ambiguity checks", async () => {
     setAutolock(true);
     fakeDeviceReadiness.setConnectedDevices([androidB, iosA]);
-    fakeDeviceReadiness.setCurrentDevice(androidA, "android");
+    fakeDeviceReadiness.setExplicitDevicePin(androidA);
     fakeDeviceReadiness.setExplicitDevicePin(androidA);
     const tool = registerTool("autolockStalePin");
 
@@ -455,7 +460,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   test("keeps an iOS pin when simctl scan fails during autolock enforcement", async () => {
     setAutolock(true);
     fakeDeviceReadiness.setConnectedDevices([androidA, iosA]);
-    fakeDeviceReadiness.setCurrentDevice(iosA, "ios");
+    fakeDeviceReadiness.setExplicitDevicePin(iosA);
     fakeDeviceReadiness.setExplicitDevicePin(iosA);
     fakeDeviceReadiness.setPlatformScanFailure("ios", true);
     const tool = registerTool("autolockFailedIosScanPin");

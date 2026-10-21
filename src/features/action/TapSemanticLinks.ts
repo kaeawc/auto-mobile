@@ -15,6 +15,7 @@ import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import { stableNodeSelectorForElement } from "../talkback/TalkBackTapStrategy";
+import { matchesCtrlProxyNodeSelector } from "../utility/SearchableNode";
 import { indeterminateTapError } from "./coordinateTapDispatch";
 import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
@@ -267,29 +268,7 @@ export class TapSemanticLinks {
     const selector = stableNodeSelectorForElement(owner);
     return (
       selector !== undefined &&
-      elements.filter((element) => this.matchesNativeOwnerSelector(element, selector)).length === 1
-    );
-  }
-
-  private matchesNativeOwnerSelector(
-    element: Element,
-    selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
-  ): boolean {
-    const resourceId = element["resource-id"];
-    if (
-      selector.resourceId !== undefined &&
-      (typeof resourceId !== "string" ||
-        (resourceId !== selector.resourceId && !resourceId.endsWith(`:id/${selector.resourceId}`)))
-    ) {
-      return false;
-    }
-    return (
-      (selector.testTag === undefined || element["test-tag"] === selector.testTag) &&
-      (selector.uniqueId === undefined || element["unique-id"] === selector.uniqueId) &&
-      (selector.collectionRow === undefined ||
-        element["collection-row-index"] === selector.collectionRow) &&
-      (selector.collectionColumn === undefined ||
-        element["collection-column-index"] === selector.collectionColumn)
+      elements.filter((element) => matchesCtrlProxyNodeSelector(element, selector)).length === 1
     );
   }
 

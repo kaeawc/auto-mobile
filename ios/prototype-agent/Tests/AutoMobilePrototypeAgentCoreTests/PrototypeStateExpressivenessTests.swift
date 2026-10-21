@@ -132,6 +132,8 @@ final class PrototypeStateExpressivenessTests: XCTestCase {
         XCTAssertEqual(rows.map { $0[3].stateKey }, ["notify_a", "notify_b"])
         XCTAssertEqual(rows.map { $0[4].onTap?.map(\.key) }, [["count_a", "last_0"], ["count_b", "last_1"]])
         XCTAssertEqual(rows.map { $0[5].trailing?.stateKey }, ["saved_a", "saved_b"])
+        // #14585: a list item's headline interpolates per item.
+        XCTAssertEqual(rows.map { $0[5].headline }, ["Save Alexey", "Save Bea"])
         XCTAssertEqual(rows.map { $0[6].confirm?.onTap?.first?.key }, ["open_a", "open_b"])
         var session = PrototypeSession()
         session.show(spec)

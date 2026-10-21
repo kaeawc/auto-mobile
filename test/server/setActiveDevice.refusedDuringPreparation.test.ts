@@ -244,8 +244,8 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
           calls.push("resume");
         },
         legacyDeviceSelection: () => ({
-          getCurrentDevice: () => undefined,
-          getCurrentPlatform: () => undefined,
+          getExplicitDevicePin: () => undefined,
+
           ensureDeviceReady: async () => {
             calls.push("ready");
             return h.device;
@@ -409,8 +409,8 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
             }
           },
           legacyDeviceSelection: () => ({
-            getCurrentDevice: () => undefined,
-            getCurrentPlatform: () => undefined,
+            getExplicitDevicePin: () => undefined,
+
             ensureDeviceReady: async () => {
               calls.push("ready");
               if (reserveDuring === "ready") {
@@ -450,8 +450,8 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
           calls.push("resume");
         },
         legacyDeviceSelection: () => ({
-          getCurrentDevice: () => undefined,
-          getCurrentPlatform: () => undefined,
+          getExplicitDevicePin: () => undefined,
+
           ensureDeviceReady: async () => {
             calls.push("ready");
             return h.device;

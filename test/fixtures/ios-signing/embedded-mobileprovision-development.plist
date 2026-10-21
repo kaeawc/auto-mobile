@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AppIDName</key>
+	<string>Playground</string>
+	<key>ApplicationIdentifierPrefix</key>
+	<array>
+	<string>ABCDE12345</string>
+	</array>
+	<key>CreationDate</key>
+	<date>2026-04-21T09:00:00Z</date>
+	<key>Platform</key>
+	<array>
+		<string>iOS</string>
+		<string>xrOS</string>
+		<string>visionOS</string>
+	</array>
+	<key>IsXcodeManaged</key>
+	<true/>
+	<key>DeveloperCertificates</key>
+	<array>
+	</array>
+	<key>Entitlements</key>
+	<dict>
+		<key>application-identifier</key>
+		<string>ABCDE12345.dev.jasonpearson.automobile.Playground</string>
+		<key>com.apple.developer.associated-domains</key>
+		<string>*</string>
+		<key>com.apple.developer.team-identifier</key>
+		<string>ABCDE12345</string>
+		<key>get-task-allow</key>
+		<true/>
+		<key>keychain-access-groups</key>
+		<array>
+				<string>ABCDE12345.*</string>
+		</array>
+	</dict>
+	<key>ExpirationDate</key>
+	<date>2027-04-21T09:00:00Z</date>
+	<key>Name</key>
+	<string>iOS Team Provisioning Profile: dev.jasonpearson.automobile.Playground</string>
+	<key>ProvisionedDevices</key>
+	<array>
+		<string>00008110-001A2B3C4D5E801E</string>
+		<string>00008120-000F1E2D3C4B5A6E</string>
+	</array>
+	<key>TeamIdentifier</key>
+	<array>
+		<string>ABCDE12345</string>
+	</array>
+	<key>TeamName</key>
+	<string>Jane Appleseed</string>
+	<key>TimeToLive</key>
+	<integer>365</integer>
+	<key>UUID</key>
+	<string>8F6C2B1A-3D4E-4F50-9A6B-7C8D9E0F1A2B</string>
+	<key>Version</key>
+	<integer>1</integer>
+</dict>
+</plist>

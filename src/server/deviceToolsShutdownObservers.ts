@@ -1,3 +1,4 @@
+import type { Invalidatable, Reconnectable } from "./observerTypes";
 import {
   isAlreadyStoppedDeviceError,
   resumeCtrlProxyWhenPreparationSettles,
@@ -179,7 +180,7 @@ function bindLiveAndroidObserverSession(
   }
 }
 
-function invalidateObserver(observer: import("./observerTypes").Invalidatable, id: string): void {
+function invalidateObserver(observer: Invalidatable, id: string): void {
   // Removal is deliberately synchronous and precedes cleanup. `close()` can
   // wait on an ADB forward removal that does not honour the shutdown deadline;
   // retaining the singleton until that completes would keep an obsolete client
@@ -206,7 +207,7 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
     ShutdownObserverRecoveryContext,
     "device" | "timer" | "shutdownDeadlineMs" | "requestAbortSignal" | "timeoutMs"
   >,
-  observer: import("./observerTypes").Reconnectable,
+  observer: Reconnectable,
 ): Promise<boolean> {
   const { device, timer, shutdownDeadlineMs, requestAbortSignal, timeoutMs } = context;
   const reconnect = async (): Promise<boolean> => {
@@ -241,7 +242,7 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
 
 async function revalidateReconnectedAndroidObserver(
   context: ShutdownObserverRecoveryContext,
-  observer: import("./observerTypes").Invalidatable,
+  observer: Invalidatable,
   observerState: AndroidObserverShutdownState,
 ): Promise<boolean> {
   const { device } = context;

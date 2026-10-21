@@ -41,6 +41,14 @@ class DaemonSocketClientReaderResilienceTest {
         val reader = Channels.newInputStream(connection).bufferedReader(StandardCharsets.UTF_8)
         val writer = Channels.newOutputStream(connection).bufferedWriter(StandardCharsets.UTF_8)
         val request = json.decodeFromString(serializer<DaemonRequest>(), reader.readLine())
+        writer.write("""{"type":"daemon_notification","method":"notifications/progress"}""")
+        writer.newLine()
+        writer.write(
+          """{"type":"daemon_notification","method":"notifications/automobile/requestBudget","requestId":"${request.id}","timeoutMs":4000}""",
+        )
+        writer.newLine()
+        writer.write("{malformed")
+        writer.newLine()
         listOf("boom", request.id).forEach { id ->
           writer.write(json.encodeToString(DaemonResponse(id, "mcp_response", success = true)))
           writer.newLine()

@@ -4,6 +4,7 @@ import { logger } from "../../utils/logger";
 import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
 import { normalizedAxis } from "./normalizedAxis";
 import { isInternalStepParam } from "../../constants/internalStepParams";
+import { redactToolSecrets, TOOL_SECRET_PLACEHOLDER } from "../../utils/redactToolSecrets";
 
 /** The registry-declared tool traits the recorder reads (structural subset of `ToolTraits`). */
 export interface RecorderToolTraits {
@@ -50,12 +51,34 @@ const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 
 /**
+ * `action` values that only read state unless the call also waits (`waitFor`): a wait
+ * holds a replayed plan until the device reaches a state, so it is a step (#14117).
+ */
+const READ_ONLY_ACTIONS_UNLESS_WAITING: Readonly<Record<string, ReadonlySet<string>>> = {
+  mediaSession: new Set(["get"]),
+};
+
+/**
  * Tools that read current values unless one of these set fields is present:
  * displayConfig changes a value only with a set field, accessibility reports
  * the TalkBack/VoiceOver state when neither toggle is given.
  */
 const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  displayConfig: ["fontScale", "density", "theme", "reset"],
+  displayConfig: [
+    "fontScale",
+    "contentSize",
+    "density",
+    "theme",
+    "increaseContrast",
+    "reduceMotion",
+    "boldText",
+    "colorInversion",
+    "colorCorrection",
+    "magnification",
+    "magnificationScale",
+    "extraDim",
+    "reset",
+  ],
   accessibility: ["talkback", "voiceover"],
 };
 
@@ -64,6 +87,14 @@ export function isReadOnlyCall(toolName: string, params: Record<string, unknown>
   const setFields = READ_UNLESS_SET_FIELDS[toolName];
   if (setFields) {
     return setFields.every((field) => params[field] === undefined);
+  }
+  const readUnlessWaiting = READ_ONLY_ACTIONS_UNLESS_WAITING[toolName];
+  if (readUnlessWaiting) {
+    return (
+      params.waitFor === undefined &&
+      typeof params.action === "string" &&
+      readUnlessWaiting.has(params.action)
+    );
   }
   const readOnly = READ_ONLY_ACTIONS[toolName];
   return readOnly !== undefined && typeof params.action === "string" && readOnly.has(params.action);
@@ -226,12 +257,7 @@ export class ToolCallRecorder {
       this.warnings.push(warning);
       return;
     }
-    const recorded = withholdDestructiveConfirmations(toolName, params);
-    if (recorded !== params) {
-      this.warnings.push(
-        `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
-      );
-    }
+    const recorded = this.withholdUnsafeParams(toolName, params);
     const context = args.__tapAtRecordingContext as
       | import("../../models/TapAtGeometry").TapAtPlanContext
       | undefined;
@@ -256,6 +282,26 @@ export class ToolCallRecorder {
       this.steps.push({ tool: toolName, params: recordedParams });
     }
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
+  }
+
+  /** Withhold destructive confirmations and credentials, warning the author of each. */
+  private withholdUnsafeParams(
+    toolName: string,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const confirmed = withholdDestructiveConfirmations(toolName, params);
+    if (confirmed !== params) {
+      this.warnings.push(
+        `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
+      );
+    }
+    const recorded = redactToolSecrets(toolName, confirmed);
+    if (recorded !== confirmed) {
+      this.warnings.push(
+        `${toolName} was recorded with its credentials replaced by ${TOOL_SECRET_PLACEHOLDER}: set them in the plan by hand before a replay`,
+      );
+    }
+    return recorded;
   }
 
   private paramsToStore(

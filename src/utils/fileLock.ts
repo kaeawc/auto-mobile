@@ -58,7 +58,6 @@ export {
   OWN_TMP_SWEEP_INTERVAL_MS,
   OWN_TMP_SWEEP_CANDIDATE_LIMIT,
   OWN_TMP_SWEEP_DIRECTORY_LIMIT,
-  BACK_OUT_RETRY_LIMIT,
   type ExclusiveLockOptions,
   type LockContent,
   formatLockContent,

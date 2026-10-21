@@ -163,7 +163,7 @@ export class ToolRegistryClass {
   private readonly sessionBindingReleaseNotifier: SessionBindingReleaseHandler = {
     onSessionReleased: (sessionUuid) => this.notifySessionBindingReleased(sessionUuid),
   };
-  private deviceReadiness: DeviceReadiness;
+  private deviceReadiness!: DeviceReadiness;
   private cleanupService: AppCleanupService;
   private toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   private timer: Timer;
@@ -180,8 +180,14 @@ export class ToolRegistryClass {
   private toolDefinitionSchemaBuilds = 0;
   private removalEpoch = 0;
 
-  constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
-    this.deviceReadiness = DeviceReadiness.getInstance();
+  constructor(
+    timer: Timer = defaultTimer,
+    loggerInstance: Logger = logger,
+    deviceReadiness: DeviceReadiness | null = DeviceReadiness.createInstance(),
+  ) {
+    if (deviceReadiness) {
+      this.deviceReadiness = deviceReadiness;
+    }
     this.cleanupService = new DefaultAppCleanupService();
     this.toolCallRepository = new ToolCallRepository();
     this.timer = timer;
@@ -197,10 +203,7 @@ export class ToolRegistryClass {
     this.toolCallRepository = repository;
   }
 
-  /**
-   * Test seam: the collaborators suites swap on the singleton, so a test can save the
-   * originals and restore them with {@link setCollaboratorsForTesting}.
-   */
+  /** Snapshot injectable collaborators so tests can restore them. */
   getCollaboratorsForTesting(): ToolRegistryCollaborators {
     return {
       deviceReadiness: this.deviceReadiness,
@@ -211,20 +214,16 @@ export class ToolRegistryClass {
     };
   }
 
-  /**
-   * Test seam: replace the named collaborators; omitted ones are left alone. Test doubles
-   * usually implement only the members under test, so they are accepted as `Partial` and
-   * narrowed here, in the one place. The after-tool-call handler is replaced through
-   * `setPipelineOverridesForTesting`.
-   */
+  /** Replace named collaborators in tests, narrowing partial fakes here; omitted fields stay unchanged. */
   setCollaboratorsForTesting(overrides: {
     deviceReadiness?: Partial<DeviceReadiness>;
     toolCallRepository?: Pick<ToolCallRepository, "recordToolCall">;
     timer?: Timer;
     navigationToolCallRecorder?: Partial<NavigationToolCallRecorder>;
   }): void {
-    this.deviceReadiness =
-      (overrides.deviceReadiness as DeviceReadiness | undefined) ?? this.deviceReadiness;
+    if ("deviceReadiness" in overrides) {
+      this.deviceReadiness = overrides.deviceReadiness as DeviceReadiness;
+    }
     this.toolCallRepository = overrides.toolCallRepository ?? this.toolCallRepository;
     this.timer = overrides.timer ?? this.timer;
     this.navigationToolCallRecorder =
@@ -971,8 +970,16 @@ export class ToolRegistryClass {
     this.toolDefinitionSchemaCache.clear();
   }
 
+  /** Install the service owned by this process's composition root. */
+  setDeviceReadiness(readiness: DeviceReadiness): void {
+    this.deviceReadiness = readiness;
+  }
+
   // Get the device session manager
   getDeviceReadiness(): DeviceReadiness {
+    if (!this.deviceReadiness) {
+      throw new ActionableError("Device readiness was not configured by the process entrypoint.");
+    }
     return this.deviceReadiness;
   }
 
@@ -1037,7 +1044,9 @@ export class ToolRegistryClass {
 }
 
 // Install one instance; the exported value below also enforces its typed payload contract.
-const installedToolRegistry = installDaemonToolRegistryPort(new ToolRegistryClass());
+const installedToolRegistry = installDaemonToolRegistryPort(
+  new ToolRegistryClass(undefined, undefined, null),
+);
 
 // --- Compile-time enforcement of AC1 (issue #3222) ---
 // This contract is checked by the src typecheck gate. It rejects both an `any`

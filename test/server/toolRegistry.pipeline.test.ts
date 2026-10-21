@@ -1,3 +1,7 @@
+import {
+  registerDirectSessionDevice,
+  unregisterDirectSession,
+} from "../../src/utils/directSessionDeviceRegistry";
 import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -88,6 +92,7 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   afterEach(() => {
+    unregisterDirectSession("session-1");
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     restoreDefaultPipelineOverrides?.();
@@ -500,6 +505,7 @@ describe("ToolRegistry device-aware pipeline", () => {
         async () => ({ success: true }),
       );
 
+      registerDirectSessionDevice("session-1", device);
       const tool = registry.getTool("bindFailureProbe")!;
       await expect(
         tool.handler({ platform: "android", sessionUuid: "session-1" }),
@@ -1142,6 +1148,40 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       expect(telemetryEvents[0].error).toBe(
         "device_already_stopped: Failed to kill android device: Emulator is not running",
       );
+    } finally {
+      recordToolCallEvent.mockRestore();
+    }
+  });
+
+  test("telemetry never carries a setDeviceState lock-screen credential (#14107)", async () => {
+    const telemetryEvents: Array<{ args?: unknown }> = [];
+    const recordToolCallEvent = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordToolCallEvent",
+    ).mockImplementation((event) => {
+      telemetryEvents.push(event);
+    });
+    const timer = new FakeTimer();
+    timer.setCurrentTime(25);
+
+    try {
+      await new DefaultAfterToolCallHandler().handle({
+        outputSchema: undefined,
+        name: "setDeviceState",
+        args: { screenLock: { type: "pin", credential: "7391" } },
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse({ message: "Applied device state", success: true }),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 20,
+      });
+
+      expect(telemetryEvents).toHaveLength(1);
+      expect(telemetryEvents[0].args).toEqual({
+        screenLock: { type: "pin", credential: "<redacted>" },
+      });
     } finally {
       recordToolCallEvent.mockRestore();
     }

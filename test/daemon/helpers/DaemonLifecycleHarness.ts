@@ -21,11 +21,11 @@ export class DaemonLifecycleHarness extends Daemon {
   }
 
   stopMonitor(): void {
-    this.heartbeatMonitor?.stop();
+    this.runtime.heartbeatMonitor?.stop();
   }
 
   /** Stops the heartbeat monitor and waits for its in-flight pass to settle. */
   async stopMonitorAndWait(): Promise<void> {
-    await this.heartbeatMonitor?.stop();
+    await this.runtime.heartbeatMonitor?.stop();
   }
 }

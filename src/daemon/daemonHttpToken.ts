@@ -26,6 +26,8 @@ import { exponentialBackoff } from "../utils/Backoff";
 import { logger } from "../utils/logger";
 import { resolveDaemonStatePath } from "./constants";
 
+const STALE_REMOVAL_CLAIM_MS = 60_000;
+
 export interface DaemonHttpTokenStore {
   write(token: string): void;
   read(): string | undefined;
@@ -45,7 +47,9 @@ export interface DaemonHttpTokenRemovalFiles {
   list(path: string): string[];
   inspect(
     path: string,
-  ): Pick<Stats, "isFile" | "isDirectory" | "isSymbolicLink" | "uid" | "mode"> | undefined;
+  ):
+    | Pick<Stats, "isFile" | "isDirectory" | "isSymbolicLink" | "uid" | "mode" | "mtimeMs">
+    | undefined;
   move(source: string, destination: string): void;
   read(path: string): string | undefined;
   restore(source: string, destination: string): void;
@@ -58,6 +62,7 @@ interface FileDaemonHttpTokenStoreOptions {
   platform?: NodeJS.Platform;
   renameFile?: (source: string, destination: string) => void;
   sleep?: (ms: number) => void;
+  now?: () => number;
 }
 
 /** Atomic publication; readers validate the opened inode, not a prior path stat. */
@@ -67,6 +72,7 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
   private readonly platform: NodeJS.Platform;
   private readonly renameFile: (source: string, destination: string) => void;
   private readonly sleep: (ms: number) => void;
+  private readonly now: () => number;
 
   constructor(
     private readonly path = resolveDaemonStatePath("token"),
@@ -87,6 +93,7 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
       removeDirectory: rmdirSync,
     };
     this.platform = options.platform ?? process.platform;
+    this.now = options.now ?? Date.now;
     this.renameFile = options.renameFile ?? renameSync;
     this.sleep =
       options.sleep ??
@@ -218,6 +225,20 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
     }
   }
 
+  private isStaleRemovalDirectory(
+    stat: ReturnType<DaemonHttpTokenRemovalFiles["inspect"]>,
+  ): boolean {
+    return (
+      !!stat?.isDirectory() &&
+      !stat.isSymbolicLink() &&
+      // A live remove() may be holding the successor's token until it can restore it.
+      Number.isFinite(stat.mtimeMs) &&
+      stat.mtimeMs < this.now() - STALE_REMOVAL_CLAIM_MS &&
+      (this.platform === "win32" ||
+        (stat.uid === process.getuid?.() && (stat.mode & 0o7777) === 0o700))
+    );
+  }
+
   private sweepRemovalDirectories(): void {
     const files = this.removalFiles;
     try {
@@ -229,12 +250,7 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
         }
         const directory = join(parent, name);
         const stat = files.inspect(directory);
-        if (
-          stat?.isDirectory() &&
-          !stat.isSymbolicLink() &&
-          stat.uid === (process.getuid?.() ?? 0) &&
-          (stat.mode & 0o7777) === 0o700
-        ) {
+        if (this.isStaleRemovalDirectory(stat)) {
           this.cleanClaim(directory);
         }
       }

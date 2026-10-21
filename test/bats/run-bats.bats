@@ -286,6 +286,25 @@ run_runner() {
   done
 }
 
+@test "slow hermetic unit files are classified for front-loading" {
+  source "$SCRIPT"
+  local parallel_list="$FIXTURES/parallel-files"
+  local serial_list="$FIXTURES/serial-files"
+  local within_list="$FIXTURES/within-files"
+  local file
+  : > "$parallel_list"
+  : > "$serial_list"
+  : > "$within_list"
+
+  classify_files "$REPO_ROOT/test/bats" unit "$parallel_list" "$serial_list" "$within_list"
+
+  for file in live-idle-release-check oxlint-baseline boot-emulator; do
+    tr '\0' '\n' < "$within_list" | grep -Fx -- "$REPO_ROOT/test/bats/$file.bats"
+    # `! cmd` never trips errexit, so compare the match output instead.
+    [ -z "$(tr '\0' '\n' < "$parallel_list" | grep -Fx -- "$REPO_ROOT/test/bats/$file.bats")" ]
+  done
+}
+
 @test "rejects an invalid within-file jobs override" {
   run env \
     HOME="$FAKE_HOME" \

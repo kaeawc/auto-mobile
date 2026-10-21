@@ -331,13 +331,11 @@ internal class ViewHierarchyExtractorTraversalIdentityTest : ViewHierarchyExtrac
     return method.invoke(this, path) as String
   }
 
+  // optimizeHierarchy is internal (its Kotlin name is mangled), so call it directly, not
+  // reflectively.
   private fun ViewHierarchyExtractor.optimizeHierarchyForTest(
     element: UIElementInfo,
-  ): List<UIElementInfo> {
-    val method = this.javaClass.getDeclaredMethod("optimizeHierarchy", UIElementInfo::class.java)
-    method.isAccessible = true
-    return (method.invoke(this, element) as List<*>).map { it as UIElementInfo }
-  }
+  ): List<UIElementInfo> = optimizeHierarchy(element)
 
   // Issue #5471: the optimize pass walks typed children and performs ZERO serialization, so every
   // element it returns still has a null `node` (the wire projection is built only at the boundary).

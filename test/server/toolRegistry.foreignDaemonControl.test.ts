@@ -86,7 +86,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     });
     devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([claimed, free]);
-    devices.setCurrentDevice(claimed, "android");
+    devices.setExplicitDevicePin(claimed);
     readinessRequests = 0;
     const ensureDeviceReady = devices.ensureDeviceReady.bind(devices);
     devices.ensureDeviceReady = async (...args) => {
@@ -344,8 +344,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     async () => {
       onlyClaimedVisible();
       foreignOwners.clear();
-      devices.getCurrentDevice = () => undefined;
-      devices.getCurrentPlatform = () => undefined;
+      devices.clearExplicitDevicePin(claimed.deviceId);
       expect(devices.getExplicitDevicePin()).toBeUndefined();
       forwardVerdict = {
         kind: "foreign",

@@ -1,3 +1,4 @@
+import type { DeviceReadiness } from "../readiness/DeviceReadiness";
 import { DaemonHttpIngress, type DaemonHttpIngressDeps } from "../daemonHttpIngress";
 import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "../inProcessMcpDispatcher";
 import { buildMcpRequestContext, createStatelessMcpServer } from "../statelessMcpServerFactory";
@@ -8,6 +9,7 @@ import {
 } from "../daemonHandoffInterruption";
 
 interface DaemonMcpServicesHost extends Omit<DaemonHttpIngressDeps, "createRequestMcpServer"> {
+  deviceReadiness(): DeviceReadiness;
   iosDoctorDependencies: ReturnType<typeof createIosDoctorDependencies>;
   debug(): boolean;
   acceptanceDiscoveryCapability(): string | undefined;
@@ -40,6 +42,7 @@ export class DaemonMcpServices {
 
   private statelessMcpServerBase() {
     return {
+      deviceReadiness: this.host.deviceReadiness(),
       iosDependencies: this.host.iosDoctorDependencies,
       debug: this.host.debug(),
       acceptanceDiscoveryCapability: this.host.acceptanceDiscoveryCapability(),

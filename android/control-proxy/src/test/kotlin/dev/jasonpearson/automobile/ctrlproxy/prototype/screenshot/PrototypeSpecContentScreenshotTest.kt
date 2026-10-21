@@ -510,6 +510,24 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
     )
 
+  // Pending: #14209 line, area, bar and ring charts; no Linux baselines recorded yet.
+  @Test
+  fun chartVariants() =
+    prototypeScreenshotTest(
+      "chart_variants",
+      validPrototypeFixture("chart-variants"),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun chartVariantsDark() =
+    prototypeScreenshotTest(
+      "chart_variants_dark",
+      validPrototypeFixture("chart-variants"),
+      pending = true,
+    )
+
   /** Pending until the baseline workflow records the new menu and select surfaces. */
   @Test
   fun menuOpen() =

@@ -100,7 +100,7 @@ struct PrototypeSpec: Decodable {
     let authoredRoot: JSONValue
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage
+        case id, window, state, data, theme, motion, root, storage, requires, platform
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -131,6 +131,13 @@ struct PrototypeSpec: Decodable {
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
+        // The platform vocabulary (#14294) is checked as a backstop; the agent does not run it yet.
+        try PrototypePlatformValidator.validate(
+            requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
+            handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
+            root: raw,
+            state: menuState ?? [:]
+        )
         root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:])
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
@@ -755,6 +762,8 @@ final class PrototypeNode: Decodable {
     let screens: [String: PrototypeNode]?
     let text: String?
     let spans: [PrototypeTextSpan]?
+    /// Mentions, hashtags and URLs in `text` as links (#14233).
+    let linkify: PrototypeLinkifyOptions?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
@@ -856,6 +865,7 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing, swipeActions
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
+             linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
              imeAction
@@ -933,6 +943,7 @@ final class PrototypeNode: Decodable {
         start = try container.decodeIfPresent(String.self, forKey: .start)
         screens = try container.decodeIfPresent([String: PrototypeNode].self, forKey: .screens)
         spans = try container.decodeIfPresent([PrototypeTextSpan].self, forKey: .spans)
+        linkify = try container.decodeIfPresent(PrototypeLinkifyOptions.self, forKey: .linkify)
         activeKey = try container.decodeIfPresent(String.self, forKey: .activeKey)
         trailingActions = try container.decodeIfPresent([PrototypeAppBarAction].self, forKey: .trailingActions)
         onSubmit = try container.decodeIfPresent([PrototypeAction].self, forKey: .onSubmit)

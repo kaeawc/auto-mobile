@@ -95,7 +95,7 @@ internal enum class PrototypeRenderWork {
 internal val LocalPrototypeRenderWorkProbe =
   staticCompositionLocalOf<((PrototypeRenderWork, String) -> Unit)?> { null }
 
-val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
+internal val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
 
 /** Font assets are remembered once per distinct authored family, outside the string builder. */
 @Composable
@@ -172,6 +172,7 @@ fun PrototypeRuntimeContent(
         }
       CompositionLocalProvider(
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
+        LocalPrototypeScrollRequests provides snapshot.scrollRequests,
         LocalPrototypeImageCache provides images,
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
@@ -191,6 +192,7 @@ fun PrototypeRuntimeContent(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
+@InternalAutoMobilePrototypeApi
 fun PrototypeSpecContent(
   root: PrototypeRenderNode,
   theme: PrototypeSpecTheme? = null,
@@ -411,6 +413,30 @@ private fun RenderPrototypeModal(
   }
 }
 
+/**
+ * The largest scroll viewport an unbounded parent can hand a nested same-axis scroll. Compose
+ * rejects a scroll measured with an infinite maximum along its axis, which is what a `scroll`
+ * inside a `scroll` gets. Capping it gives the inner viewport its content's size, so it has nothing
+ * of its own to scroll and the ancestor scrolls it; a bounded viewport passes through unchanged.
+ * 32766 px fits Compose's packed constraints whenever the cross axis is at most 65534 px.
+ */
+internal const val NESTED_SCROLL_VIEWPORT_MAX_PX = 32_766
+
+internal fun Modifier.boundedScrollViewport(vertical: Boolean): Modifier =
+  layout { measurable, constraints ->
+    val bounded = if (vertical) constraints.hasBoundedHeight else constraints.hasBoundedWidth
+    val viewport =
+      when {
+        bounded -> constraints
+        vertical ->
+          constraints.copy(maxHeight = maxOf(constraints.minHeight, NESTED_SCROLL_VIEWPORT_MAX_PX))
+        else ->
+          constraints.copy(maxWidth = maxOf(constraints.minWidth, NESTED_SCROLL_VIEWPORT_MAX_PX))
+      }
+    val placeable = measurable.measure(viewport)
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+  }
+
 @Composable
 private fun RenderPrototypeNode(
   node: PrototypeRenderNode,
@@ -543,6 +569,7 @@ private fun RenderPrototypeNodeContent(
       }
   val modifier =
     (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
+      .prototypeScrollAnchor(node.identity)
       .then(boundsModifier)
       .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
       .then(focusModifier)
@@ -717,12 +744,28 @@ private fun RenderPrototypeNodeContent(
       val scroll = key(LocalPrototypeShowEpoch.current) { rememberScrollState() }
       val source = node.source as? PrototypeScrollNode
       val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
+      // A vertical scroll may be a chat list (#14232); reverse anchors it at its end.
+      val chat = source?.takeIf { it.axis != "horizontal" }
+      val reverse = chat?.reverse == true
+      val anchors = remember { PrototypeScrollAnchors() }
+      val viewport = Modifier.onGloballyPositioned { anchors.viewport = it }
       val scrolling =
-        if (source?.axis == "horizontal") modifier.horizontalScroll(scroll)
-        else if (refresh != null) Modifier.verticalScroll(scroll)
-        else modifier.verticalScroll(scroll)
+        if (source?.axis == "horizontal")
+          modifier.boundedScrollViewport(vertical = false).horizontalScroll(scroll)
+        else if (refresh != null)
+          viewport
+            .boundedScrollViewport(vertical = true)
+            .verticalScroll(scroll, reverseScrolling = reverse)
+        else
+          modifier
+            .then(viewport)
+            .boundedScrollViewport(vertical = true)
+            .verticalScroll(scroll, reverseScrolling = reverse)
+      if (chat != null) PrototypeChatScrollEffects(chat, scroll, anchors, interact)
       val content: @Composable BoxScope.() -> Unit = {
-        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+        CompositionLocalProvider(LocalPrototypeScrollAnchors provides chat?.let { anchors }) {
+          node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+        }
       }
       if (refresh != null) {
         PrototypeRefreshBox(refresh, node.checked, modifier, interact) {
@@ -749,6 +792,7 @@ private fun RenderPrototypeNodeContent(
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
+    "chart" -> RenderPrototypeChart(node, modifier)
     "timePicker" ->
       PrototypeCheckedControl(node, parentModifier) {
         RenderPrototypeTimePicker(node, modifier, controlInteract)

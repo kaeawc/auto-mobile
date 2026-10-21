@@ -23,6 +23,14 @@ export async function rollBackCreatedIosSimulator(
   created: { name: string; deviceId?: string },
   failure: unknown,
 ): Promise<void> {
+  const deadlineMs = context.runnerReadinessTimer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
+  const remainingBudget = (): number => {
+    const remainingMs = deadlineMs - context.runnerReadinessTimer.now();
+    if (remainingMs <= 0) {
+      throw new ActionableError("Created iOS simulator rollback budget exhausted.");
+    }
+    return remainingMs;
+  };
   if (!created.deviceId) {
     logger.warn(
       `[DeviceReadiness] Cannot roll back created iOS simulator '${created.name}': no UDID.`,
@@ -45,17 +53,22 @@ export async function rollBackCreatedIosSimulator(
     // Same order as the deleteDevice teardown: runner, shutdown, delete, verify absence.
     await retireCreatedIosRunner(context, device);
     step = "shut down";
-    await shutDownCreatedIosSimulator(context, device, cleanupSignal);
+    await shutDownCreatedIosSimulator(context, device, cleanupSignal, remainingBudget());
     step = "delete";
     await context.simctl()!.deleteSimulator(created.deviceId, {
       signal: cleanupSignal,
-      timeoutMs: DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+      timeoutMs: remainingBudget(),
     });
     step = "verify absence of";
-    await verifyCreatedIosSimulatorAbsent(context, created.deviceId, cleanupSignal);
+    remainingBudget();
+    await verifyCreatedIosSimulatorAbsent(context, created.deviceId, cleanupSignal, deadlineMs);
   } catch (cleanupError) {
     // The caller's failure is what explains the request; a rollback error never replaces it.
-    const state = await readCreatedIosSimulatorState(context, created.deviceId, cleanupSignal);
+    const remainingMs = deadlineMs - context.runnerReadinessTimer.now();
+    const state =
+      remainingMs > 0
+        ? await readCreatedIosSimulatorState(context, created.deviceId, cleanupSignal, remainingMs)
+        : "unknown";
     logger.warn(
       `[DeviceReadiness] Failed to ${step} created iOS simulator ` +
         `'${created.name}' (${created.deviceId}, state: ${state}); it may be left behind: ` +
@@ -87,11 +100,10 @@ export async function shutDownCreatedIosSimulator(
   context: Pick<CreatedIosSimulatorRollbackContext, "simctl">,
   device: BootedDevice,
   signal: AbortSignal,
+  timeoutMs = DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
 ): Promise<void> {
   try {
-    await context
-      .simctl()!
-      .killSimulator(device, { signal, timeoutMs: DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS });
+    await context.simctl()!.killSimulator(device, { signal, timeoutMs });
   } catch (error) {
     if (!isIosSimulatorAlreadyStoppedError(error)) {
       // delete also shuts down the device; a failed shutdown must not skip it.
@@ -112,10 +124,18 @@ export async function verifyCreatedIosSimulatorAbsent(
   context: Pick<CreatedIosSimulatorRollbackContext, "runnerReadinessTimer" | "simctl">,
   udid: string,
   signal: AbortSignal,
+  sharedDeadlineMs = Number.POSITIVE_INFINITY,
 ): Promise<void> {
-  const deadlineMs = context.runnerReadinessTimer.now() + CREATED_IOS_ABSENCE_TIMEOUT_MS;
+  const deadlineMs = Math.min(
+    context.runnerReadinessTimer.now() + CREATED_IOS_ABSENCE_TIMEOUT_MS,
+    sharedDeadlineMs,
+  );
   for (;;) {
-    const images = await context.simctl()!.listSimulatorImages(undefined, {
+    const remainingMs = deadlineMs - context.runnerReadinessTimer.now();
+    if (remainingMs <= 0) {
+      throw new ActionableError(`iOS simulator ${udid} is still listed after delete.`);
+    }
+    const images = await context.simctl()!.listSimulatorImages(remainingMs, {
       bypassCache: true,
       signal,
     });
@@ -125,7 +145,9 @@ export async function verifyCreatedIosSimulatorAbsent(
     if (context.runnerReadinessTimer.now() >= deadlineMs) {
       throw new ActionableError(`iOS simulator ${udid} is still listed after delete.`);
     }
-    await context.runnerReadinessTimer.sleep(CREATED_IOS_ABSENCE_POLL_MS);
+    await context.runnerReadinessTimer.sleep(
+      Math.min(CREATED_IOS_ABSENCE_POLL_MS, deadlineMs - context.runnerReadinessTimer.now()),
+    );
   }
 }
 
@@ -133,16 +155,17 @@ export async function readCreatedIosSimulatorState(
   context: Pick<CreatedIosSimulatorRollbackContext, "simctl">,
   udid: string,
   signal: AbortSignal,
+  timeoutMs?: number,
 ): Promise<string> {
   try {
-    const images = await context.simctl()!.listSimulatorImages(undefined, {
+    const images = await context.simctl()!.listSimulatorImages(timeoutMs, {
       bypassCache: true,
       signal,
     });
     const image = images.find((candidate) => candidate.deviceId === udid);
     return image ? (image.state ?? "unknown") : "absent";
   } catch (error) {
-    logger.debug(`[DeviceReadiness] Could not read state of ${udid}: ${errorMessage(error)}`);
+    logger.warn(`[DeviceReadiness] Could not read state of ${udid}: ${errorMessage(error)}`, error);
     return "unknown";
   }
 }

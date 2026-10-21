@@ -1,3 +1,4 @@
+import type { ScreenLockReleaseReport } from "../../screenLockSessionCleanup";
 import { type BackoffPolicy, exponentialBackoff } from "../../../utils/Backoff";
 import type { KeepAwakeRestoreReport } from "../../../utils/KeepScreenAwakeManager";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -54,6 +55,8 @@ export interface ManagedExecutionBindingFailure {
 
 export interface BrokerExecutionReleaseResult {
   keepAwakeRestore?: KeepAwakeRestoreReport;
+  /** How clearing the lock-screen credential the session set went (#14107). */
+  screenLockRestore?: ScreenLockReleaseReport;
   sessionId: string;
   outcome: BrokerExecutionReleaseOutcome;
   settlement: ManagedExecutionSettlement;

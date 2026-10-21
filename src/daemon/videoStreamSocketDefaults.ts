@@ -1,4 +1,4 @@
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
+import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../devices/deviceUtils";
 import { getDefaultDeviceCaptureRegistry } from "../features/webrtc/deviceCaptureRegistry";
 import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
 import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
@@ -6,7 +6,6 @@ import type { BootedDevice } from "../models";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { defaultDaemonContext } from "./daemonContext";
 import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
-import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { resolveStreamDevice } from "./streamDeviceResolver";
@@ -31,24 +30,23 @@ export async function resolveVideoStreamDevice(
 }
 
 export async function defaultResolveDevice(
+  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
   platform?: "android" | "ios",
 ): Promise<BootedDevice> {
-  return resolveVideoStreamDevice(
-    DeviceReadiness.getInstance().getPlatformDeviceManager(),
-    deviceId,
-    platform,
-  );
+  return resolveVideoStreamDevice(deviceManager, deviceId, platform);
 }
 
-export function defaultDependencies(): VideoStreamSocketServerDependencies {
+export function defaultDependencies(
+  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices"> = new MultiPlatformDeviceManager(),
+): VideoStreamSocketServerDependencies {
   return {
     captureRegistry: getDefaultDeviceCaptureRegistry(),
     ownershipChanges: () => defaultDaemonContext.sessionManager() ?? null,
     deviceLifecycle: getDaemonStreamDeviceLifecycleEmitter,
     sessionReleases: SessionReleaseBroadcaster,
     observerReleases: ObserverReleaseBroadcaster,
-    resolveDevice: defaultResolveDevice,
+    resolveDevice: (id, platform) => defaultResolveDevice(deviceManager, id, platform),
     createCaptureSource: async (options) => {
       // Resolved once per stream, off the frame path. A null jar means the Android source falls
       // back to `screenrecord`.
@@ -94,4 +92,3 @@ export {
   type DeviceOwnershipChanges,
   type VideoStreamSocketServerDependencies,
 } from "./videoStreamSocketSupport";
-export type { CaptureSourceFactory } from "./videoStream/captureTypes";

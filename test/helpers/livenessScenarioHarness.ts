@@ -1170,7 +1170,7 @@ export class LivenessScenario {
       new SessionScopedStreamAuthenticator(() => manager, "appearance"),
       {
         getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
-        getCurrentDevice: () => undefined,
+        getSessionDevice: () => undefined,
         getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
         getSessionManager: () => manager,
       },

@@ -262,7 +262,7 @@ export class IosSimulatorDisplayConfig {
       this.device.deviceId,
       "content_size",
     ]);
-    const value = result.stdout.trim();
+    const value = result.stdout.trim().toLowerCase();
     if (!isIosContentSizeCategory(value)) {
       throw new Error(`simctl reported an unknown Simulator content size '${value}'`);
     }

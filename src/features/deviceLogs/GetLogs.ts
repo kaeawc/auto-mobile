@@ -1,6 +1,8 @@
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { AndroidLogReader } from "./AndroidLogReader";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { compileGrep, type LogcatBuffer, type LogcatPriority, type LogLine } from "./logcatQuery";
 
 /** Default and largest look-back windows, in seconds (the resource's one-hour cap). */
@@ -41,7 +43,7 @@ export interface GetLogsResult {
   /** Lines were dropped to stay within `maxLines` or the byte bound; the newest are kept. */
   truncated: boolean;
   pids: number[];
-  attribution: "uid" | "pid" | "subsystem" | "none";
+  attribution: "uid" | "pid" | "subsystem" | "process" | "none";
   warnings: string[];
 }
 
@@ -65,7 +67,10 @@ export interface IosUnifiedLogSource {
     lastSeconds: number,
     level: UnifiedLogLevel,
     signal?: AbortSignal,
+    processName?: string,
   ): Promise<string>;
+  /** The app's executable name (CFBundleExecutable), or undefined when it cannot be resolved. */
+  resolveProcessName?(appId: string, signal?: AbortSignal): Promise<string | undefined>;
 }
 
 export interface GetLogsDependencies {
@@ -211,9 +216,15 @@ export class GetLogs {
       warnings.push(`Android-only filters ignored on iOS: ${ignored.join(", ")}.`);
     }
     const grep = compileGrep(request.grep);
-    const text = await this.deps
-      .ios()
-      .collect(request.appId, sinceSeconds, unifiedLogLevel(minPriority), signal);
+    const source = this.deps.ios();
+    const processName = await resolveProcessName(source, request.appId, warnings, signal);
+    const text = await source.collect(
+      request.appId,
+      sinceSeconds,
+      unifiedLogLevel(minPriority),
+      signal,
+      processName,
+    );
     const lines = parseUnifiedCompact(text).filter(
       (line) => grep === undefined || grep.test(line.message),
     );
@@ -225,8 +236,37 @@ export class GetLogs {
       lines: bounded.lines,
       truncated: bounded.truncated,
       pids: [],
-      attribution: "subsystem",
-      warnings,
+      attribution: processName ? "process" : "subsystem",
+      warnings:
+        lines.length === 0 ? [...warnings, emptyIosWarning(request.appId, processName)] : warnings,
     };
   }
+}
+
+async function resolveProcessName(
+  source: IosUnifiedLogSource,
+  appId: string,
+  warnings: string[],
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  try {
+    return await source.resolveProcessName?.(appId, signal);
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(
+      `[getLogs] could not resolve the executable of ${appId}: ${errorMessage(error)}`,
+      error,
+    );
+    warnings.push(
+      `Could not resolve ${appId}'s process name, so only its subsystem was matched: ${errorMessage(error)}`,
+    );
+    return undefined;
+  }
+}
+
+function emptyIosWarning(appId: string, processName: string | undefined): string {
+  return processName
+    ? `No unified-log lines matched subsystem ${appId} or process ${processName} in this window.`
+    : `No unified-log lines matched subsystem ${appId}; the app's process name could not be resolved, ` +
+        "and apps that log under other subsystems are not attributed.";
 }

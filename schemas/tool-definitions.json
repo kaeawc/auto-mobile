@@ -6151,7 +6151,7 @@
           "additionalProperties": false
         },
         "__schema9": {
-          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext, completeHierarchy); only present when a session observe could not produce a reference.",
           "type": "array",
           "items": {
             "type": "string"
@@ -10513,7 +10513,7 @@
           "additionalProperties": false
         },
         "snapshotReferenceUnavailable": {
-          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext, completeHierarchy); only present when a session observe could not produce a reference.",
           "type": "array",
           "items": {
             "type": "string"
@@ -13538,7 +13538,7 @@
           "additionalProperties": false
         },
         "__schema9": {
-          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext, completeHierarchy); only present when a session observe could not produce a reference.",
           "type": "array",
           "items": {
             "type": "string"
@@ -23350,7 +23350,7 @@
           "additionalProperties": false
         },
         "__schema9": {
-          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext, completeHierarchy); only present when a session observe could not produce a reference.",
           "type": "array",
           "items": {
             "type": "string"
@@ -30536,7 +30536,7 @@
           "additionalProperties": false
         },
         "__schema15": {
-          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext, completeHierarchy); only present when a session observe could not produce a reference.",
           "type": "array",
           "items": {
             "type": "string"
@@ -32340,7 +32340,7 @@
           "additionalProperties": false
         },
         "__schema9": {
-          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext, completeHierarchy); only present when a session observe could not produce a reference.",
           "type": "array",
           "items": {
             "type": "string"

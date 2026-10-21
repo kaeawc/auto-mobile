@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod/v4";
 import { ActionableError } from "../../models/ActionableError";
 import { sortedReaddir } from "../../utils/io";
-import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
+import { ensureSecureTempDirSync } from "../../utils/tempDir";
 import type { VisualDeviceProfile } from "./VisualDeviceProfile";
 import { visualProfileKey } from "./VisualDeviceProfile";
 
@@ -29,6 +29,9 @@ export interface VisualBaselineStore {
   /** Where a mismatch's diff image for this baseline goes. */
   diffPath(name: string, profile: VisualDeviceProfile): string;
 }
+
+/** Under the AutoMobile data directory; baselines persist across runs, unlike screenshots. */
+export const VISUAL_BASELINES_SUBDIR = "visual-baselines";
 
 const BASELINE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
@@ -85,8 +88,7 @@ function isMissing(error: unknown): boolean {
  */
 export class FileVisualBaselineStore implements VisualBaselineStore {
   constructor(
-    private readonly root: () => string = () =>
-      ensureSecureTempDirSync(TEMP_SUBDIRS.VISUAL_BASELINES),
+    private readonly root: () => string = () => ensureSecureTempDirSync(VISUAL_BASELINES_SUBDIR),
     private readonly fs: BaselineFs = nodeBaselineFs,
   ) {}
 

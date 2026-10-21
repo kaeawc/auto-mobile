@@ -1,4 +1,7 @@
-import { MAX_VM_SNAPSHOT_TIMEOUT_MS } from "../models/deviceSnapshotTimeout";
+import {
+  deviceSnapshotCaptureArgsShape,
+  deviceSnapshotRestoreArgsShape,
+} from "../models/deviceSnapshotArgsSchema";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -12,43 +15,12 @@ import "./DeviceIncarnationInvalidator";
 /** Per-call VM snapshot budget: at most 30 minutes, safely below the timer overflow ceiling. */
 export { MAX_VM_SNAPSHOT_TIMEOUT_MS } from "../models/deviceSnapshotTimeout";
 
-const snapshotNameRequiredMessage = "snapshotName is required when action is restore";
-const optionalSnapshotNameSchema = z.string().min(1).optional().describe("Snapshot name");
-
-const deviceSnapshotCommonShape = {
-  includeAppData: z
-    .boolean()
-    .optional()
-    .describe(
-      "Include app data (iOS app containers; ignored on non-VM Android, which is settings-only)",
-    ),
-  includeSettings: z.boolean().optional().describe("Include settings"),
-  useVmSnapshot: z.boolean().optional().describe("Use emulator VM snapshot"),
-  strictBackupMode: z
-    .boolean()
-    .optional()
-    .describe(
-      "iOS-only: fail the whole snapshot unless every requested bundle is backed up (all-or-nothing)",
-    ),
-  vmSnapshotTimeoutMs: z
-    .number()
-    .int()
-    .positive()
-    .max(MAX_VM_SNAPSHOT_TIMEOUT_MS)
-    .optional()
-    .describe(
-      "VM snapshot timeout in milliseconds (positive integer; maximum 1800000 ms / 30 minutes)",
-    ),
-  appBundleIds: z.array(z.string()).optional().describe("iOS bundle IDs for app data snapshot"),
-};
-
 export const deviceSnapshotSchema = z.discriminatedUnion("action", [
   addDeviceTargetingToSchema(
     z
       .object({
         action: z.literal("capture"),
-        snapshotName: optionalSnapshotNameSchema,
-        ...deviceSnapshotCommonShape,
+        ...deviceSnapshotCaptureArgsShape,
       })
       .strict(),
   ),
@@ -56,11 +28,7 @@ export const deviceSnapshotSchema = z.discriminatedUnion("action", [
     z
       .object({
         action: z.literal("restore"),
-        snapshotName: z
-          .string({ error: snapshotNameRequiredMessage })
-          .min(1, snapshotNameRequiredMessage)
-          .describe("Snapshot name"),
-        ...deviceSnapshotCommonShape,
+        ...deviceSnapshotRestoreArgsShape,
       })
       .strict(),
   ),

@@ -1,44 +1,9 @@
-import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
-import {
-  clampCallerMcpRequestTimeoutMs,
-  LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
-  LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-  OBSERVE_MCP_TIMEOUT_ENV_VAR,
-  OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-  resolveMcpRequestTimeoutMs,
-} from "./mcpRequestTimeout";
+import { clampCallerMcpRequestTimeoutMs, resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import type { DaemonRequest } from "./types";
+import { resolveExplicitToolTimeoutOverrideMs } from "./explicitToolTimeoutOverride";
 
-/**
- * An explicit operator override is more specific than the generic connection timeout (#13797).
- * Unset or unusable values retain the client's connection-timeout floor.
- */
-export function resolveExplicitToolTimeoutOverrideMs(
-  request: DaemonRequest,
-  env: NodeJS.ProcessEnv = process.env,
-): number | undefined {
-  if (request.method !== "tools/call") {
-    return undefined;
-  }
-  switch (request.params?.name) {
-    case "openLink":
-      return readOptionalEnvPositiveInteger(
-        OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-        LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-        {},
-        env,
-      );
-    case "observe":
-      return readOptionalEnvPositiveInteger(
-        OBSERVE_MCP_TIMEOUT_ENV_VAR,
-        LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
-        {},
-        env,
-      );
-    default:
-      return undefined;
-  }
-}
+// Preserve the public client import while both processes share the same reader.
+export { resolveExplicitToolTimeoutOverrideMs } from "./explicitToolTimeoutOverride";
 
 /** Apply the generic connection timeout unless an explicit tool override takes precedence. */
 export function resolveClientMcpRequestTimeoutMs(

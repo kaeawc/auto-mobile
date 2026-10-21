@@ -81,6 +81,8 @@ export type SocketServerConstructorArgs = [
     liveAcceptanceStartupSecret?: string;
     acceptanceDiscoveryCapability?: string;
     sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
+    /** Environment used for daemon request budgets; defaults to this process. */
+    requestTimeoutEnv?: NodeJS.ProcessEnv;
     onFrameTrace?: (event: SocketFrameTraceEvent) => void;
     /**
      * Runs forwards in process (#11820). The daemon passes its own, so shutdown can close the
@@ -103,6 +105,7 @@ export class SocketServerRuntime {
   serverClosePromise: Promise<void> | null = null;
   closing = false;
   acceptingRequests = false;
+  readonly requestTimeoutEnv?: NodeJS.ProcessEnv;
   /** Largest inbound frame a control-socket peer may send; tests lower it. */
   get maxInboundFrameBytes(): number {
     return this.inboundFrameLimit();
@@ -268,6 +271,7 @@ export class SocketServerRuntime {
     this.socketPath = socketPath;
     this.daemonState = daemonState;
     this.timer = timer;
+    this.requestTimeoutEnv = handshakeConfig.requestTimeoutEnv;
     this.onFrameTrace = handshakeConfig.onFrameTrace;
     this.mcpDispatcher =
       handshakeConfig.mcpDispatcher ??

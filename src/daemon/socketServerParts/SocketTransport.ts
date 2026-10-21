@@ -63,6 +63,7 @@ type State = Pick<
   | "acceptingRequests"
   | "idGenerator"
   | "timer"
+  | "requestTimeoutEnv"
   | "sessions"
   | "clientSockets"
   | "acceptedClientConnections"
@@ -241,7 +242,12 @@ export class SocketTransport {
         DAEMON_CANCEL_REQUEST_METHOD,
         DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
       ].includes(request.method);
-      const context = createRequestContext(request, sessionId, receivedAtMs);
+      const context = createRequestContext(
+        request,
+        sessionId,
+        receivedAtMs,
+        this.state.requestTimeoutEnv,
+      );
       const tracked: PendingSocketRequest = {
         id: request.id,
         sessionId,
@@ -580,7 +586,7 @@ export class SocketTransport {
       controlFrame ||
       request.type !== "mcp_request" ||
       request.acceptsRequestBudget !== true ||
-      resolvedMs <= (request.timeoutMs ?? 0)
+      resolvedMs === request.timeoutMs
     ) {
       return;
     }

@@ -335,7 +335,7 @@ export const MEDIA_ENV = {
     kind: "int",
     default: "see docs",
     min: 1,
-    doc: "observe MCP request timeout in ms.",
+    doc: "observe MCP budget in ms: daemon decides; explicit client or daemon value applies; daemon wins if both set. Client connection timeout does not floor it.",
   },
   WEBRTC_STREAM_SOCKET_PATH: {
     name: "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",

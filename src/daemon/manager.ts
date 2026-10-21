@@ -67,6 +67,8 @@ import {
 } from "./manager/DaemonProcessDiscovery";
 import { DaemonStartupLock, type DaemonStartupLockHost } from "./manager/DaemonStartupLock";
 import { DaemonStart, type DaemonStartHost } from "./manager/DaemonStart";
+import { DefaultTakeoverDeferralLedger } from "./manager/TakeoverDeferralLedger";
+import { FileStartupFailureStore } from "./FileStartupFailureStore";
 import { DaemonLaunch, type DaemonLaunchHost } from "./manager/DaemonLaunch";
 import {
   DaemonControlRecovery,
@@ -125,6 +127,7 @@ type DaemonManagerHost = DaemonProcessDiscoveryHost &
 type DaemonManagerDependencies = Pick<
   DaemonManagerHost,
   | "pidFilePath"
+  | "takeoverDeferrals"
   | "processFinder"
   | "socketPath"
   | "identityRecoveryIO"
@@ -786,8 +789,14 @@ export class DaemonManager implements DaemonManagerLike {
   /** Read dependencies on each use so replaceable test seams stay live. */
   private collaboratorHost(): DaemonManagerHost {
     const manager = this;
+    let takeoverDeferrals: DefaultTakeoverDeferralLedger | undefined;
     return {
       ...this.collaboratorOperations(),
+      get takeoverDeferrals() {
+        return (takeoverDeferrals ??= new DefaultTakeoverDeferralLedger(
+          new FileStartupFailureStore(`${manager.pidFilePath}.takeover-deferral.json`),
+        ));
+      },
       get pidFilePath() {
         return manager.pidFilePath;
       },

@@ -108,6 +108,12 @@ internal object PrototypeSpecInput {
     }
   }
 
+  private fun nodeVocabularyErrors(value: JsonElement, context: Context): String? =
+    platformErrors(value, context)
+      ?: chartErrors(value, context)
+      ?: linkifyErrors(value, context)
+      ?: chatScrollErrors(context)
+
   fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
@@ -117,10 +123,7 @@ internal object PrototypeSpecInput {
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: dataActionErrors(context, value)
         ?: requestActionErrors(context)
-        ?: platformErrors(value, context)
-        ?: chartErrors(value, context)
-        ?: linkifyErrors(value, context)
-        ?: chatScrollErrors(context)
+        ?: nodeVocabularyErrors(value, context)
         ?: swipeActionsErrors(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)

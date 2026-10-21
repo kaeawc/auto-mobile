@@ -2605,6 +2605,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceTrace",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -2735,6 +2736,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceTrace",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -12073,6 +12075,257 @@
     }
   },
   {
+    "name": "performanceTrace",
+    "description": "Record a native performance trace (xctrace on iOS, Perfetto on Android): start with a template, drive the flow, then stop for the artifact path and a bounded summary.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "start a recorder, or stop one by traceId",
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "appId": {
+          "description": "App to trace (required for appLaunch and allocations)",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "template": {
+          "description": "start: what to record",
+          "type": "string",
+          "enum": ["appLaunch", "hitches", "hangs", "timeProfiler", "allocations"]
+        },
+        "timeLimitMs": {
+          "description": "start: recorder stops itself after this (default 30000)",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000
+        },
+        "traceId": {
+          "description": "stop: the id start returned",
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["recording", "stopped"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "template": {
+          "type": "string",
+          "enum": ["appLaunch", "hitches", "hangs", "timeProfiler", "allocations"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "timeLimitMs": {
+          "type": "number"
+        },
+        "artifactPath": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "durationMs": {
+              "type": "number"
+            },
+            "endReason": {
+              "type": "string"
+            },
+            "launch": {
+              "type": "object",
+              "properties": {
+                "durationMs": {
+                  "type": "number"
+                },
+                "phases": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "durationMs": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["name", "durationMs"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["durationMs", "phases"],
+              "additionalProperties": false
+            },
+            "hitches": {
+              "type": "object",
+              "properties": {
+                "count": {
+                  "type": "number"
+                },
+                "totalDurationMs": {
+                  "type": "number"
+                },
+                "maxDurationMs": {
+                  "type": "number"
+                }
+              },
+              "required": ["count", "totalDurationMs", "maxDurationMs"],
+              "additionalProperties": false
+            },
+            "hangs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "durationMs": {
+                    "type": "number"
+                  },
+                  "startMs": {
+                    "type": "number"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": ["durationMs"],
+                "additionalProperties": false
+              }
+            },
+            "topFunctions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "samples": {
+                    "type": "number"
+                  }
+                },
+                "required": ["name", "samples"],
+                "additionalProperties": false
+              }
+            },
+            "allocations": {
+              "type": "object",
+              "properties": {
+                "bytes": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["bytes", "count"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "success",
+        "action",
+        "traceId",
+        "state",
+        "deviceId",
+        "platform",
+        "template",
+        "startedAt",
+        "timeLimitMs",
+        "artifactPath",
+        "warnings"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "phoneCall",
     "description": "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
     "inputSchema": {
@@ -20556,6 +20809,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceTrace",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -26844,6 +27098,7 @@
             "network",
             "observe",
             "openLink",
+            "performanceTrace",
             "phoneCall",
             "pinchOn",
             "postNotification",
@@ -26940,6 +27195,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceTrace",
               "phoneCall",
               "pinchOn",
               "postNotification",

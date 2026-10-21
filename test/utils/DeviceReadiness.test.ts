@@ -18,7 +18,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { FakeWindow } from "../fakes/FakeWindow";
-import { BootedDevice, AppearanceConfigInput, ExecResult } from "../../src/models";
+import { ActionableError, BootedDevice, AppearanceConfigInput, ExecResult } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { parseAppearanceConfig } from "../../src/features/appearance";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadinessConfig";
@@ -1285,9 +1285,31 @@ describe("DeviceReadiness dual-platform resolution", () => {
   test("should throw when both platforms connected and no active device or deviceId", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
-    await expect(manager.ensureDeviceReady("either")).rejects.toThrow(
-      "pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
+    expect(manager.getCurrentDevice()).toBeUndefined();
+    const readiness = manager.ensureDeviceReady("either", undefined, {
+      skipCtrlProxyDownload: true,
+    });
+    await expect(readiness).rejects.toBeInstanceOf(ActionableError);
+    await expect(readiness).rejects.toThrow(
+      "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
     );
+  });
+
+  test("session-scoped readiness leaks the shared current device into sessionless resolution: current behaviour (#11810)", async () => {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+
+    await manager.ensureDeviceReady("ios", iosDevice.deviceId, {
+      sessionId: "session-b",
+      skipCtrlProxyDownload: true,
+    });
+    expect(manager.getCurrentDevice()?.deviceId).toBe("ios-sim-1");
+
+    // The baseline above throws with no prior readiness. The #11810 removal slice will flip
+    // this characterization: session-scoped readiness must no longer choose a sessionless target.
+    const result = await manager.ensureDeviceReady("either", undefined, {
+      skipCtrlProxyDownload: true,
+    });
+    expect(result.deviceId).toBe("ios-sim-1");
   });
 
   test("fails closed when an unusable iOS runner override is set (#4221)", async () => {

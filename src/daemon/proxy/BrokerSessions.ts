@@ -317,6 +317,7 @@ export class BrokerSessions {
             sessionId: sessionUuid,
             livenessOwnerToken: this.deps.livenessOwnerToken,
             ...(reason ? { reason } : {}),
+            replyBudgetMs: Math.max(250, timeoutMs - 500),
           },
           { timeoutMs },
         ),

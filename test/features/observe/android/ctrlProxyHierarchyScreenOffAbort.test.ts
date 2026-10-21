@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
 import type { HierarchyDelegateContext } from "../../../../src/features/observe/android/types";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { logger } from "../../../../src/utils/logger";
 import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function createHarness(isScreenOn: (signal?: AbortSignal) => Promise<boolean>) {
   const timer = new FakeTimer();

@@ -6,6 +6,14 @@ import org.junit.Test
 
 class HexFormattingTest {
   @Test
+  fun `all byte values match the original formatter`() {
+    for (value in 0..255) {
+      val byte = value.toByte()
+      assertEquals("byte $value", "%02x".format(Locale.ROOT, byte), formatHexByte(byte))
+    }
+  }
+
+  @Test
   fun `hex bytes stay padded and lowercase under German locale`() {
     val previous = Locale.getDefault()
     try {

@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DefaultDeviceResourceObserver,
   type DeviceResourceObservationRequest,
@@ -13,6 +13,10 @@ import { logger } from "../../src/utils/logger";
 import { ResourceAdb } from "../fakes/FakeAndroidResourceAdb";
 import { FakeWallpaperSimctl, FakeWallpaperPlist, udid } from "../fakes/FakeIosResourceRuntime";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const commonKeys = [
   "wallpaperRendering",

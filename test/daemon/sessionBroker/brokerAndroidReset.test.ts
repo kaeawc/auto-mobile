@@ -1,11 +1,19 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import { ManagedDevicePort } from "../../../src/daemon/sessionBroker/managedDevicePort";
+import { AndroidSnapshotReset } from "../../../src/daemon/sessionBroker/androidSnapshotReset";
+import { FakeAndroidSnapshotPort } from "./fixtures/androidSnapshotReset";
 import {
   AndroidBaselineReset,
   watchAndroidResetSession,
 } from "../../../src/daemon/sessionBroker/androidBaselineReset";
 import { ExecutionTracker } from "../../../src/daemon/executionTracker";
+import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
+import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
+import { DEVICE_MUTATION_KINDS } from "../../../src/daemon/sessionBroker/mutations/types";
+import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
+import { FakeAndroidKeepBootedResetPort } from "../../fakes/FakeAndroidKeepBootedResetPort";
+import { androidBaselineRig } from "./fixtures/androidMutationBaseline";
 import { BindingJournal } from "../../../src/daemon/sessionBroker/registry/bindingJournal";
 import {
   openSqliteBindingRegistry,
@@ -70,9 +78,11 @@ describe("Android broker reset dispatch and recovery", () => {
     current = true;
     creates = 0;
     transportId = ANDROID_RESET_DEVICE.deviceId;
+    timer = new FakeTimer();
     registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       isExecOwnerLive: () => false,
+      timer,
     });
     const scope = await registry.ensureScope(SCOPE);
     if (scope.kind !== "ready") {
@@ -80,11 +90,15 @@ describe("Android broker reset dispatch and recovery", () => {
     }
     const scopeKey = scope.scope.scopeKey;
     const store = registry.sessionBrokerStore(scopeKey, new CountingIdGenerator("resource"));
-    timer = new FakeTimer();
     host = new FakeAndroidResetHost();
     tracker = new ExecutionTracker(timer, new CountingIdGenerator("execution"));
     host.watchSession = (sessionId: string) => watchAndroidResetSession(tracker, sessionId);
-    host.strategy = { reset: async (_device, _packages, assertOwned) => assertOwned() };
+    host.strategy = {
+      reset: async (_device, _packages, assertOwned) => {
+        await assertOwned();
+        return { outcome: "clean", mode: "none", phases: {} };
+      },
+    };
     const reset = new AndroidBaselineReset(host);
     const inventory = new FakeInventory();
     inventory.devices = [...host.devices];
@@ -177,7 +191,22 @@ describe("Android broker reset dispatch and recovery", () => {
       brokerExecutionRelease: {
         releaseExecution: async (sessionId) => {
           for (const assignment of await registry.findExecutionAssignments(sessionId)) {
+            const marked = await registry.updateBindingState(assignment, assignment, "settling", {
+              settler: OWNER,
+            });
+            if (marked.kind !== "updated") {
+              throw new Error("Release mark failed");
+            }
+            expect(marked.assignment.generation).toBe(assignment.generation + 1);
             await registry.releaseExecution(assignment, sessionId);
+            const restored = await registry.updateBindingState(
+              assignment,
+              marked.assignment,
+              "ready",
+            );
+            if (restored.kind !== "updated") {
+              throw new Error("Release settlement failed");
+            }
           }
           return {
             sessionId,
@@ -230,6 +259,53 @@ describe("Android broker reset dispatch and recovery", () => {
     expect(deleter.calls).toHaveLength(0);
   });
 
+  test("production keep-booted cleaner publishes idle and reuses despite incomplete certification", async () => {
+    const { adb } = androidBaselineRig();
+    host.strategy = new AndroidKeepBootedReset({
+      journal: new FakeDeviceMutationJournal(timer),
+      port: () => new AndroidDeviceMutationResetPort(adb),
+      timer,
+    });
+    const first = await ready();
+    expect(await broker.release(first)).toMatchObject({
+      outcome: "released",
+      timing: {
+        reset: {
+          outcome: "clean",
+          mode: "keep-booted",
+          phases: { journal: 0, clean: 0, health: 0 },
+        },
+      },
+    });
+    expect((await options.store.listResources())[0]!.state).toBe("idle");
+    const second = await ready("second");
+    expect(second).not.toBe(first);
+    expect(await broker.release(second)).toMatchObject({
+      outcome: "released",
+      timing: { reset: { outcome: "clean", mode: "keep-booted" } },
+    });
+    expect((await options.store.listResources())[0]!.state).toBe("idle");
+    expect(creates).toBe(1);
+    expect(deleter.calls).toHaveLength(0);
+    expect(adb.getExecutedCommands()).toContain("shell cmd clipboard clear");
+  });
+
+  test("rebooting a retained AVD invalidates the original baseline even with the same serial and name", async () => {
+    const { adb } = androidBaselineRig();
+    host.strategy = new AndroidKeepBootedReset({
+      journal: new FakeDeviceMutationJournal(timer),
+      port: () => new AndroidDeviceMutationResetPort(adb),
+      timer,
+    });
+    const first = await ready();
+    await broker.release(first);
+    host.bootId = "87654321-1234-1234-1234-123456789abc";
+    const second = await ready("second");
+    await broker.release(second);
+    expect((await options.store.listResources())[0]!.state).toBe("destroyed");
+    expect(deleter.calls).toHaveLength(1);
+  });
+
   test("Android reset without a strategy fails before native inventory or adb", async () => {
     host.strategy = undefined;
     const reset = new AndroidBaselineReset(host);
@@ -240,31 +316,51 @@ describe("Android broker reset dispatch and recovery", () => {
     expect(host.commands).toEqual([]);
   });
 
-  test("Android reuse keeps reset timings when iOS reuse is disabled", async () => {
-    await broker.close();
-    broker = new SessionBroker({ ...options, reuseCleanDevices: false });
-    host.strategy = {
-      reset: async (_device, _packages, assertOwned) => {
-        await assertOwned();
+  test.each(["snapshot", "wipe-data"] as const)(
+    "Android %s reuse keeps reset timings when iOS reuse is disabled",
+    async (mode) => {
+      await broker.close();
+      broker = new SessionBroker({ ...options, reuseCleanDevices: false });
+      const snapshotPort = new FakeAndroidSnapshotPort();
+      host.timer = timer;
+      host.strategy = new AndroidSnapshotReset(snapshotPort, timer, {
+        prepareForIncarnationChange: async () => {},
+        invalidate: async () => {},
+        settleIncarnationChange: async () => {},
+      });
+      const first = await ready();
+      if (mode === "wipe-data") {
+        snapshotPort.failures.add("load");
+      }
+      snapshotPort.onStep = async () => {
         timer.advanceTime(7);
-      },
-    };
-    const first = await ready();
+      };
+      const totalMs = mode === "snapshot" ? 35 : 70;
 
-    expect(await broker.release(first)).toMatchObject({
-      outcome: "released",
-      timing: {
-        acquisition: { admission: "create", outcome: "ready" },
-        reset: { outcome: "clean", phases: { reset: 7 }, totalMs: 7 },
-      },
-    });
-    expect((await options.store.listResources())[0]!.state).toBe("idle");
-    expect(await broker.prepare(config("second"), "owner-token")).toMatchObject({
-      outcome: "ready",
-      timing: { acquisition: { admission: "reuse", reuseCount: 1, createMs: 0, bootMs: 0 } },
-    });
-    expect(creates).toBe(1);
-  });
+      expect(await broker.release(first)).toMatchObject({
+        outcome: "released",
+        timing: {
+          acquisition: { admission: "create", outcome: "ready" },
+          reset: {
+            outcome: mode === "snapshot" ? "clean" : "fallback:wipe-data",
+            mode,
+            phases: { reset: totalMs, load: 7 },
+            totalMs,
+            ...(mode === "wipe-data" ? { fallbackReason: "load failed" } : {}),
+          },
+        },
+      });
+      expect(await broker.stats()).toMatchObject({
+        groups: [{ fallbackRate: mode === "wipe-data" ? 1 : 0 }],
+      });
+      expect((await options.store.listResources())[0]!.state).toBe("idle");
+      expect(await broker.prepare(config("second"), "owner-token")).toMatchObject({
+        outcome: "ready",
+        timing: { acquisition: { admission: "reuse", reuseCount: 1, createMs: 0, bootMs: 0 } },
+      });
+      expect(creates).toBe(1);
+    },
+  );
 
   test("baseline capture honors abort and preparation deadline before adb", async () => {
     const reset = new AndroidBaselineReset(host);
@@ -299,6 +395,71 @@ describe("Android broker reset dispatch and recovery", () => {
     expect(host.commands).toEqual([]);
     expect((await options.store.listResources())[0]!.state).toBe("destroyed");
   });
+
+  test("hard cleaning followed by failed snapshot and wipe-data reset destroys the resource", async () => {
+    const port = new FakeAndroidKeepBootedResetPort({
+      completeKinds: [...DEVICE_MUTATION_KINDS],
+      observations: [],
+      unobservable: [],
+    });
+    port.beforeClean = async () => {
+      throw new Error("hard cleaning failure");
+    };
+    const snapshotPort = new FakeAndroidSnapshotPort();
+    snapshotPort.failures.add("load");
+    snapshotPort.failures.add("launch");
+    const fallback = new AndroidSnapshotReset(snapshotPort, timer, {
+      prepareForIncarnationChange: async () => {},
+      invalidate: async () => {},
+      settleIncarnationChange: async () => {},
+    });
+    host.strategy = new AndroidKeepBootedReset({
+      journal: new FakeDeviceMutationJournal(timer),
+      port: () => port,
+      timer,
+      fallback,
+    });
+    const session = await ready();
+    expect(await broker.release(session)).toMatchObject({ outcome: "released" });
+    expect(snapshotPort.calls).toContain("load");
+    expect(snapshotPort.calls).toContain("launch");
+    expect((await options.store.listResources())[0]!.state).toBe("destroyed");
+    expect(deleter.calls).toHaveLength(1);
+  });
+
+  test.each(["hard-cleaning-failure", "maxUses-retirement", "failed-fallback"])(
+    "keep-booted %s destroys and never publishes idle",
+    async (failure) => {
+      const port = new FakeAndroidKeepBootedResetPort({
+        completeKinds: [...DEVICE_MUTATION_KINDS],
+        observations: [],
+        unobservable: ["clipboard"],
+      });
+      if (failure === "hard-cleaning-failure") {
+        port.beforeClean = async () => {
+          throw new Error("adb cleaner failed");
+        };
+      }
+      host.strategy = new AndroidKeepBootedReset({
+        journal: new FakeDeviceMutationJournal(timer),
+        port: () => port,
+        timer,
+        maxUses: failure === "hard-cleaning-failure" ? 20 : 1,
+        fallback:
+          failure === "failed-fallback"
+            ? {
+                reset: async () => {
+                  throw new Error("snapshot failed");
+                },
+              }
+            : undefined,
+      });
+      const session = await ready();
+      expect(await broker.release(session)).toMatchObject({ outcome: "released" });
+      expect((await options.store.listResources())[0]!.state).toBe("destroyed");
+      expect(deleter.calls).toHaveLength(1);
+    },
+  );
 
   test.each(["packages", "unobservable", "ios-only-opt-in"])(
     "%s destroys instead of pooling",

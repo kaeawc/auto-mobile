@@ -6,6 +6,7 @@ import { setKeyboardProfileForTool } from "../features/action/keyboardProfileCon
 import type { KeyboardProfileId } from "../features/action/keyboardProfiles";
 import {
   defaultKeyboardProfileRestoreRegistry,
+  isKeyboardProfileId,
   type KeyboardProfileRestoreRegistry,
 } from "../features/action/KeyboardProfileRestore";
 
@@ -61,6 +62,20 @@ export interface SessionKeyboardProfileDependencies {
   setProfile?: typeof setKeyboardProfileForTool;
 }
 
+/** Whether `sessionId` still holds `deviceId` for automation after an awaited write. */
+function stillHoldsDevice(
+  sessionManager: SessionKeyboardProfileHost,
+  sessionId: string,
+  deviceId: string,
+): boolean {
+  const session = sessionManager.getSession(sessionId);
+  return (
+    session !== null &&
+    sessionManager.isAdmittedForAutomation(session) &&
+    session.assignedDevice === deviceId
+  );
+}
+
 /**
  * `keyboard setProfile`, recording the profile it replaced (#14705) so a
  * daemon session's release puts it back. Sessionless calls record without an
@@ -84,7 +99,18 @@ export async function setKeyboardProfileForSession(
     device.deviceId,
     async (owner) => {
       const result = await setProfile(device, profile, undefined, signal);
-      registry.record(device, result.previousProfileId, owner);
+      const before = result.previousProfileId;
+      if (owner && sessionManager && !stillHoldsDevice(sessionManager, owner, device.deviceId)) {
+        // Release waits for tracked setup only so long; one that outran this write already
+        // ran its cleanup. Undo the write now, while the device is still gated on this setup.
+        if (before !== undefined && isKeyboardProfileId(before)) {
+          await setProfile(device, before);
+        }
+        throw new ActionableError(
+          `Session ${owner} was released or rebound while the keyboard profile changed; restored '${before}'.`,
+        );
+      }
+      registry.record(device, before, owner);
       return { ...result, restoresOnRelease: registry.restoresOnRelease(device.deviceId) };
     },
   );

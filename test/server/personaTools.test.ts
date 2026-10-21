@@ -138,6 +138,7 @@ describe("persona tool (#14055)", () => {
       profile: "motorola-adaptive",
       owner: "session-1",
     });
+    expect(executors.keyboardOwners).toEqual(["session-1"]);
   });
 
   test("a session bound to another device is refused before anything changes", async () => {

@@ -189,6 +189,7 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionDisplayProfile.ts#runSessionDisplayProfileMutation": 1,
   "sessionPersona.ts#runSessionPersonaMutation": 1,
   "sessionKeyboardProfile.ts#runSessionKeyboardProfileMutation": 1,
+  "sessionKeyboardProfile.ts#stillHoldsDevice": 1,
   "sessionKillProfile.ts#runSessionKillProfileMutation": 1,
   "sessionNetworkCondition.ts#runSessionNetworkMutation": 1,
   "sessionRotation.ts#runSessionRotationMutation": 1,

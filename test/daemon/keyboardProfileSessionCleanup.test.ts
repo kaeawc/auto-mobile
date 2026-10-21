@@ -83,29 +83,43 @@ describe("registerKeyboardProfileSessionCleanup (#14705)", () => {
     expect(await manager.pendingCleanups[0].cleanup).toBe(false);
   });
 
-  test("a restore that never answers is bounded", async () => {
-    setProfile = () => new Promise(() => {});
+  test("a restore that never answers is bounded and aborted, so it cannot land late", async () => {
+    let restoreSignal: AbortSignal | undefined;
+    setProfile = (_device, _profile, signal) => {
+      restoreSignal = signal;
+      return new Promise(() => {});
+    };
     registry.record(emulator, "gboard", "session-1");
     manager.release("session-1", emulator.deviceId);
     const pending = manager.pendingCleanups[0].cleanup;
     timer.advanceTime(KEYBOARD_PROFILE_RESTORE_TIMEOUT_MS);
     expect(await pending).toBe(false);
+    expect(restoreSignal?.aborted).toBe(true);
   });
 });
 
 describe("KeyboardProfileRestoreRegistry (#14705)", () => {
-  test("records once, and a later session takes over ownership", () => {
+  test("records once per owner; a session's later changes keep its first before-profile", () => {
     const registry = new KeyboardProfileRestoreRegistry();
-    registry.record(emulator, "gboard", undefined);
-    expect(registry.restoresOnRelease(emulator.deviceId)).toBe(false);
+    registry.record(emulator, "gboard", "session-1");
     registry.record(emulator, "samsung", "session-1");
+    registry.record(emulator, "direct", undefined);
     expect(registry.recorded(emulator.deviceId)).toBe("gboard");
-    expect(registry.restoresOnRelease(emulator.deviceId)).toBe(true);
     expect(registry.takeOwnedBy(emulator.deviceId, "session-2")).toBeUndefined();
     expect(registry.takeOwnedBy(emulator.deviceId, "session-1")).toEqual({
       device: emulator,
       before: "gboard",
     });
+  });
+
+  test("a session taking over a sessionless entry records its own before-profile", () => {
+    const registry = new KeyboardProfileRestoreRegistry();
+    registry.record(emulator, "gboard", undefined);
+    expect(registry.restoresOnRelease(emulator.deviceId)).toBe(false);
+    // The sessionless call set samsung; the session changes it from there.
+    registry.record(emulator, "samsung", "session-1");
+    expect(registry.restoresOnRelease(emulator.deviceId)).toBe(true);
+    expect(registry.takeOwnedBy(emulator.deviceId, "session-1")?.before).toBe("samsung");
   });
 
   test("an unknown or missing previous profile records nothing", () => {

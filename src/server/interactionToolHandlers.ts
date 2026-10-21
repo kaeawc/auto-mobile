@@ -68,10 +68,7 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { displayWaitInventory } from "../utils/deviceMatcher";
 import { toActionableError } from "../models/ActionableError";
 import { HomeScreen } from "../features/action/HomeScreen";
-import { setKeyboardProfileForTool } from "../features/action/keyboardProfileControl";
 import { setKeyboardProfileForSession } from "./sessionKeyboardProfile";
-
-export { setKeyboardProfileForTool };
 
 export async function listKeyboardProfilesForTool(
   device: BootedDevice,

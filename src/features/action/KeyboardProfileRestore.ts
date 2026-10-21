@@ -42,9 +42,11 @@ export interface OwnedKeyboardProfileRestore {
  * profile active before `keyboard setProfile` or a persona first changed it
  * (#14705). CtrlProxy persists the active profile, so without this a session's
  * profile stays active for the device's next session. A session that changes
- * the profile takes ownership, so its release restores the recorded profile; an
- * entry only sessionless calls wrote stays until a persona reset or the device
- * is retired. In memory only: a daemon restart loses it.
+ * the profile owns the entry and its release restores the profile from before
+ * its first change; a session taking over a sessionless entry records its own
+ * before-profile, so sessionless changes persist. An entry only sessionless
+ * calls wrote stays until a persona reset or the device is retired. In memory
+ * only: a daemon restart loses it.
  */
 export class KeyboardProfileRestoreRegistry {
   private readonly entries = new Map<string, KeyboardProfileRestoreEntry>();
@@ -52,18 +54,21 @@ export class KeyboardProfileRestoreRegistry {
   /** Record the profile before a change unless one is recorded already. */
   record(device: BootedDevice, before: string | undefined, owner: string | undefined): void {
     const existing = this.entries.get(device.deviceId);
-    if (existing) {
+    const known = before !== undefined && isKeyboardProfileId(before) ? before : undefined;
+    if (existing && !(existing.owner === undefined && owner !== undefined && known)) {
       existing.device = device;
       existing.owner = owner ?? existing.owner;
       return;
     }
-    if (before === undefined || !isKeyboardProfileId(before)) {
+    // A session taking over a sessionless entry records its own before-profile, so its
+    // release keeps the sessionless change instead of undoing it.
+    if (known === undefined) {
       logger.warn(
         `Keyboard profile before the change on ${device.deviceId} is unknown ('${before}'); it will not be restored.`,
       );
       return;
     }
-    this.entries.set(device.deviceId, { device, before, ...(owner ? { owner } : {}) });
+    this.entries.set(device.deviceId, { device, before: known, ...(owner ? { owner } : {}) });
   }
 
   /** The profile recorded before the first change, if one is waiting to be restored. */
@@ -109,9 +114,12 @@ export async function restoreKeyboardProfileAfterRelease(
   setProfile: KeyboardProfileSetter,
   timer: Pick<Timer, "setTimeout" | "clearTimeout">,
 ): Promise<boolean> {
+  // Aborted on the deadline so a restore stuck before the IME lock cannot land after the
+  // device's next owner set its own profile.
+  const controller = new AbortController();
   try {
     await runOutsideRequestContext(() =>
-      raceWithDeadline(() => setProfile(owned.device, owned.before), {
+      raceWithDeadline(() => setProfile(owned.device, owned.before, controller.signal), {
         timer,
         timeoutMs: KEYBOARD_PROFILE_RESTORE_TIMEOUT_MS,
         label: `Restore keyboard profile ${owned.before}`,
@@ -119,6 +127,7 @@ export async function restoreKeyboardProfileAfterRelease(
     );
     return true;
   } catch (error) {
+    controller.abort();
     logger.warn(
       `Failed to restore keyboard profile ${owned.before} on ${owned.device.deviceId}: ${errorMessage(error)}`,
       error,

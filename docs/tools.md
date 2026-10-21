@@ -1470,10 +1470,12 @@ overwrites external enable/disable changes.
 
 `{"action":"setProfile","profile":"gboard"}` switches the AutoMobile IME's typing
 behaviour profile (`direct`, `gboard` or `samsung`); `listProfiles` returns the catalog.
-CtrlProxy persists the active profile on the device. In a daemon session (`sessionUuid`),
-the profile active before the session's first change is recorded, and release or rebind
-restores it before the next session can acquire the device (`restoresOnRelease: true` in
-the result). Sessionless changes persist.
+CtrlProxy persists the active profile on the device. A change made under a daemon session
+(an explicit `sessionUuid`, or the session the connection or plan is bound to) records the
+profile active before that session's first change, and release or rebind restores it before
+the next session can acquire the device; `restoresOnRelease` in the result says whether that
+will happen. A session that changes the profile after a sessionless change records the
+profile it found, so sessionless changes persist until a persona `reset`.
 
 `tapOn` and `tapAny` accept recursive `container` selectors. The outermost
 container resolves first; every inner container and the target must be strict
@@ -2875,10 +2877,10 @@ persona({ action: "reset" });
   `nonEmulatable`, `apply` returns `success: false` and `status: "route_to_real_device"` with
   the capabilities and changes nothing.
 - `reset` restores every recorded display facet, the kill facet of every package a persona
-  applied to that still has a change recorded (plus `appId`), then the keyboard profile active
-  before the first persona. The display and kill records are shared with `displayProfile` and
-  `killProfile`, so reset also restores direct `displayProfile` changes and the device-wide
-  battery and Doze state. A facet the device refuses stays recorded and the reset is an error.
+  applied to that still has a change recorded (plus `appId`), then the recorded keyboard
+  profile. The display, kill and keyboard records are shared with `displayProfile`,
+  `killProfile` and `keyboard` `setProfile`, so reset also restores direct `displayProfile` and
+  `keyboard` `setProfile` changes and the device-wide battery and Doze state. A facet the device refuses stays recorded and the reset is an error.
 - In a daemon session (`sessionUuid`), release or rebind restores the kill, display and
   keyboard facets, as with `killProfile`, `displayProfile` and `keyboard` `setProfile`, which
   share their records with `persona`. The records are in memory only. The shared `platform`

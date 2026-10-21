@@ -5,12 +5,14 @@ import { personaResultSchema } from "./personaToolOutputSchemas";
 import { runSessionPersonaMutation, type SessionPersonaHost } from "./sessionPersona";
 import { changedSettings, type DisplayProfileToolDependencies } from "./displayProfileTools";
 import { setKeyboardProfileForTool } from "../features/action/keyboardProfileControl";
-import { defaultKeyboardProfileRestoreRegistry } from "../features/action/KeyboardProfileRestore";
+import {
+  defaultKeyboardProfileRestoreRegistry,
+  isKeyboardProfileId,
+} from "../features/action/KeyboardProfileRestore";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { ActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
-import { KEYBOARD_PROFILE_IDS, type KeyboardProfileId } from "../features/action/keyboardProfiles";
 import {
   NON_EMULATABLE_CAPABILITY_IDS,
   OEM_PERSONA_IDS,
@@ -76,10 +78,6 @@ export interface PersonaToolDependencies {
   sessionManager?: () => SessionPersonaHost | undefined;
   executorsFor?: PersonaExecutorsFactory;
   registry?: PersonaRestoreRegistry;
-}
-
-function isKeyboardProfileId(value: string): value is KeyboardProfileId {
-  return (KEYBOARD_PROFILE_IDS as readonly string[]).includes(value);
 }
 
 /** The production executors: `keyboard setProfile`, `killProfile` and `displayProfile`. */
@@ -210,7 +208,7 @@ const personaTool = defineDeviceTool({
     "describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | " +
     "experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those " +
     "returns route_to_real_device and changes nothing. applying a different persona resets the recorded one first; reset restores the display, kill " +
-    "and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). " +
+    "and keyboard changes (their records are shared with displayProfile, killProfile and keyboard setProfile). " +
     "In a daemon session, release or rebind restores the kill, display and keyboard facets. Simulates effects, " +
     "not firmware.",
   input: personaInput,

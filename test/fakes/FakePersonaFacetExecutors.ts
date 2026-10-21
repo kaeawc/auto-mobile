@@ -26,6 +26,8 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
   activeKeyboardProfile = "gboard";
   /** The fake shared keyboard-profile record: the profile before the first change. */
   keyboardRecorded?: string;
+  /** The owner each keyboard set was recorded under, in order. */
+  readonly keyboardOwners: (string | undefined)[] = [];
   keyboardError?: Error;
   killError?: Error;
   displayError?: Error;
@@ -35,8 +37,9 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
   displayStatus: DisplayProfileResult["status"] = "applied";
 
   readonly keyboard: PersonaKeyboardExecutor = {
-    set: async (profile) => {
+    set: async (profile, _signal, owner) => {
       this.calls.push({ facet: "keyboard", action: "set", profile });
+      this.keyboardOwners.push(owner);
       if (this.keyboardError) {
         throw this.keyboardError;
       }

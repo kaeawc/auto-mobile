@@ -11,9 +11,9 @@ import {
   runWithinShutdownDeadline,
   shutdownTimeoutError,
   DEVICE_SHUTDOWN_TIMEOUT_MS,
-} from "./deadlines";
+} from "../core/deadlines";
 import { getShutdownInitiatingExecutionId, isShutdownTimeoutError } from "./shutdownPreparation";
-import { isUnknownAndroidRuntimeName } from "./androidIdentity";
+import { isUnknownAndroidRuntimeName } from "../core/androidIdentity";
 import { type ShutdownOwnershipContext } from "./shutdownOwnership";
 
 export const DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF = fixedBackoff(1_000);

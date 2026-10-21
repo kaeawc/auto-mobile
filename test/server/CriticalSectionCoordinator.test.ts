@@ -1,9 +1,13 @@
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
-import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { mock, describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { DeviceLostError, rememberDeviceLossAbort } from "../../src/models/DeviceLostError";
 import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 describe("CriticalSectionCoordinator", () => {
   let coordinator: CriticalSectionCoordinator;

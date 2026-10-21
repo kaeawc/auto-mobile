@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
@@ -6,6 +6,10 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
+
+afterEach(() => {
+  mock.restore();
+});
 
 describe("DeviceSessionManager platform scan status", () => {
   const android: BootedDevice = {

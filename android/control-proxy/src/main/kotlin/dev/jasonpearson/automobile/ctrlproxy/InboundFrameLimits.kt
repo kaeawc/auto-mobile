@@ -64,28 +64,44 @@ internal data class InboundFrameHeader(val type: String?, val requestId: String?
   companion object {
     private const val TAG = "InboundFrameHeader"
 
-    fun peek(frame: ByteArray): InboundFrameHeader {
+    /**
+     * Logging validates the complete object so a malformed suffix still logs `unknown`, as the
+     * former tree parser did. Cap checks keep their early exit and best-effort correlation. Neither
+     * mode materializes payload values.
+     */
+    fun peek(frame: ByteArray, validateObject: Boolean = false): InboundFrameHeader {
       var type: String? = null
       var requestId: String? = null
       try {
         JsonReader(InputStreamReader(ByteArrayInputStream(frame), Charsets.UTF_8)).use { reader ->
           reader.beginObject()
-          while (reader.hasNext() && (type == null || requestId == null)) {
+          while (reader.hasNext()) {
+            if (!validateObject && type != null && requestId != null) break
             when (reader.nextName()) {
               "type" -> type = reader.nextStringOrSkip()
               "requestId" -> requestId = reader.nextStringOrSkip()
               else -> reader.skipValue()
             }
           }
+          reader.requireObjectEnd(validateObject)
         }
       } catch (error: IOException) {
-        // A malformed frame keeps whatever was read; the full decode reports the syntax error.
+        // Cap checks keep partial headers for correlation; logging requires a complete object.
         Log.d(TAG, "Frame header unreadable (${frame.size} bytes): ${error.javaClass.simpleName}")
+        if (validateObject) return InboundFrameHeader(null, null)
       } catch (error: IllegalStateException) {
-        // A non-object frame or an unexpected token: same as malformed, the full decode reports it.
+        // A non-object frame or unexpected token: the full decode reports the syntax error.
         Log.d(TAG, "Frame header unreadable (${frame.size} bytes): ${error.javaClass.simpleName}")
+        if (validateObject) return InboundFrameHeader(null, null)
       }
       return InboundFrameHeader(type, requestId)
+    }
+
+    private fun JsonReader.requireObjectEnd(validateObject: Boolean) {
+      if (validateObject) {
+        endObject()
+        check(peek() == JsonToken.END_DOCUMENT)
+      }
     }
 
     private fun JsonReader.nextStringOrSkip(): String? =

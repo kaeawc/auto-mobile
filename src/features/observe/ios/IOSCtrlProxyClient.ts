@@ -601,9 +601,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     );
   }
 
-  /**
-   * Get singleton instance for a device
-   */
+  /** Get singleton instance for a device */
   public static getInstance(device: BootedDevice, port?: number): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.getInstance");
     const key = device.deviceId;
@@ -750,10 +748,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     return client;
   }
 
-  /**
-   * Diagnostic accessor for doctor: reports the host port this client will use
-   * for the runner WebSocket without opening any additional connection.
-   */
+  /** Doctor diagnostic: the runner WebSocket host port, without opening a connection. */
   public getConnectionPortForDiagnostics(): number {
     return this.port;
   }
@@ -776,18 +771,14 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     return this.getBoundSessionId();
   }
 
-  /**
-   * Get the NavigationGraphManager for the bound session, or the global singleton.
-   */
+  /** Get the NavigationGraphManager for the bound session, or the global singleton. */
   private getNavigationGraphManager(): NavGraph {
     return this.boundSessionId
       ? NavigationGraphManager.getInstanceForSession(this.boundSessionId)
       : NavigationGraphManager.getInstance();
   }
 
-  /**
-   * Create instance for testing with injected dependencies
-   */
+  /** Create instance for testing with injected dependencies */
   public static createForTesting(
     device: BootedDevice,
     port: number,
@@ -802,9 +793,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     );
   }
 
-  /**
-   * Reset all instances (for testing)
-   */
+  /** Reset all instances (for testing) */
   public static resetInstances(): void {
     for (const instance of IOSCtrlProxyClient.registry.closeAll()) {
       void instance.close();

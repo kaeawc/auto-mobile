@@ -27,9 +27,13 @@ import {
   SessionBrokerFailureError,
   type SessionBrokerDevicePort,
   type SessionDevicePreparationOptions,
+  type ResetResult,
+  type ResetOutcome,
+  type SessionPreparationTiming,
 } from "./devicePort";
 import { nativeProfile, type BrokerNativeProfile } from "./profile";
 import type { BrokerResourceRecord } from "./store";
+import { preparationTiming } from "./preparationTiming";
 
 import { BROKER_BINDING_ROLE } from "./persistedIdentity";
 
@@ -56,7 +60,7 @@ export interface ManagedDevicePortDependencies {
     device: BootedDevice,
     profile: Extract<BrokerNativeProfile, { platform: "ios" }>,
     assertOwned: () => Promise<void>,
-  ) => Promise<"clean">;
+  ) => Promise<"clean" | ResetOutcome>;
   /** Durable request/revision fence; a stale reset must not act on a later session's resource. */
   isCurrentReset?: (resource: BrokerResourceRecord) => Promise<boolean>;
 }
@@ -82,7 +86,11 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   async prepare(
     resource: BrokerResourceRecord,
     options: SessionDevicePreparationOptions,
-  ): Promise<{ sessionId: string; profile: BrokerNativeProfile }> {
+  ): Promise<{
+    sessionId: string;
+    profile: BrokerNativeProfile;
+    timing?: SessionPreparationTiming;
+  }> {
     this.assertResource(resource, "reserved");
     if (!resource.requestId) {
       throw new ActionableError("A broker device reservation must belong to a session request");
@@ -136,7 +144,10 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    return { sessionId, profile };
+    const binding = result.bindings.find(
+      (entry) => entry.bindingIndex === resource.allocationIndex,
+    );
+    return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
   }
 
   private preparationStopped(deadlineMs: number, signal?: AbortSignal): boolean {
@@ -258,7 +269,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     };
   }
 
-  async reset(resource: BrokerResourceRecord): Promise<"clean" | "pending"> {
+  async reset(resource: BrokerResourceRecord): Promise<ResetResult> {
     this.assertResource(resource, "resetting");
     const profile = nativeProfile(resource);
     const reset = this.dependencies.resetIosBaseline;

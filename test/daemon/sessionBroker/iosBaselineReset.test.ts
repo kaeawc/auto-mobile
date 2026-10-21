@@ -158,6 +158,51 @@ describe("IosBaselineReset", () => {
     expect(h.events).toEqual(["list:1"]);
   });
 
+  test("returns measured stop, erase and boot durations with a fake clock", async () => {
+    const timer = new FakeTimer();
+    const h = harness({
+      timer,
+      stopDevice: async () => {
+        timer.advanceTime(3);
+      },
+      eraseSimulator: async () => {
+        timer.advanceTime(5);
+      },
+      bootSimulator: async () => {
+        timer.advanceTime(7);
+        return DEVICE;
+      },
+    });
+    expect(await h.resetter.resetWithTiming(DEVICE, PROFILE, h.assertOwned)).toEqual({
+      outcome: "clean",
+      mode: "erase",
+      phases: { stop: 3, erase: 5, boot: 7 },
+    });
+  });
+
+  test("failed erase preserves completed and failed phase evidence", async () => {
+    const timer = new FakeTimer();
+    const failure = new ActionableError("erase failed");
+    const h = harness({
+      timer,
+      stopDevice: async () => {
+        timer.advanceTime(3);
+      },
+      eraseSimulator: async () => {
+        timer.advanceTime(5);
+        throw failure;
+      },
+    });
+    await expect(h.resetter.resetWithTiming(DEVICE, PROFILE, h.assertOwned)).rejects.toMatchObject({
+      cause: failure,
+      reset: {
+        mode: "erase",
+        outcome: "pending",
+        phases: { stop: 3, erase: 5 },
+        fallbackReason: "erase failed",
+      },
+    });
+  });
   test("runs the bounded clean-baseline sequence with fresh authoritative reads", async () => {
     const h = harness();
 

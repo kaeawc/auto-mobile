@@ -23,6 +23,10 @@ internal object PrototypeChatScrollRules {
       }
       node.text("id")?.let { ids[it] = (ids[it] ?: 0) + 1 }
     }
+    return scrollToErrors(context, ids)
+  }
+
+  private fun scrollToErrors(context: Context, ids: Map<String, Int>): PrototypeSpecError? {
     for ((action, path) in context.actions) {
       if (action.text("type") != "scrollTo") continue
       val target = action.text("scroll") ?: continue

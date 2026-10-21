@@ -1,0 +1,32 @@
+MEDIA SESSION SERVICE (dumpsys media_session)
+
+  1 sessions listeners.
+  Global priority session is null
+  User Records:
+Record for full_user=0
+  Volume key long-press listener: null
+  Volume key long-press listener package:
+  Media key event listener: null
+  Media key event listener package:
+  Callback: null
+  Last MediaButtonReceiver: MBR {pi=PendingIntent{4b2a0e3: PendingIntentRecord{8f71c20 dev.example.player broadcastIntent}}, componentName=ComponentInfo{dev.example.player/android.support.v4.media.session.MediaButtonReceiver}, type=1, pkg=dev.example.player}
+  Restored MediaButtonReceiver: null
+  Restored MediaButtonReceiver componentType: 0
+  Media button session is dev.example.player/PlaybackService (userId=0)
+  Sessions Stack - have 1 sessions:
+    PlaybackService dev.example.player/PlaybackService (userId=0)
+      ownerPid=3388, ownerUid=10089, userId=0
+      package=dev.example.player
+      launchIntent=null
+      mediaButtonReceiver=PendingIntent{4b2a0e3: PendingIntentRecord{8f71c20 dev.example.player broadcastIntent}}
+      active=true
+      flags=3
+      rating type=0
+      controllers: 1
+      state=PlaybackState {state=3, position=125000, buffered position=0, speed=1.25, updated=4410723, actions=823, custom actions=[], active item id=-1, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata:size=5, description=Night Drive, Example Artist, null
+      queueTitle=null, size=0
+Audio playback (lastly played comes first)
+  uid=10089 packages=dev.example.player

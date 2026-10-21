@@ -69,6 +69,21 @@ const typedResults: Record<string, Record<string, unknown>> = {
     rotationPerformed: true,
   },
   hinge_angle_result: { success: false, angle: 90, error: "unsupported", totalTimeMs: 17 },
+  accessibility_audit_result: {
+    success: true,
+    issues: [
+      {
+        check: "contrast",
+        summary: "fixture issue",
+        detail: "fixture detail",
+        elementId: "fixture-element",
+        label: "Fixture",
+        bounds: { left: 1, top: 2, right: 3, bottom: 4 },
+      },
+    ],
+    unsupportedChecks: ["fixture-check"],
+    totalTimeMs: 17,
+  },
   magic_tap_result: {
     success: false,
     available: true,

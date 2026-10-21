@@ -23,7 +23,13 @@ import {
   PROTOTYPE_STORAGE_CAPABILITY,
   PROTOTYPE_NETWORK_CAPABILITY,
   PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
+  PROTOTYPE_PLATFORM_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PLATFORM_MODULE_GATES,
+  prototypePlatformFields,
+  prototypePlatformUnsupportedMessage,
+} from "./prototypePlatform";
 import {
   prototypeDataActionFields,
   prototypeDataActionsUnsupportedMessage,
@@ -217,6 +223,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: prototypeDeviceRequestFields,
     unsupportedMessage: prototypeNetworkDeviceUnsupportedMessage,
   },
+  {
+    capability: PROTOTYPE_PLATFORM_CAPABILITY,
+    fields: prototypePlatformFields,
+    unsupportedMessage: prototypePlatformUnsupportedMessage,
+  },
+  ...PROTOTYPE_PLATFORM_MODULE_GATES,
 ];
 
 export function prototypeRequiredCapabilities(spec: unknown): {

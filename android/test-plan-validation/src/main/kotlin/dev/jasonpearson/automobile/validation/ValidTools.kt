@@ -15,6 +15,7 @@ object ValidTools {
     MIGRATED_LEGACY_TOOLS +
       setOf(
         "accessibility",
+        "accessibilityAudit",
         "accessibilityAction",
         "accessibilityFocus",
         "audit",
@@ -102,6 +103,7 @@ object ValidTools {
         "resetAppLogs",
         "resetKeychain",
         "sendSms",
+        "mediaSession",
         "setDeviceResources",
         "setPosture",
         "setPreference",

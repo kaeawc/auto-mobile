@@ -183,6 +183,140 @@
     }
   },
   {
+    "name": "accessibilityAudit",
+    "description": "Run the platform's own accessibility audit engine on the current screen. iOS (iOS 17+, Simulator and physical) runs XCUITest performAccessibilityAudit and reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds. Unlike the host-side WCAG audit, the platform engine sees real hit regions, Dynamic Type support and clipped text. Android (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform; a runner that predates this command returns errorCode unsupported_capability.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Bundle id of the app to audit (default: the foreground app)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "checks": {
+          "description": "Checks to run (default: all)",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "contrast",
+              "hitRegion",
+              "dynamicType",
+              "textClipped",
+              "sufficientDescription",
+              "trait",
+              "elementDetection",
+              "all"
+            ]
+          }
+        },
+        "maxIssues": {
+          "description": "Most issues to return (default 50); truncated reports a clip",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "engine": {
+          "type": "string",
+          "enum": ["xcuitest", "atf"]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "check": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "elementId": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "left": {
+                    "type": "number"
+                  },
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  }
+                },
+                "required": ["left", "top", "right", "bottom"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["check", "summary"],
+            "additionalProperties": {}
+          }
+        },
+        "totalIssues": {
+          "type": "number"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "unsupportedChecks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": ["unsupported_capability", "unsupported_platform"]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "engine", "issues", "totalIssues", "truncated", "unsupportedChecks"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "accessibilityFocus",
     "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
     "inputSchema": {
@@ -3323,6 +3457,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -3364,6 +3499,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
@@ -3461,6 +3597,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -3502,6 +3639,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
@@ -9910,6 +10048,413 @@
     },
     "_meta": {
       "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "mediaSession",
+    "description": "Android media sessions: read playback state, position, speed, metadata and actions (dumpsys media_session); dispatch a transport key to the media button session like a headset, reporting which session handled it; or set a music/ring/alarm stream volume. Mutations return a restore receipt. waitFor polls get until a session reports a state.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Package. get: only its sessions. dispatch: refuse unless it is the media button session",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "action": {
+          "description": "\"get\" reads sessions; {dispatch} sends a media key like a headset; {volume} sets a stream index",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "get"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "dispatch": {
+                  "type": "string",
+                  "enum": [
+                    "play",
+                    "pause",
+                    "play-pause",
+                    "next",
+                    "previous",
+                    "stop",
+                    "fast-forward",
+                    "rewind"
+                  ]
+                }
+              },
+              "required": ["dispatch"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "volume": {
+                  "type": "object",
+                  "properties": {
+                    "stream": {
+                      "type": "string",
+                      "enum": ["music", "ring", "alarm"]
+                    },
+                    "level": {
+                      "description": "Volume index within the stream's range",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["stream", "level"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["volume"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "waitFor": {
+          "description": "get only: poll until a session (of appId, if given) reports this state",
+          "type": "object",
+          "properties": {
+            "mediaState": {
+              "type": "string",
+              "enum": [
+                "none",
+                "stopped",
+                "paused",
+                "playing",
+                "fast_forwarding",
+                "rewinding",
+                "buffering",
+                "error",
+                "connecting",
+                "skipping_to_previous",
+                "skipping_to_next",
+                "skipping_to_queue_item"
+              ]
+            },
+            "timeoutMs": {
+              "description": "Wait timeout ms (default: 5000)",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1770000
+            }
+          },
+          "required": ["mediaState"],
+          "additionalProperties": false
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["get", "dispatch", "volume"]
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "package": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "tag": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "userId": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "state": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "stateCode": {
+                "type": "number"
+              },
+              "positionMs": {
+                "type": "number"
+              },
+              "positionUpdatedAtMs": {
+                "type": "number"
+              },
+              "speed": {
+                "type": "number"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "artist": {
+                    "type": "string"
+                  },
+                  "album": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "isMediaButtonSession": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "package",
+              "tag",
+              "userId",
+              "active",
+              "state",
+              "actions",
+              "isMediaButtonSession"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "mediaButtonSession": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wait": {
+          "type": "object",
+          "properties": {
+            "mediaState": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "matched": {
+              "type": "boolean"
+            },
+            "waitMs": {
+              "type": "number"
+            },
+            "polls": {
+              "type": "number"
+            }
+          },
+          "required": ["mediaState", "matched", "waitMs", "polls"],
+          "additionalProperties": false
+        },
+        "awaitTimeout": {
+          "type": "boolean"
+        },
+        "awaitDuration": {
+          "type": "number"
+        },
+        "dispatch": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "handledBy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "previousState": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "state": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "stateChanged": {
+              "type": "boolean"
+            }
+          },
+          "required": ["key", "handledBy", "stateChanged"],
+          "additionalProperties": false
+        },
+        "volume": {
+          "type": "object",
+          "properties": {
+            "stream": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "previousLevel": {
+              "type": "number"
+            },
+            "level": {
+              "type": "number"
+            },
+            "requestedLevel": {
+              "type": "number"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "verified": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "stream",
+            "previousLevel",
+            "level",
+            "requestedLevel",
+            "min",
+            "max",
+            "changed",
+            "verified"
+          ],
+          "additionalProperties": false
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "dispatch": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "volume": {
+              "type": "object",
+              "properties": {
+                "stream": {
+                  "$ref": "#/$defs/__schema6"
+                },
+                "level": {
+                  "type": "number"
+                }
+              },
+              "required": ["stream", "level"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["success", "message", "action"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "string"
+        },
+        "__schema1": {
+          "type": "string"
+        },
+        "__schema2": {
+          "type": "number"
+        },
+        "__schema3": {
+          "type": "string",
+          "enum": [
+            "none",
+            "stopped",
+            "paused",
+            "playing",
+            "fast_forwarding",
+            "rewinding",
+            "buffering",
+            "error",
+            "connecting",
+            "skipping_to_previous",
+            "skipping_to_next",
+            "skipping_to_queue_item",
+            "unknown"
+          ]
+        },
+        "__schema4": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "tag": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "userId": {
+              "$ref": "#/$defs/__schema2"
+            }
+          },
+          "required": ["package", "tag", "userId"],
+          "additionalProperties": false
+        },
+        "__schema5": {
+          "type": "string",
+          "enum": [
+            "play",
+            "pause",
+            "play-pause",
+            "next",
+            "previous",
+            "stop",
+            "fast-forward",
+            "rewind"
+          ]
+        },
+        "__schema6": {
+          "type": "string",
+          "enum": ["music", "ring", "alarm"]
+        }
+      }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["get"]
+        }
+      ]
     }
   },
   {
@@ -16663,6 +17208,685 @@
               "required": ["version", "keys"],
               "additionalProperties": false
             },
+            "requires": {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                },
+                "permissions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "enum": [
+                          "camera",
+                          "microphone",
+                          "location",
+                          "locationBackground",
+                          "notifications",
+                          "photos",
+                          "photosAdd",
+                          "contacts",
+                          "calendar",
+                          "bluetooth",
+                          "nearbyWifi",
+                          "motion",
+                          "speech"
+                        ]
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "maxLength": 512
+                      }
+                    },
+                    "required": ["name", "purpose"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 16
+                },
+                "background": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "location",
+                      "call",
+                      "connectedDevice",
+                      "transfer",
+                      "camera",
+                      "microphone",
+                      "remoteNotification"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 8
+                }
+              },
+              "additionalProperties": false
+            },
+            "platform": {
+              "type": "object",
+              "properties": {
+                "on": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["emit"]
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "payload": {},
+                            "context": {
+                              "allOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "state": {
+                                            "type": "string",
+                                            "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
+                                          }
+                                        },
+                                        "required": ["state"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "item": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                          }
+                                        },
+                                        "required": ["item"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "index": {
+                                            "type": "boolean",
+                                            "const": true
+                                          }
+                                        },
+                                        "required": ["index"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "data": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 256,
+                                            "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
+                                          }
+                                        },
+                                        "required": ["data"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/payload"
+                                          }
+                                        },
+                                        "required": ["value"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "page": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": ["page"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "match": {
+                                            "type": "string",
+                                            "enum": ["text", "kind"]
+                                          }
+                                        },
+                                        "required": ["match"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "propertyNames": {
+                                    "minLength": 1
+                                  }
+                                }
+                              ]
+                            },
+                            "requireValid": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                              },
+                              "minItems": 1,
+                              "maxItems": 8
+                            }
+                          },
+                          "required": ["type", "name"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["setPage"]
+                            },
+                            "pager": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "page": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": ["next", "prev"]
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2147483647
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["type", "pager", "page"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["setState"]
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["type", "key", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["toggle"]
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            }
+                          },
+                          "required": ["type", "key"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["increment"]
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "by": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["type", "key"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["decrement"]
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "by": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["type", "key"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["dismiss"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["setData"]
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 261
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["type", "path", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["appendData"]
+                            },
+                            "path": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/path"
+                            },
+                            "value": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/value"
+                            }
+                          },
+                          "required": ["type", "path", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["removeData"]
+                            },
+                            "path": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/path"
+                            }
+                          },
+                          "required": ["type", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["request"]
+                            },
+                            "method": {
+                              "type": "string",
+                              "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+                            },
+                            "url": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "headers": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "maxLength": 4096
+                                  },
+                                  {
+                                    "anyOf": [
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              "propertyNames": {
+                                "minLength": 1
+                              }
+                            },
+                            "query": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/headers/additionalProperties"
+                              },
+                              "propertyNames": {
+                                "minLength": 1
+                              }
+                            },
+                            "body": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/headers/additionalProperties/anyOf/1"
+                            },
+                            "into": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 261
+                            },
+                            "statusKey": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "via": {
+                              "type": "string",
+                              "enum": ["host", "device"]
+                            },
+                            "timeoutMs": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 30000
+                            },
+                            "onSuccess": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                              },
+                              "minItems": 1,
+                              "maxItems": 32
+                            },
+                            "onError": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/onSuccess"
+                            }
+                          },
+                          "required": ["type", "url"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["platform"]
+                            },
+                            "call": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "args": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "platform": {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                      }
+                                    },
+                                    "required": ["platform"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "event": {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                      }
+                                    },
+                                    "required": ["event"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "propertyNames": {
+                                "minLength": 1
+                              }
+                            },
+                            "into": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 261
+                            },
+                            "statusKey": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                            },
+                            "timeoutMs": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 300000
+                            },
+                            "onSuccess": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties"
+                            },
+                            "onError": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties"
+                            }
+                          },
+                          "required": ["type", "call"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["push"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "screen": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "stack", "screen"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["pop"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "stack"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["popToRoot"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "stack"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["scrollTo"]
+                            },
+                            "scroll": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "to": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": ["start", "end"]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["key"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "animated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["type", "scroll", "to"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["replace"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "screen": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "stack", "screen"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 32
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": ["on"],
+              "additionalProperties": false
+            },
             "root": {
               "anyOf": [
                 {
@@ -16687,517 +17911,7 @@
                     "onTap": {
                       "type": "array",
                       "items": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["emit"]
-                              },
-                              "name": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "payload": {},
-                              "context": {
-                                "allOf": [
-                                  {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "anyOf": [
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "state": {
-                                              "type": "string",
-                                              "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
-                                            }
-                                          },
-                                          "required": ["state"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "item": {
-                                              "type": "string",
-                                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                                            }
-                                          },
-                                          "required": ["item"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "index": {
-                                              "type": "boolean",
-                                              "const": true
-                                            }
-                                          },
-                                          "required": ["index"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "data": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 256,
-                                              "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
-                                            }
-                                          },
-                                          "required": ["data"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "value": {
-                                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/payload"
-                                            }
-                                          },
-                                          "required": ["value"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "page": {
-                                              "type": "string",
-                                              "minLength": 1
-                                            }
-                                          },
-                                          "required": ["page"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
-                                            "match": {
-                                              "type": "string",
-                                              "enum": ["text", "kind"]
-                                            }
-                                          },
-                                          "required": ["match"],
-                                          "additionalProperties": false
-                                        }
-                                      ]
-                                    },
-                                    "propertyNames": {
-                                      "minLength": 1
-                                    }
-                                  }
-                                ]
-                              },
-                              "requireValid": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                                },
-                                "minItems": 1,
-                                "maxItems": 8
-                              }
-                            },
-                            "required": ["type", "name"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["setPage"]
-                              },
-                              "pager": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "page": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["next", "prev"]
-                                  },
-                                  {
-                                    "type": "integer",
-                                    "minimum": 0,
-                                    "maximum": 2147483647
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["type", "pager", "page"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["setState"]
-                              },
-                              "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              },
-                              "value": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["type", "key", "value"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["toggle"]
-                              },
-                              "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              }
-                            },
-                            "required": ["type", "key"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["increment"]
-                              },
-                              "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              },
-                              "by": {
-                                "type": "number"
-                              }
-                            },
-                            "required": ["type", "key"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["decrement"]
-                              },
-                              "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              },
-                              "by": {
-                                "type": "number"
-                              }
-                            },
-                            "required": ["type", "key"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["dismiss"]
-                              }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["setData"]
-                              },
-                              "path": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 261
-                              },
-                              "value": {
-                                "anyOf": [
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["type", "path", "value"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["appendData"]
-                              },
-                              "path": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/path"
-                              },
-                              "value": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/value"
-                              }
-                            },
-                            "required": ["type", "path", "value"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["removeData"]
-                              },
-                              "path": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/path"
-                              }
-                            },
-                            "required": ["type", "path"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["request"]
-                              },
-                              "method": {
-                                "type": "string",
-                                "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
-                              },
-                              "url": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 2048
-                              },
-                              "headers": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "maxLength": 4096
-                                    },
-                                    {
-                                      "anyOf": [
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
-                                        },
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
-                                        },
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
-                                        },
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
-                                        },
-                                        {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
-                                        }
-                                      ]
-                                    }
-                                  ]
-                                },
-                                "propertyNames": {
-                                  "minLength": 1
-                                }
-                              },
-                              "query": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/headers/additionalProperties"
-                                },
-                                "propertyNames": {
-                                  "minLength": 1
-                                }
-                              },
-                              "body": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/headers/additionalProperties/anyOf/1"
-                              },
-                              "into": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 261
-                              },
-                              "statusKey": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
-                              },
-                              "via": {
-                                "type": "string",
-                                "enum": ["host", "device"]
-                              },
-                              "timeoutMs": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "maximum": 30000
-                              },
-                              "onSuccess": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
-                                },
-                                "minItems": 1,
-                                "maxItems": 32
-                              },
-                              "onError": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/onSuccess"
-                              }
-                            },
-                            "required": ["type", "url"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["push"]
-                              },
-                              "stack": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "screen": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "stack", "screen"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["pop"]
-                              },
-                              "stack": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "stack"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["popToRoot"]
-                              },
-                              "stack": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "stack"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["scrollTo"]
-                              },
-                              "scroll": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "to": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": ["start", "end"]
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "key": {
-                                        "anyOf": [
-                                          {
-                                            "type": "string"
-                                          },
-                                          {
-                                            "type": "number"
-                                          },
-                                          {
-                                            "type": "boolean"
-                                          }
-                                        ]
-                                      }
-                                    },
-                                    "required": ["key"],
-                                    "additionalProperties": false
-                                  }
-                                ]
-                              },
-                              "animated": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["type", "scroll", "to"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["replace"]
-                              },
-                              "stack": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "screen": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "stack", "screen"],
-                            "additionalProperties": false
-                          }
-                        ]
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                       },
                       "minItems": 1,
                       "maxItems": 32
@@ -17571,12 +18285,12 @@
                                   "valid": {
                                     "anyOf": [
                                       {
-                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                       },
                                       {
                                         "type": "array",
                                         "items": {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                         },
                                         "minItems": 1,
                                         "maxItems": 8
@@ -17591,7 +18305,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "equals": {
                                     "anyOf": [
@@ -17614,7 +18328,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
@@ -17627,7 +18341,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -17640,7 +18354,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -17652,8 +18366,60 @@
                               {
                                 "type": "object",
                                 "properties": {
+                                  "platform": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "equals": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
+                                  }
+                                },
+                                "required": ["platform", "equals"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "platform": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "notEquals": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
+                                  }
+                                },
+                                "required": ["platform", "notEquals"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "platform": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "gt": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["platform", "gt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "platform": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  },
+                                  "lt": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["platform", "lt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "equals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
@@ -17666,7 +18432,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
@@ -17679,7 +18445,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -17692,7 +18458,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -17912,7 +18678,7 @@
                     "onLongPress": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                       },
                       "minItems": 1,
                       "maxItems": 32
@@ -17920,7 +18686,7 @@
                     "onDoubleTap": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                       },
                       "minItems": 1,
                       "maxItems": 32
@@ -17958,7 +18724,7 @@
                               "type": "object",
                               "properties": {
                                 "path": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                 }
                               },
                               "required": ["path"],
@@ -17967,10 +18733,10 @@
                           ]
                         },
                         "as": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         },
                         "key": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         }
                       },
                       "required": ["items", "as"],
@@ -18061,7 +18827,7 @@
                               "onTap": {
                                 "type": "array",
                                 "items": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                                 },
                                 "minItems": 1,
                                 "maxItems": 32
@@ -18491,7 +19257,7 @@
                         "onTap": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                           },
                           "minItems": 1,
                           "maxItems": 32
@@ -18866,7 +19632,7 @@
                       "enum": ["textField"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "placeholder": {
                       "type": "string"
@@ -18924,7 +19690,7 @@
                         "onTap": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                           },
                           "minItems": 1,
                           "maxItems": 32
@@ -18988,7 +19754,7 @@
                       "enum": ["searchBar"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "placeholder": {
                       "$ref": "#/properties/spec/properties/root/anyOf/10/properties/placeholder"
@@ -19005,7 +19771,7 @@
                       "maxItems": 2
                     },
                     "activeKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "variant": {
                       "type": "string",
@@ -19074,7 +19840,7 @@
                       "enum": ["switch"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -19137,7 +19903,7 @@
                       "enum": ["checkbox"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -19261,7 +20027,7 @@
                       "enum": ["radioGroup"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "options": {
                       "type": "array",
@@ -19331,7 +20097,7 @@
                       "enum": ["select"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -19431,7 +20197,7 @@
                               "enum": ["switch"]
                             },
                             "stateKey": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -19445,7 +20211,7 @@
                               "enum": ["checkbox"]
                             },
                             "stateKey": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -19524,7 +20290,7 @@
                       "enum": ["slider"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -19598,7 +20364,7 @@
                       "enum": ["assist", "filter", "input", "suggestion"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "label"],
@@ -19830,7 +20596,7 @@
                       "enum": ["segmentedButton"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "options": {
                       "type": "array",
@@ -20072,7 +20838,7 @@
                       "enum": ["linear", "circular"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "max": {
                       "type": "number"
@@ -20134,13 +20900,13 @@
                         "type": "object",
                         "properties": {
                           "path": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                           },
                           "x": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                           },
                           "y": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                           },
                           "label": {
                             "type": "string"
@@ -20226,7 +20992,7 @@
                       "type": "object",
                       "properties": {
                         "key": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                         },
                         "equals": {
                           "type": "boolean"
@@ -20478,10 +21244,10 @@
                       "enum": ["timePicker"]
                     },
                     "hourKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "minuteKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "is24Hour": {
                       "type": "boolean"
@@ -20543,7 +21309,7 @@
                       "enum": ["datePicker"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "stateKey"],
@@ -20601,12 +21367,12 @@
                       "type": "object",
                       "properties": {
                         "stateKey": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                         },
                         "onRefresh": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                           },
                           "minItems": 1,
                           "maxItems": 32
@@ -20622,12 +21388,12 @@
                       "type": "boolean"
                     },
                     "atEndKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "onStartReached": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
                       },
                       "minItems": 1,
                       "maxItems": 32
@@ -20860,7 +21626,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "scrollable": {
                       "type": "boolean"
@@ -20925,7 +21691,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "items"],
@@ -22689,6 +23455,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -22730,6 +23497,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",
@@ -28369,6 +29137,66 @@
             }
           ]
         },
+        "deviceCondition": {
+          "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Every applied condition restores to a clean state on release, rebind or lease expiry. Send it in its own call, not combined with other setDeviceState fields.",
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1,
+              "description": "Request shape version; only 1 exists."
+            },
+            "rootState": {
+              "type": "string",
+              "const": "unset",
+              "description": "Root fixture state. Only 'unset' (clear) is available until a root injector lands."
+            },
+            "integrityState": {
+              "type": "string",
+              "const": "unset",
+              "description": "Integrity-signal state. Only 'unset' (clear) is available until an integrity injector lands."
+            },
+            "faults": {
+              "type": "object",
+              "properties": {
+                "battery": {
+                  "type": "string",
+                  "enum": ["unplug", "low", "full", "unset"],
+                  "description": "Battery fault via `dumpsys battery` (unplug / low 15% / full), or unset."
+                },
+                "lowPower": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Toggle `settings global low_power`, restored to its prior value, or unset."
+                },
+                "doze": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Force deep Doze via `dumpsys deviceidle force-idle`, or unset."
+                },
+                "thermal": {
+                  "type": "string",
+                  "enum": ["throttling", "critical", "unset"],
+                  "description": "Override thermal status via `cmd thermalservice override-status`, or unset."
+                }
+              },
+              "additionalProperties": false,
+              "description": "Power-domain fault injectors (Android only, behind the feature flag)."
+            },
+            "expiresInSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400,
+              "description": "Lease: restore every applied condition after this many seconds unless a later deviceCondition call renews it. Session-bound calls only."
+            },
+            "reset": {
+              "type": "boolean",
+              "const": true,
+              "description": "Restore every condition applied on this device and verify a clean read."
+            }
+          },
+          "additionalProperties": false
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -29738,6 +30566,7 @@
           "enum": [
             "accessibility",
             "accessibilityAction",
+            "accessibilityAudit",
             "accessibilityFocus",
             "appLifecycle",
             "audit",
@@ -29779,6 +30608,7 @@
             "listDataStores",
             "listDeviceImages",
             "listDevices",
+            "mediaSession",
             "mockNetwork",
             "multiTouch",
             "navigateTo",
@@ -29842,6 +30672,7 @@
             "enum": [
               "accessibility",
               "accessibilityAction",
+              "accessibilityAudit",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -29883,6 +30714,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "mediaSession",
               "mockNetwork",
               "multiTouch",
               "navigateTo",

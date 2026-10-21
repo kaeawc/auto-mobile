@@ -55,10 +55,8 @@ export {
   type BindingDeviceClaim,
   type BindingDeviceClaims,
   type BindingDeviceDeleter,
-  type BindingDeviceIdentity,
   type BindingDeviceProvisioner,
   type BindingDisposition,
-  type BindingExistingSpecReader,
   type BindingInventory,
   type BindingInventorySnapshot,
   type BindingProvisionRequest,
@@ -67,7 +65,6 @@ export {
   type BindingReconcileRequest,
   type BindingReconcileResult,
   type BindingReconcilerDependencies,
-  type BindingReconcilerJournalOptions,
   type BindingResolvedSpec,
 } from "./reconcilerContracts";
 
@@ -1018,32 +1015,14 @@ export { type BindingRequestedSpec } from "./DefaultManagedSpecMatcher";
 
 export { type ManagedSpecMatch } from "./DefaultManagedSpecMatcher";
 
-export { type ManagedSpecResolver } from "./DefaultManagedSpecResolver";
-
 export { type ManagedAndroidImageCatalog } from "./DefaultManagedSpecResolver";
 
 export { type ManagedAndroidProfileCatalog } from "./DefaultManagedSpecResolver";
 
 export { type DefaultManagedSpecResolverOptions } from "./DefaultManagedSpecResolver";
 
-export { BINDING_DEFAULT_ANDROID_DEVICE_TYPE } from "./DefaultManagedSpecResolver";
-
-export { BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY } from "./DefaultManagedSpecResolver";
-
-export { type ManagedSpecCreatability } from "./DefaultManagedSpecResolver";
-
-export { type ManagedSpecResolution } from "./DefaultManagedSpecResolver";
-
 export { computeManagedSpecFingerprint } from "./DefaultManagedSpecResolver";
 
 export { chooseIosDeviceType } from "./DefaultManagedSpecResolver";
 
 export { type BindingReconcileFailure } from "./ReconcileAbort";
-
-export { type BindingSpecFingerprint } from "./DefaultManagedSpecResolver";
-
-export { BINDING_SPEC_FINGERPRINT_VERSION } from "./DefaultManagedSpecResolver";
-
-export { type BindingReconcileFailureCode } from "./ReconcileAbort";
-
-export { type BindingFailureCapacity } from "./ReconcileAbort";

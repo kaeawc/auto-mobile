@@ -29,7 +29,13 @@
     "MAX_PROTOTYPE_REQUEST_TIMEOUT_MS": 30000,
     "MAX_PROTOTYPE_RESPONSE_BYTES": 262144,
     "MAX_PROTOTYPE_REQUESTS_IN_FLIGHT": 4,
-    "MAX_PROTOTYPE_ACTION_DEPTH": 4
+    "MAX_PROTOTYPE_ACTION_DEPTH": 4,
+    "MAX_PROTOTYPE_PLATFORM_STATE_BYTES": 65536,
+    "DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS": 10000,
+    "MAX_PROTOTYPE_PLATFORM_TIMEOUT_MS": 300000,
+    "MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT": 4,
+    "MAX_PROTOTYPE_PLATFORM_HANDLERS": 32,
+    "MAX_PROTOTYPE_PLATFORM_ARGS": 16
   },
   "definitions": {
     "offset": {
@@ -129,9 +135,9 @@
     },
     "condition": {
       "kind": "object",
-      "exactlyOne": ["key", "data", "all", "any", "not", "valid"],
+      "exactlyOne": ["key", "data", "platform", "all", "any", "not", "valid"],
       "dependents": {
-        "key|data": ["equals", "notEquals", "gt", "lt"]
+        "key|data|platform": ["equals", "notEquals", "gt", "lt"]
       },
       "fields": {
         "key": {
@@ -221,6 +227,12 @@
                 }
               }
             ]
+          },
+          "optional": true
+        },
+        "platform": {
+          "rule": {
+            "kind": "pointer"
           },
           "optional": true
         }
@@ -2010,6 +2022,82 @@
                 "integer": true,
                 "min": 1,
                 "max": 30000
+              },
+              "optional": true
+            },
+            "onSuccess": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": true
+            },
+            "onError": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": true
+            }
+          }
+        },
+        "platform": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["platform"]
+              },
+              "optional": false
+            },
+            "call": {
+              "rule": {
+                "kind": "string",
+                "max": 64
+              },
+              "optional": false
+            },
+            "args": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 16,
+                "item": {
+                  "kind": "ref",
+                  "name": "platformBinding"
+                }
+              },
+              "optional": true
+            },
+            "into": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": true
+            },
+            "statusKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "timeoutMs": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 300000
               },
               "optional": true
             },
@@ -7959,6 +8047,20 @@
             "name": "storage"
           },
           "optional": true
+        },
+        "requires": {
+          "rule": {
+            "kind": "ref",
+            "name": "platformRequires"
+          },
+          "optional": true
+        },
+        "platform": {
+          "rule": {
+            "kind": "ref",
+            "name": "platformHandlers"
+          },
+          "optional": true
         }
       }
     },
@@ -11242,6 +11344,197 @@
         }
       }
     },
+    "platformBinding": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "object",
+          "fields": {
+            "state": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "item": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "index": {
+              "rule": {
+                "kind": "enum",
+                "values": [true]
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "data": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "value": {
+              "rule": {
+                "kind": "json",
+                "maxDepth": 24
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "platform": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "event": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
+    },
+    "platformPermission": {
+      "kind": "object",
+      "fields": {
+        "name": {
+          "rule": {
+            "kind": "enum",
+            "values": [
+              "camera",
+              "microphone",
+              "location",
+              "locationBackground",
+              "notifications",
+              "photos",
+              "photosAdd",
+              "contacts",
+              "calendar",
+              "bluetooth",
+              "nearbyWifi",
+              "motion",
+              "speech"
+            ]
+          },
+          "optional": false
+        },
+        "purpose": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 512
+          },
+          "optional": false
+        }
+      }
+    },
+    "platformRequires": {
+      "kind": "object",
+      "fields": {
+        "platform": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "unique": true,
+            "item": {
+              "kind": "string",
+              "max": 64
+            }
+          },
+          "optional": true
+        },
+        "permissions": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 16,
+            "item": {
+              "kind": "ref",
+              "name": "platformPermission"
+            }
+          },
+          "optional": true
+        },
+        "background": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 8,
+            "unique": true,
+            "item": {
+              "kind": "enum",
+              "values": [
+                "audio",
+                "location",
+                "call",
+                "connectedDevice",
+                "transfer",
+                "camera",
+                "microphone",
+                "remoteNotification"
+              ]
+            }
+          },
+          "optional": true
+        }
+      }
+    },
+    "platformHandlers": {
+      "kind": "object",
+      "fields": {
+        "on": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 32,
+            "item": {
+              "kind": "array",
+              "min": 1,
+              "max": 32,
+              "item": {
+                "kind": "ref",
+                "name": "action"
+              }
+            }
+          },
+          "optional": false
+        }
+      }
+    },
     "chartSeries": {
       "kind": "object",
       "fields": {
@@ -11343,5 +11636,47 @@
     "screen_changed",
     "change",
     "validation_failed"
-  ]
+  ],
+  "platformModules": {
+    "test": {
+      "capability": "prototype_platform_test_v1",
+      "placeholder": true,
+      "calls": {
+        "echo": {
+          "args": {
+            "message": {
+              "optional": false,
+              "value": {
+                "kind": "json",
+                "maxBytes": 1024
+              }
+            },
+            "delayMs": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 60000
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "protected": {
+          "args": {},
+          "permissions": ["camera"],
+          "background": ["audio"],
+          "sensitive": true
+        }
+      },
+      "events": {
+        "tick": {
+          "sensitive": false
+        }
+      }
+    }
+  }
 }

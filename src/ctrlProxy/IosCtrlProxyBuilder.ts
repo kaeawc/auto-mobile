@@ -50,11 +50,8 @@ import { sortedReaddir } from "../utils/io";
 import { ENV, readEnvBool, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 export {
-  IOS_HELPER_REQUIRE_CODESIGN_ENV,
-  IOS_HELPER_TEAM_ID_ENV,
   IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
   IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV,
-  IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV,
 } from "./IosRunnerArtifactVerifier";
 
 /**

@@ -34,6 +34,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "resetKeychain",
       "rotate",
       "setSensor",
+      "windowMode",
       "setAppPermissions",
       "setDeviceState",
       "setNotificationPolicy",

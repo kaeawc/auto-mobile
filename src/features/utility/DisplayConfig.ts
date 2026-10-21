@@ -12,6 +12,8 @@ import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlC
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
+import { IOSCtrlProxyClient } from "../observe/ios";
+import type { CtrlProxyAppearanceResult } from "../observe/ios/types";
 
 /**
  * The argv-shaped slice of the simctl client this feature needs. Routing
@@ -141,20 +143,30 @@ export interface DisplayConfigDependencies {
   adbFactory?: AdbClientFactory;
   /** iOS Simulator appearance seam; defaults to a `SimCtlClient` for the device. */
   simctl?: SimctlAppearanceRunner;
+  /** Physical iOS appearance seam (#14092); defaults to the device's CtrlProxy runner client. */
+  iosRunnerAppearance?: IosRunnerAppearanceClient;
 }
 
-const IOS_PHYSICAL_DISPLAY_CONFIG_UNSUPPORTED_ERROR =
-  "Display configuration (font scale, density, theme) cannot be read or set on a physical iOS " +
-  "device: there is no automatable, per-device control for the system text size, display zoom, " +
-  "or Dark Mode outside the Simulator. simctl has no verb for them on hardware, and the only " +
-  "host mechanism is manual Settings toggles. Set these manually in the iOS Settings app.";
+/** The runner's `request_appearance` (`XCUIDevice.appearance`); physical iOS has no simctl. */
+export interface IosRunnerAppearanceClient {
+  requestAppearance(appearance?: "light" | "dark"): Promise<CtrlProxyAppearanceResult>;
+}
+
+/** Reads and writes the iOS light/dark appearance: simctl on the Simulator, the runner on hardware. */
+interface IosAppearanceBackend {
+  /** Names the target in errors: "Simulator" or "device". */
+  readonly target: string;
+  read(): Promise<DisplayTheme | undefined>;
+  /** Resolves on success; rejects with the backend's own error. */
+  write(theme: "light" | "dark"): Promise<void>;
+}
 
 const IOS_FONT_SCALE_UNSUPPORTED_ERROR =
-  "fontScale is not supported on the iOS Simulator: there is no simctl/defaults control for " +
+  "fontScale is not supported on iOS: there is no simctl, defaults or XCUITest control for " +
   "the system text scale.";
 
 const IOS_DENSITY_UNSUPPORTED_ERROR =
-  "density is not supported on the iOS Simulator: there is no simctl/defaults control for " +
+  "density is not supported on iOS: there is no simctl, defaults or XCUITest control for " +
   "display density.";
 
 const ANDROID_UNSUPPORTED_PLATFORM_ERROR = "Display configuration is only supported on Android.";
@@ -282,6 +294,8 @@ export class DisplayConfig {
 
   private simctl: SimctlAppearanceRunner;
 
+  private iosRunnerAppearance?: IosRunnerAppearanceClient;
+
   private themeBaselines: ThemeBaselineStore;
 
   constructor(device: BootedDevice, dependencies: DisplayConfigDependencies = {}) {
@@ -289,18 +303,60 @@ export class DisplayConfig {
     this.themeBaselines = dependencies.themeBaselines ?? defaultThemeBaselines;
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl ?? new SimCtlClient(device);
+    this.iosRunnerAppearance = dependencies.iosRunnerAppearance;
   }
 
-  /** iOS simulators expose `simctl`/`defaults`; physical iOS devices expose neither. */
+  private iosAppearance(): IosAppearanceBackend {
+    if (this.isIosSimulator()) {
+      return {
+        target: "Simulator",
+        read: async () => {
+          const result = await this.simctl.executeCommandArgs([
+            "ui",
+            this.device.deviceId,
+            "appearance",
+          ]);
+          const value = result.stdout.trim();
+          return value === "light" || value === "dark" ? value : undefined;
+        },
+        write: async (theme) => {
+          await this.simctl.executeCommandArgs(["ui", this.device.deviceId, "appearance", theme]);
+        },
+      };
+    }
+    const runner = this.iosRunnerAppearance ?? IOSCtrlProxyClient.getInstance(this.device);
+    const call = async (appearance?: "light" | "dark") => {
+      const result = await runner.requestAppearance(appearance);
+      if (!result.success) {
+        throw new Error(
+          `CtrlProxy runner appearance request failed: ${result.error ?? "unknown error"}. ` +
+            "Physical-device theme control needs a runner that supports request_appearance.",
+        );
+      }
+      return result.appearance === "light" || result.appearance === "dark"
+        ? result.appearance
+        : undefined;
+    };
+    return {
+      target: "device",
+      read: () => call(),
+      write: async (theme) => {
+        await call(theme);
+      },
+    };
+  }
+
+  /** iOS simulators expose `simctl`/`defaults`; physical iOS devices use the runner instead. */
   private isIosSimulator(): boolean {
     return resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
   }
 
   private support(): DisplayConfigSupport {
     if (this.device.platform === "ios") {
-      // `simctl ui appearance` supports the iOS Simulator only; font scale and
-      // density have no simctl/defaults equivalent on either iOS target (#6096).
-      return { fontScale: false, density: false, theme: this.isIosSimulator() };
+      // Theme uses `simctl ui appearance` on the Simulator and the runner's
+      // `XCUIDevice.appearance` on hardware (#14092); font scale and density have
+      // no equivalent on either iOS target (#6096).
+      return { fontScale: false, density: false, theme: true };
     }
     return {
       fontScale: true,
@@ -321,11 +377,9 @@ export class DisplayConfig {
     };
   }
 
-  /** Read the current iOS Simulator theme via `simctl ui appearance` (no value = get). */
+  /** Read the current iOS theme (Simulator: `simctl ui appearance`; device: the runner). */
   private async readIosTheme(): Promise<DisplayTheme | undefined> {
-    const result = await this.simctl.executeCommandArgs(["ui", this.device.deviceId, "appearance"]);
-    const value = result.stdout.trim();
-    return value === "light" || value === "dark" ? value : undefined;
+    return this.iosAppearance().read();
   }
 
   /**
@@ -336,17 +390,19 @@ export class DisplayConfig {
    * light or dark.
    */
   private async setIosAppearance(theme: DisplayTheme): Promise<string[]> {
+    const backend = this.iosAppearance();
     if (theme !== "light" && theme !== "dark") {
       return [
-        `Cannot set theme '${theme}' on the iOS Simulator: 'simctl ui appearance' only accepts ` +
-          "'light' or 'dark'.",
+        `Cannot set theme '${theme}' on the iOS ${backend.target}: only 'light' or 'dark' can be set.`,
       ];
     }
     try {
-      await this.simctl.executeCommandArgs(["ui", this.device.deviceId, "appearance", theme]);
+      await backend.write(theme);
       return [];
     } catch (error) {
-      return [`'simctl ui appearance ${theme}' failed: ${errorMessage(error)}`];
+      return [
+        `Setting the iOS ${backend.target} appearance to ${theme} failed: ${errorMessage(error)}`,
+      ];
     }
   }
 
@@ -354,7 +410,7 @@ export class DisplayConfig {
     try {
       const theme = await this.readIosTheme();
       if (theme === undefined) {
-        throw new Error("simctl did not report a readable Simulator appearance");
+        throw new Error(`iOS did not report a readable ${this.iosAppearance().target} appearance`);
       }
       return {
         success: true,
@@ -396,7 +452,7 @@ export class DisplayConfig {
   private async readIosThemeSnapshot(): Promise<DisplayConfigValues> {
     const theme = await this.readIosTheme();
     if (theme === undefined) {
-      throw new Error("simctl did not report a readable Simulator appearance");
+      throw new Error(`iOS did not report a readable ${this.iosAppearance().target} appearance`);
     }
     return { theme };
   }
@@ -466,6 +522,44 @@ export class DisplayConfig {
     return undefined;
   }
 
+  /**
+   * `setIosAppearance`/`applyIosChanges` return failures as error fragments (mirroring the
+   * Android `runChecked` pattern), so this never throws. Light remains the iOS Simulator reset
+   * appearance (#6096); a physical device resets to the theme this tool first replaced there,
+   * which the user chose (#14092).
+   */
+  private async applyIosMutation(
+    input: SetDisplayConfigInput,
+    previous: DisplayConfigValues,
+  ): Promise<{ errors: string[]; expectedTheme?: DisplayTheme }> {
+    if (!input.reset) {
+      if (input.theme !== undefined) {
+        this.recordIosThemeBaseline(previous);
+      }
+      return { errors: await this.applyIosChanges(input), expectedTheme: input.theme };
+    }
+    const resetTheme = this.iosResetTheme();
+    const errors = await this.setIosAppearance(resetTheme);
+    if (errors.length === 0) {
+      this.themeBaselines.delete(this.device.deviceId);
+    }
+    return { errors, expectedTheme: resetTheme };
+  }
+
+  /** Physical iOS only: the first appearance this tool replaced, restored by `reset`. */
+  private recordIosThemeBaseline(previous: DisplayConfigValues): void {
+    const id = this.device.deviceId;
+    if (!this.isIosSimulator() && previous.theme && !this.themeBaselines.get(id)) {
+      this.themeBaselines.set(id, previous.theme);
+    }
+  }
+
+  private iosResetTheme(): DisplayTheme {
+    return this.isIosSimulator()
+      ? "light"
+      : (this.themeBaselines.get(this.device.deviceId) ?? "light");
+  }
+
   private async setIosSimulatorConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
     const invalidInput = this.validateIosSimulatorSetInput(input);
     if (invalidInput) {
@@ -481,23 +575,16 @@ export class DisplayConfig {
       return this.iosPreReadFailure(error);
     }
 
-    // `setIosAppearance`/`applyIosChanges` catch their own `executeCommandArgs`
-    // rejection and return it as an error fragment (mirroring the Android
-    // `runChecked` pattern), so the mutation step itself never throws here.
-    // Light remains the iOS Simulator reset appearance (issue #6096).
-    const errors = input.reset
-      ? await this.setIosAppearance("light")
-      : await this.applyIosChanges(input);
+    const { errors, expectedTheme } = await this.applyIosMutation(input, previous);
 
     const { applied, readError } = await this.readIosAppliedSnapshot();
     const allErrors = readError ? [...errors, readError] : [...errors];
     // `simctl ui appearance` can accept a write while the simulator has not
     // actually adopted it. A successful command is only an attempted mutation;
     // report success only when the authoritative post-read confirms the target.
-    const expectedTheme = input.reset ? "light" : input.theme;
     if (applied && expectedTheme && applied.theme !== expectedTheme) {
       allErrors.push(
-        `Simulator appearance remained ${applied.theme} after requesting ${expectedTheme}`,
+        `iOS ${this.iosAppearance().target} appearance remained ${applied.theme} after requesting ${expectedTheme}`,
       );
     }
     const error = allErrors.length > 0 ? allErrors.join("; ") : undefined;
@@ -515,9 +602,6 @@ export class DisplayConfig {
   /** Read the current font scale, density, and theme. */
   async getConfig(): Promise<DisplayConfigResult> {
     if (this.device.platform === "ios") {
-      if (!this.isIosSimulator()) {
-        return this.unsupported(IOS_PHYSICAL_DISPLAY_CONFIG_UNSUPPORTED_ERROR);
-      }
       return this.getIosSimulatorConfig();
     }
     try {
@@ -549,7 +633,7 @@ export class DisplayConfig {
    */
   async getRestorableConfig(): Promise<DisplayConfigValues> {
     if (this.device.platform === "ios") {
-      const theme = this.isIosSimulator() ? await this.readIosTheme() : undefined;
+      const theme = await this.readIosTheme();
       return theme === undefined ? {} : { theme };
     }
     return (await this.readRawValues(this.adbFactory.create(this.device))).restorableValues;
@@ -582,9 +666,6 @@ export class DisplayConfig {
       );
     }
     if (this.device.platform === "ios") {
-      if (!this.isIosSimulator()) {
-        return this.unsupported(IOS_PHYSICAL_DISPLAY_CONFIG_UNSUPPORTED_ERROR);
-      }
       return this.setIosSimulatorConfig(input);
     }
     if (this.device.platform !== "android") {

@@ -1,0 +1,23 @@
+Current lock settings service state:
+
+User State:
+    User 0
+        LSKF-based SP protector ID: 3c1f0e9a7b2d4c58
+        LSKF last changed: 2026-10-21 09:14:02 (previous protector: 0000000000000000)
+        SID: 0
+        Quality: 0
+        CredentialType: None
+        SeparateChallenge: false
+        Metrics: known
+    User 10
+        LSKF-based SP protector ID: 51e0c7a2d9f4b613
+        LSKF last changed: 2026-10-21 09:31:12 (previous protector: 0000000000000000)
+        SID: 2c7d1e94b08a6f35
+        Quality: 262144
+        CredentialType: Password
+        SeparateChallenge: true
+        Metrics: known
+
+StrongAuth:
+    User 0 strong auth flags: 0
+    User 10 strong auth flags: 0

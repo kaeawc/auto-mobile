@@ -187,6 +187,8 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionLocation.ts#runSessionLocationMutation": 1,
   "sessionNetworkCondition.ts#runSessionNetworkMutation": 1,
   "sessionRotation.ts#runSessionRotationMutation": 1,
+  "sessionScreenLock.ts#createSessionScreenLockMutation": 1,
+  "sessionScreenLock.ts#isLiveOn": 1,
   "sessionScreenReader.ts#runSessionScreenReaderMutation": 1,
   "sessionSensor.ts#runSessionSensorMutation": 1,
   "setActiveDevice.ts#admitSessionlessSelection": 1,

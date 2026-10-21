@@ -12,6 +12,7 @@ export function deviceStateMessage(result: DeviceStateResult): string {
     biometricsMessage(result),
     networkConditionMessage(result),
     sensorsMessage(result),
+    screenLockMessage(result),
   ].filter((section): section is string => section !== undefined);
   return sections.length > 0 ? sections.join("; ") : "Read device state";
 }
@@ -55,4 +56,9 @@ function networkConditionMessage(result: DeviceStateResult): string | undefined 
 function sensorsMessage(result: DeviceStateResult): string | undefined {
   const sensors = result.sensors?.supported ? result.sensors.sensors : undefined;
   return sensors === undefined ? undefined : `${sensors.length} emulator sensors read`;
+}
+
+function screenLockMessage(result: DeviceStateResult): string | undefined {
+  const type = result.screenLock?.supported ? result.screenLock.type : undefined;
+  return type === undefined ? undefined : `Screen lock ${type}`;
 }

@@ -6,9 +6,10 @@ import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 
 /** From this API level the platform routes Back to registered callbacks, not to KEYCODE_BACK. */
-const val PROTOTYPE_BACK_CALLBACK_MIN_SDK = 33
+@InternalAutoMobilePrototypeApi const val PROTOTYPE_BACK_CALLBACK_MIN_SDK = 33
 
 /** Narrow seam over the window's predictive-back dispatcher so the policy is device-free. */
+@InternalAutoMobilePrototypeApi
 interface PrototypeBackCallbackRegistrar {
   /** Registers [onBack]; false when the window has no dispatcher yet (retried on the next sync). */
   fun register(onBack: () -> Unit): Boolean

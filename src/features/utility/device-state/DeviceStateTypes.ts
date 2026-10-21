@@ -43,6 +43,8 @@ import {
   type BiometricEnrollment,
   type BiometricEnrollmentState,
 } from "./BiometricState";
+import type { ScreenLockState, SetScreenLockInput } from "../screenLock/ScreenLockTypes";
+import type { ScreenLockDeviceStateDependencies } from "../screenLock/ScreenLockOperations";
 
 export interface DeviceStateResult {
   success: boolean;
@@ -57,6 +59,7 @@ export interface DeviceStateResult {
   clock?: DeviceClockState;
   cameraPoster?: DeviceCameraPosterState;
   sensors?: DeviceSensorsState;
+  screenLock?: ScreenLockState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -72,6 +75,7 @@ export interface SetDeviceStateInput {
   location?: SetDeviceLocationInput;
   clock?: SetDeviceClockInput;
   cameraPoster?: SetDeviceCameraPosterInput;
+  screenLock?: SetScreenLockInput;
 }
 
 /**
@@ -88,6 +92,7 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "networkCondition",
   "clock",
   "sensors",
+  "screenLock",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -107,6 +112,7 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
   location: true,
   clock: true,
   cameraPoster: true,
+  screenLock: true,
 };
 
 /**
@@ -133,6 +139,7 @@ export interface SelectedDeviceStates {
   networkCondition?: NetworkConditionState;
   clock?: DeviceClockState;
   sensors?: DeviceSensorsState;
+  screenLock?: ScreenLockState;
 }
 
 /**
@@ -178,6 +185,8 @@ export interface DeviceStateDependencies {
    * conditions are refused because nothing would renew or remove the rule.
    */
   iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
+  /** Android lock-screen credential seams (#14107); a session supplies `mutation`. */
+  screenLock?: ScreenLockDeviceStateDependencies;
 }
 
 export type RequestedDeviceStates = Pick<
@@ -189,6 +198,7 @@ export type RequestedDeviceStates = Pick<
   | "location"
   | "clock"
   | "cameraPoster"
+  | "screenLock"
 >;
 
 export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must be included";
@@ -202,7 +212,8 @@ export function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean 
     !input.networkCondition &&
     !input.location &&
     !input.clock &&
-    !input.cameraPoster
+    !input.cameraPoster &&
+    !input.screenLock
   );
 }
 

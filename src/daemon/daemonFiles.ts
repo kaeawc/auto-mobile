@@ -13,12 +13,12 @@ import {
   linkSync,
   readFileSync,
   renameSync,
-  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
+import { sameFileIdentity, statFileIdentity, type SocketFileIdentity } from "./socketFileIdentity";
 import {
   compareProcessGenerationTokens,
   readProcessGenerationTokenForPid,
@@ -166,7 +166,7 @@ export interface DaemonFileCleanupOptions {
   pidFilePath?: string;
   socketPaths?: string[];
   /** Bound socket identities, used to avoid unlinking a successor's replacement path. */
-  socketFileIdentities?: ReadonlyMap<string, { dev: number; ino: number }>;
+  socketFileIdentities?: ReadonlyMap<string, SocketFileIdentity>;
   controlSocketPath?: string;
   expectedPid?: number;
   /**
@@ -339,7 +339,7 @@ export function getDaemonSocketPathList(): string[] {
 
 export interface DaemonCleanupFileSystem {
   exists: (path: string) => boolean;
-  stat: (path: string) => { dev: number; ino: number };
+  stat: (path: string) => SocketFileIdentity;
   unlink: (path: string) => Promise<void>;
   unlinkSync: (path: string) => void;
   renameSync: (from: string, to: string) => void;
@@ -351,7 +351,7 @@ export interface DaemonCleanupFileSystem {
 
 const cleanupFileSystem: DaemonCleanupFileSystem = {
   exists: existsSync,
-  stat: statSync,
+  stat: statFileIdentity,
   unlink: (path) => unlink(path),
   unlinkSync: (path) => unlinkSync(path),
   renameSync,
@@ -371,8 +371,7 @@ function stillOwnsSocketFile(
     return true;
   }
   try {
-    const current = files.stat(socketPath);
-    return current.dev === identity.dev && current.ino === identity.ino;
+    return sameFileIdentity(files.stat(socketPath), identity);
   } catch (error) {
     // A vanished or unreadable path is not safe to unlink during shutdown.
     logger.warn(`daemon socket ownership check failed for ${socketPath}: ${error}`, error);

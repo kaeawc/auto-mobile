@@ -289,7 +289,19 @@ describe("LaunchApp", () => {
         coldBoot: false,
         launchArguments: ["--flag"],
       }),
-    ).rejects.toThrow("launchArguments are supported on iOS only");
+    ).rejects.toThrow("On Android, pass intent");
+    expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+  });
+
+  test("rejects an intent on iOS before invoking device commands (#14080)", async () => {
+    const iosLaunchApp = new LaunchApp({ ...device, platform: "ios" }, fakeAdb, null, fakeTimer);
+    await expect(
+      iosLaunchApp.execute(packageName, {
+        clearAppData: false,
+        coldBoot: false,
+        intent: { component: ".Main" },
+      }),
+    ).rejects.toThrow("intent is supported on Android only");
     expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
   });
 

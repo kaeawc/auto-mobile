@@ -1,51 +1,54 @@
 # Session broker device reuse, reset, and capacity
 
 This guide explains how to trade device startup time against reset work and
-host capacity. It describes the session broker's current opt-in behavior plus
-configuration proposed by the still-open reuse lanes under #14358. Treat the
-mode-specific configuration below as a preview until its implementation PRs
-have merged; do not assume a setting is accepted by the current daemon just
-because it appears here. The reset-readiness admission wait and reset-boot
-queue described below are also preview behavior from the open iOS cleaning
-PRs, not current main behavior. The open implementation PRs do not claim
-real-device or simulator qualification.
+host capacity. It describes the reuse modes delivered under #14358: iOS erase
+and keep-booted resets, Android snapshot and keep-booted resets, reset-boot
+admission, and the per-session mutation journal. None of these modes has passed
+real-device or simulator contamination qualification yet, and no matched timing
+comparison has shown that reuse beats creating a fresh device.
 
 ## Current status
 
-The broker is opt-in through `AUTOMOBILE_SESSION_BROKER_CONFIG`. The current
-main-branch host config has the legacy `reuseCleanDevices` boolean, which is
-false by default. On iOS, setting it to true selects an erase reset: stop the
-simulator, erase it, then boot the same simulator while holding the boot slot.
-Main also has the `reuseAndroidCleanDevices` flag, but enabling it alone does
-not provide Android reuse today: reset cannot prove restoration of
-unobservable state, so release fails and the device is destroyed. Android reuse
-is not enabled by the iOS `reuseCleanDevices` flag.
+The broker is opt-in through `AUTOMOBILE_SESSION_BROKER_CONFIG`, and every reuse
+mode defaults off.
 
-The newer per-platform mode and Android reset options described below are
-still being delivered by open implementation PRs. Check those PRs for the
-current implementation and integration status before enabling a preview
-setting. The iOS reset-readiness wait and `maxConcurrentResetBoots` queue are
-also only in the open iOS cleaning PRs. Keep-booted is best-effort cleanup,
-not a guarantee that all device state has been reset.
+- **iOS:** `reuse.ios.mode` selects `off`, `erase`, or `keep-booted`. The legacy
+  `reuseCleanDevices: true` flag still selects `erase` and cannot be combined with
+  a `reuse.ios` block that picks another mode. A planned `minimal` mode (#14682)
+  is not accepted yet; see [Planned: iOS minimal mode](#planned-ios-minimal-mode).
+- **Android:** `reuseAndroidCleanDevices: true` together with `androidResetMode`
+  (`snapshot` or `keep-booted`) enables reuse. Setting the flag without a mode
+  provides no reuse: release cannot prove that unobservable state was restored,
+  so the device is destroyed. The iOS settings never enable Android reuse.
+- **Admission:** iOS reset boots hold their boot slot across stop, erase and boot.
+  `limits.maxConcurrentResetBoots` can queue them. An iOS request can wait for a
+  compatible device that is about to finish resetting.
+- **Journal:** session-scoped tool calls for the journaled tools record the
+  mutation they are about to make before they act. A recording failure logs a
+  warning and lets the tool proceed. The journal guides best-effort reverts; it
+  is not an admission gate.
+
+Keep-booted is best-effort cleanup, not a guarantee that all device state has
+been reset.
 
 ## Choose an iOS reuse mode
 
 The mode table describes only `reuse.ios.mode`; Android uses
 `reuseAndroidCleanDevices` with `androidResetMode` instead.
 
-| Mode          | What it does                                                                                 | Use it when                                                                  | Boundary                                                                                                    |
-| ------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `off`         | Destroys a device on release; the next request creates one.                                  | Isolation and simple lifecycle behavior matter more than warm-start latency. | No idle device is retained for reuse.                                                                       |
-| `erase`       | Stops and erases the device, then boots the same device before reuse.                        | You want an explicit reset boundary and accept reset/boot latency.           | Erase and boot checks must succeed; otherwise the device is destroyed or remains unavailable.               |
-| `keep-booted` | Runs its platform cleaning operations, then a health check, while leaving the device booted. | Lower reset latency is useful and residual state is acceptable.              | Successful cleanup is not a claim that all device state was cleaned; see “What keep-booted does not clean.” |
+| Mode                | What it does                                                                                 | Use it when                                                                  | Boundary                                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `off`               | Destroys a device on release; the next request creates one.                                  | Isolation and simple lifecycle behavior matter more than warm-start latency. | No idle device is retained for reuse.                                                                       |
+| `erase`             | Stops and erases the device, then boots the same device before reuse.                        | You want an explicit reset boundary and accept reset/boot latency.           | Erase and boot checks must succeed; otherwise the device is destroyed or remains unavailable.               |
+| `keep-booted`       | Runs its platform cleaning operations, then a health check, while leaving the device booted. | Lower reset latency is useful and residual state is acceptable.              | Successful cleanup is not a claim that all device state was cleaned; see “What keep-booted does not clean.” |
+| `minimal` (planned) | Planned in #14682; not accepted by the current schema.                                       | See [Planned: iOS minimal mode](#planned-ios-minimal-mode).                  | No erase fallback; trusts its cleanup steps without a diff.                                                 |
 
-For iOS, the preview configuration replaces the coarse legacy switch with
-`reuse.ios.mode`. In `keep-booted` mode, `maxUses` forces every Nth release to
-use erase instead of keep-booted cleanup; its default is 20. This bounds
-keep-booted reuse rather than capping sessions or retiring the device. When
-that erase succeeds, the same device returns to the idle pool, and later
-releases can use keep-booted again. `maxUses` has no effect in `erase` mode.
-The iOS fallback is `erase`.
+`reuse.ios.mode` replaces the coarse legacy switch. In `keep-booted` mode,
+`maxUses` forces every Nth release to use erase instead of keep-booted cleanup;
+its default is 20. This bounds keep-booted reuse rather than capping sessions or
+retiring the device. When that erase succeeds, the same device returns to the
+idle pool, and later releases can use keep-booted again. `maxUses` has no effect
+in `erase` mode. The only iOS fallback is `erase`.
 
 ```json
 {
@@ -69,33 +72,56 @@ This is a configuration fragment, not a complete host config: include the
 required `contractVersion` and `defaults.ios` policy from [the broker
 experiment](session-broker-experiment.md). `iosClassifications` is optional and
 defaults to `[]`; add classifications when the host's simulator inventory needs
-them. Any `reuse.ios.mode` other than `off` requires `defaults.ios`. On current
-main, use the legacy `reuseCleanDevices` value only if the deployed daemon
-supports that schema; do not combine it with the preview mode block.
+them. Any `reuse.ios.mode` other than `off` requires `defaults.ios`. Do not set
+`reuseCleanDevices: true` alongside a `reuse.ios` block unless that block selects
+`erase`; the schema rejects the combination.
+
+### Planned: iOS minimal mode
+
+Issue #14682 plans `reuse.ios.mode: "minimal"`. It is not implemented, and the
+current schema rejects it. As planned, a minimal release keeps the simulator
+booted and only:
+
+1. terminates and uninstalls the session's apps;
+2. resets the keychain and all privacy grants;
+3. restores appearance, content size and the pasteboard to the pool-entry
+   baseline.
+
+It skips any baseline diff and never falls back to erase. The trade-off is that
+it can miss state the other modes would reset, such as a changed locale,
+simulated location, or a change to a preinstalled app. `maxUses` retirement
+would still apply. How a failed minimal step is handled (for example leaving the
+resource `cleanup_pending` or destroying it) is still to be designed.
+
+## Choose an Android reset mode
 
 Android reuse is a separate opt-in and defaults off; enabling iOS reuse does
-not enable it. The open Android lanes deliver separate `snapshot` and
-`keep-booted` reset strategies. `androidResetMode: "snapshot"` restores an
-emulator snapshot and can fall back to a same-device wipe-data replacement;
-`androidResetMode: "keep-booted"` runs the Android cleaning operations below
-and then checks health. Keep-booted's `androidKeepBootedMaxUses` defaults to 20.
-An injected snapshot reset can be used as its fallback, and that reset may
-itself fall back to wipe-data; otherwise a failed keep-booted reset requires
-destruction. The keep-booted lane currently does not wire a snapshot fallback
-in its host-config integration. The Android strategy integration is still in
-progress; do not combine preview keys unless the deployed daemon schema accepts
-them. Android `maxUses` currently sends the device to destruction unless a
-fallback is injected; it does not periodically reset and retain the device.
-`wipe-data` is not a selectable `androidResetMode`: it is the snapshot
-strategy's internal fallback.
+not enable it. `androidResetMode` requires `reuseAndroidCleanDevices: true` and
+a `defaults.android` policy.
 
-The first Android fragment illustrates the in-progress snapshot strategy; it
-is not a complete host config. It also needs `contractVersion` and a
-`defaults.android` policy from [the broker experiment](session-broker-experiment.md).
-`androidResetTimeoutMs` is optional, defaults to 600,000 ms, and is valid only
-with snapshot mode and Android reuse enabled. The second fragment illustrates
-the keep-booted lane: `androidKeepBootedMaxUses` is optional and defaults to 20.
-Both fragments are previews until their PRs and schema integration have merged.
+- `androidResetMode: "snapshot"` saves a named baseline snapshot for each freshly
+  created or replaced emulator. Release loads that snapshot, waits for
+  readiness and checks health. If that fails, it relaunches the same AVD with
+  wipe-data while keeping its reserved boot capacity, then recaptures the
+  baseline; otherwise the device is destroyed. `wipe-data` is not a selectable
+  mode: it is the snapshot strategy's internal fallback. Broker snapshots are
+  hidden from the user snapshot tools. A session that makes opaque persistent
+  changes (for example, a user snapshot capture) still forces the wipe-data
+  fallback.
+- `androidResetMode: "keep-booted"` runs the Android cleaning operations below
+  and then checks health. `androidKeepBootedMaxUses` (default 20) sends every
+  Nth release to the fallback. `androidKeepBootedFallback` picks that fallback:
+  `"snapshot"` uses the snapshot strategy (which may itself fall back to
+  wipe-data), while `"destroy"` or omitting it destroys the device on a failed
+  cleanup, a failed health check, or the `maxUses` limit.
+
+`androidResetTimeoutMs` is optional and defaults to 600,000 ms. It is valid only
+with `snapshot` mode, or with `keep-booted` plus `androidKeepBootedFallback:
+"snapshot"`, where it bounds that fallback. `androidKeepBootedMaxUses` and
+`androidKeepBootedFallback` are rejected outside `keep-booted` mode.
+
+Both fragments below need `contractVersion` and a `defaults.android` policy from
+[the broker experiment](session-broker-experiment.md).
 
 ```json
 {
@@ -114,20 +140,19 @@ Both fragments are previews until their PRs and schema integration have merged.
 {
   "reuseAndroidCleanDevices": true,
   "androidResetMode": "keep-booted",
-  "androidKeepBootedMaxUses": 20
+  "androidKeepBootedMaxUses": 20,
+  "androidKeepBootedFallback": "snapshot"
 }
 ```
 
-Each lane's host-config schema is strict. The iOS reuse block and Android reset
-keys cannot be combined until a merged daemon schema explicitly accepts both;
-use the complete schema supported by the deployed daemon.
+The host-config schema is strict and accepts the iOS `reuse` block and the
+Android reset keys together, so one host config can enable reuse on both
+platforms.
 
 ## Admission and fallback order
 
-Reuse is limited to an idle device compatible with the requested profile. The
-iOS reset-readiness wait described here is preview behavior in the open iOS
-cleaning PRs, not current main behavior. In those PRs, an iOS request may wait
-for a compatible resetting device only when the same profile has reset p90 and
+Reuse is limited to an idle device compatible with the requested profile. An
+iOS request may wait for a compatible resetting device only when the same profile has reset p90 and
 create/boot p50 samples from the last 24 hours. A resetting device qualifies
 only when its positive p90 remaining-time estimate is no greater than the
 shared cutoff: the minimum create p50 plus boot p50 across matching resetting
@@ -139,22 +164,23 @@ use this wait. Otherwise, normal creation is subject to the session,
 total-device, and platform boot-gate limits. A cap or boot-gate limit does not
 make a busy or incompatible device reusable.
 
-The `maxConcurrentResetBoots` queue described here is also preview behavior in
-the open iOS cleaning PRs, not current main behavior. In those PRs it queues
-iOS reset boots; main does not currently have this queue.
+An iOS erase reset reserves its boot slot before stopping the simulator and
+holds it through erase and boot, so a concurrent acquisition cannot take it
+mid-reset. `limits.maxConcurrentResetBoots` queues excess iOS reset boots in the
+broker cleanup queue instead of the boot gate; without it, resets share the boot
+gate's host limit. Gate admissions are tagged `reset`, `create` or `restart`,
+and `listDevices` reports live iOS admissions by reason.
 
 On every keep-booted release below `maxUses`, the cleaning work runs before a
 health check. A successful health check returns the device to the idle pool only
 while ownership is still valid. Reaching `maxUses` skips cleaning and goes
-straight to fallback: iOS erases; Android uses an injected snapshot fallback or
-destroys the device. Android's current keep-booted host-config integration does
-not inject that fallback, so reaching its `androidKeepBootedMaxUses` destroys
-the device. In the open iOS cleaning PRs, re-running a release that has already
-recorded a failure also skips cleaning. On those PRs, a journal-load failure or
-an unsettled earlier native step fails release without running the erase
-fallback; the resource remains pending or is destroyed. Failures during the
-cleaning operations (or health check) reach the erase fallback. These details
-describe the open PR behavior, not current main behavior. Ownership loss
+straight to fallback: iOS erases; Android uses the snapshot fallback when
+`androidKeepBootedFallback` is `"snapshot"` and otherwise destroys the device.
+On iOS, re-running a release that has already recorded a failure also skips
+cleaning. A journal-load failure or an unsettled earlier native step fails the
+release without running the erase fallback; the resource remains pending or is
+destroyed. Failures during the cleaning operations (or health check) reach the
+erase fallback. Ownership loss
 prevents idle publication; cleanup and fallback must remain ownership-fenced,
 so the broker may leave the resource pending or destroy it rather than run a
 reset under a stale fence. For `off`, release destroys the device.
@@ -180,10 +206,9 @@ fallback. On iOS, a re-run after a recorded failure also skips cleaning.
   supported; then check boot completion, package-manager responsiveness and
   CtrlProxy health. Non-critical setting/revert errors may be logged and
   skipped; critical cleaning or health failures use fallback or destruction.
-- **Fallback:** iOS uses erase. Android can use an injected snapshot reset,
-  whose own fallback can be wipe-data; without an available fallback, the
-  device is destroyed. The current keep-booted host-config integration does
-  not wire a snapshot fallback. Successful fallback makes the resource
+- **Fallback:** iOS uses erase. Android uses the snapshot reset when
+  `androidKeepBootedFallback` is `"snapshot"`, and that reset can itself fall
+  back to wipe-data; otherwise the device is destroyed. Successful fallback makes the resource
   eligible for idle reuse; failed fallback leaves it unavailable or destroys it.
 
 Reset timings identify the work performed. iOS records journal, preflight
@@ -191,15 +216,14 @@ inventory, individual revert, sanitize, health and health-probe phases; native
 commands are bounded at 10 seconds, the health HTTP probe at 5 seconds, and
 reset steps default to 30 seconds.
 Android keep-booted records journal, clean and health phases, with a default
-30-second cleaning budget and a separate default 30-second fallback budget for
-an injected fallback. Within a keep-booted fallback, that 30-second budget
-bounds the snapshot and its wipe-data step instead of the snapshot strategy's
-600,000 ms default.
+30-second cleaning budget. Its snapshot fallback gets a separate budget from
+`androidResetTimeoutMs` (default 600,000 ms) that bounds the snapshot load and
+its wipe-data step.
 Android snapshot uses phases such as identity, load, readiness, health, stop
 and wipe-data launch; its overall timeout defaults to 600,000 ms. A keep-booted
 fallback is reported as `fallback:snapshot` even if that snapshot strategy
 itself falls back to wipe-data. Phase names are implementation details and may
-evolve with the open PRs.
+change.
 
 ## What keep-booted does not clean
 
@@ -218,8 +242,8 @@ Use `erase` on iOS or the Android `snapshot` strategy when a full reset
 boundary is required. Wipe-data is snapshot's internal fallback, not a
 selectable mode. Use `maxUses` to bound drift when keep-booted reuse is
 acceptable; on iOS it periodically uses erase and retains the same device after
-success, while Android currently destroys at the limit unless a fallback is
-injected.
+success, while Android sends the device to its snapshot fallback when one is
+configured and otherwise destroys it.
 
 ## Size caps independently
 
@@ -238,9 +262,7 @@ These limits control different resources:
 - The platform boot-gate limit bounds concurrent device boots (including
   creation/replacement work governed by that gate). It is distinct from the
   broker's device-count caps.
-- `limits.maxConcurrentResetBoots` is a preview option from the open iOS
-  cleaning PRs; it is not accepted by current main's strict host-config schema.
-  In those PRs it queues iOS erase resets and the erase fallback from
+- `limits.maxConcurrentResetBoots` queues iOS erase resets and the erase fallback from
   keep-booted mode, does not limit Android keep-booted cleanup, and is unlimited
   when omitted. Keep it at or below iOS safe boot concurrency so reset boots do
   not overwhelm the same host resources as fresh acquisitions.
@@ -264,7 +286,7 @@ illustrative inputs, not measured repo facts. An iOS erase reset is reported as
 approximately 15 seconds to stop, 0.3 seconds to erase, and 52 seconds to boot:
 about 67.3 seconds total. Compare matched end-to-end acquisition and release
 timings before concluding that reuse improves latency. These are planning
-inputs, not qualification of the in-progress keep-booted implementations.
+inputs, not qualification of the keep-booted implementations.
 
 For a host serving up to six concurrent sessions and retaining two compatible
 devices between demand peaks, a starting plan could be `sessionCap: 6`,
@@ -283,7 +305,7 @@ time is materially above the measured estimate, adjust reset concurrency,
 request tolerance; raising reset concurrency only helps when the platform boot
 gate and host have spare capacity.
 
-In the open iOS cleaning PRs, if a compatible device is still resetting and
+If a compatible iOS device is still resetting and
 matching same-profile timing samples exist from the last 24 hours, admission may
 wait for it only when its positive reset-p90 remaining-time estimate is no
 greater than the shared cutoff (the minimum create-p50 plus boot-p50 across
@@ -291,8 +313,8 @@ matching resetting candidates with usable estimates). The wait equals that
 remaining-time estimate and is bounded by the preparation deadline; only one
 request can wait on that device. If the estimate timer fires first, normal
 admission resumes; if the preparation deadline fires first, the request fails
-with retryable `session_preparation_failed` instead. Current main does not have
-this reset-readiness wait, and Android does not use it. Waiting is a bounded
+with retryable `session_preparation_failed` instead. Android does not use this
+reset-readiness wait. Waiting is a bounded
 opportunity to reuse, not a guarantee: reset failures follow the normal
 fallback and cap rules.
 

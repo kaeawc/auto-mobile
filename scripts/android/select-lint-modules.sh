@@ -66,7 +66,7 @@ elif [[ "${#modules[@]}" -gt 0 ]]; then
   done < <(find android -name build.gradle.kts -not -path '*/build/*' -not -path '*/.gradle/*' | sort)
   settings=()
   [[ ! -f android/settings.gradle.kts ]] || settings+=(android/settings.gradle.kts)
-  awk -v seeds="$(printf '%s ' "${modules[@]}")" '
+  awk -v seeds="$(printf '%s ' ${modules[@]+"${modules[@]}"})" '
     function accessor(path, parts, words, n, m, i, j, result, segment) {
       n = split(substr(path, 2), parts, ":")
       result = "projects"
@@ -141,5 +141,5 @@ elif [[ "${#modules[@]}" -gt 0 ]]; then
       for (module in selected)
         if (selected[module] && android[module]) print module ":lintDebug"
     }
-  ' ${settings[@]+"${settings[@]}"} "${build_files[@]}" | sort -u
+  ' ${settings[@]+"${settings[@]}"} ${build_files[@]+"${build_files[@]}"} | sort -u
 fi

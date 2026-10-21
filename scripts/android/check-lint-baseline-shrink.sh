@@ -38,9 +38,14 @@ done
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/vcs-diff.sh"
 cd "$(vcs_root)"
 base_ref="$(vcs_base_ref "$base_ref")"
-vcs_base_exists "$base_ref" || { echo "error: base ref does not exist: $base_ref" >&2; exit 2; }
+base_status="$(set +e; vcs_base_exists "$base_ref" > /dev/null 2>&1; echo $?)"
+if [[ "$base_status" != 0 ]]; then
+  echo "error: base ref does not exist: $base_ref" >&2
+  exit 2
+fi
 vcs=git
-if vcs_uses_jj; then
+jj_status="$(set +e; vcs_uses_jj > /dev/null 2>&1; echo $?)"
+if [[ "$jj_status" == 0 ]]; then
   vcs=jj
   revision=@-
   merge_base="$(jj log -r "fork_point(${revision} | ${base_ref})" --no-graph -T commit_id)"

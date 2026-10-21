@@ -14,6 +14,7 @@ import {
 } from "../../src/utils/ProcessSupervisor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
+import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 // #10649: a caller such as getApple extends the shared health-poll deadline to its
 // whole acquisition budget. A runner frozen at launch must still be relaunched
@@ -58,7 +59,11 @@ interface Harness {
  */
 function createHarness(
   healthy: (launchIndex: number, sinceLaunchMs: number) => boolean,
-  options: { exitOnTerminate?: boolean; deferredPid?: number } = {},
+  options: {
+    exitOnTerminate?: boolean;
+    deferredPid?: number;
+    defaultPortHealthyAfterMs?: number;
+  } = {},
 ): Harness {
   const timer = new FakeTimer();
   const executor = new FakeProcessExecutor();
@@ -107,16 +112,18 @@ function createHarness(
     },
   };
   executor.setCommandResponse("pgrep", createExecResult("", ""));
-  executor.setCommandHandler("curl -s", () => {
+  executor.setCommandHandler("curl -s", (command) => {
     // The health poll begins right after each launch, so record launches here.
     while (harness.launches.length < launchedPids().length) {
       harness.launches.push(timer.now());
     }
     const launchIndex = launchedPids().length - 1;
     const answers =
-      launchIndex >= 0 &&
-      !harness.terminated.includes(launchedPids()[launchIndex]) &&
-      healthy(launchIndex, timer.now() - harness.launches[launchIndex]);
+      (command.includes(":8765/") &&
+        timer.now() >= (options.defaultPortHealthyAfterMs ?? Number.POSITIVE_INFINITY)) ||
+      (launchIndex >= 0 &&
+        !harness.terminated.includes(launchedPids()[launchIndex]) &&
+        healthy(launchIndex, timer.now() - harness.launches[launchIndex]));
     return createExecResult(
       answers ? JSON.stringify({ status: "ok", deviceId: DEVICE.deviceId }) : "",
       "",
@@ -235,8 +242,7 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     await harness.manager.start();
     expect(harness.launches).toHaveLength(1);
     expect(harness.terminated).toEqual([]);
-    // Includes the existing 500ms WebSocket initialization wait.
-    expect(harness.timer.now() - harness.launches[0]).toBe(45_500);
+    expect(harness.timer.now() - harness.launches[0]).toBe(45_000);
   });
 
   test("a subsequent launch stops at the shared deadline without extending its window", async () => {
@@ -264,6 +270,22 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     expect(harness.executor.getSpawnedProcesses()).toHaveLength(0);
     expect(harness.terminated).toEqual([12345]);
     expect(harness.timer.now() - startedAt).toBe(30_000);
+  });
+
+  test("adopts a deferred runner on its healthy default port without a post-health sleep", async () => {
+    const harness = createHarness(() => false, {
+      deferredPid: 12345,
+      defaultPortHealthyAfterMs: WINDOW_MS,
+    });
+    harness.manager.testHooks.setState({ xcTestProcessId: 12345, servicePort: 8767 });
+    await settleByFakeEvents(harness.timer, harness.manager.start(), {
+      description: "deferred runner adoption",
+    });
+    expect(harness.manager.getServicePort()).toBe(8765);
+    expect(harness.timer.now()).toBe(WINDOW_MS);
+    expect(harness.timer.getSleepHistory()).toEqual(Array<number>(15).fill(100));
+    expect(harness.terminated).toEqual([]);
+    expect(harness.executor.getSpawnedProcesses()).toHaveLength(0);
   });
 
   test("supervisor restarts retain the 30s default health budget", async () => {

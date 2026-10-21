@@ -524,6 +524,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     logger.info("[CTRL_PROXY] Reset setup state - next setup will be a full attempt");
   }
 
+  /** Allow another automated setup attempt while preserving fresh availability caches. */
+  public reopenSetupGate(): void {
+    this.attemptedAutomatedSetup = false;
+  }
+
   /**
    * Check if Accessibility Service is installed on the device
    */

@@ -193,7 +193,7 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
   });
 
   test.each(["listDevices", "listDeviceImages"])(
-    "platform filters retain bound policy for %s",
+    "platform-filtered %s never inherits the proxy binding (#13796)",
     async (name) => {
       const client = new FakeDaemonClient({
         toolResultFor: (tool) =>
@@ -211,7 +211,6 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         expect(client.callToolCalls.at(-1)?.params).toEqual(
           withProxyOwnerToken({
             platform: "android",
-            sessionUuid: "android-session",
           }),
         );
       } finally {

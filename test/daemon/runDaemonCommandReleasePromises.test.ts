@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -11,6 +11,18 @@ import {
   ScriptedSessionManager,
   unexpected as unexpectedHook,
 } from "./helpers/cliDaemonState";
+
+let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
+let reportSpy: ReturnType<typeof spyOn<typeof console, "error">>;
+let exitSpy: ReturnType<typeof spyOn<typeof process, "exit">>;
+beforeEach(() => {
+  logSpy = spyOn(console, "log");
+  reportSpy = spyOn(console, "error");
+  exitSpy = spyOn(process, "exit");
+});
+afterEach(() => {
+  mock.restore();
+});
 
 class CodedActionableError extends ActionableError {
   constructor(
@@ -200,9 +212,9 @@ async function expectCliReleaseFailure(
   message: string,
 ) {
   const exited = new Error("fake exit");
-  const log = spyOn(console, "log").mockImplementation(() => {});
-  const report = spyOn(console, "error").mockImplementation(() => {});
-  const exit = spyOn(process, "exit").mockImplementation(() => {
+  const log = logSpy.mockImplementation(() => {});
+  const report = reportSpy.mockImplementation(() => {});
+  const exit = exitSpy.mockImplementation(() => {
     throw exited;
   });
   try {

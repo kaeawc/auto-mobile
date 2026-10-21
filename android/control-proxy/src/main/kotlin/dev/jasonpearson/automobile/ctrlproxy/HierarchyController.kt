@@ -76,6 +76,7 @@ internal class HierarchyController(
   companion object {
     private const val TAG = "CtrlProxy"
     private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
+    private const val DUMP_MARKER_FILE_NAME = "dump_hierarchy"
     const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
   }
 
@@ -91,7 +92,7 @@ internal class HierarchyController(
     suspend (Boolean, HierarchySnapshotOptions, String?) -> Unit =
     ::extractHierarchyNow
 
-  private suspend fun deliverResult(result: HierarchyResult) {
+  internal suspend fun deliverResult(result: HierarchyResult) {
     // Guard the whole body: serialization was hoisted here (issue #5469) out of
     // writeHierarchyToFile/broadcastHierarchyUpdate's own try/catch, so an encode failure
     // on
@@ -114,7 +115,9 @@ internal class HierarchyController(
               }
             },
             write = { serialized ->
-              writeHierarchyToFile(result.hierarchy, serialized = serialized)
+              if (hierarchyDumpEnabled()) {
+                writeHierarchyToFile(result.hierarchy, serialized = serialized)
+              }
             },
             broadcast = { serialized ->
               broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
@@ -461,7 +464,7 @@ internal class HierarchyController(
     private val commandJob: Job?,
   ) {
     suspend fun deliver(hierarchy: ViewHierarchy) {
-      // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
+      // Explicit request: broadcast and optionally dump, serializing the tree once (#5469).
       // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
       // encode throws (leak fix).
       deliverHierarchyFrame(
@@ -469,7 +472,11 @@ internal class HierarchyController(
           commandJob?.ensureActive()
           perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
         },
-        write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
+        write = { serialized ->
+          if (hierarchyDumpEnabled()) {
+            writeHierarchyToFile(hierarchy, serialized = serialized)
+          }
+        },
         broadcast = { serialized ->
           broadcastHierarchyUpdate(
             hierarchy,
@@ -483,6 +490,9 @@ internal class HierarchyController(
       )
     }
   }
+
+  private fun hierarchyDumpEnabled(): Boolean =
+    host.filesDir().resolve(DUMP_MARKER_FILE_NAME).exists()
 
   private inline fun <T> hierarchyExtractionResult(block: () -> T): Result<T> =
     try {

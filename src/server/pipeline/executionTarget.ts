@@ -251,7 +251,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
     await this.enforceSessionUuidForMultipleDevices({
       platform,
-      connectionId: mcpSessionId,
+      connectionId: state.deviceConnectionId,
       sessionUuid: state.sessionUuid,
       providedDeviceId,
       deviceReadiness,
@@ -261,7 +261,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     });
     await this.enforceSessionUuidForAutolock({
       platform,
-      connectionId: mcpSessionId,
+      connectionId: state.deviceConnectionId,
       sessionUuid: state.sessionUuid,
       providedDeviceId,
       deviceReadiness,
@@ -608,7 +608,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         platform,
         deviceReadiness,
         state.getConnectedPlatforms,
-        state.mcpSessionId,
+        state.deviceConnectionId,
       );
     }
     const heldRead = await this.heldReadTarget(state, readinessTarget);
@@ -659,7 +659,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       deviceId,
       {
         sessionId: sessionUuid,
-        connectionId: state.mcpSessionId,
+        connectionId: state.deviceConnectionId,
         // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
         // (owner decision 2026-10-12, #11964)
         intent: readOnly && !sessionUuid ? "read" : undefined,

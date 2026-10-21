@@ -1,4 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
+import { DeviceOutsideBoundSessionError } from "../daemon/DeviceOutsideBoundSessionError";
 import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
@@ -44,6 +45,7 @@ import { isClientCancelled } from "../utils/AbortContext";
 import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
+import { deviceConnectionIdFor } from "./deviceConnectionId";
 
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -454,13 +456,14 @@ async function selectLegacyDevice(input: {
   transportAttempt: TransportAttempt;
 }): Promise<void> {
   const { args, resumeCtrlProxy, sessions, signal } = input;
-  const previousDevice = sessions.getExplicitDevicePin(args.__mcpSessionId);
+  const connectionId = deviceConnectionIdFor(args);
+  const previousDevice = sessions.getExplicitDevicePin(connectionId);
   const previousPlatform = previousDevice?.platform;
   // #5870: "either" lets deviceId disambiguate when platform is omitted.
   const readyDevice = await input.transportAttempt(() =>
     sessions.ensureDeviceReady(args.platform ?? "either", args.deviceId, {
       signal,
-      connectionId: args.__mcpSessionId,
+      connectionId,
     }),
   );
   // A session that acquired the device during readiness cancelled this call: never pin its device.
@@ -480,7 +483,7 @@ async function selectLegacyDevice(input: {
     );
     RealObserveScreen.clearCache(previousDevice.deviceId);
   }
-  sessions.setExplicitDevicePin(readyDevice, args.__mcpSessionId);
+  sessions.setExplicitDevicePin(readyDevice, connectionId);
 }
 
 function currentDisplayPinResult(
@@ -495,6 +498,19 @@ function currentDisplayPinResult(
   }
   const pin = sessions.getDisplayPin(input.sessionUuid);
   return pin !== undefined || input.reportClearedPin ? { displayPin: pin ?? null } : {};
+}
+
+/** Direct sessions keep the device they acquired; refuse before readiness or pin changes. */
+function refuseDirectSessionDeviceMismatch(args: HandlerArgs, sessionScoped: boolean): void {
+  const directSession =
+    args.sessionUuid && !sessionScoped ? resolveDirectSessionDevice(args.sessionUuid) : undefined;
+  if (directSession && args.deviceId !== directSession.device.deviceId) {
+    throw new DeviceOutsideBoundSessionError(
+      args.sessionUuid,
+      { deviceId: directSession.device.deviceId, platform: directSession.device.platform },
+      { deviceId: args.deviceId, platform: args.platform },
+    );
+  }
 }
 
 /** Existing device selection with a session-only, side-effect-free display selection slot. */
@@ -518,6 +534,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       if (sessionUuid && !sessionScoped && !resolveDirectSessionDevice(sessionUuid)) {
         throw new DirectSessionNotActiveError(sessionUuid);
       }
+      refuseDirectSessionDeviceMismatch(args, sessionScoped);
       if (args.display !== undefined && !sessionScoped) {
         throw new DisplayPinNeedsSessionError();
       }

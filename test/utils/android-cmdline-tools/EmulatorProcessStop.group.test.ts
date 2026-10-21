@@ -1,4 +1,4 @@
-import { expect, test, spyOn } from "bun:test";
+import { mock, afterEach, expect, test, spyOn } from "bun:test";
 import {
   ProcessTableEmulatorProcessStopper,
   type EmulatorProcessSignaler,
@@ -11,6 +11,10 @@ import {
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 import { FakeLockOwnerGenerationProbe } from "../../fakes/FakeLockOwnerGenerationProbe";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const command = "qemu-system-aarch64 -avd Pixel -port 5554";
 const target = { serial: "emulator-5554", avdName: "Pixel" };

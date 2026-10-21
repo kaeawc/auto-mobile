@@ -137,6 +137,52 @@ describe("push backpressure", () => {
     );
   });
 
+  it.each(["screenshot_update", "hierarchy_update"])(
+    "keeps %s frames from different epochs on their own side of lifecycle events",
+    (type) => {
+      const { server, socket } = rig();
+      server.push({ type: "ping" });
+      const frames: Frame[] = [
+        { type, deviceId: "device-a", deviceSessionUuid: "old-epoch", value: 1 },
+        { type: "device_session_ended", deviceId: "device-a", deviceSessionUuid: "old-epoch" },
+        { type: "device_session_started", deviceId: "device-a", deviceSessionUuid: "new-epoch" },
+        { type, deviceId: "device-a", deviceSessionUuid: "new-epoch", value: 2 },
+      ];
+      for (const frame of frames) {
+        server.push(frame);
+      }
+      expect(socket.responses).toHaveLength(1);
+      socket.drain();
+      expect(socket.responses.slice(1)).toEqual(
+        frames.map((frame) => ({ ...frame, subscriptionId: "sub" })),
+      );
+    },
+  );
+
+  it.each(["screenshot_update", "hierarchy_update"])(
+    "coalesces %s only within the same absent, null or string epoch",
+    (type) => {
+      const { server, socket } = rig();
+      server.push({ type: "ping" });
+      const epochs = [undefined, null, "", "unset", "null", "old:epoch", "new:epoch"];
+      for (const value of [1, 2]) {
+        for (const deviceSessionUuid of epochs) {
+          server.push({ type, deviceId: "device-a", deviceSessionUuid, value });
+        }
+      }
+      socket.drain();
+      expect(socket.responses.slice(1)).toEqual(
+        epochs.map((deviceSessionUuid) => ({
+          type,
+          deviceId: "device-a",
+          ...(deviceSessionUuid === undefined ? {} : { deviceSessionUuid }),
+          value: 2,
+          subscriptionId: "sub",
+        })),
+      );
+    },
+  );
+
   it("keeps a replaced hierarchy before its queued request_observation acknowledgement", () => {
     const { server, socket } = rig();
     server.push({ type: "ping" });
@@ -198,7 +244,12 @@ describe("push backpressure", () => {
     server.push({ type: "ping" });
     // These retained screenshots must be removed only for their own device.
     for (const deviceId of ["device-a", "device-b"]) {
-      server.push({ type: "screenshot_update", deviceId, value: 1 });
+      server.push({
+        type: "screenshot_update",
+        deviceId,
+        deviceSessionUuid: `${deviceId}-session`,
+        value: 1,
+      });
     }
     socket.bufferedBytes = PUSH_SOCKET_WRITABLE_LIMIT_BYTES + 1;
     for (let value = 2; value <= 3; value++) {
@@ -218,6 +269,62 @@ describe("push backpressure", () => {
         subscriptionId: "sub",
         deviceId,
         deviceSessionUuid: `${deviceId}-session`,
+        droppedType: "screenshot_update",
+        reason: "backpressure",
+      })),
+    );
+  });
+
+  it("reports drops for a new epoch even when the old epoch already reported a drop", () => {
+    const { server, socket } = rig();
+    server.push({ type: "ping" });
+    socket.bufferedBytes = PUSH_SOCKET_WRITABLE_LIMIT_BYTES + 1;
+    const oldFrame = {
+      type: "screenshot_update",
+      deviceId: "device-a",
+      deviceSessionUuid: "old-epoch",
+    };
+    const newFrame = { ...oldFrame, deviceSessionUuid: "new-epoch" };
+    server.push(oldFrame);
+    server.push(oldFrame);
+    server.push({ ...oldFrame, type: "device_session_ended" });
+    server.push({ ...newFrame, type: "device_session_started" });
+    server.push(newFrame);
+    server.push(newFrame);
+    expect(socket.responses).toHaveLength(1);
+    socket.drain();
+    const marker = {
+      type: "frames_dropped",
+      subscriptionId: "sub",
+      deviceId: "device-a",
+      droppedType: "screenshot_update",
+      reason: "backpressure",
+    };
+    expect(socket.responses.slice(1)).toEqual([
+      { ...marker, deviceSessionUuid: "old-epoch" },
+      { ...oldFrame, type: "device_session_ended", subscriptionId: "sub" },
+      { ...newFrame, type: "device_session_started", subscriptionId: "sub" },
+      { ...marker, deviceSessionUuid: "new-epoch" },
+    ]);
+  });
+
+  it("reports separate drops for absent, null and string epochs", () => {
+    const { server, socket } = rig();
+    server.push({ type: "ping" });
+    socket.bufferedBytes = PUSH_SOCKET_WRITABLE_LIMIT_BYTES + 1;
+    const epochs = [undefined, null, "", "unset", "null", "old:epoch", "new:epoch"];
+    for (const deviceSessionUuid of epochs) {
+      const frame = { type: "screenshot_update", deviceId: "device-a", deviceSessionUuid };
+      server.push(frame);
+      server.push(frame);
+    }
+    socket.drain();
+    expect(socket.responses.slice(1)).toEqual(
+      epochs.map((deviceSessionUuid) => ({
+        type: "frames_dropped",
+        subscriptionId: "sub",
+        deviceId: "device-a",
+        ...(deviceSessionUuid === undefined ? {} : { deviceSessionUuid }),
         droppedType: "screenshot_update",
         reason: "backpressure",
       })),

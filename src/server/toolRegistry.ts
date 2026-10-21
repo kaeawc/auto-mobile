@@ -948,7 +948,11 @@ export class ToolRegistryClass {
         toolHasOutputSchema(tool) && !suppressOutputSchema
           ? (advertiseBoundsForCompact(
               addSpillArtifactToAdvertisedOutputSchema(
-                toAdvertisedJsonSchema(tool.outputSchema, { constrainAppIds: false }),
+                toAdvertisedJsonSchema(tool.outputSchema, {
+                  constrainAppIds: false,
+                  // Zod's per-conversion __schemaN definitions stay local to this tool.
+                  reused: "ref",
+                }),
               ),
               compactBounds,
             ) as Record<string, unknown>)

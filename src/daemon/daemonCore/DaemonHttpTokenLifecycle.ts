@@ -12,11 +12,16 @@ export class DaemonHttpTokenLifecycle {
     private token = "",
   ) {}
 
+  get isPublished(): boolean {
+    return this.published;
+  }
+
   get value(): string {
     return this.token;
   }
 
   prepare(): void {
+    this.published = false;
     this.token = generateDaemonHttpToken(this.idGenerator);
   }
 

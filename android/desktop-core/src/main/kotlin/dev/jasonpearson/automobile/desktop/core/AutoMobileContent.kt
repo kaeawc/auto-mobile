@@ -885,10 +885,10 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
   // into the new context.
   val deviceControlSession =
     rememberDeviceControlSession(
+      desktopSessionState,
       dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
         scope = screenshotScope,
         clientProvider = clientProvider,
-        inputAllocation = { inputAllocation },
         platform = { controlPlatform.value },
         nowMs = MONOTONIC_NOW_MS,
         publishError = { message -> deviceControlTapError = message },

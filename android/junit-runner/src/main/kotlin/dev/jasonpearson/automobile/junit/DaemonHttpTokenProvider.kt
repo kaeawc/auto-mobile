@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.junit
 
+import java.net.URL
 import java.nio.channels.Channels
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -10,6 +11,11 @@ import java.nio.file.attribute.BasicFileAttributes
 internal fun interface DaemonHttpTokenProvider {
   fun read(): String?
 }
+
+/** Exact loopback names only; other 127/8 and IPv4-mapped IPv6 addresses are excluded. */
+internal fun isDaemonHttpEndpoint(endpoint: URL): Boolean =
+  endpoint.protocol.lowercase() in setOf("http", "https") &&
+    endpoint.host.lowercase() in setOf("localhost", "127.0.0.1", "::1", "[::1]")
 
 /**
  * Re-reads discovery state for every HTTP request to harden daemon HTTP ingress with a per-daemon

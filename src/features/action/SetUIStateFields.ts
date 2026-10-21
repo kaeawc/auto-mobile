@@ -14,10 +14,8 @@ import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../utility/SearchableNode";
-import { hasVisibleBounds, isWithin } from "../utility/ElementResolverNodes";
-import { getHierarchySnapshot } from "../observe/HierarchyCapture";
-import { boundsArea, intersectBounds } from "../../utils/bounds";
-import { DefaultElementGeometry, screenSizeForOffscreenCheck } from "../utility/ElementGeometry";
+import { DefaultElementGeometry } from "../utility/ElementGeometry";
+import { findIosToggleControl } from "./iosToggleControl";
 import type { TapAtCoordinate } from "./TapAtCoordinate";
 import {
   CONTAINS_IGNORE_CASE,
@@ -472,63 +470,9 @@ export class SetUIStateFields {
     }
     const control = android
       ? element
-      : this.findIosToggleControl(element, text, viewHierarchy, screenSizeOptions);
+      : findIosToggleControl(this.hierarchy, element, text, viewHierarchy, screenSizeOptions);
     const fieldType = this.fieldTypeDetector.detect(control);
     return fieldType === "toggle" || fieldType === "checkbox" ? control : null;
-  }
-
-  private findIosToggleControl(
-    element: Element,
-    text: string,
-    viewHierarchy: ViewHierarchyResult,
-    screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
-  ): Element {
-    const nodes =
-      getHierarchySnapshot(viewHierarchy)?.nodes ??
-      this.hierarchy.project(resolveViewHierarchyForSearch(viewHierarchy)!);
-    const source = getHierarchyNodeSource(element);
-    const matched = nodes.find((node) => node.source === source);
-    if (!matched?.bounds) {
-      return element;
-    }
-    // The shared resolver can already pick an inner switch. Recover its labelled
-    // row before comparing sibling controls, rather than treating it as the row.
-    const row =
-      nodes
-        .filter(
-          (node) =>
-            node.rootGroup === matched.rootGroup &&
-            node.affordances.includes("toggle") &&
-            node.textFields.includes(text) &&
-            node.bounds &&
-            node.bounds.right - node.bounds.left > matched.bounds!.right - matched.bounds!.left &&
-            (isWithin(matched, node, nodes) ||
-              intersectBounds(node.bounds, matched.bounds!) !== null),
-        )
-        .sort((a, b) => boundsArea(a.bounds!) - boundsArea(b.bounds!))[0] ?? matched;
-    const viewport = screenSizeForOffscreenCheck(viewHierarchy, {
-      ...screenSizeOptions,
-      platform: "ios",
-    });
-    // UIKit may serialize the switch as a sibling, protruding slightly past
-    // the row's right edge. Keep association within this row and capture root.
-    const controls = nodes.filter(
-      (node) =>
-        node.rootGroup === row.rootGroup &&
-        node.affordances.includes("toggle") &&
-        node.element &&
-        hasVisibleBounds(node, { viewport }) &&
-        boundsArea(node.bounds!) > 0 &&
-        (node === row ||
-          isWithin(node, row, nodes) ||
-          intersectBounds(row.bounds!, node.bounds!) !== null),
-    );
-    controls.sort(
-      (a, b) =>
-        a.bounds!.right - a.bounds!.left - (b.bounds!.right - b.bounds!.left) ||
-        b.bounds!.right - a.bounds!.right,
-    );
-    return controls[0]?.element ?? element;
   }
 
   /**

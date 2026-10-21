@@ -96,7 +96,10 @@ export class DaemonRestartDeferredError extends DaemonUnavailableError {
   readonly retryable = true;
   readonly retryAfterMs = ACTIVE_PROVISIONING_RESTART_RETRY_MS;
 
-  constructor(reason: string) {
+  constructor(
+    reason: string,
+    readonly refusalReason?: string,
+  ) {
     super(
       `AutoMobile daemon restart deferred (${reason}). ` +
         `Retry after ${ACTIVE_PROVISIONING_RESTART_RETRY_MS}ms; use an explicit daemon restart ` +

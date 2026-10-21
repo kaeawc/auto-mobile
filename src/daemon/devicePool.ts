@@ -9,16 +9,13 @@ import {
 } from "./foreignDeviceOwnership";
 export * from "./devicePoolParts/contracts";
 export { classifyPoolStatus, type GenericAvailability, type PoolStatusBucket } from "./deviceHold";
-export type { CurrentDisconnectStatus } from "./deviceDisconnectHandler";
 export { McpSessionRecoveryInProgressError } from "./McpSessionRecoveryInProgressError";
-export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
 export type {
   RefusedOwnedSessionRestore,
   DeviceStatus,
   SessionPreservingRecoveryResult,
   SessionRecoveryPreparation,
-  DeviceRecoveryIneligibilityReason,
   DeviceRecoveryEligibility,
   RemoveDeviceOptions,
   PooledDevice,

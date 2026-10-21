@@ -1,4 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  AuxiliarySocketBindConflict,
+  degradeAuxiliarySocket,
+  isAuxiliarySocketUnavailable,
+  markAuxiliarySocketAvailable,
+} from "../../src/daemon/auxiliarySocketAvailability";
 import {
   createDaemonHealthCheck,
   HEALTH_CHECK_INTERVAL_MS,
@@ -9,6 +15,7 @@ import {
 } from "../../src/daemon/daemonHealthCheck";
 import { DatabaseHealthProbeTimeoutError } from "../../src/db/DatabaseHealthProbeTimeoutError";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
 
 function harness(overrides: Partial<DaemonHealthCheckDeps> = {}) {
   const timer = new FakeTimer();
@@ -22,6 +29,7 @@ function harness(overrides: Partial<DaemonHealthCheckDeps> = {}) {
     socketServerListening: () => true,
     observationStreamHealthy: () => true,
     retryDegradedObservationStream: async () => {},
+    onObservationStreamRestored: async () => true,
     databaseHealthProbe: () => ({
       check: () => {
         probeCalls++;
@@ -60,6 +68,129 @@ function harness(overrides: Partial<DaemonHealthCheckDeps> = {}) {
 }
 
 describe("createDaemonHealthCheck", () => {
+  afterEach(() => {
+    markAuxiliarySocketAvailable("observation-stream");
+  });
+
+  describe("degraded observation stream restoration", () => {
+    const degrade = () =>
+      degradeAuxiliarySocket(
+        "observation-stream",
+        new AuxiliarySocketBindConflict("/fake/stream.sock", "Stream"),
+      );
+
+    test("republishes exactly once after a degraded stream is restored", async () => {
+      degrade();
+      let healthy = false;
+      let restored = 0;
+      const h = harness({
+        observationStreamHealthy: () => healthy,
+        retryDegradedObservationStream: async () => {
+          markAuxiliarySocketAvailable("observation-stream");
+          healthy = true;
+        },
+        onObservationStreamRestored: async () => {
+          expect(isAuxiliarySocketUnavailable("observation-stream")).toBe(false);
+          expect(healthy).toBe(true);
+          restored++;
+          return true;
+        },
+      });
+
+      await h.check.run();
+      expect(restored).toBe(1);
+      await h.check.run();
+      await h.check.run();
+      expect(restored).toBe(1);
+      expect(h.probeCalls()).toBe(3);
+      expect(h.recovered).toEqual([]);
+    });
+
+    test.each(["rejects", "remains degraded", "still unhealthy", "degraded but healthy"])(
+      "does not republish when the retry %s",
+      async (outcome) => {
+        degrade();
+        let healthy = false;
+        let restored = 0;
+        const h = harness({
+          observationStreamHealthy: () => healthy,
+          retryDegradedObservationStream: async () => {
+            if (outcome === "rejects") {
+              throw new Error("bind failed");
+            }
+            if (outcome === "still unhealthy") {
+              markAuxiliarySocketAvailable("observation-stream");
+            }
+            healthy = outcome === "degraded but healthy";
+          },
+          onObservationStreamRestored: async () => {
+            restored++;
+            return true;
+          },
+        });
+
+        await h.check.run();
+        expect(restored).toBe(0);
+        expect(h.recovered).toEqual([]);
+      },
+    );
+
+    test.each(["rejects", "declines"])(
+      "warns and keeps checking health when identity republish %s",
+      async (outcome) => {
+        const error = new Error("PID record write failed");
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        let healthy = false;
+        let restored = 0;
+        const h = harness({
+          observationStreamHealthy: () => healthy,
+          retryDegradedObservationStream: async () => {
+            markAuxiliarySocketAvailable("observation-stream");
+            healthy = true;
+          },
+          onObservationStreamRestored: async () => {
+            restored++;
+            if (outcome === "rejects") {
+              throw error;
+            }
+            return false;
+          },
+          // Inconclusive probes do not reset strikes, exposing any accidental health failures.
+          databaseHealthProbe: () => ({
+            check: async () => {
+              throw new DatabaseHealthProbeTimeoutError(1000);
+            },
+          }),
+          hostIoStalled: () => true,
+        });
+        try {
+          for (let i = 0; i < 4; i++) {
+            degrade();
+            healthy = false;
+            await expect(h.check.run()).resolves.toBeUndefined();
+          }
+          expect(restored).toBe(4);
+          expect(h.recovered).toEqual([]);
+          if (outcome === "rejects") {
+            expect(warn).toHaveBeenCalledWith(
+              "Observation stream restored but daemon identity republish failed",
+              error,
+            );
+          } else {
+            expect(warn).toHaveBeenCalledWith(
+              "Observation stream restored but daemon identity republish was declined",
+            );
+          }
+          expect(
+            warn.mock.calls.some(([message]) => message.startsWith("Health check error:")),
+          ).toBe(false);
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
+  });
+
   test("does not start a probe while the previous one is still running", async () => {
     const h = harness();
     h.setSlow(true);

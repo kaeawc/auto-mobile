@@ -70,6 +70,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   },
   { name: "AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH", kind: "input", reason: "Read-only IPA artifact." },
   { name: "AUTOMOBILE_CWEBP_PATH", kind: "input", reason: "Read-only codec executable." },
+  {
+    name: "AUTOMOBILE_TRACE_PROCESSOR",
+    kind: "input",
+    reason: "Read-only Perfetto trace processor executable.",
+  },
   { name: "AUTOMOBILE_DWEBP_PATH", kind: "input", reason: "Read-only codec executable." },
   {
     name: "AUTOMOBILE_DAEMON_LAUNCH_CWD",
@@ -131,6 +136,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Read-only helper executable.",
   },
   { name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT", kind: "input", reason: "Read-only agent dylib." },
+  {
+    name: "AUTOMOBILE_BUNDLETOOL_JAR",
+    kind: "input",
+    reason: "Read-only bundletool jar for installApp .aab/.apks.",
+  },
   {
     name: "AUTOMOBILE_IOS_PROTOTYPE_VIEWER",
     kind: "input",

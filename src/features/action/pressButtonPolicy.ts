@@ -1,4 +1,5 @@
-const NAVIGATION_PRESS_BUTTONS = new Set(["back", "home", "recent", "power"]);
+// iOS action runs a user-chosen shortcut and camera opens the camera: both can change the UI.
+const NAVIGATION_PRESS_BUTTONS = new Set(["back", "home", "recent", "power", "action", "camera"]);
 const IN_PLACE_PRESS_BUTTONS = new Set(["menu", "volume_up", "volume_down"]);
 
 export function isNavigationPressButton(button: unknown): boolean {

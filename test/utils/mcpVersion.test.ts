@@ -14,7 +14,7 @@ import {
   defaultGitMetadataClient,
 } from "../../src/utils/GitMetadataClient";
 import type { GitDirtyState, GitMetadataClient } from "../../src/utils/GitMetadataClient";
-import { compareVersions } from "../../src/server/deviceMatcher";
+import { compareVersions } from "../../src/utils/deviceMatcher";
 import { testOverrides } from "../../src/utils/testOverrides";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
@@ -136,6 +136,85 @@ describe("createMcpVersionResolver", () => {
     return { resolver, timer, counts: () => ({ dirtyReads, versionReads, packageReads }) };
   };
 
+  test("settlement starts refinement without waiting for an unref timer and shares the result", async () => {
+    const pending = Promise.withResolvers<GitDirtyState | null>();
+    const { resolver, timer, counts } = fixture(() => pending.promise);
+    expect(resolver.current()).toBe(plain);
+    const first = resolver.resolveSettled();
+    const second = resolver.resolveSettled();
+    expect(counts().dirtyReads).toBe(1);
+    expect(resolver.current()).toBe(plain);
+    timer.advanceTime(0);
+    expect(counts().dirtyReads).toBe(1);
+    pending.resolve({ dirty: true, dirtyHash: "abc123def456" });
+    expect(await first).toBe(`${plain}.dirty.abc123def456`);
+    expect(await second).toBe(await first);
+    expect(await resolver.resolveSettled()).toBe(resolver.current());
+    expect(counts()).toEqual({ dirtyReads: 1, versionReads: 1, packageReads: 1 });
+  });
+
+  test("isSettled stays false until the due refinement finishes, even when it fails", async () => {
+    for (const outcome of ["dirty", "error"] as const) {
+      const pending = Promise.withResolvers<GitDirtyState | null>();
+      const { resolver } = fixture(() => pending.promise);
+      expect(resolver.isSettled()).toBe(false);
+      const settled = resolver.resolveSettled();
+      expect(resolver.isSettled()).toBe(false);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      if (outcome === "dirty") {
+        pending.resolve({ dirty: true, dirtyHash: "abc123def456" });
+      } else {
+        pending.reject(new Error("git timed out"));
+      }
+      await settled;
+      warn.mockRestore();
+      expect(resolver.isSettled()).toBe(true);
+    }
+  });
+
+  test("isSettled is immediately true when no refinement is due", () => {
+    const { resolver } = fixture(undefined, { env: { MCP_SERVER_VERSION: "9.9.9" } });
+    expect(resolver.isSettled()).toBe(true);
+  });
+
+  test("settlement can be the first read, as in the version-only entrypoint", async () => {
+    const { resolver, timer, counts } = fixture();
+    expect(await resolver.resolveSettled()).toBe(`${plain}.dirty.abc123def456`);
+    expect(counts()).toEqual({ dirtyReads: 1, versionReads: 1, packageReads: 1 });
+    timer.advanceTime(0);
+    expect(counts().dirtyReads).toBe(1);
+  });
+
+  test("settlement joins background refinement already in flight", async () => {
+    const pending = Promise.withResolvers<GitDirtyState | null>();
+    const { resolver, timer, counts } = fixture(() => pending.promise);
+    resolver.current();
+    timer.advanceTime(0);
+    const settled = resolver.resolveSettled();
+    pending.resolve({ dirty: true, dirtyHash: "abc123def456" });
+    expect(await settled).toBe(`${plain}.dirty.abc123def456`);
+    expect(counts().dirtyReads).toBe(1);
+  });
+
+  test("settled identities distinguish different tracked edits at the same HEAD", async () => {
+    const first = fixture(async () => ({ dirty: true, dirtyHash: "aaaaaaaaaaaa" }));
+    const second = fixture(async () => ({ dirty: true, dirtyHash: "bbbbbbbbbbbb" }));
+    expect(first.resolver.current()).toBe(second.resolver.current());
+    expect(await first.resolver.resolveSettled()).toBe(`${plain}.dirty.aaaaaaaaaaaa`);
+    expect(await second.resolver.resolveSettled()).toBe(`${plain}.dirty.bbbbbbbbbbbb`);
+  });
+
+  test.each([
+    { env: { MCP_SERVER_VERSION: "9.9.9" } },
+    { readGitVersion: () => null },
+    { readPackageVersion: () => null },
+  ])("settlement needs no timer or dirty read for unstamped versions", async (overrides) => {
+    const { resolver, timer, counts } = fixture(undefined, overrides);
+    expect(await resolver.resolveSettled()).toBe(resolver.current());
+    expect(counts().dirtyReads).toBe(0);
+    expect(timer.getPendingTimeouts()).toEqual([]);
+  });
+
   test("first current is plain, then refines after the zero-delay timer and microtasks", async () => {
     const { resolver, timer, counts } = fixture();
     expect(timer.getPendingTimeouts()).toEqual([]);
@@ -161,6 +240,7 @@ describe("createMcpVersionResolver", () => {
         await Promise.resolve();
       }
       expect(resolver.current()).toBe(state?.dirty ? `${plain}.dirty` : plain);
+      expect(await resolver.resolveSettled()).toBe(resolver.current());
     },
   );
 
@@ -179,6 +259,7 @@ describe("createMcpVersionResolver", () => {
       expect(resolver.current()).toBe(plain);
       expect(timer.getPendingTimeouts()).toEqual([]);
       expect(warning).toHaveBeenCalledWith("Background git dirty-state resolution failed", error);
+      expect(await resolver.resolveSettled()).toBe(plain);
     } finally {
       warning.mockRestore();
     }

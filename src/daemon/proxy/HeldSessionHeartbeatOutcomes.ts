@@ -6,7 +6,7 @@ import {
   type LivenessRecovery,
   type ReportedOwnerHold,
 } from "../proxyLivenessRecovery";
-import type { SessionReleaseSnapshot } from "../sessionManager";
+import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
 import { HeldSessionNotFoundError } from "./HeldSessionNotFoundError";
 import {

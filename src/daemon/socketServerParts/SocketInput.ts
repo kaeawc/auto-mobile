@@ -32,6 +32,11 @@ import { assertSocketInputNotAborted } from "./socketServerContracts";
 
 import type { SocketServerRuntime } from "./SocketServerRuntime";
 import type { SocketServerOperations } from "./socketServerOperations";
+/** The two calls the iOS input-coordinate scale probe makes. */
+type IosRunnerScaleClient = Pick<
+  IOSCtrlProxyClient,
+  "getScreenScaleMetadata" | "requestHierarchySyncWithoutObservationStreamPush"
+>;
 type State = Pick<SocketServerRuntime, "timer" | "confirmedLegacyScaleDevices" | "ownedGestures">;
 type Callbacks = Pick<
   SocketServerOperations,
@@ -125,7 +130,7 @@ export class SocketInput {
     return remaining;
   }
   async toIosRunnerCoordinates(
-    client: IOSCtrlProxyClient,
+    client: IosRunnerScaleClient,
     deviceId: string,
     coordinates: number[],
     probeTimeoutMs: number,

@@ -83,12 +83,15 @@ class DaemonSocketClientSendFailureTest {
   @Test(timeout = 2000)
   fun `normal request returns response and removes pending request`() {
     val sentResponse = CompletableFuture<DaemonResponse>()
+    val sentFrame = CompletableFuture<JsonObject>()
     responseThread =
       thread(isDaemon = true, name = "daemon-test-response") {
         try {
           val reader = Channels.newInputStream(connection).bufferedReader(StandardCharsets.UTF_8)
           val writer = Channels.newOutputStream(connection).bufferedWriter(StandardCharsets.UTF_8)
-          val request = json.decodeFromString(serializer<DaemonRequest>(), reader.readLine())
+          val frame = json.parseToJsonElement(reader.readLine()).jsonObject
+          sentFrame.complete(frame)
+          val request = json.decodeFromJsonElement(serializer<DaemonRequest>(), frame)
           val response =
             DaemonResponse(
               id = request.id,
@@ -108,6 +111,7 @@ class DaemonSocketClientSendFailureTest {
     val response = client.callTool("x", JsonObject(emptyMap()), 1000)
 
     assertEquals(sentResponse.get(2, TimeUnit.SECONDS), response)
+    assertEquals(JsonPrimitive(true), sentFrame.get(2, TimeUnit.SECONDS)["acceptsRequestBudget"])
     assertTrue(response.success)
     assertEquals(JsonObject(mapOf("ok" to JsonPrimitive(true))), response.result)
     assertEquals(0, client.pendingRequestCount())

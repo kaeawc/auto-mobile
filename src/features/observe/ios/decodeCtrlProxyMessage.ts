@@ -263,6 +263,16 @@ function decodeHingeAngleResult(message: WebSocketMessage): unknown {
   };
 }
 
+function decodeAppearanceResult(message: WebSocketMessage): unknown {
+  const text = (message as { text?: string }).text;
+  return {
+    success: message.success ?? false,
+    appearance: text === "light" || text === "dark" || text === "unspecified" ? text : undefined,
+    error: message.error,
+    totalTimeMs: message.totalTimeMs ?? 0,
+  };
+}
+
 function decodeImeActionResult(message: WebSocketMessage): unknown {
   return {
     success: message.success ?? (message.error === undefined || message.error === null),
@@ -521,8 +531,19 @@ const messageDecoders = new Map<
   ["keyboard_result", decodeKeyboardResult],
   ["rotate_result", decodeRotateResult],
   ["hinge_angle_result", decodeHingeAngleResult],
+  ["appearance_result", decodeAppearanceResult],
   ["ime_action_result", decodeImeActionResult],
   ["action_result", decodeImeActionResult],
+  [
+    "accessibility_audit_result",
+    (message) => ({
+      success: message.success ?? false,
+      issues: message.issues ?? [],
+      unsupportedChecks: message.unsupportedChecks ?? [],
+      error: message.error,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    }),
+  ],
   [
     "magic_tap_result",
     (message) => ({

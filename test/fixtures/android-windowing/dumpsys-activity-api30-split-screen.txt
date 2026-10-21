@@ -1,0 +1,55 @@
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  Stack #4: type=undefined mode=split-screen-primary
+  isSleeping=false
+  mBounds=Rect(0, 0 - 1080, 1194)
+    mResumedActivity: ActivityRecord{8d0f2c1 u0 dev.jasonpearson.automobile.playground/.MainActivity t14}
+    * Task{3b1e0a7 #14 visible=true type=standard mode=split-screen-primary translucent=false A=10150:dev.jasonpearson.automobile.playground U=0 StackId=4 sz=1}
+      mBounds=Rect(0, 0 - 0, 0)
+      mMinWidth=-1 mMinHeight=-1
+      affinity=10150:dev.jasonpearson.automobile.playground
+      intent={act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 cmp=dev.jasonpearson.automobile.playground/.MainActivity}
+      taskId=14 stackId=4
+      * Hist #0: ActivityRecord{8d0f2c1 u0 dev.jasonpearson.automobile.playground/.MainActivity t14}
+          packageName=dev.jasonpearson.automobile.playground processName=dev.jasonpearson.automobile.playground
+          launchedFromUid=2000 launchedFromPackage=com.android.shell launchedFromFeature=null userId=0
+          rootOfTask=true task=Task{3b1e0a7 #14 visible=true type=standard mode=split-screen-primary translucent=false A=10150:dev.jasonpearson.automobile.playground U=0 StackId=4 sz=1}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h454dp 420dpi nrml long land finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 1194) mAppBounds=Rect(0, 63 - 1080, 1194) mWindowingMode=split-screen-primary mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.6}
+          state=RESUMED stopped=false delayedResume=false finishing=false
+          mLastReportedMultiWindowMode=true mLastReportedPictureInPictureMode=false
+
+  Stack #5: type=undefined mode=split-screen-secondary
+  isSleeping=false
+  mBounds=Rect(0, 1206 - 1080, 2400)
+    * Task{9ef1f74 #10 visible=true type=standard mode=split-screen-secondary translucent=false A=1000:com.android.settings U=0 StackId=5 sz=1}
+      mBounds=Rect(0, 0 - 0, 0)
+      mMinWidth=-1 mMinHeight=-1
+      affinity=1000:com.android.settings
+      taskId=10 stackId=5
+      * Hist #0: ActivityRecord{eca7af6 u0 com.android.settings/.Settings t10}
+          packageName=com.android.settings processName=com.android.settings
+          launchedFromUid=2000 launchedFromPackage=com.android.shell launchedFromFeature=null userId=0
+          rootOfTask=true task=Task{9ef1f74 #10 visible=true type=standard mode=split-screen-secondary translucent=false A=1000:com.android.settings U=0 StackId=5 sz=1}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h454dp 420dpi nrml long land finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 1206 - 1080, 2400) mAppBounds=Rect(0, 1206 - 1080, 2337) mWindowingMode=split-screen-secondary mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.6}
+          state=RESUMED stopped=false delayedResume=false finishing=false
+
+  Resumed activities in task display areas (from top to bottom):
+    Resumed: ActivityRecord{8d0f2c1 u0 dev.jasonpearson.automobile.playground/.MainActivity t14}
+
+  ResumedActivity: ActivityRecord{8d0f2c1 u0 dev.jasonpearson.automobile.playground/.MainActivity t14}
+
+ActivityStackSupervisor state:
+  topDisplayFocusedStack=Task{5d86ba3 #4 visible=true type=undefined mode=split-screen-primary translucent=false ?? U=0 StackId=4 sz=1}
+      Application tokens in top down Z order:
+      * Task{5d86ba3 #4 visible=true type=undefined mode=split-screen-primary translucent=false ?? U=0 StackId=4 sz=1}
+        bounds=[0,0][1080,1194]
+        * Task{3b1e0a7 #14 visible=true type=standard mode=split-screen-primary translucent=false A=10150:dev.jasonpearson.automobile.playground U=0 StackId=4 sz=1}
+          bounds=[0,0][1080,1194]
+          * ActivityRecord{8d0f2c1 u0 dev.jasonpearson.automobile.playground/.MainActivity t14}
+      * Task{103aea0 #5 visible=true type=undefined mode=split-screen-secondary translucent=false ?? U=0 StackId=5 sz=1}
+        bounds=[0,1206][1080,2400]
+        * Task{9ef1f74 #10 visible=true type=standard mode=split-screen-secondary translucent=false A=1000:com.android.settings U=0 StackId=5 sz=1}
+          bounds=[0,1206][1080,2400]
+          * ActivityRecord{eca7af6 u0 com.android.settings/.Settings t10}
+
+  splitScreenPrimaryStack=Task=4

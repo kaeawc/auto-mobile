@@ -247,6 +247,61 @@ class RetrofitPrototypeHttpClientTest {
     assertEquals("/final", taken().target)
   }
 
+  private fun redirectThenOk(
+    status: Int,
+    request: PrototypeHttpRequest,
+  ): Pair<RecordedRequest, RecordedRequest> {
+    server.enqueue(
+      MockResponse.Builder().code(status).addHeader("Location", server.url("/final")).build(),
+    )
+    reply("ok")
+    received(execute(request))
+    return taken() to taken()
+  }
+
+  @Test
+  fun `301 and 302 keep PUT PATCH and DELETE and their body`() {
+    for ((method, status) in listOf("PUT" to 301, "PATCH" to 302, "DELETE" to 302, "POST" to 307)) {
+      val headers = mapOf("Content-Type" to "application/json", "X-Token" to "kept")
+      val (_, next) =
+        redirectThenOk(
+          status,
+          request(method, headers = headers, body = json("""{"a":1}""")),
+        )
+      assertEquals("$method $status", method, next.method)
+      assertEquals("$method $status", """{"a":1}""", next.body?.utf8())
+      assertEquals("kept", next.headers["X-Token"])
+    }
+  }
+
+  @Test
+  fun `a redirect that becomes GET drops the body and entity headers but keeps others`() {
+    for ((method, status) in listOf("POST" to 301, "POST" to 302, "PUT" to 303, "DELETE" to 303)) {
+      val headers =
+        mapOf(
+          "Content-Type" to "application/json",
+          "content-language" to "en",
+          "X-Token" to "kept",
+        )
+      val (_, next) =
+        redirectThenOk(
+          status,
+          request(method, headers = headers, body = json("""{"a":1}""")),
+        )
+      assertEquals("$method $status", "GET", next.method)
+      assertNull("$method $status", next.headers["Content-Type"])
+      assertNull("$method $status", next.headers["Content-Language"])
+      assertEquals("kept", next.headers["X-Token"])
+      assertEquals(0L, next.bodySize)
+    }
+  }
+
+  @Test
+  fun `303 keeps HEAD`() {
+    val (_, next) = redirectThenOk(303, request("HEAD"))
+    assertEquals("HEAD", next.method)
+  }
+
   @Test
   fun `a body over the cap is too_large and a body at the cap is read`() {
     reply("x".repeat(100))

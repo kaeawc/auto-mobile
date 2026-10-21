@@ -43,6 +43,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     /// Device control
     case requestRotate = "request_rotate"
     case setHingeAngle = "set_hinge_angle"
+    case requestAppearance = "request_appearance"
 
     /// Clipboard
     case requestClipboard = "request_clipboard"
@@ -55,6 +56,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case sdkTrigger = "request_sdk_trigger"
     case getVoiceOverState = "get_voiceover_state"
     case setVoiceOverState = "set_voiceover_state"
+    case requestAccessibilityAudit = "request_accessibility_audit"
 
     // Storage inspection
     case listPreferenceFiles = "list_preference_files"
@@ -114,11 +116,13 @@ extension RequestType {
         case .requestResetPermissions: return .resetPermissionsResult
         case .requestRotate: return .rotateResult
         case .setHingeAngle: return .hingeAngleResult
+        case .requestAppearance: return .appearanceResult
         case .requestClipboard: return .clipboardResult
         case .getCurrentFocus: return .currentFocusResult
         case .getTraversalOrder: return .traversalOrderResult
         case .addHighlight: return .highlightResponse
         case .magicTap: return .magicTapResult
+        case .requestAccessibilityAudit: return .accessibilityAuditResult
         case .sdkTrigger: return .sdkTriggerResult
         case .getVoiceOverState: return .voiceOverStateResult
         case .setVoiceOverState: return .voiceOverSetResult

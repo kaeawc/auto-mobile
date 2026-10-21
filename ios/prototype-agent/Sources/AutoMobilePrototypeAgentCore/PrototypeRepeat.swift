@@ -125,6 +125,9 @@ enum PrototypeRepeat {
                 })
             }
         case .string("button")?, .string("fab")?: string("label", &fields)
+        case .string("listItem")?:
+            string("headline", &fields)
+            string("supporting", &fields)
         case .string("segmentedButton")?: list("options", &fields)
         case .string("select")?:
             string("label", &fields)

@@ -80,6 +80,7 @@ internal class PrototypeRenderMapper {
             validity =
               prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
             shownErrors = shownErrors,
+            data = resolved.data,
           )
         val model = prototypeRenderModel(resolved, mapping.map(resolved.root, "root"))
         cache = static

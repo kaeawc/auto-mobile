@@ -39,7 +39,7 @@ import type {
   SendKeysRunnerCommandSourceFactory,
   SystemAlertTap,
 } from "./interactionTools/dependencies";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../features/observe/ios";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { SendKeys } from "../features/action/SendKeys";
 import { TapOnElement } from "../features/action/TapOnElement";
@@ -589,7 +589,10 @@ const defaultWakeAndUnlockFactory: NonNullable<
   });
 
 function buildIosOpenAlertOptions(
-  iosClient: IOSCtrlProxyClient | null,
+  iosClient: Pick<
+    IosCtrlProxy,
+    "requestHierarchySync" | "convertToViewHierarchyResult" | "requestAction"
+  > | null,
   signal: AbortSignal | undefined,
   tapOnElementFactory: InteractionToolDependencies["tapOnElementFactory"],
 ): AcceptIosAppOpenAlertOptions {

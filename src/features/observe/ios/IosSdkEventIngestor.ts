@@ -663,18 +663,23 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
       recorder.setContext(this.deviceId, null);
       const previous = this.latestLayoutCapture();
       // Deduplicate consecutive captures per device/ingestor, never a global set:
-      // hash the compact display tree + package + window count, not updatedAt
+      // hash the full display tree + node/package/window counts, not updatedAt
       // (which changes on every poll). An equal defined timestamp is also a replay.
       if (hierarchy.updatedAt !== undefined && hierarchy.updatedAt === previous?.updatedAt) {
         return;
       }
-      const compact = buildIosLayoutTelemetryTree(hierarchy.hierarchy.node);
       const windowCount = hierarchy.windows?.length ?? 0;
-      const key = hashIosLayoutTelemetryTree(compact.node, hierarchy.packageName, windowCount);
+      const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy.node);
+      const key = hashIosLayoutTelemetryTree(
+        hierarchy.hierarchy.node,
+        hierarchy.packageName,
+        windowCount,
+        nodeCount,
+      );
       if (key === previous?.key) {
         return;
       }
-      const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy.node);
+      const compact = buildIosLayoutTelemetryTree(hierarchy.hierarchy.node);
       const screenName = hierarchy.packageName ?? null;
       const hierarchyJson = JSON.stringify({
         screenName,
@@ -734,14 +739,17 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     }
   }
 
-  private trackLayoutRecording(recording: Promise<void>, capture: LayoutCapture): void {
-    // Pending writes suppress immediate duplicate calls. Only fulfilled writes
-    // become committed state; a throw/rejection leaves the capture retryable.
+  private trackLayoutRecording(recording: Promise<boolean>, capture: LayoutCapture): void {
+    // Pending writes suppress immediate duplicate calls. Only confirmed writes
+    // become committed state; failures and unconfirmed buffered adds are retryable.
     this.pendingLayoutCaptures.set(capture.sequence, capture);
     void recording.then(
-      () => {
+      (persisted) => {
         this.pendingLayoutCaptures.delete(capture.sequence);
-        if (!this.lastLayoutCapture || capture.sequence > this.lastLayoutCapture.sequence) {
+        if (
+          persisted &&
+          (!this.lastLayoutCapture || capture.sequence > this.lastLayoutCapture.sequence)
+        ) {
           this.lastLayoutCapture = capture;
         }
       },

@@ -1,20 +1,23 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-const val DEFAULT_PROTOTYPE_IDLE_TTL_MILLIS = 300_000L
+internal const val DEFAULT_PROTOTYPE_IDLE_TTL_MILLIS = 300_000L
 
 /** Delay before retrying an expiry whose window removal failed, and how many retries are made. */
-const val PROTOTYPE_DISMISS_RETRY_MILLIS = 5_000L
-const val PROTOTYPE_DISMISS_MAX_RETRIES = 3
+@InternalAutoMobilePrototypeApi const val PROTOTYPE_DISMISS_RETRY_MILLIS = 5_000L
+@InternalAutoMobilePrototypeApi const val PROTOTYPE_DISMISS_MAX_RETRIES = 3
 
 /** A cancellable one-shot task. Unlike PrototypeSettleTimer, it does not block a gesture caller. */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeScheduledTask {
   fun cancel()
 }
 
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeScheduler {
   fun schedule(millis: Long, action: suspend () -> Unit): PrototypeScheduledTask
 }
 
+@InternalAutoMobilePrototypeApi
 enum class PrototypeDismissReason(val wireValue: String) {
   USER("user"),
   AGENT("agent"),
@@ -23,6 +26,7 @@ enum class PrototypeDismissReason(val wireValue: String) {
   TEARDOWN("teardown"),
 }
 
+@InternalAutoMobilePrototypeApi
 enum class PrototypeWindowDecision {
   RELAYOUT,
   HIDE,
@@ -30,6 +34,7 @@ enum class PrototypeWindowDecision {
 }
 
 /** A removed display ends its window lifetime; never migrate authored content to another panel. */
+@InternalAutoMobilePrototypeApi
 fun prototypeWindowDecision(displayAvailable: Boolean, blocked: Boolean): PrototypeWindowDecision =
   when {
     !displayAvailable -> PrototypeWindowDecision.DISMISS
@@ -38,6 +43,7 @@ fun prototypeWindowDecision(displayAvailable: Boolean, blocked: Boolean): Protot
   }
 
 /** Controller-serialized idle policy. Activity includes interactions and accepted updates only. */
+@InternalAutoMobilePrototypeApi
 class PrototypeLifecycle(
   private val scheduler: PrototypeScheduler,
   ttlMillis: Long = DEFAULT_PROTOTYPE_IDLE_TTL_MILLIS,

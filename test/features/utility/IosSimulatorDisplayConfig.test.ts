@@ -41,7 +41,8 @@ class FakeUiSimctl implements SimctlRunner {
     }
     if (verb === "content_size") {
       if (value !== undefined && !this.ignoreContentSizeWrites) {
-        this.contentSize = value;
+        // simctl reports this spelling after a fontScale 0.8 write (captured in issue #14736).
+        this.contentSize = value === "extra-small" ? "extra-Small" : value;
       }
       return createExecResult(`${this.contentSize}\n`, "");
     }
@@ -91,6 +92,39 @@ describe("Dynamic Type category mapping (#14087)", () => {
 });
 
 describe("displayConfig font scale on the iOS Simulator (#14087)", () => {
+  test("reads simctl's mixed-case extra-Small category as extra-small", async () => {
+    const simctl = new FakeUiSimctl();
+    simctl.contentSize = "extra-Small";
+
+    const result = await simulatorConfig(simctl).getConfig();
+
+    expect(result.success).toBe(true);
+    expect(result.current).toMatchObject({ contentSize: "extra-small", fontScale: 0.82 });
+    expect(result.supported.fontScale).toBe(true);
+  });
+
+  test("fontScale 0.8 reads back extra-Small and can then return to default", async () => {
+    const simctl = new FakeUiSimctl();
+    const config = simulatorConfig(simctl);
+
+    const change = await config.setConfig({ fontScale: 0.8 });
+
+    expect(change.success).toBe(true);
+    expect(change.applied).toMatchObject({ contentSize: "extra-small", fontScale: 0.82 });
+    expect(simctl.contentSize).toBe("extra-Small");
+
+    const restored = await config.setConfig({ fontScale: "default" });
+
+    expect(restored.success).toBe(true);
+    expect(restored.previous?.contentSize).toBe("extra-small");
+    expect(restored.applied).toMatchObject({ contentSize: "large", fontScale: 1 });
+    expect(simctl.contentSize).toBe("large");
+    expect(simctl.writes()).toEqual([
+      ["ui", simulator.deviceId, "content_size", "extra-small"],
+      ["ui", simulator.deviceId, "content_size", "large"],
+    ]);
+  });
+
   test("a read reports the content size category and its derived font scale", async () => {
     const simctl = new FakeUiSimctl();
     simctl.contentSize = "extra-large";

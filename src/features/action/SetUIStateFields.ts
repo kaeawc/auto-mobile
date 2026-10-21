@@ -827,7 +827,7 @@ export class SetUIStateFields {
     if (isChecked !== fieldSpec.selected) {
       const tapResult = await tapOnElement.execute(
         this.buildTapOptions(fieldSpec.selector, "tap"),
-        { progress, signal, settlePostTapEffect: false },
+        { progress, signal },
       );
       if (!tapResult.success) {
         return { success: false, error: `Failed to tap checkbox/toggle: ${tapResult.error}` };
@@ -851,7 +851,6 @@ export class SetUIStateFields {
     const openResult = await tapOnElement.execute(this.buildTapOptions(fieldSpec.selector, "tap"), {
       progress,
       signal,
-      settlePostTapEffect: false,
     });
     if (!openResult.success) {
       return { success: false, error: `Failed to open dropdown: ${openResult.error}` };

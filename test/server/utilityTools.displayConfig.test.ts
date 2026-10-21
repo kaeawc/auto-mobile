@@ -288,7 +288,7 @@ describe("device setting defaults are recorded before a change (#11145)", () => 
       expect(events).toEqual([
         "record:fontScale,nightMode",
         "set",
-        "record:fontScale,density,nightMode,increaseContrast,reduceMotion,boldText",
+        "record:fontScale,density,nightMode,increaseContrast,reduceMotion,boldText,colorInversion,colorCorrection,magnification,magnificationScale,extraDim",
         "set",
         "record:boldText",
         "set",

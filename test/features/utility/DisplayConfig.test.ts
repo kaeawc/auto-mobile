@@ -679,6 +679,11 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
       increaseContrast: false,
       reduceMotion: false,
       boldText: false,
+      colorInversion: false,
+      colorCorrection: false,
+      magnification: false,
+      magnificationScale: false,
+      extraDim: false,
     });
     expect(runner.requests).toEqual([undefined]);
     expect(simctlArgvCalls(simctl)).toEqual([]);

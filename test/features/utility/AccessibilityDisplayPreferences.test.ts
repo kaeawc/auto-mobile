@@ -3,6 +3,7 @@ import type { BootedDevice } from "../../../src/models";
 import {
   AccessibilityDisplayPreferences,
   animationScalesRemoved,
+  decodeColorCorrection,
   parseAndroidNumericSetting,
   type AccessibilityDisplaySnapshot,
   type SettingsAdb,
@@ -128,8 +129,17 @@ describe("AccessibilityDisplayPreferences on Android", () => {
 
     const read = await androidPreferences(adb).read();
 
-    expect(read.values).toEqual({ increaseContrast: false, reduceMotion: false, boldText: false });
-    expect(read.supported).toEqual({ increaseContrast: true, reduceMotion: true, boldText: true });
+    expect(read.values).toEqual({
+      increaseContrast: false,
+      reduceMotion: false,
+      boldText: false,
+      colorInversion: false,
+      colorCorrection: "off",
+      magnification: false,
+      magnificationScale: 2,
+      extraDim: false,
+    });
+    expect(Object.values(read.supported).every((level) => level === true)).toBe(true);
     expect(read.notes).toEqual({});
   });
 
@@ -273,6 +283,94 @@ describe("AccessibilityDisplayPreferences on Android", () => {
   });
 });
 
+describe("Android accessibility display settings (#14076)", () => {
+  test("color inversion round-trips and reset deletes the setting it was absent from", async () => {
+    const adb = new FakeSettingsAdb();
+    const baselines = new Map<string, AccessibilityDisplaySnapshot>();
+
+    const change = await androidPreferences(adb, baselines).set({ colorInversion: true });
+
+    expect(change.errors).toEqual([]);
+    expect(change.applied.colorInversion).toBe(true);
+    expect(adb.settings.get("secure/accessibility_display_inversion_enabled")).toBe("1");
+
+    await androidPreferences(adb, baselines).reset();
+
+    expect(adb.settings.has("secure/accessibility_display_inversion_enabled")).toBe(false);
+  });
+
+  test("color correction writes the mode before enabling the daltonizer", async () => {
+    const adb = new FakeSettingsAdb();
+
+    const change = await androidPreferences(adb).set({ colorCorrection: "protanomaly" });
+
+    expect(change.errors).toEqual([]);
+    expect(change.applied.colorCorrection).toBe("protanomaly");
+    expect(adb.writes()).toEqual([
+      "shell settings put secure accessibility_display_daltonizer 11",
+      "shell settings put secure accessibility_display_daltonizer_enabled 1",
+    ]);
+  });
+
+  test("color correction off keeps the user's mode and grayscale is monochromacy", async () => {
+    const adb = new FakeSettingsAdb();
+    adb.settings.set("secure/accessibility_display_daltonizer_enabled", "0");
+    adb.settings.set("secure/accessibility_display_daltonizer", "13");
+    const baselines = new Map<string, AccessibilityDisplaySnapshot>();
+
+    await androidPreferences(adb, baselines).set({ colorCorrection: "grayscale" });
+    expect(adb.settings.get("secure/accessibility_display_daltonizer")).toBe("0");
+
+    const off = await androidPreferences(adb, baselines).set({ colorCorrection: "off" });
+
+    expect(off.applied.colorCorrection).toBe("off");
+    expect(adb.settings.get("secure/accessibility_display_daltonizer_enabled")).toBe("0");
+    expect(adb.settings.get("secure/accessibility_display_daltonizer")).toBe("13");
+  });
+
+  test("decodeColorCorrection reads an enabled unknown mode as AOSP's default", () => {
+    expect(decodeColorCorrection(null)).toBe("off");
+    expect(decodeColorCorrection("0,12")).toBe("off");
+    expect(decodeColorCorrection("1,12")).toBe("deuteranomaly");
+    expect(decodeColorCorrection("1,null")).toBe("deuteranomaly");
+  });
+
+  test("magnification gesture and scale are separate settings", async () => {
+    const adb = new FakeSettingsAdb();
+
+    const change = await androidPreferences(adb).set({
+      magnification: true,
+      magnificationScale: 3,
+    });
+
+    expect(change.errors).toEqual([]);
+    expect(change.previous.magnificationScale).toBe(2);
+    expect(change.applied).toMatchObject({ magnification: true, magnificationScale: 3 });
+    expect(adb.settings.get("secure/accessibility_display_magnification_scale")).toBe("3");
+  });
+
+  test("extra dim needs API 31", async () => {
+    const adb = new FakeSettingsAdb();
+    adb.apiLevel = "30";
+
+    const change = await androidPreferences(adb).set({ extraDim: true });
+
+    expect(change.supported.extraDim).toBe(false);
+    expect(change.errors).toEqual([expect.stringContaining("Extra dim needs Android API 31+")]);
+    expect(adb.writes()).toEqual([]);
+  });
+
+  test("extra dim round-trips on API 31+", async () => {
+    const adb = new FakeSettingsAdb();
+    adb.apiLevel = "31";
+
+    const change = await androidPreferences(adb).set({ extraDim: true });
+
+    expect(change.errors).toEqual([]);
+    expect(adb.settings.get("secure/reduce_bright_colors_activated")).toBe("1");
+  });
+});
+
 describe("AccessibilityDisplayPreferences on the iOS Simulator", () => {
   test("reads increase_contrast via simctl and the defaults-backed fields as partial", async () => {
     const simctl = new FakeAccessibilitySimctl();
@@ -286,7 +384,13 @@ describe("AccessibilityDisplayPreferences on the iOS Simulator", () => {
       increaseContrast: true,
       reduceMotion: "partial",
       boldText: "partial",
+      colorInversion: false,
+      colorCorrection: false,
+      magnification: false,
+      magnificationScale: false,
+      extraDim: false,
     });
+    expect(read.notes.colorInversion).toContain("Android only");
     expect(read.notes.reduceMotion).toContain("relaunch");
     expect(read.notes.increaseContrast).toBeUndefined();
   });
@@ -366,11 +470,7 @@ describe("AccessibilityDisplayPreferences on physical iOS", () => {
     const read = await preferences.read();
     const change = await preferences.set({ boldText: true });
 
-    expect(read.supported).toEqual({
-      increaseContrast: false,
-      reduceMotion: false,
-      boldText: false,
-    });
+    expect(Object.values(read.supported).every((level) => level === false)).toBe(true);
     expect(change.errors).toEqual([expect.stringContaining("boldText: No automatable")]);
     expect(simctl.calls).toEqual([]);
   });

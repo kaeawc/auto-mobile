@@ -8,19 +8,52 @@ import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
 
 /**
- * Accessibility display preferences that change layout and rendering beyond text size and theme
- * (issue #14088): Increase Contrast / high-contrast text, Reduce Motion / Remove animations, and
- * Bold Text. Each is a boolean preference read back from the platform setting it is stored in.
+ * Accessibility display preferences that change layout and rendering beyond text size and theme:
+ * Increase Contrast / high-contrast text, Reduce Motion / Remove animations and Bold Text on both
+ * platforms (#14088), and Android's color inversion, color correction, magnification and extra dim
+ * (#14076). Each is read back from the platform setting it is stored in.
  */
 export const ACCESSIBILITY_DISPLAY_FIELDS = [
   "increaseContrast",
   "reduceMotion",
   "boldText",
+  "colorInversion",
+  "colorCorrection",
+  "magnification",
+  "magnificationScale",
+  "extraDim",
 ] as const;
 
 export type AccessibilityDisplayField = (typeof ACCESSIBILITY_DISPLAY_FIELDS)[number];
 
-export type AccessibilityDisplayValues = Partial<Record<AccessibilityDisplayField, boolean>>;
+/** Android color correction (daltonizer) modes; `grayscale` is monochromacy. */
+export const COLOR_CORRECTION_MODES = [
+  "off",
+  "deuteranomaly",
+  "protanomaly",
+  "tritanomaly",
+  "grayscale",
+] as const;
+
+export type ColorCorrectionMode = (typeof COLOR_CORRECTION_MODES)[number];
+
+export interface AccessibilityDisplayValues {
+  increaseContrast?: boolean;
+  reduceMotion?: boolean;
+  boldText?: boolean;
+  /** Android: color inversion. */
+  colorInversion?: boolean;
+  /** Android: color correction mode, or `off`. */
+  colorCorrection?: ColorCorrectionMode;
+  /** Android: the triple-tap magnification gesture. */
+  magnification?: boolean;
+  /** Android: the magnification gesture's zoom factor. */
+  magnificationScale?: number;
+  /** Android 12+ (API 31): Extra dim. */
+  extraDim?: boolean;
+}
+
+type AccessibilityDisplayValue = NonNullable<AccessibilityDisplayValues[AccessibilityDisplayField]>;
 
 /** Per field, the raw platform setting in the form a restore writes back; `null` is unset. */
 export type AccessibilityDisplaySnapshot = Partial<
@@ -82,13 +115,34 @@ export type SettingsAdb = Pick<AdbExecutor, "executeCommand">;
 interface PreferenceSetting {
   support: true | "partial";
   note?: string;
-  enabledRaw: string;
-  disabledRaw: string;
-  isEnabled(raw: string | null): boolean;
+  /** The preference a raw setting represents. */
+  decode(raw: string | null): AccessibilityDisplayValue;
+  /**
+   * The raw setting that applies [value]. [baseline] is the raw value displayConfig first
+   * replaced, so turning a preference back off can restore what the user had.
+   */
+  encode(value: AccessibilityDisplayValue, baseline: string | null | undefined): string | null;
   /** Throws when the setting cannot be read. */
   read(): Promise<string | null>;
   /** Throws when the write is rejected. */
   write(raw: string | null): Promise<void>;
+}
+
+/** A boolean preference: on is [enabledRaw]; off restores an off baseline, else [disabledRaw]. */
+function booleanCodec(
+  enabledRaw: string,
+  disabledRaw: string,
+  isEnabled: (raw: string | null) => boolean,
+): Pick<PreferenceSetting, "decode" | "encode"> {
+  return {
+    decode: isEnabled,
+    encode: (value, baseline) =>
+      value === true
+        ? enabledRaw
+        : baseline !== undefined && !isEnabled(baseline)
+          ? baseline
+          : disabledRaw,
+  };
 }
 
 type SettingResolution = PreferenceSetting | { unsupported: string };
@@ -99,7 +153,7 @@ interface FieldState {
   /** Present (possibly `null`, an unset setting) only when the read succeeded. */
   raw?: string | null;
   /** The preference as `raw` reads; present exactly when `raw` is. */
-  enabled?: boolean;
+  value?: AccessibilityDisplayValue;
   support: AccessibilityDisplaySupportLevel;
   note?: string;
 }
@@ -180,9 +234,7 @@ async function writeAndroidSetting(
 function androidSecureFlag(adb: SettingsAdb, key: string, enabledRaw: string): PreferenceSetting {
   return {
     support: true,
-    enabledRaw,
-    disabledRaw: "0",
-    isEnabled: isNonZero,
+    ...booleanCodec(enabledRaw, "0", isNonZero),
     read: async () =>
       parseAndroidNumericSetting(await androidShell(adb, `shell settings get secure ${key}`)),
     write: (raw) => writeAndroidSetting(adb, "secure", key, raw),
@@ -192,9 +244,7 @@ function androidSecureFlag(adb: SettingsAdb, key: string, enabledRaw: string): P
 function androidRemoveAnimations(adb: SettingsAdb): PreferenceSetting {
   return {
     support: true,
-    enabledRaw: "0,0,0",
-    disabledRaw: "1,1,1",
-    isEnabled: animationScalesRemoved,
+    ...booleanCodec("0,0,0", "1,1,1", animationScalesRemoved),
     read: async () => {
       const scales = await Promise.all(
         ANDROID_ANIMATION_SCALE_KEYS.map(async (key) =>
@@ -217,19 +267,118 @@ function androidRemoveAnimations(adb: SettingsAdb): PreferenceSetting {
   };
 }
 
+/** Android API level that added Extra dim (`Settings.Secure.REDUCE_BRIGHT_COLORS_ACTIVATED`). */
+export const ANDROID_EXTRA_DIM_MIN_API = 31;
+
+/** `Settings.Secure.ACCESSIBILITY_DISPLAY_DALTONIZER` values, by mode (AccessibilityManager). */
+export const DALTONIZER_MODE_VALUES: Record<Exclude<ColorCorrectionMode, "off">, string> = {
+  grayscale: "0",
+  protanomaly: "11",
+  deuteranomaly: "12",
+  tritanomaly: "13",
+};
+
+/** The scale the magnification gesture uses when the setting is unset (AOSP default 2.0). */
+export const ANDROID_DEFAULT_MAGNIFICATION_SCALE = 2;
+
+/** Color correction is on only when enabled and set to a known mode: raw is `enabled,mode`. */
+export function decodeColorCorrection(raw: string | null): ColorCorrectionMode {
+  const [enabled, mode] = (raw ?? "null,null").split(",");
+  if (enabled !== "1") {
+    return "off";
+  }
+  const match = Object.entries(DALTONIZER_MODE_VALUES).find(([, value]) => value === mode);
+  // An enabled daltonizer with an unknown or unset mode is AOSP's default, deuteranomaly.
+  return (match?.[0] as ColorCorrectionMode | undefined) ?? "deuteranomaly";
+}
+
+const DALTONIZER_KEYS = [
+  "accessibility_display_daltonizer_enabled",
+  "accessibility_display_daltonizer",
+] as const;
+
+function androidColorCorrection(adb: SettingsAdb): PreferenceSetting {
+  return {
+    support: true,
+    decode: decodeColorCorrection,
+    encode: (value, baseline) => {
+      if (value !== "off") {
+        return `1,${DALTONIZER_MODE_VALUES[value as Exclude<ColorCorrectionMode, "off">]}`;
+      }
+      return baseline !== undefined && decodeColorCorrection(baseline) === "off"
+        ? baseline
+        : `0,${baseline?.split(",")[1] ?? "null"}`;
+    },
+    read: async () => {
+      const parts = await Promise.all(
+        DALTONIZER_KEYS.map(async (key) =>
+          parseAndroidNumericSetting(await androidShell(adb, `shell settings get secure ${key}`)),
+        ),
+      );
+      return parts.map((part) => part ?? "null").join(",");
+    },
+    write: async (raw) => {
+      const parts = (raw ?? "null,null").split(",");
+      if (parts.length !== DALTONIZER_KEYS.length) {
+        throw new Error(`malformed color correction snapshot '${raw}'`);
+      }
+      // Set the mode before enabling, so the filter never applies with the previous mode.
+      for (const index of [1, 0]) {
+        const part = parts[index];
+        await writeAndroidSetting(
+          adb,
+          "secure",
+          DALTONIZER_KEYS[index],
+          part === "null" ? null : part,
+        );
+      }
+    },
+  };
+}
+
+function androidMagnificationScale(adb: SettingsAdb): PreferenceSetting {
+  const key = "accessibility_display_magnification_scale";
+  return {
+    support: true,
+    decode: (raw) => (raw === null ? ANDROID_DEFAULT_MAGNIFICATION_SCALE : Number(raw)),
+    encode: (value) => String(value),
+    read: async () =>
+      parseAndroidNumericSetting(await androidShell(adb, `shell settings get secure ${key}`)),
+    write: (raw) => writeAndroidSetting(adb, "secure", key, raw),
+  };
+}
+
+/** Gate a setting on the device API level; an unreadable level gates it off rather than guessing. */
+function apiGated(
+  label: string,
+  minApi: number,
+  apiLevel: number | null,
+  setting: () => PreferenceSetting,
+): SettingResolution {
+  if (apiLevel === null) {
+    return {
+      unsupported: `Could not read the Android API level to gate ${label} (API ${minApi}+).`,
+    };
+  }
+  return apiLevel < minApi
+    ? { unsupported: `${label} needs Android API ${minApi}+ (device is API ${apiLevel}).` }
+    : setting();
+}
+
 function androidSettings(adb: SettingsAdb, apiLevel: number | null): ResolvedSettings {
-  const boldText: SettingResolution =
-    apiLevel === null
-      ? { unsupported: "Could not read the Android API level to gate Bold text (API 31+)." }
-      : apiLevel < ANDROID_BOLD_TEXT_MIN_API
-        ? {
-            unsupported: `Bold text needs Android API ${ANDROID_BOLD_TEXT_MIN_API}+ (device is API ${apiLevel}).`,
-          }
-        : androidSecureFlag(adb, "font_weight_adjustment", ANDROID_BOLD_TEXT_WEIGHT_ADJUSTMENT);
   return {
     increaseContrast: androidSecureFlag(adb, "high_text_contrast_enabled", "1"),
     reduceMotion: androidRemoveAnimations(adb),
-    boldText,
+    boldText: apiGated("Bold text", ANDROID_BOLD_TEXT_MIN_API, apiLevel, () =>
+      androidSecureFlag(adb, "font_weight_adjustment", ANDROID_BOLD_TEXT_WEIGHT_ADJUSTMENT),
+    ),
+    colorInversion: androidSecureFlag(adb, "accessibility_display_inversion_enabled", "1"),
+    colorCorrection: androidColorCorrection(adb),
+    magnification: androidSecureFlag(adb, "accessibility_display_magnification_enabled", "1"),
+    magnificationScale: androidMagnificationScale(adb),
+    extraDim: apiGated("Extra dim", ANDROID_EXTRA_DIM_MIN_API, apiLevel, () =>
+      androidSecureFlag(adb, "reduce_bright_colors_activated", "1"),
+    ),
   };
 }
 
@@ -238,9 +387,7 @@ export type SimctlRunner = Pick<SimCtl, "executeCommandArgs">;
 function iosIncreaseContrast(simctl: SimctlRunner, udid: string): PreferenceSetting {
   return {
     support: true,
-    enabledRaw: "enabled",
-    disabledRaw: "disabled",
-    isEnabled: (raw) => raw === "enabled",
+    ...booleanCodec("enabled", "disabled", (raw) => raw === "enabled"),
     read: async () => {
       const value = (
         await simctl.executeCommandArgs(["ui", udid, "increase_contrast"])
@@ -272,9 +419,7 @@ function iosAccessibilityDefault(
   return {
     support: "partial",
     note: IOS_DEFAULTS_PARTIAL_NOTE,
-    enabledRaw: "1",
-    disabledRaw: "0",
-    isEnabled: (raw) => raw === "1",
+    ...booleanCodec("1", "0", (raw) => raw === "1"),
     read: async () => {
       try {
         const value = (
@@ -305,11 +450,18 @@ function iosAccessibilityDefault(
   };
 }
 
+const ANDROID_ONLY = { unsupported: "Android only: the iOS Simulator has no control for it." };
+
 function iosSimulatorSettings(simctl: SimctlRunner, udid: string): ResolvedSettings {
   return {
     increaseContrast: iosIncreaseContrast(simctl, udid),
     reduceMotion: iosAccessibilityDefault(simctl, udid, IOS_REDUCE_MOTION_KEY),
     boldText: iosAccessibilityDefault(simctl, udid, IOS_BOLD_TEXT_KEY),
+    colorInversion: ANDROID_ONLY,
+    colorCorrection: ANDROID_ONLY,
+    magnification: ANDROID_ONLY,
+    magnificationScale: ANDROID_ONLY,
+    extraDim: ANDROID_ONLY,
   };
 }
 
@@ -319,8 +471,10 @@ export function unsupportedAccessibilityDisplay(note: string = IOS_PHYSICAL_NOTE
   notes: AccessibilityDisplayNotes;
 } {
   return {
-    supported: { increaseContrast: false, reduceMotion: false, boldText: false },
-    notes: { increaseContrast: note, reduceMotion: note, boldText: note },
+    supported: Object.fromEntries(
+      ACCESSIBILITY_DISPLAY_FIELDS.map((field) => [field, false]),
+    ) as AccessibilityDisplaySupport,
+    notes: Object.fromEntries(ACCESSIBILITY_DISPLAY_FIELDS.map((field) => [field, note])),
   };
 }
 
@@ -382,7 +536,7 @@ export class AccessibilityDisplayPreferences {
     for (const field of requestedAccessibilityFields(input)) {
       const fieldErrors = await this.applyField(
         field,
-        input[field] === true,
+        input[field] as AccessibilityDisplayValue,
         settings[field],
         before[field],
       );
@@ -509,7 +663,7 @@ export class AccessibilityDisplayPreferences {
       const raw = await resolution.read();
       return {
         raw,
-        enabled: resolution.isEnabled(raw),
+        value: resolution.decode(raw),
         support: resolution.support,
         ...(resolution.note ? { note: resolution.note } : {}),
       };
@@ -524,7 +678,7 @@ export class AccessibilityDisplayPreferences {
 
   private async applyField(
     field: AccessibilityDisplayField,
-    enabled: boolean,
+    value: AccessibilityDisplayValue,
     resolution: SettingResolution,
     before: FieldState,
   ): Promise<string[]> {
@@ -537,12 +691,7 @@ export class AccessibilityDisplayPreferences {
     const previousRaw = before.raw ?? null;
     this.recordBaseline(field, previousRaw);
     const baselineRaw = this.baselines.get(this.device.deviceId)?.[field];
-    const target = enabled
-      ? resolution.enabledRaw
-      : baselineRaw !== undefined && !resolution.isEnabled(baselineRaw)
-        ? baselineRaw
-        : resolution.disabledRaw;
-    return this.writeField(field, resolution, target);
+    return this.writeField(field, resolution, resolution.encode(value, baselineRaw));
   }
 
   private async writeSnapshot(
@@ -610,7 +759,7 @@ function valuesOf(states: FieldStates): AccessibilityDisplayValues {
   return Object.fromEntries(
     ACCESSIBILITY_DISPLAY_FIELDS.filter((field) => "raw" in states[field]).map((field) => [
       field,
-      states[field].enabled ?? false,
+      states[field].value,
     ]),
   ) as AccessibilityDisplayValues;
 }
@@ -646,12 +795,12 @@ function verifyRequested(
 ): string[] {
   return written.flatMap((field) => {
     const state = after[field];
-    if (state.enabled === undefined) {
+    if (state.value === undefined) {
       return [`${field}: could not read back the applied value`];
     }
-    const applied = state.enabled;
+    const applied = state.value;
     return applied === input[field]
       ? []
-      : [`${field} remained ${applied} after requesting ${input[field]}`];
+      : [`${field} remained ${String(applied)} after requesting ${String(input[field])}`];
   });
 }

@@ -13,12 +13,12 @@ import {
   isVirtualAndroidDevice,
   getBootedAndroidTeardownStableName,
   isUnknownAndroidRuntimeName,
-} from "./androidIdentity";
-import { type TeardownDeviceArgs } from "./contracts";
+} from "../core/androidIdentity";
+import { type TeardownDeviceArgs } from "../core/contracts";
 import {
   type DeviceToolsDependencies,
   POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
-} from "./dependencies";
+} from "../core/dependencies";
 
 export type TeardownFailurePhase = "precondition" | "stop" | "destroy" | "verification";
 

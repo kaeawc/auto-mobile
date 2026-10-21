@@ -12,7 +12,7 @@ interface PendingPush {
 
 type PushSocketWriter = Pick<Socket, "write" | "writableLength" | "destroyed">;
 
-/** Per-connection FIFO, with latest-wins slots scoped to each subscription and device. */
+/** Per-connection FIFO, with latest-wins slots scoped to each subscription, device and epoch. */
 export class PushSubscriberOutbox {
   private readonly pending = new Map<string | number, PendingPush>();
   private readonly reportedDrops = new Map<string, string | undefined>();
@@ -30,7 +30,12 @@ export class PushSubscriberOutbox {
       !fields.correlated &&
       this.socket.writableLength > PUSH_SOCKET_WRITABLE_LIMIT_BYTES
     ) {
-      const key = this.stateKey(fields.subscriptionId, fields.deviceId, fields.type);
+      const key = this.stateKey(
+        fields.subscriptionId,
+        fields.deviceId,
+        fields.deviceSessionUuid,
+        fields.type,
+      );
       this.pending.delete(key);
       if (this.reportedDrops.has(key)) {
         return !drainPending;
@@ -82,7 +87,7 @@ export class PushSubscriberOutbox {
   }
 
   private enqueue(message: unknown): void {
-    const { type, subscriptionId, deviceId, correlated } = this.fields(message);
+    const { type, subscriptionId, deviceId, deviceSessionUuid, correlated } = this.fields(message);
     // Only these full-state observation frames are replaceable. hierarchy_update
     // carries the complete tree; hierarchyDiff is advisory. There is no separate
     // observation_update wire type. Correlated replies (id/requestId), even
@@ -94,7 +99,7 @@ export class PushSubscriberOutbox {
     // that skipping them preserves protocol semantics.
     const key =
       !correlated && (type === "screenshot_update" || type === "hierarchy_update")
-        ? this.stateKey(subscriptionId, deviceId, type)
+        ? this.stateKey(subscriptionId, deviceId, deviceSessionUuid, type)
         : ++this.sequence;
     // Map.set replaces in place, keeping state ahead of later acknowledgements.
     this.pending.set(key, {
@@ -112,10 +117,19 @@ export class PushSubscriberOutbox {
   private stateKey(
     subscriptionId: string | undefined,
     deviceId: string | undefined,
+    deviceSessionUuid: string | null | undefined,
     type: string,
   ): string {
-    return [subscriptionId, deviceId, type]
-      .map((field) => (field === undefined ? "unset" : `${field.length}:${field}`))
+    return [subscriptionId, deviceId, deviceSessionUuid, type]
+      .map((field) => {
+        if (field === undefined) {
+          return "unset";
+        }
+        if (field === null) {
+          return "null";
+        }
+        return `${field.length}:${field}`;
+      })
       .join(":");
   }
 

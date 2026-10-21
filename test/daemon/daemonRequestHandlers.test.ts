@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
@@ -30,6 +30,10 @@ import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonito
 import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import type { DeviceLeaseActivitySources } from "../../src/daemon/deviceLeaseActivity";
 import type { DeviceLeaseRelinquishPort } from "../../src/daemon/deviceLeaseActivitySources";
+
+afterEach(() => {
+  mock.restore();
+});
 
 class FakeDevicePool {
   stats: DevicePoolStats;

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -7,6 +7,10 @@ import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { FakeLogger } from "../fakes/FakeLogger";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function registerThrowingTool(name: string): void {
   ToolRegistry.register(name, "Throws for catch logging tests", z.object({}), async () => {

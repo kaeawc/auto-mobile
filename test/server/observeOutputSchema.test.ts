@@ -1,4 +1,6 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { jsonSchemaObjects } from "../helpers/advertisedOutputSchemas";
+import { resolveJsonSchemaReference } from "../../src/server/jsonSchemaReferences";
 import type { LayoutWarning } from "../../src/models/ObservationInsets";
 import { readToolResponse } from "../helpers/toolResponse";
 import { observeToolScreen } from "../helpers/observeToolScreen";
@@ -303,7 +305,10 @@ describe("observe.outputSchema: requires usable screenshot-resource join keys on
     expect(
       (published.properties as Record<string, unknown>).observationScreenshotResourceUri,
     ).toBeDefined();
-    const display = (published.properties as Record<string, unknown>).display as {
+    const display = resolveJsonSchemaReference(
+      published,
+      (published.properties as Record<string, Record<string, unknown>>).display,
+    ) as {
       properties: Record<string, unknown>;
       required: string[];
     };
@@ -1037,19 +1042,16 @@ describe("observe tool registration advertises the schema (#3025)", () => {
   });
 
   test("advertises the bounds tuple through getToolDefinitions (compaction is a permanent default)", () => {
-    const observeSchemaJson = (): string => {
-      const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
-      return JSON.stringify((observe as Record<string, unknown>).outputSchema);
-    };
-    // Count JSON-Schema tuple sites (`prefixItems`). Bounds compaction is now
-    // unconditional, so the object|tuple union is advertised for every bounds
-    // field — plus the always-tuple `skeleton` bounds (#4388). A client can
-    // therefore always decode the emitted [l,t,r,b] tuple. There is no flag to
-    // flip: the advertised schema carries multiple tuple sites unconditionally.
-    const countTupleSites = (json: string): number => json.split("prefixItems").length - 1;
     withFreshRegistry(() => {
-      const sites = countTupleSites(observeSchemaJson());
-      expect(sites).toBeGreaterThan(1);
+      const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
+      const schema = observe!.outputSchema!;
+      const definitions = schema.$defs as Record<string, Record<string, unknown>>;
+      const tuple = Object.entries(definitions).find(([, node]) => Array.isArray(node.prefixItems));
+      expect(tuple).toBeDefined();
+      // Object|tuple bounds and always-tuple skeleton rows now share one
+      // definition rather than repeating prefixItems at each use site.
+      const uses = jsonSchemaObjects(schema).filter((node) => node.$ref === `#/$defs/${tuple![0]}`);
+      expect(uses.length).toBeGreaterThan(1);
     });
   });
 

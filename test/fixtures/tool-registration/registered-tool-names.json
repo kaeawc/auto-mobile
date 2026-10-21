@@ -53,6 +53,7 @@
     "killDevice",
     "deleteDevice",
     "getDeepLinks",
+    "statusBar",
     "setAppLinks",
     "navigateTo",
     "getNavigationGraph",
@@ -103,6 +104,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -158,6 +160,7 @@
     "killDevice",
     "deleteDevice",
     "getDeepLinks",
+    "statusBar",
     "setAppLinks",
     "navigateTo",
     "getNavigationGraph",
@@ -206,6 +209,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "setToolEnabled"
   ],
   "cli": [
@@ -282,6 +286,7 @@
     "criticalSection",
     "sqlQuery",
     "getDeepLinks",
+    "statusBar",
     "setUIState",
     "highlight",
     "prototype",
@@ -295,6 +300,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
+    "persona",
     "getPreference",
     "setPreference",
     "deviceSnapshot",

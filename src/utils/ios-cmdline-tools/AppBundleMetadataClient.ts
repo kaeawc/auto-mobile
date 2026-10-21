@@ -6,6 +6,7 @@ import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { PlistClient } from "./PlistClient";
+import { parseCodesignDisplay, type CodeSignature } from "./codesignDisplay";
 
 export type PlistDictionary = Readonly<Record<string, unknown>>;
 
@@ -14,6 +15,8 @@ export interface EntitlementPlistReader {
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const ENTITLEMENTS_LABEL = "App-bundle entitlement inspection";
+const SIGNATURE_LABEL = "App-bundle code-signature inspection";
 const UNSIGNED_BUNDLE_MARKERS = ["code object is not signed at all", "is not signed"];
 
 export interface AppBundleMetadataRequest {
@@ -30,6 +33,12 @@ export interface CodesignExecutor {
 
 export interface AppBundleMetadata {
   readEntitlements(request: AppBundleMetadataRequest): Promise<PlistDictionary | null>;
+}
+
+/** The signature summary of an on-disk bundle (#14099). */
+export interface CodeSignatureReader {
+  /** Null when the bundle is unsigned. */
+  readCodeSignature(request: AppBundleMetadataRequest): Promise<CodeSignature | null>;
 }
 
 const defaultExecutor: CodesignExecutor = {
@@ -54,15 +63,15 @@ const isUnsignedBundle = (error: unknown): boolean => {
   return UNSIGNED_BUNDLE_MARKERS.some((marker) => normalized.includes(marker));
 };
 
-const cancellationError = (): ActionableError =>
-  new ActionableError("App-bundle entitlement inspection was cancelled.");
+const cancellationError = (label = "App-bundle entitlement inspection"): ActionableError =>
+  new ActionableError(`${label} was cancelled.`);
 
 /**
  * The sole production owner of codesign for app-bundle metadata. Its structured
  * request keeps device and artifact context out of shell strings; the argv-only
  * executor receives the bundle path as one literal argument.
  */
-export class AppBundleMetadataClient implements AppBundleMetadata {
+export class AppBundleMetadataClient implements AppBundleMetadata, CodeSignatureReader {
   constructor(
     private readonly executor: CodesignExecutor = defaultExecutor,
     private readonly plist: EntitlementPlistReader = new PlistClient(),
@@ -70,8 +79,31 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
   ) {}
 
   async readEntitlements(request: AppBundleMetadataRequest): Promise<PlistDictionary | null> {
+    const output = await this.run(
+      ["-d", "--entitlements", ":-", request.appBundlePath],
+      request,
+      ENTITLEMENTS_LABEL,
+    );
+    return output ? this.parseEntitlements(output) : null;
+  }
+
+  /**
+   * `codesign -dvvv <bundle>`: identifier, team, certificate chain and CDHash. codesign prints the
+   * display on stderr; an unsigned bundle reads as null, like `readEntitlements`.
+   */
+  async readCodeSignature(request: AppBundleMetadataRequest): Promise<CodeSignature | null> {
+    const output = await this.run(["-d", "-vvv", request.appBundlePath], request, SIGNATURE_LABEL);
+    return output ? parseCodesignDisplay(`${output.stderr}\n${output.stdout}`) : null;
+  }
+
+  /** Run one bounded, cancellable codesign read; null when codesign reports an unsigned bundle. */
+  private async run(
+    args: readonly string[],
+    request: AppBundleMetadataRequest,
+    label: string,
+  ): Promise<ExecResult | null> {
     if (request.signal?.aborted) {
-      throw cancellationError();
+      throw cancellationError(label);
     }
 
     const controller = new AbortController();
@@ -79,33 +111,31 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
     request.signal?.addEventListener("abort", abort, { once: true });
 
     try {
-      const output = await this.executeEntitlements(request, controller);
+      const output = await this.execute(args, request, controller, label);
       if (request.signal?.aborted) {
-        throw cancellationError();
+        throw cancellationError(label);
       }
-      return this.parseEntitlements(output);
+      return output;
     } catch (error) {
-      return this.handleReadError(error, request.signal);
+      return this.handleReadError(error, label, request.signal);
     } finally {
       request.signal?.removeEventListener("abort", abort);
     }
   }
 
-  private async executeEntitlements(
+  private async execute(
+    args: readonly string[],
     request: AppBundleMetadataRequest,
     controller: AbortController,
+    label: string,
   ): Promise<ExecResult> {
     const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const command = this.executor.execute(
-      ["-d", "--entitlements", ":-", request.appBundlePath],
-      controller.signal,
-    );
+    const command = this.executor.execute(args, controller.signal);
     return await raceWithDeadline(command, {
       timer: this.timer,
       timeoutMs,
-      label: "App-bundle entitlement inspection",
-      timeoutError: () =>
-        new ActionableError(`App-bundle entitlement inspection timed out after ${timeoutMs}ms.`),
+      label,
+      timeoutError: () => new ActionableError(`${label} timed out after ${timeoutMs}ms.`),
       onTimeout: () => controller.abort(),
     });
   }
@@ -133,20 +163,22 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
     }
   }
 
-  private handleReadError(error: unknown, signal?: AbortSignal): null {
+  private handleReadError(error: unknown, label: string, signal?: AbortSignal): null {
     if (signal?.aborted) {
-      throw cancellationError();
+      throw cancellationError(label);
     }
     if (isUnsignedBundle(error)) {
-      // codesign reports unsigned simulator bundles as a failed inspection; no entitlements is a valid result.
-      logger.debug("[AppBundleMetadataClient] codesign reports the app bundle is unsigned");
+      // codesign reports unsigned simulator bundles as a failed inspection; no signature is a valid result.
+      logger.debug(
+        `[AppBundleMetadataClient] codesign reports the app bundle is unsigned (${label})`,
+      );
       return null;
     }
     if (error instanceof ActionableError) {
       throw error;
     }
     throw new ActionableError(
-      "Unable to inspect app-bundle entitlements with codesign. Confirm Xcode command-line tools are installed and the artifact is accessible.",
+      `${label} with codesign failed. Confirm Xcode command-line tools are installed and the artifact is accessible.`,
     );
   }
 }

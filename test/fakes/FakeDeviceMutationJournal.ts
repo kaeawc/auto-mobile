@@ -24,8 +24,11 @@ export class FakeDeviceMutationJournal implements DeviceMutationJournal {
     const scopeKey = this.sessionKey(scope);
     const entries = this.entries.get(scopeKey) ?? [];
     if (!entries.some((entry) => entry.kind === mutation.kind && entry.key === mutation.key)) {
+      // Only the journal's columns are stored, as in SqliteDeviceMutationJournal.
       entries.push({
-        ...structuredClone(mutation),
+        kind: mutation.kind,
+        key: mutation.key,
+        toolName: mutation.toolName,
         priorValue: structuredClone(priorValue),
         sequence: ++this.sequence,
         appliedAt: this.timer.now(),

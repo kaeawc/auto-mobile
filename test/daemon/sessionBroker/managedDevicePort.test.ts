@@ -501,7 +501,7 @@ function destroyingPort(
 
 describe("ManagedDevicePort clean-reset ownership", () => {
   async function resetRig(
-    reset: NonNullable<ManagedDevicePortDependencies["resetIosBaseline"]>,
+    reset: NonNullable<NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"]>,
     current = true,
   ) {
     const rig = await destructionRig();
@@ -511,7 +511,7 @@ describe("ManagedDevicePort clean-reset ownership", () => {
       brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
       registry: rig.registry,
       bindingJournal: rig.journal,
-      resetIosBaseline: reset,
+      resetBaseline: { ios: reset },
       isCurrentReset: async () => current,
     });
     return { ...rig, port, resource: { ...rig.resource, state: "resetting" as const } };
@@ -536,6 +536,21 @@ describe("ManagedDevicePort clean-reset ownership", () => {
     }, false);
     await expect(rig.port.reset(rig.resource)).rejects.toThrow("durable resource revision");
     expect(called).toBe(false);
+  });
+
+  test("iOS reset preserves its structured outcome and phase timings", async () => {
+    const outcome = {
+      outcome: "fallback:erase" as const,
+      mode: "erase" as const,
+      phases: { erase: 17, boot: 23 },
+      fallbackReason: "baseline contamination",
+    };
+    const rig = await resetRig(async (_device, _profile, assertOwned) => {
+      await assertOwned();
+      return outcome;
+    });
+
+    expect(await rig.port.reset(rig.resource)).toEqual(outcome);
   });
 
   test("a live execution prevents resetting its device", async () => {

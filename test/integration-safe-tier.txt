@@ -19,9 +19,11 @@
 # Last derived from origin/main on 2026-10-10.
 test/contracts/avdConfigReader.integration.test.ts | safe | fake versus real FileAvdConfigReader over a private mkdtemp AVD home removed afterwards
 test/contracts/daemonClient.integration.test.ts | safe | fake versus real DaemonClient over a unix socket in a private mkdtemp directory removed afterwards L11
+test/contracts/deviceMutationJournal.integration.test.ts | safe | fake versus real SqliteDeviceMutationJournal over createTestDatabase in-memory with FakeTimer L20
 test/contracts/deviceResourceApplicationStore.integration.test.ts | safe | fake versus real DeviceResourceApplicationRepository over createTestDatabase in-memory L8
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
+test/contracts/hostBootAdmissionRegistry.integration.test.ts | safe | fake versus real FileHostBootAdmissionRegistry over a private mkdtemp directory removed afterwards, injected liveness and FakeTimer L36
 test/contracts/imageBackend.integration.test.ts | safe | fake versus real JimpBackend and SharpBackend decoding a repo PNG fixture, no writes L9
 test/contracts/lockFileSystem.integration.test.ts | safe | fake versus nodeLockFileSystem over a private mkdtemp directory removed afterwards
 test/contracts/mcpTaskStore.integration.test.ts | safe | fake versus real McpTaskRepository over createTestDatabase in-memory with FakeTimer L12

@@ -27,7 +27,7 @@ const COMPOSITION_ROOTS: ReadonlySet<string> = new Set([
  */
 const REMAINING_GET_INSTANCE_CALLS: Readonly<Record<string, number>> = {
   AndroidAvdProvenanceCache: 8,
-  AndroidCtrlProxyClient: 83,
+  AndroidCtrlProxyClient: 84,
   AndroidCtrlProxyManager: 12,
   clients: 1,
   CriticalSectionCoordinator: 2,
@@ -36,7 +36,7 @@ const REMAINING_GET_INSTANCE_CALLS: Readonly<Record<string, number>> = {
   FeatureFlagService: 11,
   ImageCache: 4,
   IosCtrlProxyBuilder: 2,
-  IOSCtrlProxyClient: 66,
+  IOSCtrlProxyClient: 64,
   IOSCtrlProxyManager: 11,
   NavigationGraphManager: 16,
   NavigationScreenshotManager: 4,

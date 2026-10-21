@@ -1,13 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  mkdirSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import * as asyncFiles from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -29,6 +21,7 @@ import {
   type DaemonCleanupFileSystem,
 } from "../../src/daemon/daemonFiles";
 import { FakeLockFileSystem } from "../fakes/FakeLockFileSystem";
+import { statFileIdentity } from "../../src/daemon/socketFileIdentity";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
@@ -622,7 +615,7 @@ describe("daemon file cleanup", () => {
         const persistedOwners: (PidFileData | null)[] = [];
         const files: DaemonCleanupFileSystem = {
           exists: (path) => storage.exists(path),
-          stat: (path) => ({ dev: 1, ino: Number(storage.stat(path).ino) }),
+          stat: (path) => ({ dev: 1n, ino: storage.stat(path).ino }),
           unlink: async (path) => storage.unlink(path),
           unlinkSync: (path) => storage.unlink(path),
           renameSync: (from, to) => storage.rename(from, to),
@@ -712,7 +705,7 @@ describe("daemon file cleanup", () => {
       const controlSocketPath = join(dir, "blocked.sock");
       // An isolated directory deterministically fails unlink without opening a socket.
       mkdirSync(controlSocketPath);
-      const { dev, ino } = statSync(controlSocketPath);
+      const { dev, ino } = statFileIdentity(controlSocketPath);
       const options = {
         pidFilePath,
         controlSocketPath,

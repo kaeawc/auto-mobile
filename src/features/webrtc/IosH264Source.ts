@@ -81,7 +81,6 @@ export {
 
 export * from "./IosH264SourceConfig";
 export * from "./IosCaptureResolver";
-export { wireHelperDiagnostics } from "./IosCaptureDiagnostics";
 
 export class IosH264Source implements H264CaptureSource {
   private readonly resolver: IosCaptureResolver;

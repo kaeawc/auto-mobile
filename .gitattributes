@@ -1,4 +1,5 @@
 test/fixtures/android-display/**/*.txt text eol=lf
+test/fixtures/crashReports/* text eol=lf
 test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
@@ -10,6 +11,7 @@ test/fixtures/prototype-capabilities/*.json text eol=lf
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/android-dumpsys-package/*.txt text eol=lf
 test/fixtures/android-notification-policy/*.txt text eol=lf
+test/fixtures/android-app-links/*.txt text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
@@ -138,6 +140,7 @@ test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 test/fixtures/prototype-spec/**/*.json text eol=lf
 test/fixtures/prototype-saved-layout/**/*.json text eol=lf
 test/fixtures/prototype-embedded-routing/*.json text eol=lf
+test/fixtures/prototype-egress-policy/*.json text eol=lf
 test/bats/fixtures/compose-compiler-report/**/*.txt text eol=lf
 test/bats/fixtures/compose-compiler-report/**/*.json text eol=lf
 schemas/prototype-spec-contract.json text eol=lf

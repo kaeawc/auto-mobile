@@ -36,13 +36,10 @@ export type { ListChangedKind };
 export { DaemonSocketQueueOverflowError } from "./socketServerParts/DaemonSocketQueueOverflowError";
 export {
   MCP_FORWARD_START_HEADROOM_MS,
-  MAX_MCP_FORWARD_REROUTES,
-  type SocketBindGuardOptions,
   type SocketReclaimLock,
   type SocketOwnerLiveness,
   type SocketOwnerStatus,
   type AppendTextInput,
-  type DeviceReadToolCallClassifier,
   type McpForwardRoute,
   type SocketFrameTraceEvent,
 } from "./socketServerParts/socketServerContracts";

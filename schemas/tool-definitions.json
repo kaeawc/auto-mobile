@@ -90,6 +90,99 @@
     }
   },
   {
+    "name": "accessibilityAction",
+    "description": "Perform an Android accessibility action on an element, the way TalkBack or Switch Access does: expand, collapse, dismiss, select, clear_selection, show_on_screen, scroll in a direction, page (API 29+), press_and_hold (API 30+), set_progress on a slider, or custom to run an app-defined action (e.g. a Compose customActions label) by its label. Target the element by resourceId, text or contentDesc; it needs a unique resource-id. An action the element does not offer is refused, and the error lists the actions it does offer (custom ones as custom:<label>).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Accessibility action. page_* needs API 29+, press_and_hold API 30+; set_progress takes progress; custom runs the app-defined action labeled customAction",
+          "type": "string",
+          "enum": [
+            "expand",
+            "collapse",
+            "dismiss",
+            "select",
+            "clear_selection",
+            "show_on_screen",
+            "scroll_forward",
+            "scroll_backward",
+            "scroll_up",
+            "scroll_down",
+            "scroll_left",
+            "scroll_right",
+            "page_up",
+            "page_down",
+            "page_left",
+            "page_right",
+            "press_and_hold",
+            "set_progress",
+            "custom"
+          ]
+        },
+        "resourceId": {
+          "description": "Target resource ID",
+          "type": "string"
+        },
+        "text": {
+          "description": "Target text",
+          "type": "string"
+        },
+        "contentDesc": {
+          "description": "Exact content-desc or accessible label; distinct from visible text",
+          "type": "string"
+        },
+        "customAction": {
+          "description": "Label of the app-defined action, for action custom",
+          "type": "string",
+          "minLength": 1
+        },
+        "progress": {
+          "description": "Value in the control's own range, for action set_progress",
+          "type": "number"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string"
+        },
+        "resourceId": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "resourceId"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "accessibilityFocus",
     "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
     "inputSchema": {
@@ -1246,7 +1339,7 @@
         },
         "mechanism": {
           "type": "string",
-          "enum": ["android_am_crash", "ios_simulator_sigabrt", "unsupported"]
+          "enum": ["android_am_crash", "ios_simulator_sigabrt", "ios_device_sigabrt", "unsupported"]
         },
         "timestamp": {
           "type": "integer",
@@ -1264,7 +1357,13 @@
           "properties": {
             "source": {
               "type": "string",
-              "enum": ["android_logcat", "ios_unified_log", "android_dropbox", "ios_crash_report"]
+              "enum": [
+                "android_logcat",
+                "ios_unified_log",
+                "android_dropbox",
+                "ios_crash_report",
+                "none"
+              ]
             },
             "summary": {
               "type": "string"
@@ -1885,6 +1984,150 @@
           "absentArguments": ["reset", "fontScale", "density", "theme"]
         }
       ]
+    }
+  },
+  {
+    "name": "displayProfile",
+    "description": "Android: apply an OEM-style display persona in one call (screen size, density, font scale, display-cutout and navigation-mode overlays, force dark, fold posture), composing displayConfig and setPosture. Each step reports applied | partial | unsupported | failed. The state before each facet's first change is recorded once; reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM look and geometry; it cannot reproduce OEM SystemUI.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "apply the given fields, or reset every recorded change",
+          "type": "string",
+          "enum": ["apply", "reset"]
+        },
+        "screenSize": {
+          "description": "wm size override WIDTHxHEIGHT, or 'default' to reset it",
+          "type": "string",
+          "pattern": "^(\\d+x\\d+|default)$"
+        },
+        "density": {
+          "description": "Display density dpi or bucket, as displayConfig (approximates Samsung Screen zoom)",
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 72,
+              "maximum": 1280
+            },
+            {
+              "type": "string",
+              "enum": ["smaller", "default", "larger"]
+            }
+          ]
+        },
+        "fontScale": {
+          "description": "System font scale, as displayConfig",
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 10
+        },
+        "cutout": {
+          "description": "Display cutout emulation overlay, or none to disable it",
+          "type": "string",
+          "enum": ["none", "corner", "double", "hole", "tall", "waterfall"]
+        },
+        "navigationMode": {
+          "description": "Navigation bar overlay",
+          "type": "string",
+          "enum": ["gestural", "threebutton", "twobutton"]
+        },
+        "forceDark": {
+          "description": "true forces dark rendering (debug.hwui.force_dark) and night mode, as OEM force dark",
+          "type": "boolean"
+        },
+        "posture": {
+          "description": "Fold posture, as setPosture (foldable AVDs and devices)",
+          "type": "string",
+          "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["apply", "reset"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["applied", "partial", "unsupported"]
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["applied", "partial", "unsupported", "failed"]
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": ["step", "status"],
+            "additionalProperties": {}
+          }
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "facets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "onSessionRelease": {
+              "type": "boolean"
+            }
+          },
+          "required": ["facets", "onSessionRelease"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "message", "deviceId", "action", "status", "steps"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "string",
+          "enum": ["screenSize", "display", "cutout", "navigationMode", "forceDark", "posture"]
+        }
+      }
     }
   },
   {
@@ -2920,6 +3163,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -2932,6 +3176,7 @@
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
+              "displayProfile",
               "dragAndDrop",
               "dragPath",
               "executePlan",
@@ -2954,6 +3199,7 @@
               "installApp",
               "keyboard",
               "killDevice",
+              "killProfile",
               "launchApp",
               "listApps",
               "listDataStores",
@@ -3053,6 +3299,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -3065,6 +3312,7 @@
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
+              "displayProfile",
               "dragAndDrop",
               "dragPath",
               "executePlan",
@@ -3087,6 +3335,7 @@
               "installApp",
               "keyboard",
               "killDevice",
+              "killProfile",
               "launchApp",
               "listApps",
               "listDataStores",
@@ -5032,7 +5281,7 @@
   },
   {
     "name": "inspectPackageSigning",
-    "description": "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "description": "Fresh read of one app's presence (installed/absent/unknown) and signing. Android: a user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and embedded provisioning profile (expiry, UUID). Never cached.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -5044,7 +5293,7 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "userId": {
-          "description": "Android user/profile to inspect; when omitted it is resolved and reported",
+          "description": "Android user/profile to inspect; when omitted it is resolved and reported. Refused on iOS",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
@@ -5077,7 +5326,7 @@
         },
         "platform": {
           "type": "string",
-          "const": "android"
+          "enum": ["android", "ios"]
         },
         "deviceId": {
           "type": "string"
@@ -5231,19 +5480,37 @@
           },
           "required": ["source", "fresh", "observedAt", "scope", "apiLevel"],
           "additionalProperties": {}
+        },
+        "deviceKind": {
+          "type": "string",
+          "enum": ["simulator", "physical"]
         }
       },
-      "required": [
-        "appId",
-        "platform",
-        "deviceId",
-        "userId",
-        "userSource",
-        "presence",
-        "signing",
-        "observation"
-      ],
-      "additionalProperties": {}
+      "required": ["appId", "platform", "deviceId", "presence", "signing", "observation"],
+      "if": {
+        "properties": {
+          "platform": {
+            "const": "android"
+          }
+        },
+        "required": ["platform"]
+      },
+      "then": {
+        "required": ["userId", "userSource"]
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "platform": {
+              "const": "ios"
+            }
+          },
+          "required": ["platform"]
+        },
+        "then": {
+          "required": ["deviceKind"]
+        }
+      }
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -5533,6 +5800,221 @@
       },
       "required": ["device"],
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "killProfile",
+    "description": "Android: simulate an OEM background-kill policy (Samsung sleeping apps, Xiaomi autostart off, OnePlus deep optimization, recents swipe, Motorola adaptive battery, user-restricted, exact alarms denied) on a stock device with standby buckets, appops, Doze and force-stop. Each profile reports its evidence status and each step applied | unsupported | failed. apply is idempotent and records the state before the first change; reset restores it, and in a daemon session release or rebind does too. list shows the catalog and the OEM behaviour that cannot be simulated. Simulates effects, not firmware.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "apply a profile, reset what profiles changed, or list the catalog (no device change)",
+          "type": "string",
+          "enum": ["apply", "reset", "list"]
+        },
+        "appId": {
+          "description": "Android package; required for apply and reset",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "profile": {
+          "description": "Profile id; required for apply",
+          "type": "string",
+          "enum": [
+            "samsung-sleeping",
+            "samsung-deep-sleeping",
+            "xiaomi-autostart-off",
+            "oneplus-deep-optimization",
+            "recents-swipe-kill",
+            "recents-swipe-force-stop",
+            "oneplus-sleep-standby",
+            "motorola-adaptive",
+            "user-restricted",
+            "exact-alarm-denied"
+          ]
+        },
+        "baseline": {
+          "description": "reset only: when nothing is recorded (e.g. after a daemon restart), write the AOSP defaults",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["apply", "reset", "list"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["applied", "partial", "unsupported"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["recorded", "baseline", "none"]
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "samsung-sleeping",
+                "samsung-deep-sleeping",
+                "xiaomi-autostart-off",
+                "oneplus-deep-optimization",
+                "recents-swipe-kill",
+                "recents-swipe-force-stop",
+                "oneplus-sleep-standby",
+                "motorola-adaptive",
+                "user-restricted",
+                "exact-alarm-denied"
+              ]
+            },
+            "version": {
+              "type": "number"
+            },
+            "evidenceStatus": {
+              "type": "string",
+              "enum": ["vendor_documented", "cdd_derived", "inferred"]
+            },
+            "evidenceNote": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "version", "evidenceStatus", "evidenceNote"],
+          "additionalProperties": {}
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["applied", "unsupported", "failed"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["step", "command", "status"],
+            "additionalProperties": {}
+          }
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "commands": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "onSessionRelease": {
+              "type": "boolean"
+            }
+          },
+          "required": ["commands", "onSessionRelease"],
+          "additionalProperties": {}
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "samsung-sleeping",
+                  "samsung-deep-sleeping",
+                  "xiaomi-autostart-off",
+                  "oneplus-deep-optimization",
+                  "recents-swipe-kill",
+                  "recents-swipe-force-stop",
+                  "oneplus-sleep-standby",
+                  "motorola-adaptive",
+                  "user-restricted",
+                  "exact-alarm-denied"
+                ]
+              }
+            },
+            "required": ["id"],
+            "additionalProperties": {}
+          }
+        },
+        "nonEmulatable": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "note"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["success", "message", "action", "deviceId"],
+      "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["list"]
+        }
+      ]
     }
   },
   {
@@ -15892,6 +16374,17 @@
                                         },
                                         "required": ["page"],
                                         "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "match": {
+                                            "type": "string",
+                                            "enum": ["text", "kind"]
+                                          }
+                                        },
+                                        "required": ["match"],
+                                        "additionalProperties": false
                                       }
                                     ]
                                   },
@@ -15961,6 +16454,9 @@
                                 },
                                 {
                                   "type": "boolean"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
                                 }
                               ]
                             }
@@ -16055,6 +16551,9 @@
                                 },
                                 {
                                   "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                },
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
                                 }
                               ]
                             }
@@ -16118,7 +16617,23 @@
                                     "maxLength": 4096
                                   },
                                   {
-                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/value"
+                                    "anyOf": [
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                      }
+                                    ]
                                   }
                                 ]
                               },
@@ -16136,7 +16651,7 @@
                               }
                             },
                             "body": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/value"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/10/properties/headers/additionalProperties/anyOf/1"
                             },
                             "into": {
                               "type": "string",
@@ -16297,6 +16812,52 @@
                             }
                           },
                           "required": ["type", "stack"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["scrollTo"]
+                            },
+                            "scroll": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "to": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": ["start", "end"]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["key"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "animated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["type", "scroll", "to"],
                           "additionalProperties": false
                         },
                         {
@@ -17639,6 +18200,33 @@
                       },
                       "minItems": 1,
                       "maxItems": 64
+                    },
+                    "linkify": {
+                      "type": "object",
+                      "properties": {
+                        "kinds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": ["mention", "hashtag", "url"]
+                          },
+                          "minItems": 1,
+                          "maxItems": 3
+                        },
+                        "style": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/6/properties/spans/items/properties/style"
+                        },
+                        "onTap": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                          },
+                          "minItems": 1,
+                          "maxItems": 32
+                        }
+                      },
+                      "required": ["kinds", "onTap"],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["type"],
@@ -19563,6 +20151,23 @@
                       },
                       "required": ["stateKey", "onRefresh"],
                       "additionalProperties": false
+                    },
+                    "reverse": {
+                      "type": "boolean"
+                    },
+                    "stickToEnd": {
+                      "type": "boolean"
+                    },
+                    "atEndKey": {
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                    },
+                    "onStartReached": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -21605,6 +22210,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -21617,6 +22223,7 @@
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
+              "displayProfile",
               "dragAndDrop",
               "dragPath",
               "executePlan",
@@ -21639,6 +22246,7 @@
               "installApp",
               "keyboard",
               "killDevice",
+              "killProfile",
               "launchApp",
               "listApps",
               "listDataStores",
@@ -28442,6 +29050,7 @@
           "minLength": 1,
           "enum": [
             "accessibility",
+            "accessibilityAction",
             "accessibilityFocus",
             "appLifecycle",
             "audit",
@@ -28454,6 +29063,7 @@
             "deleteDevice",
             "deviceSnapshot",
             "displayConfig",
+            "displayProfile",
             "dragAndDrop",
             "dragPath",
             "executePlan",
@@ -28476,6 +29086,7 @@
             "installApp",
             "keyboard",
             "killDevice",
+            "killProfile",
             "launchApp",
             "listApps",
             "listDataStores",
@@ -28541,6 +29152,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "audit",
@@ -28553,6 +29165,7 @@
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
+              "displayProfile",
               "dragAndDrop",
               "dragPath",
               "executePlan",
@@ -28575,6 +29188,7 @@
               "installApp",
               "keyboard",
               "killDevice",
+              "killProfile",
               "launchApp",
               "listApps",
               "listDataStores",
@@ -28876,7 +29490,7 @@
   },
   {
     "name": "shake",
-    "description": "Shake device; iOS Simulator only.",
+    "description": "Shake device; iOS Simulator and Android emulator only (unsupported on physical iOS and Android devices).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

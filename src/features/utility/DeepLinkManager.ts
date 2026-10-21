@@ -26,6 +26,7 @@ import {
   type AppBundleMetadata,
 } from "../../utils/ios-cmdline-tools/AppBundleMetadataClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
@@ -116,6 +117,31 @@ export interface DeepLinkManager {
   ): Promise<IntentChooserResult>;
 }
 
+/** Copies a physical device's installed bundle to the host (`DeviceAppManager`). */
+export type PhysicalIosBundleSource = Pick<
+  DeviceAppManager,
+  "getInstalledAppInfo" | "withInstalledAppBundle"
+>;
+
+/** Process-wide: DeepLinkManager is built per request, and a bundle copy is the slow part. */
+const PHYSICAL_DEEP_LINK_CACHE = new Map<string, DeepLinkResult>();
+const PHYSICAL_DEEP_LINK_CACHE_LIMIT = 64;
+
+/**
+ * Cache key from the device, bundle id and the installed version devicectl reports. Without a
+ * version a reinstall could not be told apart, so nothing is cached.
+ */
+export function physicalDeepLinkCacheKey(
+  udid: string,
+  bundleId: string,
+  installed: Record<string, unknown> | null,
+): string | undefined {
+  const version = [installed?.version, installed?.bundleVersion].filter(
+    (part): part is string => typeof part === "string" && part.length > 0,
+  );
+  return version.length > 0 ? JSON.stringify([udid, bundleId, ...version]) : undefined;
+}
+
 export class DeepLinkManager implements DeepLinkManager {
   private device: BootedDevice | null;
   private adbUtils: AdbExecutor;
@@ -124,6 +150,8 @@ export class DeepLinkManager implements DeepLinkManager {
   private hostExec: HostExec;
   private plist: PlistReader;
   private appBundleMetadata: AppBundleMetadata;
+  private deviceApps: PhysicalIosBundleSource;
+  private physicalCache: Map<string, DeepLinkResult>;
 
   private configureAdb(
     device: BootedDevice | null,
@@ -157,6 +185,8 @@ export class DeepLinkManager implements DeepLinkManager {
     this.hostExec = dependencies.hostExec ?? defaultHostExec;
     this.plist = dependencies.plist ?? new PlistClient();
     this.appBundleMetadata = dependencies.appBundleMetadata ?? new AppBundleMetadataClient();
+    this.deviceApps = dependencies.deviceApps ?? new DeviceAppManager();
+    this.physicalCache = dependencies.physicalDeepLinkCache ?? PHYSICAL_DEEP_LINK_CACHE;
     this.chooser = new IntentChooserHandler(
       device,
       this.adbFactory,
@@ -300,10 +330,7 @@ export class DeepLinkManager implements DeepLinkManager {
       logger.info(`[DeepLinkManager] Querying iOS deep links for bundle: ${bundleId}`);
 
       if (resolveIosDeviceKind({ deviceId: udid }) !== "simulator") {
-        return this.emptyIosResult(
-          bundleId,
-          `Physical-device deep-link discovery for ${bundleId} is not yet implemented`,
-        );
+        return await this.getDeepLinksIosPhysical(udid, bundleId, signal);
       }
 
       // 1. Resolve the installed .app bundle path (HOST path on the simulator).
@@ -338,30 +365,7 @@ export class DeepLinkManager implements DeepLinkManager {
         return this.emptyIosResult(bundleId, `App ${bundleId} is not installed on ${udid}`);
       }
 
-      // 2. Info.plist -> JSON via host plutil. argv form (no shell): the
-      //    bundle path is a literal argument, so a crafted `.app` name cannot
-      //    inject host commands.
-      const info = (await this.plist.readJsonFile(`${appPath}/Info.plist`)) as IosInfoPlist;
-      throwIfAborted(signal);
-
-      const schemes = this.parseCFBundleURLSchemes(info);
-      const associatedDomains = await this.parseAssociatedDomains(appPath, bundleId);
-      throwIfAborted(signal);
-      const hosts = associatedDomains.hosts;
-      const supportedMimeTypes = this.parseDocumentTypes(info);
-
-      return {
-        success: true,
-        appId: bundleId,
-        deepLinks: {
-          schemes,
-          hosts,
-          supportedMimeTypes,
-          intentFilters: this.synthesizeIosIntentFilters(schemes, hosts),
-        },
-        rawOutput: JSON.stringify(info),
-        note: associatedDomains.note,
-      };
+      return await this.readIosBundleDeepLinks(appPath, bundleId, signal);
     } catch (error) {
       logger.warn(
         `[DeepLinkManager] Failed to get iOS deep links for ${bundleId}: ${errorMessage(error)}`,
@@ -370,6 +374,73 @@ export class DeepLinkManager implements DeepLinkManager {
       throwIfAborted(signal);
       return this.emptyIosResult(bundleId, errorMessage(error));
     }
+  }
+
+  /**
+   * Physical iOS (#14094): copy the installed bundle off the device with devicectl and read it
+   * exactly as the Simulator path reads its host bundle. A successful read is cached per device,
+   * bundle id and installed version so repeat calls skip the copy.
+   */
+  private async getDeepLinksIosPhysical(
+    udid: string,
+    bundleId: string,
+    signal?: AbortSignal,
+  ): Promise<DeepLinkResult> {
+    const installed = await this.deviceApps.getInstalledAppInfo(udid, bundleId);
+    throwIfAborted(signal);
+    const cacheKey = physicalDeepLinkCacheKey(udid, bundleId, installed);
+    const cached = cacheKey ? this.physicalCache.get(cacheKey) : undefined;
+    if (cached) {
+      return cached;
+    }
+    const result = await this.deviceApps.withInstalledAppBundle(
+      udid,
+      bundleId,
+      (appPath) => this.readIosBundleDeepLinks(appPath, bundleId, signal),
+      { surfaceLookupErrors: true },
+    );
+    throwIfAborted(signal);
+    if (!result) {
+      return this.emptyIosResult(bundleId, `App ${bundleId} is not installed on ${udid}`);
+    }
+    if (cacheKey && result.success) {
+      if (this.physicalCache.size >= PHYSICAL_DEEP_LINK_CACHE_LIMIT) {
+        this.physicalCache.delete(this.physicalCache.keys().next().value as string);
+      }
+      this.physicalCache.set(cacheKey, result);
+    }
+    return result;
+  }
+
+  /** Deep links from an on-disk `.app`: Info.plist schemes, document types, entitlement hosts. */
+  private async readIosBundleDeepLinks(
+    appPath: string,
+    bundleId: string,
+    signal?: AbortSignal,
+  ): Promise<DeepLinkResult> {
+    // Info.plist -> JSON via host plutil. argv form (no shell): the bundle path
+    // is a literal argument, so a crafted `.app` name cannot inject host commands.
+    const info = (await this.plist.readJsonFile(`${appPath}/Info.plist`)) as IosInfoPlist;
+    throwIfAborted(signal);
+
+    const schemes = this.parseCFBundleURLSchemes(info);
+    const associatedDomains = await this.parseAssociatedDomains(appPath, bundleId);
+    throwIfAborted(signal);
+    const hosts = associatedDomains.hosts;
+    const supportedMimeTypes = this.parseDocumentTypes(info);
+
+    return {
+      success: true,
+      appId: bundleId,
+      deepLinks: {
+        schemes,
+        hosts,
+        supportedMimeTypes,
+        intentFilters: this.synthesizeIosIntentFilters(schemes, hosts),
+      },
+      rawOutput: JSON.stringify(info),
+      note: associatedDomains.note,
+    };
   }
 
   private emptyIosResult(appId: string, error: string): DeepLinkResult {

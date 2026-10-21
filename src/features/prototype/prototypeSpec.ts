@@ -5,6 +5,7 @@ import {
   keySchema,
   pointerSchema,
   prototypeDataActionValueSchema,
+  prototypeMatchBindingSchema,
   stateKeySchema,
   type PrototypeDataActionValue,
 } from "./prototypeActionValues";
@@ -71,6 +72,7 @@ export { prototypeJsonObjectSchema, prototypeJsonSchema, type PrototypeJson };
 export const prototypeEmitContextBindingSchema = z.union([
   ...prototypeDataActionValueSchema.options,
   z.object({ page: z.string().min(1) }).strict(),
+  prototypeMatchBindingSchema,
 ]);
 export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
 // A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
@@ -78,7 +80,10 @@ const dataActionPathSchema = z
   .string()
   .min(1)
   .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
-const dataActionFields = { path: dataActionPathSchema, value: prototypeDataActionValueSchema };
+const dataActionFields = {
+  path: dataActionPathSchema,
+  value: z.union([...prototypeDataActionValueSchema.options, prototypeMatchBindingSchema]),
+};
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
 export const prototypeEmitContextSchema = z
   .record(z.string().min(1), prototypeEmitContextBindingSchema)
@@ -105,7 +110,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.enum(["setState"]),
       key: stateKeySchema,
-      value: z.union([z.string(), z.number().finite(), z.boolean()]),
+      value: z.union([z.string(), z.number().finite(), z.boolean(), prototypeMatchBindingSchema]),
     })
     .strict(),
   z
@@ -139,6 +144,17 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.enum(["pop"]), stack: z.string().min(1) }).strict(),
   z.object({ type: z.enum(["popToRoot"]), stack: z.string().min(1) }).strict(),
+  z
+    .object({
+      type: z.enum(["scrollTo"]),
+      scroll: z.string().min(1),
+      to: z.union([
+        z.enum(["start", "end"]),
+        z.object({ key: z.union([z.string(), z.number().finite(), z.boolean()]) }).strict(),
+      ]),
+      animated: z.boolean().optional(),
+    })
+    .strict(),
   z
     .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
@@ -270,6 +286,17 @@ const textSpanSchema = z
     onTap: commonNodeShape.onTap,
   })
   .strict();
+// `linkify` (#14233): mentions, hashtags and URLs in `text` become links running `onTap`.
+const linkifySchema = z
+  .object({
+    kinds: z
+      .array(z.enum(["mention", "hashtag", "url"]))
+      .min(1)
+      .max(3),
+    style: textSpanSchema.shape.style,
+    onTap: z.array(actionSchema).min(1).max(32),
+  })
+  .strict();
 const textBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -277,6 +304,7 @@ const textBaseSchema = z
     type: z.enum(["text"]),
     text: z.string().optional(),
     spans: z.array(textSpanSchema).min(1).max(MAX_PROTOTYPE_TEXT_SPANS).optional(),
+    linkify: linkifySchema.optional(),
   })
   .strict();
 const imageBaseSchema = z
@@ -580,6 +608,11 @@ const scrollBaseSchema = z
     type: z.enum(["scroll"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
     refresh: scrollRefreshSchema.optional(),
+    // Chat lists (#14232): anchored at the end, following new rows, reporting the end position.
+    reverse: z.boolean().optional(),
+    stickToEnd: z.boolean().optional(),
+    atEndKey: stateKeySchema.optional(),
+    onStartReached: z.array(actionSchema).min(1).max(32).optional(),
   })
   .strict();
 // Pager distances share the contract's 10000 dp dimension ceiling.
@@ -943,6 +976,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "removeData",
   "request",
   "platform",
+  "scrollTo",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

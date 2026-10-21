@@ -15,7 +15,10 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
         // when supported. The platform vocabulary (#14294) runs on the module registry (#14296),
         // and the `test` module is a placeholder no production runtime ever advertises.
-        let exclusions: Set<String> = ["prototype_platform_v1", "prototype_platform_test_v1"]
+        // Chat-list scrolls (#14232) are drawn on Android only so far (#14671).
+        let exclusions: Set<String> = [
+            "prototype_platform_v1", "prototype_platform_test_v1", "prototype_chat_scroll_v1",
+        ]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")
         XCTAssertEqual(required.subtracting(supported).subtracting(exclusions).sorted(), [])

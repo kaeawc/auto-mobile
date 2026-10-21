@@ -146,7 +146,8 @@ export type FieldKind =
   | "dataPath"
   | "requestInto"
   | "request"
-  | "deviceRequest";
+  | "deviceRequest"
+  | "scrollTo";
 
 /** True for the kinds holding a `/data/...` path with `{index}` segments. */
 export const isDataPathKind = (kind: FieldKind): boolean =>
@@ -268,6 +269,10 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "platform":
       mapPlatformAction(action, path, visit);
+      break;
+    case "scrollTo":
+      // Marks the whole action so the chat scroll gate can locate it (#14232).
+      visit(action, path, "scrollTo");
       break;
     default:
       break;
@@ -394,7 +399,7 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
 
 /** State-key fields a node binds besides its condition and action keys. */
 function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
-  for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey"]) {
+  for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey"]) {
     mapField(node, field, path, "key", visit);
   }
   for (const part of ["trailing", "openWhen", "refresh"]) {
@@ -505,7 +510,15 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
     );
   }
   const bind = (entry: unknown) => (typeof entry === "string" ? bindText(entry, instance) : entry);
-  for (const field of ["key", "stateKey", "statusKey", "activeKey", "hourKey", "minuteKey"]) {
+  for (const field of [
+    "key",
+    "stateKey",
+    "statusKey",
+    "activeKey",
+    "hourKey",
+    "minuteKey",
+    "atEndKey",
+  ]) {
     if (copy[field] !== undefined) {
       copy[field] = bind(copy[field]);
     }

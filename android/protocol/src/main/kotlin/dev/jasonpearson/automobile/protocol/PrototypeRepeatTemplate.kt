@@ -473,7 +473,7 @@ internal object PrototypeBindableFields {
       }
 
     fun keys(node: JsonObject, path: String): T? {
-      for (key in listOf("stateKey", "activeKey", "hourKey", "minuteKey")) {
+      for (key in listOf("stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey")) {
         visitor.field(node, key, path, PrototypeBindableKind.KEY)?.let {
           return it
         }

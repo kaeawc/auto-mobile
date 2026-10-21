@@ -98,6 +98,8 @@ const EXCLUDED_TOOLS: Record<string, string> = {
 /** The hand-kept PLAN_RELEVANT_TOOLS list the `planRelevant` trait replaced (#11825). */
 const FORMER_PLAN_RELEVANT_TOOLS = [
   "accessibility",
+  // Added after the list was frozen: a semantic accessibility action replays as a plan step (#14077).
+  "accessibilityAction",
   // Added after the list was frozen: an audit runs as a plan assertion step (#14075).
   "audit",
   "appLifecycle",
@@ -106,10 +108,12 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "clipboard",
   "crashApp",
   "displayConfig",
+  "displayProfile",
   "dragAndDrop",
   "dragPath",
   "homeScreen",
   "keyboard",
+  "killProfile",
   "launchApp",
   "multiTouch",
   "observe",

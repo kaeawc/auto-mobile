@@ -44,6 +44,10 @@ export function planDeviceMutationRevert(
     }
   }
   for (const step of steps) {
+    if (step.mutation.priorValue.state === "unobservable") {
+      reasons.push(`Unobservable prior value ${step.mutation.kind}:${step.mutation.key}`);
+      continue;
+    }
     if (!knownKinds.has(step.mutation.kind) || !support.canRevert(step.mutation)) {
       reasons.push(`Unsupported ${step.mutation.kind}:${step.mutation.key}`);
     }

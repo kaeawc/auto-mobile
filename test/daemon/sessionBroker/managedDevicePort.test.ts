@@ -33,6 +33,7 @@ import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
 import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
+import type { DeviceMutationScope } from "../../../src/daemon/sessionBroker/mutations/types";
 import {
   FakeClaims,
   FakeDeleter,
@@ -169,6 +170,66 @@ function acquisition(
 }
 
 describe("ManagedDevicePort preparation and release", () => {
+  test("binds the exact broker mutation scope before returning a ready session", async () => {
+    const scopes: DeviceMutationScope[] = [];
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      registry: new FakeBindingRegistry(new FakeTimer()),
+      bindingJournal: {
+        owner: OWNER,
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+      },
+      bindMutationRecorder: (scope) => {
+        scopes.push(scope);
+      },
+    });
+    expect(await port.prepare(resource(), { livenessOwnerToken: "consumer" })).toMatchObject({
+      sessionId: "session-1",
+    });
+    expect(scopes).toEqual([
+      { sessionUuid: "session-1", deviceId: "transport-1", incarnation: '["resource-1",1]' },
+    ]);
+  });
+
+  test("a mutation recorder binding failure warns and returns the ready session without releasing it", async () => {
+    const releases: string[] = [];
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: {
+        releaseExecution: async (id) => {
+          releases.push(id);
+          return releaseResult(id);
+        },
+      },
+      registry: new FakeBindingRegistry(new FakeTimer()),
+      bindingJournal: {
+        owner: OWNER,
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+      },
+      bindMutationRecorder: () => {
+        throw new Error("missing live session");
+      },
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await port.prepare(resource(), { livenessOwnerToken: "consumer" })).toMatchObject({
+        sessionId: "session-1",
+      });
+      expect(releases).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        "Failed to bind broker device mutation recorder; acquiring without recording",
+        expect.objectContaining({ message: "missing live session" }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test.each(["result", "binding"] as const)(
     "preserves typed retryable acquisition failure from %s and releases its session",
     async (source) => {

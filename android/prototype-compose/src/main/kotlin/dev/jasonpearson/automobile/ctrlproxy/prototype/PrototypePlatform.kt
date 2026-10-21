@@ -16,12 +16,14 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** Narrow main queue seam; post must enqueue on main and report whether it accepted the work. */
+@InternalAutoMobilePrototypeApi
 interface PrototypeMainThread {
   fun isMainThread(): Boolean
 
   fun post(work: () -> Unit): Boolean
 }
 
+@InternalAutoMobilePrototypeApi
 class AndroidPrototypeMainThread : PrototypeMainThread {
   private val handler = Handler(Looper.getMainLooper())
 
@@ -31,10 +33,12 @@ class AndroidPrototypeMainThread : PrototypeMainThread {
 }
 
 /** Gesture-worker and desktop delay seams cannot provide the host's main-queue/settle contract. */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeSettleTimer {
   suspend fun awaitSettle(millis: Long)
 }
 
+@InternalAutoMobilePrototypeApi
 object CoroutinePrototypeSettleTimer : PrototypeSettleTimer {
   override suspend fun awaitSettle(millis: Long) {
     delay(millis)
@@ -65,6 +69,7 @@ suspend fun <T> PrototypeMainThread.onMain(work: () -> T): T {
 }
 
 /** The service supplies its own scope; the standalone host uses main for window-safe delivery. */
+@InternalAutoMobilePrototypeApi
 class CoroutinePrototypeScheduler(
   private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob()),
 ) : PrototypeScheduler {
@@ -78,6 +83,7 @@ class CoroutinePrototypeScheduler(
 }
 
 /** Waits for frames the main thread renders; the hide-for-capture seam (#9305). */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeFrameWaiter {
   suspend fun awaitFrames(count: Int)
 }
@@ -86,6 +92,7 @@ fun interface PrototypeFrameWaiter {
  * Each frame callback runs before that frame's traversal, so the first callback can precede the
  * relayout that hides a window; the second follows a frame in which the hide was applied.
  */
+@InternalAutoMobilePrototypeApi
 object ChoreographerPrototypeFrameWaiter : PrototypeFrameWaiter {
   override suspend fun awaitFrames(count: Int) {
     repeat(count) {

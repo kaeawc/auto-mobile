@@ -9,7 +9,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeStyle
 /**
  * Reserve explicit gaps first, then distribute remaining free space using the chosen arrangement.
  */
-fun prototypeHorizontalArrangement(style: PrototypeStyle): Arrangement.Horizontal {
+internal fun prototypeHorizontalArrangement(style: PrototypeStyle): Arrangement.Horizontal {
   val base =
     when (style.arrangement) {
       "center" -> Arrangement.Center
@@ -45,7 +45,7 @@ fun prototypeHorizontalArrangement(style: PrototypeStyle): Arrangement.Horizonta
   }
 }
 
-fun prototypeVerticalArrangement(style: PrototypeStyle): Arrangement.Vertical {
+internal fun prototypeVerticalArrangement(style: PrototypeStyle): Arrangement.Vertical {
   val base =
     when (style.arrangement) {
       "center" -> Arrangement.Center

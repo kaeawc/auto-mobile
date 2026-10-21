@@ -29,7 +29,7 @@ import { Timer } from "../../utils/SystemTimer";
 import { daemonToolRegistry } from "../toolRegistryPort";
 import { type FrameDeviceIdentityPool } from "../frameDeviceIdentity";
 
-import { AndroidCtrlProxyClient } from "../../features/observe/android";
+import type { AndroidCtrlProxy } from "../../features/observe/android";
 
 import type { AppendTextFailureSource, BootedDevice } from "../../models";
 
@@ -382,7 +382,8 @@ export interface AndroidAppendTextOptions {
   deadline: number;
   totalTimeoutMs: number;
   frameContext: string | undefined;
-  client: AndroidCtrlProxyClient;
+  /** Only used to validate frameContext before each append key event. */
+  client: Pick<AndroidCtrlProxy, "validateFrameContext">;
   signal?: AbortSignal;
 }
 export type IdeServerRouteHandler = (

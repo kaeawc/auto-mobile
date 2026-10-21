@@ -18,7 +18,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeNode
 import kotlin.math.roundToInt
 
 /** `cover` lays the node over the anchor bounds; the edges align the same node edge to them. */
-enum class PrototypeAnchorAlignment {
+internal enum class PrototypeAnchorAlignment {
   COVER,
   TOP,
   BOTTOM,
@@ -40,7 +40,7 @@ enum class PrototypeAnchorAlignment {
 }
 
 /** Whether [anchor] lays the node over its bounds, sizing it to them. */
-fun prototypeAnchorCovers(anchor: PrototypeBoundsAnchor): Boolean =
+internal fun prototypeAnchorCovers(anchor: PrototypeBoundsAnchor): Boolean =
   PrototypeAnchorAlignment.fromWire(anchor.alignment) == PrototypeAnchorAlignment.COVER
 
 /**
@@ -50,7 +50,7 @@ fun prototypeAnchorCovers(anchor: PrototypeBoundsAnchor): Boolean =
  * the other axis. Start and end follow [layoutDirection]. The offset is applied last, in screen
  * axes.
  */
-fun prototypeAnchorRect(
+internal fun prototypeAnchorRect(
   anchor: PrototypeBoundsAnchor,
   density: Float,
   nodeWidthPx: Float,
@@ -94,12 +94,14 @@ private fun shift(rect: Rect, anchor: PrototypeBoundsAnchor, density: Float): Re
  * cutout, host chrome and authored padding included). [moveTo] is non-null only for a floating
  * window, whose root anchor positions the window itself so the rest of the app stays touchable.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeWindowGeometry(
   val originOnScreen: () -> Offset,
   val moveTo: ((IntOffset) -> Unit)? = null,
 )
 
 /** The window origin of [view]: its screen position less its position inside its window. */
+@InternalAutoMobilePrototypeApi
 fun prototypeViewWindowOrigin(view: View): Offset {
   val screen = IntArray(2)
   val window = IntArray(2)
@@ -109,6 +111,7 @@ fun prototypeViewWindowOrigin(view: View): Offset {
 }
 
 /** Null outside a host window; the renderer then reads the window origin from its own view. */
+@InternalAutoMobilePrototypeApi
 val LocalPrototypeWindowGeometry = staticCompositionLocalOf<PrototypeWindowGeometry?> { null }
 
 @Composable
@@ -165,6 +168,7 @@ internal fun Modifier.prototypeAnchor(
  * The host resolves every element anchor into screen dp bounds before sending (#9316). One that
  * still arrives was never resolved, and drawing the node unanchored would silently misplace it.
  */
+@InternalAutoMobilePrototypeApi
 fun requireResolvedPrototypeAnchors(root: PrototypeNode) {
   fun visit(node: PrototypeNode, path: String) {
     require(node.anchor !is PrototypeElementAnchor) {

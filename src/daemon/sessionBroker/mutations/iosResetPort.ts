@@ -99,8 +99,8 @@ async function iosGlobalSettingObservations(xml: string): Promise<DeviceBaseline
 
 function canRestoreIosSetting(mutation: DeviceMutationInput): boolean {
   const prior = mutation.priorValue;
-  if (prior.state === "absent") {
-    return iosGlobalSettingKey(mutation.key) !== undefined;
+  if (prior.state !== "present") {
+    return prior.state === "absent" && iosGlobalSettingKey(mutation.key) !== undefined;
   }
   const schema = Object.entries(IOS_SETTING_VALUE_SCHEMAS).find(
     ([key]) => key === mutation.key,
@@ -146,6 +146,9 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
 
   canRevert(mutation: DeviceMutationInput): boolean {
     const prior = mutation.priorValue;
+    if (prior.state === "unobservable") {
+      return false;
+    }
     if (
       ["installed-app", "app-group", "keychain", "permission", "location", "status-bar"].includes(
         mutation.kind,

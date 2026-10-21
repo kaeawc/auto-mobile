@@ -85,11 +85,7 @@ export const keyboardInput = z.object({
 });
 
 /** Keyboard actions that change no UI (#10965): reads, allowed without holding the device. */
-export const KEYBOARD_READ_ACTIONS: ReadonlySet<string> = new Set([
-  "detect",
-  "listImes",
-  "listProfiles",
-]);
+export { KEYBOARD_READ_ACTIONS } from "../interactionToolTypes";
 
 export const selectAllTextInput = z.object({
   layer: hierarchyLayerSchema.optional(),

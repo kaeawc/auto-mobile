@@ -1,6 +1,6 @@
 import { basename, dirname } from "node:path";
 import { compareCodeUnits } from "../../src/utils/io";
-import type { LockFileSystem } from "../../src/utils/lockFileSystem";
+import type { LockFileStat, LockFileSystem } from "../../src/utils/lockFileSystem";
 
 interface FileNode {
   ino: number;
@@ -187,10 +187,10 @@ export class FakeLockFileSystem implements LockFileSystem {
     return this.file(path).raw;
   }
 
-  stat(path: string): { ino: number; mtimeMs: number } {
+  stat(path: string): LockFileStat {
     this.record("stat", path);
     const { ino, mtimeMs } = this.file(path);
-    return { ino, mtimeMs };
+    return { ino: BigInt(ino), mtimeMs };
   }
 
   rename(from: string, to: string): void {

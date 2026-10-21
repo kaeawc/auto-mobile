@@ -7,6 +7,8 @@ import { assertDaemonNamespaceMatchesState } from "../sharedNamespaceGuard";
 import { logger } from "../../utils/logger";
 import {
   DAEMON_STARTUP_TIMEOUT_MS,
+  resolveDaemonVersion,
+  syncSettledDaemonVersion,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
 } from "../constants";
@@ -255,9 +257,23 @@ export class DaemonLifecycleReconciler {
   }
 
   /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
-  async ensureVersionMatches(
+  ensureVersionMatches(
     reconciliationDeadline = this.deps.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
     observedStatus?: DaemonStatus,
+  ): Promise<void> {
+    // Compare the settled (dirty-aware) identity (#14405). Once settled, call through
+    // directly so the gate adds no microtask turns ahead of the status read.
+    if (syncSettledDaemonVersion()) {
+      return this.ensureSettledVersionMatches(reconciliationDeadline, observedStatus);
+    }
+    return resolveDaemonVersion().then(() =>
+      this.ensureSettledVersionMatches(reconciliationDeadline, observedStatus),
+    );
+  }
+
+  private async ensureSettledVersionMatches(
+    reconciliationDeadline: number,
+    observedStatus: DaemonStatus | undefined,
   ): Promise<void> {
     const status = observedStatus ?? (await this.deps.reconciliationStatus());
     if (!status.running) {

@@ -32,17 +32,17 @@ class StorageControllerTest {
     override fun currentTimeMillis() = 7_000L
   }
 
-  private class FakeSender : StorageController.ResponseSender {
-    var running = true
+  /** Carries both request results and `storage_changed` push events. */
+  private class FakeSender : FakeResultTransport(), StorageController.ResponseSender {
     var failing = false
     val messages = mutableListOf<String>()
-
-    override fun isRunning() = running
 
     override suspend fun broadcast(message: String) {
       if (failing) error("socket gone")
       messages += message
     }
+
+    override suspend fun sendFrame(frame: String) = broadcast(frame)
 
     override fun connectionCount() = 2
   }
@@ -57,10 +57,12 @@ class StorageControllerTest {
       manager = { manager },
       asyncActionRunner =
         AsyncActionRunner(scope = scope, broadcastResponse = { errors += it as ErrorResponse }),
-      resultBroadcaster =
-        ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+      resultSender =
+        guardedResultSender(
+          sender,
+          ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+        ),
       timeProvider = FakeTimer(),
-      jsonCompact = json,
       responseSender = sender,
     )
 

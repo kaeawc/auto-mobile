@@ -880,6 +880,7 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "launch_app_result",
   "list_databases_result",
   "list_tables_result",
+  "location_result",
   "magic_tap_result",
   "multi_finger_swipe_result",
   "path_gesture_result",
@@ -937,8 +938,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 53 rawValues", () => {
-    expect(rawValues.length).toBe(53);
+  test("Swift ResponseType declares exactly 54 rawValues", () => {
+    expect(rawValues.length).toBe(54);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -951,9 +952,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 48 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 49 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(48);
+    expect(reshaped.length).toBe(49);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1101,6 +1102,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "rotate_result", expected: true },
     { type: "hinge_angle_result", expected: false },
     { type: "appearance_result", expected: false },
+    { type: "location_result", expected: false },
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
     { type: "magic_tap_result", expected: false },
@@ -1180,7 +1182,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 48 explicitly-decoded types", () => {
+  test("the default table covers all 49 explicitly-decoded types", () => {
     expect(DEFAULT_WHEN_ABSENT.map((row) => row.type).sort()).toEqual(
       EXPECTED_RESHAPED_RESPONSE_TYPES,
     );
@@ -1221,8 +1223,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 47 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(47);
+  test("the passthrough set is the 48 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(48);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

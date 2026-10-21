@@ -24,14 +24,12 @@ import kotlinx.coroutines.android.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.json.JsonElement
 
 /** Timing, performance tracking and delivery for gesture result frames. */
 internal data class GestureReportingDependencies(
   val perfProvider: PerfProvider,
   val timeProvider: TimeProvider,
-  val resultBroadcaster: ResultBroadcaster,
-  val responseSender: GestureController.ResponseSender,
+  val resultSender: ResultSender,
 )
 
 /**
@@ -42,7 +40,7 @@ internal data class GestureReportingDependencies(
  * Timing is device-measured behaviour and must not drift in a move: accessibility strokes complete
  * at their last emitted event, and the pointer stays down between continued strokes (drag phases
  * and streamed segments). Everything that needs the live accessibility service or the late-bound
- * WebSocket server comes through [Host] and [ResponseSender].
+ * WebSocket server comes through [Host] and [ResultSender].
  */
 internal class GestureController(
   private val host: Host,
@@ -52,8 +50,7 @@ internal class GestureController(
 ) {
   private val perfProvider = reporting.perfProvider
   private val timeProvider = reporting.timeProvider
-  private val resultBroadcaster = reporting.resultBroadcaster
-  private val responseSender = reporting.responseSender
+  private val resultSender = reporting.resultSender
 
   /** Service-side operations the controller cannot perform without the accessibility service. */
   interface Host {
@@ -77,16 +74,6 @@ internal class GestureController(
 
     /** Broadcasts [hierarchy] synchronously, ahead of the tap result that follows it. */
     suspend fun publishHierarchy(hierarchy: ViewHierarchy)
-  }
-
-  /** Keeps the late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    /** False until the server is constructed and while it is stopped. */
-    fun isRunning(): Boolean
-
-    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
-
-    fun connectionCount(): Int
   }
 
   companion object {
@@ -852,25 +839,17 @@ internal class GestureController(
     totalTimeMs: Long,
     gestureTimeMs: Long?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping swipe result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "swipe_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        swipeResultFrame(
-          GestureFrameResult(
-            requestId = requestId,
-            success = success,
-            error = error,
-            totalTimeMs = totalTimeMs,
-            gestureTimeMs = gestureTimeMs,
-          ),
-          perfTiming,
-        )
-      }
-      Log.d(TAG, "Broadcasted swipe result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "swipe_result") { perfTiming ->
+      swipeResultFrame(
+        GestureFrameResult(
+          requestId = requestId,
+          success = success,
+          error = error,
+          totalTimeMs = totalTimeMs,
+          gestureTimeMs = gestureTimeMs,
+        ),
+        perfTiming,
+      )
     }
   }
 
@@ -882,25 +861,17 @@ internal class GestureController(
     totalTimeMs: Long,
     gestureTimeMs: Long?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping drag result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "drag_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        dragResultFrame(
-          GestureFrameResult(
-            requestId = requestId,
-            success = success,
-            error = error,
-            totalTimeMs = totalTimeMs,
-            gestureTimeMs = gestureTimeMs,
-          ),
-          perfTiming,
-        )
-      }
-      Log.d(TAG, "Broadcasted drag result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "drag_result") { perfTiming ->
+      dragResultFrame(
+        GestureFrameResult(
+          requestId = requestId,
+          success = success,
+          error = error,
+          totalTimeMs = totalTimeMs,
+          gestureTimeMs = gestureTimeMs,
+        ),
+        perfTiming,
+      )
     }
   }
 
@@ -911,19 +882,8 @@ internal class GestureController(
     error: String?,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping tap coordinates result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "tap_coordinates_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        tapCoordinatesResultFrame(requestId, success, error, totalTimeMs, perfTiming)
-      }
-      Log.d(
-        TAG,
-        "Broadcasted tap coordinates result to ${responseSender.connectionCount()} clients",
-      )
+    resultSender.sendFrame(requestId, "tap_coordinates_result") { perfTiming ->
+      tapCoordinatesResultFrame(requestId, success, error, totalTimeMs, perfTiming)
     }
   }
 
@@ -935,25 +895,17 @@ internal class GestureController(
     totalTimeMs: Long,
     gestureTimeMs: Long?,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping pinch result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "pinch_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        pinchResultFrame(
-          GestureFrameResult(
-            requestId = requestId,
-            success = success,
-            error = error,
-            totalTimeMs = totalTimeMs,
-            gestureTimeMs = gestureTimeMs,
-          ),
-          perfTiming,
-        )
-      }
-      Log.d(TAG, "Broadcasted pinch result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "pinch_result") { perfTiming ->
+      pinchResultFrame(
+        GestureFrameResult(
+          requestId = requestId,
+          success = success,
+          error = error,
+          totalTimeMs = totalTimeMs,
+          gestureTimeMs = gestureTimeMs,
+        ),
+        perfTiming,
+      )
     }
   }
 }

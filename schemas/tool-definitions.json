@@ -1006,7 +1006,7 @@
           "properties": {
             "source": {
               "type": "string",
-              "enum": ["android_logcat", "ios_unified_log"]
+              "enum": ["android_logcat", "ios_unified_log", "android_dropbox", "ios_crash_report"]
             },
             "summary": {
               "type": "string"
@@ -1014,6 +1014,77 @@
           },
           "required": ["source", "summary"],
           "additionalProperties": false
+        },
+        "crashReport": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "found"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": ["ios_ips", "android_dropbox"]
+                },
+                "reportPath": {
+                  "type": "string"
+                },
+                "exceptionType": {
+                  "type": "string"
+                },
+                "exceptionCode": {
+                  "type": "string"
+                },
+                "exceptionMessage": {
+                  "type": "string"
+                },
+                "terminationReason": {
+                  "type": "string"
+                },
+                "appVersion": {
+                  "type": "string"
+                },
+                "frames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "failureOccurrenceId": {
+                  "type": "string"
+                }
+              },
+              "required": ["status", "source", "reportPath", "exceptionType", "frames"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "notFound"
+                }
+              },
+              "required": ["status"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "unsupported"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": ["status", "reason"],
+              "additionalProperties": false
+            }
+          ]
         },
         "userId": {
           "type": "integer",

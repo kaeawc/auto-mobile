@@ -26,7 +26,11 @@ import {
   defaultBindingRegistryPath,
   type SqliteBindingRegistry,
 } from "./registry/sqliteBindingRegistry";
-import { computeBindingScopeKey, type BindingProcessIdentity } from "./registry/bindingRegistry";
+import {
+  computeBindingScopeKey,
+  type BindingAssignmentRecord,
+  type BindingProcessIdentity,
+} from "./registry/bindingRegistry";
 import { RECEIPT_PRUNE_BATCH, SessionBroker, type SessionBrokerOptions } from "./broker";
 import { ManagedDevicePort } from "./managedDevicePort";
 import { SESSION_BROKER_SCOPE, iosReusePolicy, type SessionBrokerHostConfig } from "./hostConfig";
@@ -54,6 +58,13 @@ import type { DeviceMutationJournal } from "./mutations/types";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { executionTracker } from "../executionTracker";
+import type { Session } from "../sessionManager/sessionTypes";
+import {
+  brokerMutationIncarnation,
+  SessionMutationRecorder,
+  type MutationRecorder,
+} from "./mutations/recorder";
+import type { DeviceMutationScope } from "./mutations/types";
 import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -101,6 +112,11 @@ export function sessionBrokerHostLock(
 }
 
 export interface OpenSessionBrokerServiceOptions {
+  mutationSessions?: {
+    peekSession(
+      sessionUuid: string,
+    ): Pick<Session, "sessionId" | "assignedDevice" | "stableDeviceId" | "mutationRecorder"> | null;
+  };
   /** Daemon startup starts the loop explicitly after binding its control socket. */
   deferStart?: boolean;
   config: SessionBrokerHostConfig;
@@ -154,6 +170,7 @@ export async function openSessionBrokerService(
 ): Promise<SessionBrokerService> {
   const lock = options.hostLock ?? sessionBrokerHostLock(options.owner);
   lock.acquire();
+  let broker: SessionBroker | undefined;
   try {
     const scopeKey = computeBindingScopeKey(SESSION_BROKER_SCOPE);
     await assertBrokerInventoryOwned(options.registry, scopeKey);
@@ -208,6 +225,21 @@ export async function openSessionBrokerService(
         );
       };
     }
+    const bindMutationRecorder = options.mutationSessions
+      ? (scope: DeviceMutationScope) => {
+          const session = options.mutationSessions!.peekSession(scope.sessionUuid);
+          if (
+            !session ||
+            session.sessionId !== scope.sessionUuid ||
+            session.assignedDevice !== scope.deviceId
+          ) {
+            throw new ActionableError(
+              "Broker mutation scope must match the live native session and device",
+            );
+          }
+          session.mutationRecorder = new SessionMutationRecorder(journal, scope);
+        }
+      : undefined;
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
@@ -215,6 +247,7 @@ export async function openSessionBrokerService(
       brokerExecutionRelease: options.release,
       registry: options.registry,
       bindingJournal: options.journal,
+      bindMutationRecorder,
       ...(reset
         ? {
             resetBaseline: {
@@ -226,7 +259,7 @@ export async function openSessionBrokerService(
           }
         : {}),
     });
-    const broker = new SessionBroker({
+    broker = new SessionBroker({
       store,
       devices,
       timer: options.timer,
@@ -247,14 +280,111 @@ export async function openSessionBrokerService(
       reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,
     });
     await broker.recoverReceipts();
-    const service = new SessionBrokerService(broker, scopeKey, lock, options.timer);
+    const recoverMutationRecorder = (sessionUuid: string) =>
+      recoverSessionMutationRecorder(options, store, scopeKey, bindMutationRecorder, sessionUuid);
+    await recoverActiveMutationRecorders(store, recoverMutationRecorder);
+    const service = new SessionBrokerService(
+      broker,
+      scopeKey,
+      lock,
+      options.timer,
+      recoverMutationRecorder,
+    );
     if (!options.deferStart) {
       service.start();
     }
     return service;
   } catch (error) {
-    lock.release();
+    await closeFailedStartupBroker(broker, lock);
     throw toActionableError(error, "Session broker startup failed");
+  }
+}
+
+async function closeFailedStartupBroker(
+  broker: SessionBroker | undefined,
+  lock: SessionBrokerHostLock,
+): Promise<void> {
+  try {
+    await broker?.close();
+  } catch (error) {
+    logger.warn("Failed to close broker after startup failure", error);
+  } finally {
+    lock.release();
+  }
+}
+
+async function recoverActiveMutationRecorders(
+  store: Pick<SqliteSessionBrokerStore, "listRecoverableRequests">,
+  recover: (sessionUuid: string) => Promise<MutationRecorder | undefined>,
+): Promise<void> {
+  let requests: Awaited<ReturnType<typeof store.listRecoverableRequests>>;
+  try {
+    requests = await store.listRecoverableRequests();
+  } catch (error) {
+    logger.warn("Cannot list recoverable session requests for mutation recorder recovery", error);
+    return;
+  }
+  for (const request of requests) {
+    if (request.state !== "active" || !request.sessionId) {
+      continue;
+    }
+    try {
+      await recover(request.sessionId!);
+    } catch (error) {
+      logger.warn(`Cannot recover mutation recorder for session ${request.sessionId}`, error);
+    }
+  }
+}
+
+async function recoverSessionMutationRecorder(
+  options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "registry">,
+  store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
+  scopeKey: string,
+  bindMutationRecorder: ((scope: DeviceMutationScope) => void) | undefined,
+  sessionUuid: string,
+): Promise<MutationRecorder | undefined> {
+  if (!bindMutationRecorder || !options.mutationSessions) {
+    return undefined;
+  }
+  const session = options.mutationSessions.peekSession(sessionUuid);
+  if (!session) {
+    return undefined;
+  }
+  const request = await store.getSession(sessionUuid);
+  if (request?.state !== "active" || !request.resourceId) {
+    return undefined;
+  }
+  const resource = await store.getResource(request.resourceId);
+  const assignment = resource
+    ? await options.registry.getAssignment({ scopeKey, bindingIndex: resource.allocationIndex })
+    : null;
+  assertRecoveredMutationAssignment(
+    assignment,
+    sessionUuid,
+    session.stableDeviceId ?? session.assignedDevice,
+  );
+  bindMutationRecorder({
+    sessionUuid,
+    deviceId: session.assignedDevice,
+    incarnation: brokerMutationIncarnation(request.resourceId, assignment.generation),
+  });
+  return options.mutationSessions.peekSession(sessionUuid)?.mutationRecorder;
+}
+
+function assertRecoveredMutationAssignment(
+  assignment: BindingAssignmentRecord | null,
+  sessionUuid: string,
+  stableDeviceId: string,
+): asserts assignment is BindingAssignmentRecord {
+  if (
+    !assignment ||
+    assignment.state !== "ready" ||
+    assignment.execOwner?.sessionUuid !== sessionUuid ||
+    assignment.stableDeviceId !== stableDeviceId
+  ) {
+    throw new ActionableError(
+      "Cannot recover broker mutation recording without the exact native assignment",
+    );
   }
 }
 
@@ -540,7 +670,27 @@ export class SessionBrokerService {
     readonly scopeKey: string,
     private readonly lock: SessionBrokerHostLock,
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">,
+    private readonly recorderFor: (
+      sessionUuid: string,
+    ) => Promise<MutationRecorder | undefined> = async () => undefined,
   ) {}
+
+  async recoverMutationRecorder(sessionUuid: string): Promise<MutationRecorder | undefined> {
+    try {
+      if (this.stopped) {
+        throw new ActionableError(
+          "Cannot recover mutation recording from a stopped session broker",
+        );
+      }
+      return await this.recorderFor(sessionUuid);
+    } catch (error) {
+      logger.warn(
+        `Cannot recover mutation recorder for session ${sessionUuid}; proceeding without recording`,
+        error,
+      );
+      return undefined;
+    }
+  }
 
   start(): void {
     if (this.stopped) {

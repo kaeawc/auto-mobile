@@ -610,9 +610,39 @@ function swipeActionsErrors(context: Context): PrototypeValidationError | undefi
   }
   return undefined;
 }
+/** Whether a `scroll` with the given axis rule encloses the node at `path`. */
+function insideScroll(context: Context, path: string, horizontal: boolean): boolean {
+  return context.nodes.some(
+    ({ value: ancestor, path: ancestorPath }) =>
+      ancestor.type === "scroll" &&
+      (ancestor.axis === "horizontal") === horizontal &&
+      path.startsWith(`${ancestorPath}.`),
+  );
+}
+/**
+ * A horizontal `scroll` measures its child with an infinite width, which the lazy horizontal pager
+ * and carousel layouts cannot take (#14165); the vertical rule is the same for vertical pagers.
+ */
+function horizontalLazyError(
+  node: Record<string, unknown>,
+  path: string,
+  context: Context,
+): PrototypeValidationError | undefined {
+  if (node.type === "carousel" && insideScroll(context, path, true)) {
+    return fail(path, "A carousel cannot appear inside a horizontal scroll");
+  }
+  if (node.type === "pager" && node.axis !== "vertical" && insideScroll(context, path, true)) {
+    return fail(path, "A horizontal pager cannot appear inside a horizontal scroll");
+  }
+  return undefined;
+}
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
   for (const { value, path } of context.nodes) {
+    const lazyError = horizontalLazyError(value, path, context);
+    if (lazyError) {
+      return lazyError;
+    }
     if (value.type !== "pager" || typeof value.id !== "string") {
       continue;
     }
@@ -620,15 +650,7 @@ function pagerErrors(context: Context): PrototypeValidationError | undefined {
       return fail(`${path}.id`, "Duplicate pager id");
     }
     pagers.add(value.id);
-    if (
-      value.axis === "vertical" &&
-      context.nodes.some(
-        ({ value: ancestor, path: ancestorPath }) =>
-          ancestor.type === "scroll" &&
-          ancestor.axis !== "horizontal" &&
-          path.startsWith(`${ancestorPath}.`),
-      )
-    ) {
+    if (value.axis === "vertical" && insideScroll(context, path, false)) {
       return fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll");
     }
   }

@@ -1034,7 +1034,7 @@ strict `peek: {start?, end?}` and `pageSize` (`"fill"` default or strict `{dp}`)
 require `prototype_pager_options_v1` whenever explicitly present. Spacing and peek
 are finite 0..10000; fixed page size is finite 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
 Missing spacing/peek sides mean 0, and `{}` peek is a no-op. Units are points on iOS.
-A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical).
+A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical), and a horizontal pager or a carousel cannot have any horizontal scroll ancestor.
 Current page is the first fully visible page; page events and navigation bindings
 keep their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
 

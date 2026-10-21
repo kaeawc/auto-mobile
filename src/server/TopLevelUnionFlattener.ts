@@ -1,3 +1,5 @@
+import { resolveJsonSchemaReference } from "./jsonSchemaReferences";
+
 /**
  * Top-level union schema flattening.
  *
@@ -23,13 +25,17 @@
  * server-side Zod union still validates at runtime.
  */
 export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<string, unknown> {
-  const branches = (schema.anyOf ?? schema.oneOf) as Record<string, unknown>[] | undefined;
-  if (!branches || !Array.isArray(branches)) {
+  const alternatives = (schema.anyOf ?? schema.oneOf) as Record<string, unknown>[] | undefined;
+  if (!alternatives || !Array.isArray(alternatives)) {
     return schema;
   }
+  const resolve = (node: Record<string, unknown>) => resolveJsonSchemaReference(schema, node);
+  const branches = alternatives.map(resolve);
 
-  const { mergedProperties, seenAdditionalProperties, requiredSets } =
-    collectUnionBranches(branches);
+  const { mergedProperties, seenAdditionalProperties, requiredSets } = collectUnionBranches(
+    branches,
+    resolve,
+  );
 
   const commonRequired =
     requiredSets.length > 0
@@ -53,7 +59,7 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
     result.additionalProperties = [...seenAdditionalProperties][0];
   }
 
-  const conditionalRequired = buildConditionalRequired(branches, commonRequired);
+  const conditionalRequired = buildConditionalRequired(branches, commonRequired, resolve);
   if (conditionalRequired) {
     Object.assign(result, conditionalRequired);
   }
@@ -61,7 +67,9 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
   return result;
 }
 
-function collectUnionBranches(branches: Record<string, unknown>[]) {
+type ResolveSchema = (node: Record<string, unknown>) => Record<string, unknown>;
+
+function collectUnionBranches(branches: Record<string, unknown>[], resolve: ResolveSchema) {
   // Null-prototype map: a `{}` here inherits `Object.prototype`, so the
   // `!mergedProperties[key]` guard below would read the inherited member for a
   // property named `constructor`/`toString`/`__proto__`/... and merge the real
@@ -72,7 +80,7 @@ function collectUnionBranches(branches: Record<string, unknown>[]) {
 
   for (const branch of branches) {
     const props = branch.properties as Record<string, unknown> | undefined;
-    mergeBranchProperties(mergedProperties, props);
+    mergeBranchProperties(mergedProperties, props, resolve);
     if (typeof branch.additionalProperties === "boolean") {
       seenAdditionalProperties.add(branch.additionalProperties);
     }
@@ -86,6 +94,7 @@ function collectUnionBranches(branches: Record<string, unknown>[]) {
 function mergeBranchProperties(
   mergedProperties: Record<string, unknown>,
   props: Record<string, unknown> | undefined,
+  resolve: ResolveSchema,
 ): void {
   if (!props) {
     return;
@@ -94,7 +103,7 @@ function mergeBranchProperties(
     if (!mergedProperties[key]) {
       mergedProperties[key] = value;
     } else {
-      mergedProperties[key] = mergeUnionProperty(mergedProperties[key], value);
+      mergedProperties[key] = mergeUnionProperty(mergedProperties[key], value, resolve);
     }
   }
 }
@@ -113,6 +122,7 @@ interface ConditionalRequirement {
 function buildConditionalRequired(
   branches: Record<string, unknown>[],
   commonRequired: string[],
+  resolve: ResolveSchema,
 ): ConditionalRequirement | undefined {
   const commonRequiredSet = new Set(commonRequired);
   const requirements: ConditionalRequirement[] = [];
@@ -126,7 +136,7 @@ function buildConditionalRequired(
       continue;
     }
 
-    const condition = buildDiscriminatorCondition(branch);
+    const condition = buildDiscriminatorCondition(branch, resolve);
     if (!condition) {
       continue;
     }
@@ -144,13 +154,14 @@ function buildConditionalRequired(
 
 function buildDiscriminatorCondition(
   branch: Record<string, unknown>,
+  resolve: ResolveSchema,
 ): ConditionalRequirement["if"] | undefined {
   const properties = isJsonSchemaObject(branch.properties) ? branch.properties : {};
   for (const [key, value] of Object.entries(properties)) {
     if (!isJsonSchemaObject(value)) {
       continue;
     }
-    const values = constOrEnumValues(value);
+    const values = constOrEnumValues(resolve(value));
     if (values.length !== 1) {
       continue;
     }
@@ -179,18 +190,18 @@ function chainConditionalRequirements(
   return chain;
 }
 
-function mergeUnionProperty(existing: unknown, incoming: unknown): unknown {
+function mergeUnionProperty(existing: unknown, incoming: unknown, resolve: ResolveSchema): unknown {
   if (!isJsonSchemaObject(existing) || !isJsonSchemaObject(incoming)) {
     return existing;
   }
 
-  const existingValues = constOrEnumValues(existing);
-  const incomingValues = constOrEnumValues(incoming);
+  const existingValues = constOrEnumValues(resolve(existing));
+  const incomingValues = constOrEnumValues(resolve(incoming));
   if (existingValues.length === 0 || incomingValues.length === 0) {
     return existing;
   }
 
-  const baseSchema = { ...existing };
+  const baseSchema = { ...resolve(existing) };
   delete baseSchema.const;
   return {
     ...baseSchema,

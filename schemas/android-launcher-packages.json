@@ -1,0 +1,29 @@
+{
+  "$comment": "Single source of Android HOME launcher packages (#14056). Read by src/features/observe/androidLauncherRegistry.ts; the desktop copy in AutoMobileContent.kt is checked against it by test/lint/androidLauncherRegistry.test.ts. Order is priority order for the desktop default-app pick. A new entry must name a captured hierarchy fixture as evidence; only the entries listed as legacy in that test predate the rule.",
+  "launchers": [
+    {
+      "packageName": "com.google.android.apps.nexuslauncher",
+      "label": "Pixel Launcher",
+      "evidence": "legacy"
+    },
+    { "packageName": "com.android.launcher3", "label": "AOSP Launcher3", "evidence": "legacy" },
+    {
+      "packageName": "com.sec.android.app.launcher",
+      "label": "Samsung One UI Home",
+      "evidence": "legacy"
+    },
+    {
+      "packageName": "com.huawei.android.launcher",
+      "label": "Huawei Launcher",
+      "evidence": "legacy"
+    },
+    { "packageName": "com.miui.home", "label": "Xiaomi MIUI / HyperOS Home", "evidence": "legacy" },
+    {
+      "packageName": "com.samsung.android.app.launcher",
+      "label": "Samsung launcher (legacy package)",
+      "evidence": "legacy"
+    },
+    { "packageName": "com.oneplus.launcher", "label": "OnePlus Launcher", "evidence": "legacy" },
+    { "packageName": "com.android.launcher", "label": "Legacy AOSP Launcher", "evidence": "legacy" }
+  ]
+}

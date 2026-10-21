@@ -10,6 +10,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { ANDROID_LAUNCHER_PACKAGES } from "./androidLauncherRegistry";
 
 /**
  * Verify that a "go home" action actually landed on the home screen by
@@ -52,19 +53,10 @@ const RESOLVE_HOME_TIMEOUT_MS = 5000;
  * launcher cannot be resolved at runtime (e.g. `cmd package` unavailable, or
  * the resolve command failing/timing out). Matched by EXACT package name --
  * never by prefix, so an unrelated app like `com.android.launcher3.example`
- * cannot be misclassified as a launcher. Mirrors `Idle.isSystemLauncher`'s
- * launcher packages, including the legacy AOSP `com.android.launcher`.
+ * cannot be misclassified as a launcher. The list is the shared launcher
+ * registry (`schemas/android-launcher-packages.json`, #14056).
  */
-const FALLBACK_LAUNCHER_PACKAGES: ReadonlySet<string> = new Set([
-  "com.android.launcher",
-  "com.android.launcher3",
-  "com.google.android.apps.nexuslauncher",
-  "com.samsung.android.app.launcher",
-  "com.miui.home",
-  "com.oneplus.launcher",
-  "com.huawei.android.launcher",
-  "com.sec.android.app.launcher",
-]);
+const FALLBACK_LAUNCHER_PACKAGES: ReadonlySet<string> = new Set(ANDROID_LAUNCHER_PACKAGES);
 
 /**
  * How long a resolved HOME launcher package stays valid before it must be

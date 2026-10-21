@@ -405,14 +405,18 @@ enum class Dashboard(val title: String, val icon: String) {
 
 // DeviceType, BootedDevice, AvailableEmulator, SystemImage — defined in desktop.core.mcp
 
-// Common launcher package names
+// Known launcher packages in priority order. A copy of schemas/android-launcher-packages.json
+// (#14056); test/lint/androidLauncherRegistry.test.ts fails when the two differ.
 private val ANDROID_LAUNCHERS =
   listOf(
-    "com.google.android.apps.nexuslauncher", // Pixel Launcher
-    "com.android.launcher3", // AOSP Launcher
-    "com.sec.android.app.launcher", // Samsung One UI
-    "com.huawei.android.launcher", // Huawei
-    "com.miui.home", // Xiaomi MIUI
+    "com.google.android.apps.nexuslauncher",
+    "com.android.launcher3",
+    "com.sec.android.app.launcher",
+    "com.huawei.android.launcher",
+    "com.miui.home",
+    "com.samsung.android.app.launcher",
+    "com.oneplus.launcher",
+    "com.android.launcher",
   )
 private const val IOS_SPRINGBOARD = "com.apple.springboard"
 private const val TIMELINE_EVENT_CACHE_LIMIT = 10_000

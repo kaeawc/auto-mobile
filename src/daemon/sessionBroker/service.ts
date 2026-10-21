@@ -131,7 +131,7 @@ export async function openSessionBrokerService(
       bindingJournal: options.journal,
       ...(reset
         ? {
-            resetIosBaseline: reset.reset.bind(reset),
+            resetIosBaseline: reset.resetWithTiming.bind(reset),
             isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
           }
         : {}),

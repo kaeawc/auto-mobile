@@ -248,6 +248,22 @@ describe("session broker daemon handlers", () => {
   });
 
   const exportIdentity = { prepareId: "prepare-id", requestDigest: "digest" };
+  test("stats socket read validates bounds and forwards a read-only request", async () => {
+    const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+      ([method]) => method === "daemon/sessionBrokerStats",
+    )![1];
+    const stats = { sinceMs: 1, untilMs: 2, limit: 10, truncated: false, groups: [] };
+    const statsSpy = spyOn(broker, "stats").mockResolvedValue(stats);
+    expect(
+      await handler(request({ windowMs: 100, limit: 10 }), state, undefined, undefined, {}),
+    ).toEqual({ success: true, result: stats });
+    expect(statsSpy).toHaveBeenCalledWith(100, 10);
+    expect(await handler(request({ limit: 10001 }), state, undefined, undefined, {})).toMatchObject(
+      { success: false, code: "session_config_invalid" },
+    );
+    statsSpy.mockRestore();
+    expect(broker.prepareCalls).toEqual([]);
+  });
   const exportParams = { ...exportIdentity, livenessOwnerToken: TOKEN };
 
   async function seedExport() {

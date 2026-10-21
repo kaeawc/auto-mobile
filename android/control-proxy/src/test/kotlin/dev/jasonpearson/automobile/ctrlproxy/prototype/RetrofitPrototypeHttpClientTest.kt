@@ -404,5 +404,4 @@ class RetrofitPrototypeHttpClientTest {
 
     assertEquals(25L, response.durationMs)
   }
-
 }

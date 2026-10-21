@@ -161,8 +161,8 @@ internal fun renderComposable(
 
 /**
  * Draws [content] in a Robolectric activity and captures the composed view. Shared by
- * [renderPrototype] and the host-chrome screenshot test.
- * [settle] optionally synchronizes Compose effects before the final main-looper drain and capture.
+ * [renderPrototype] and the host-chrome screenshot test. [settle] optionally synchronizes Compose
+ * effects before the final main-looper drain and capture.
  */
 internal fun renderComposable(
   name: String,

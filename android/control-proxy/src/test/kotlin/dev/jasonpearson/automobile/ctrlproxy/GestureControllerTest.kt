@@ -18,7 +18,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
@@ -99,20 +98,14 @@ class GestureControllerTest {
     }
   }
 
-  private class FakeSender(private val events: MutableList<String>) :
-    GestureController.ResponseSender {
-    var running = true
+  private class FakeSender(private val events: MutableList<String>) : FakeResultTransport() {
     val frames = mutableListOf<JsonObject>()
 
-    override fun isRunning() = running
-
-    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
-      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
-      frames += frame
-      events += frame.getValue("type").jsonPrimitive.content
+    override suspend fun sendFrame(frame: String) {
+      val parsed = Json.parseToJsonElement(frame).jsonObject
+      frames += parsed
+      events += parsed.getValue("type").jsonPrimitive.content
     }
-
-    override fun connectionCount() = 1
   }
 
   private val events = mutableListOf<String>()
@@ -128,8 +121,11 @@ class GestureControllerTest {
           GestureReportingDependencies(
             perfProvider = PerfProvider.createForTesting(timer),
             timeProvider = timer,
-            resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
-            responseSender = sender,
+            resultSender =
+              guardedResultSender(
+                sender,
+                ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
+              ),
           ),
         gestureThreadFactory = ::InlineGestureThread,
       )

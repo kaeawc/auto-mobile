@@ -1,4 +1,5 @@
 import type { HostProcessRow, SimulatorProcessCost } from "../../models/HostProcessRow";
+import type { BootAdmissionReason } from "../../devices/bootAdmission/BootSlotReservation";
 export type { HostProcessRow, SimulatorProcessCost };
 /**
  * Shared types for iOS Simulator fleet cost measurement and capacity (#6696).
@@ -49,6 +50,7 @@ export interface SimulatorInventoryEntry {
 export type MeasurementQuality = "measured" | "no-processes" | "not-running" | "unavailable";
 
 export interface BootDurationSample {
+  reason?: BootAdmissionReason;
   udid: string;
   /** Workload/profile identity so durations compare across configurations. */
   profileId: string;

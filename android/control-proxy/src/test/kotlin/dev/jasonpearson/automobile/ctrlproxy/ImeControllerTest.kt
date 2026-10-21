@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
+import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -14,7 +15,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
@@ -77,28 +77,19 @@ class ImeControllerTest {
     }
   }
 
-  private class FakeSender : ImeController.ResponseSender {
-    var running = true
+  private class FakeSender : FakeResultTransport() {
     val frames = mutableListOf<Pair<String, kotlinx.serialization.json.JsonObject>>()
     val profileResults = mutableListOf<SetKeyboardProfileResult>()
 
-    override fun isRunning() = running
-
-    override suspend fun broadcastWithPerfSync(
-      messageBuilder: (perfTiming: JsonElement?) -> String,
-    ) {
-      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
-      val type = frame.getValue("type").jsonPrimitive.content
-      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming", "requestId"))
+    override suspend fun sendFrame(frame: String) {
+      val parsed = Json.parseToJsonElement(frame).jsonObject
+      val type = parsed.getValue("type").jsonPrimitive.content
+      frames += type to JsonObject(parsed - setOf("type", "timestamp", "perfTiming", "requestId"))
     }
 
-    override suspend fun broadcastSetKeyboardProfileResult(
-      build: (perfTiming: String?) -> SetKeyboardProfileResult,
-    ) {
-      profileResults += build(null)
+    override suspend fun send(response: WebSocketResponse) {
+      profileResults += response as SetKeyboardProfileResult
     }
-
-    override fun connectionCount() = 1
   }
 
   private class Fixture(
@@ -117,9 +108,12 @@ class ImeControllerTest {
       ImeController(
         host = host,
         timeProvider = FakeTimer(),
-        resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
         jsonCompact = Json { encodeDefaults = true },
-        responseSender = sender,
+        resultSender =
+          guardedResultSender(
+            sender,
+            ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
+          ),
         config =
           ImeConfig(
             uptimeMillis = { clock[0] },

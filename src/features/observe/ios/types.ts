@@ -375,6 +375,19 @@ export interface CtrlProxyHingeAngleResult {
   totalTimeMs: number;
 }
 
+/** A simulated fix for `request_location` (#14091), or `clear` to restore the real location. */
+export type CtrlProxyLocationRequest =
+  | { latitude: number; longitude: number; altitude?: number; horizontalAccuracy?: number }
+  | { clear: true };
+
+/** `request_location` result; `unsupported` marks a runner that predates the command. */
+export interface CtrlProxyLocationResult {
+  success: boolean;
+  unsupported?: boolean;
+  error?: string;
+  totalTimeMs: number;
+}
+
 /** System light/dark appearance read back by the runner (`XCUIDevice.appearance`, #14092). */
 export type CtrlProxyAppearance = "light" | "dark" | "unspecified";
 

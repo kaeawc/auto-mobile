@@ -241,7 +241,7 @@ depth precedes array length, then children; the byte check runs last.
 | `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                |
 | `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                             |
 | Condition `.key`                                                                          | `Exactly one of key, data, all, any, not is required`                                                                                                                 |
-| Condition comparison field                                                                | `Requires key or data or platform`; `Exactly one of equals, notEquals, gt, lt is required`                                                                            |
+| Condition comparison field                                                                | `Requires key or data or platform`; `Exactly one of equals, notEquals, gt, lt, empty is required`                                                                     |
 | Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                     |
 | `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                             |
 
@@ -755,6 +755,12 @@ A vertical pager cannot have any vertical scroll ancestor (omitted scroll axis i
 vertical), even through intervening containers or horizontal scrolls. A vertical
 pager inside only a horizontal scroll is valid; horizontal pagers stay valid.
 The error is at the pager's `.axis`: "A vertical pager cannot appear inside a vertical scroll".
+
+The horizontal counterpart (#14165): a horizontal (or default-axis) pager or a carousel cannot have
+any horizontal scroll ancestor, because a horizontal scroll measures its child with an infinite
+width that their lazy layouts cannot take. The errors are at the pager or carousel itself: "A
+horizontal pager cannot appear inside a horizontal scroll" and "A carousel cannot appear inside a
+horizontal scroll".
 
 Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
@@ -2431,6 +2437,22 @@ pinned to the material3 supplied by `androidx-compose-bom` in
 `android/gradle/libs.versions.toml`. Results are ordinary rows inside the prototype
 window, not a SearchBar popup/dialog or lazy list that drops rows, so `observe`
 sees every result row.
+
+## Loading and empty states (#14207, `prototype_loading_states_v1`, not device-verified)
+
+A data condition may test emptiness instead of comparing: `{data: "/feed", empty: true}` holds
+when the value is missing, `[]`, `{}` or `""` (`null` cannot be stored in `/data`), and
+`empty: false` holds otherwise. `empty` takes the place of `equals`, `notEquals`, `gt` and `lt`
+(exactly one is required), and `{key, empty}` is rejected at `<path>.empty` with
+`empty applies only to data conditions`. Like other data conditions it is resolved on the device
+against the current `/data`, so a request response or data action flips it.
+
+Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `column` or `card`
+over its background and inside its clip; any other node type is rejected at
+`<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
+animator scale 0 no band is drawn, so screenshots see the plain placeholder. A `repeat` of literal
+placeholder rows makes a skeleton list. The iOS agent evaluates `empty` but does not draw shimmer
+yet and does not advertise the capability (#14689).
 
 ## Charts (#14209, not device-verified)
 

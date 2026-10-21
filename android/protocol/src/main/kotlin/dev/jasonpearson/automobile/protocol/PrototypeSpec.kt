@@ -61,6 +61,8 @@ data class PrototypeCondition(
   /** A `/platform` pointer (#14294); platform state is device-owned and read-only. */
   val platform: String? = null,
   val valid: PrototypeValidityKeys? = null,
+  /** With [data]: holds when that value is missing, `[]`, `{}` or `""` (#14207). */
+  val empty: Boolean? = null,
 )
 
 @Serializable
@@ -140,6 +142,8 @@ data class PrototypeStyle(
   val alpha: Double? = null,
   /** Scale (0.5-1) a tappable node shrinks to while pressed; absent leaves it unscaled. */
   val pressScale: Double? = null,
+  /** An animated highlight sweep over a loading placeholder's background (#14207). */
+  val shimmer: Boolean? = null,
   /** A drawn scale (0-4) about the node's centre; absent is 1 (#14208). */
   val scale: Double? = null,
   /** A drawn rotation in degrees (-360..360) about the node's centre (#14208). */

@@ -5,7 +5,6 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import java.io.File
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.json.JsonElement
 
 /** Platform access bound to the service's device-admin component and private storage. */
 internal data class CaCertificateDependencies(
@@ -19,8 +18,7 @@ internal class CaCertificateController(
   dependencies: CaCertificateDependencies,
   private val perfProvider: PerfProvider,
   private val timeProvider: TimeProvider,
-  private val resultBroadcaster: ResultBroadcaster,
-  private val responseSender: ResponseSender,
+  private val resultSender: ResultSender,
 ) {
   private val devicePolicy = dependencies.devicePolicy
   private val packageName = dependencies.packageName
@@ -37,15 +35,6 @@ internal class CaCertificateController(
     fun uninstallCaCert(certBytes: ByteArray)
 
     fun getInstalledCaCerts(): List<ByteArray>
-  }
-
-  /** Keeps the service's frame encoder and late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    fun isRunning(): Boolean
-
-    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
-
-    fun getConnectionCount(): Int
   }
 
   companion object {
@@ -309,16 +298,8 @@ internal class CaCertificateController(
 
   /** Broadcast CA certificate result to WebSocket clients */
   private suspend fun broadcastCaCertResult(outcome: CaCertificateResult) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping CA cert result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(outcome.requestId, "ca_cert_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        caCertResultFrame(outcome, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted ca_cert_result to ${responseSender.getConnectionCount()} clients")
+    resultSender.sendFrame(outcome.requestId, "ca_cert_result") { perfTiming ->
+      caCertResultFrame(outcome, perfTiming)
     }
   }
 
@@ -330,28 +311,17 @@ internal class CaCertificateController(
     error: String?,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping device owner status broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "device_owner_status_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        deviceOwnerStatusResultFrame(
-          DeviceOwnerResult(
-            requestId = requestId,
-            packageName = packageName,
-            isDeviceOwner = isDeviceOwner,
-            isAdminActive = isAdminActive,
-            error = error,
-            totalTimeMs = totalTimeMs,
-          ),
-          perfTiming,
-        )
-      }
-      Log.d(
-        TAG,
-        "Broadcasted device_owner_status_result to ${responseSender.getConnectionCount()} clients",
+    resultSender.sendFrame(requestId, "device_owner_status_result") { perfTiming ->
+      deviceOwnerStatusResultFrame(
+        DeviceOwnerResult(
+          requestId = requestId,
+          packageName = packageName,
+          isDeviceOwner = isDeviceOwner,
+          isAdminActive = isAdminActive,
+          error = error,
+          totalTimeMs = totalTimeMs,
+        ),
+        perfTiming,
       )
     }
   }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { HostCommandExecutor, HostCommandOptions } from "../../src/utils/HostCommandExecutor";
 import { createSessionLogService } from "../../src/server/sessionLogService";
@@ -11,7 +12,8 @@ const physicalIos: BootedDevice = {
   platform: "ios",
 };
 const WORK_DIR = "/tmp/automobile-ios-log-abc";
-const ARCHIVE = `${WORK_DIR}/window.logarchive`;
+// The provider builds paths with the host's `path.join`, so Windows CI sees backslashes.
+const ARCHIVE = join(WORK_DIR, "window.logarchive");
 const PREDICATE = 'subsystem == "com.example.app" OR subsystem BEGINSWITH "com.example.app."';
 
 function execResult(stdout: string): ExecResult {
@@ -149,7 +151,7 @@ describe("Physical iOS unified-log window (#14104)", () => {
         ARCHIVE,
       ],
     ]);
-    expect(fileSystem.created).toEqual(["/tmp/automobile-ios-log-"]);
+    expect(fileSystem.created).toEqual([join("/tmp", "automobile-ios-log-")]);
     expect(fileSystem.removed).toEqual([WORK_DIR]);
   });
 

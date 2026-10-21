@@ -30,7 +30,7 @@ describe("device mutation tool coverage", () => {
     setDebugModeEnabled(previousDebugMode);
   });
 
-  test("every mutating registry tool including mixed, hidden and SDK tools has a pending adapter justification", () => {
+  test("every mutating registry tool including mixed, hidden and SDK tools has a journaled adapter or justification", () => {
     const tools = ToolRegistry.getEveryRegisteredTool();
     expect(tools.length).toBeGreaterThan(80);
     expect(mutationToolCoverageViolations(tools)).toEqual([]);
@@ -46,7 +46,7 @@ describe("device mutation tool coverage", () => {
       hidden: true,
     });
     expect(mutationToolCoverageViolations(registry.getEveryRegisteredTool())).toEqual([
-      "newMutation: missing pending-adapter or explicit notJournaled justification",
+      "newMutation: missing journaled adapter, pending-adapter or explicit notJournaled justification",
     ]);
   });
 
@@ -60,16 +60,42 @@ describe("device mutation tool coverage", () => {
         },
         { name: "pureRead", requiresDevice: true, deviceReadOnly: true },
       ]),
-    ).toEqual(["newMixedTool: missing pending-adapter or explicit notJournaled justification"]);
+    ).toEqual([
+      "newMixedTool: missing journaled adapter, pending-adapter or explicit notJournaled justification",
+    ]);
   });
 
-  test("pending device adapters and host-only notJournaled exemptions are distinct", () => {
-    expect(DEVICE_MUTATION_TOOL_COVERAGE.clipboard.status).toBe("pending-adapter");
+  test("journaled adapters, pending device adapters and host-only exemptions are distinct", () => {
+    expect(DEVICE_MUTATION_TOOL_COVERAGE.clipboard.status).toBe("journaled");
+    expect(DEVICE_MUTATION_TOOL_COVERAGE.setPreference.status).toBe("pending-adapter");
     expect(DEVICE_MUTATION_TOOL_COVERAGE.setActiveDevice.status).toBe("notJournaled");
     expect(
       mutationToolCoverageViolations([{ name: "clipboard" }], {
         clipboard: { status: "pending-adapter", reason: " " },
       }),
     ).toHaveLength(1);
+  });
+
+  test.each(["persona", "statusBar", "sendBroadcast", "measureStartup"])(
+    "%s stays pending until a production mutation adapter is exercised",
+    (name) => {
+      expect(DEVICE_MUTATION_TOOL_COVERAGE[name].status).toBe("pending-adapter");
+      expect(DEVICE_MUTATION_TOOL_COVERAGE[name].reason).toContain("best-effort");
+    },
+  );
+
+  test.each(["getLogs", "compareScreenshot"])("%s is unconditionally read-only", (name) => {
+    const tool = ToolRegistry.getEveryRegisteredTool().find((entry) => entry.name === name);
+    expect(tool?.deviceReadOnly).toBe(true);
+  });
+
+  test("pending mutation coverage is not a keep-booted admission gate", () => {
+    const pending = Object.values(DEVICE_MUTATION_TOOL_COVERAGE).filter(
+      (entry) => entry.status === "pending-adapter",
+    );
+    expect(pending.length).toBeGreaterThan(0);
+    for (const entry of pending) {
+      expect(entry.reason).not.toMatch(/never evidence of a clean reset|require fallback/i);
+    }
   });
 });

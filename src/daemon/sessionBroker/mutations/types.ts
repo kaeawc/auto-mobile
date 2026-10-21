@@ -4,9 +4,15 @@ import { ActionableError } from "../../../models/ActionableError";
 export const mutationValueSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("absent") }),
   z.object({ state: z.literal("present"), value: z.json() }),
+  z.object({ state: z.literal("unobservable") }),
 ]);
 
 export type MutationValue = z.infer<typeof mutationValueSchema>;
+
+export function observableMutationValue(value: unknown): MutationValue {
+  const parsed = mutationValueSchema.safeParse({ state: "present", value });
+  return parsed.success ? parsed.data : { state: "unobservable" };
+}
 
 export interface DeviceIncarnationScope {
   deviceId: string;

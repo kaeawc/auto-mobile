@@ -66,6 +66,8 @@ describe("FetchPrototypeHttpExecutor egress hardening", () => {
     "[2002:7f00:1::]",
     "[::ffff:0:7f00:1]",
     "[64:ff9b:1::7f00:1]",
+    "[64:ff9b:1::808:808]",
+    "[64:ff9b:1::c0a8:10a]",
     "[64:ff9b:1:abcd:1234:5678:a9fe:a9fe]",
     "[2001::808:808]",
     "[2001:0:ffff:ffff:ffff:ffff:ffff:ffff]",
@@ -249,22 +251,57 @@ describe("FetchPrototypeHttpExecutor egress hardening", () => {
     expect(excessive.calls).toHaveLength(6);
   });
 
-  test.each([301, 302, 303, 307, 308])("applies method/body rules for %s", async (status) => {
+  test.each(
+    (["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const).flatMap((method) =>
+      [301, 302, 303, 307, 308].map((status) => ({ method, status })),
+    ),
+  )("applies method/body rules for $method through $status", async ({ method, status }) => {
     const transport = new FakeTransport((call) =>
-      call === 1 ? redirect("/next", status) : Response.json("ok"),
+      call === 1 ? redirect("/next", status) : new Response(null),
     );
-    await executor(transport).execute({ ...request, method: "POST", body: { x: 1 } }, signal());
-    expect(transport.calls[1]?.init.method).toBe(status <= 303 ? "GET" : "POST");
-    expect(transport.calls[1]?.init.body).toBe(status <= 303 ? undefined : '{"x":1}');
+    const bodied = method !== "GET" && method !== "HEAD";
+    const rewrite =
+      (status === 303 && bodied) || ((status === 301 || status === 302) && method === "POST");
+    expect(
+      await executor(transport).execute(
+        { ...request, method, body: bodied ? { x: 1 } : undefined },
+        signal(),
+      ),
+    ).toMatchObject({ ok: true });
+    expect(transport.calls).toHaveLength(2);
+    expect(transport.calls[1]?.init.method).toBe(rewrite ? "GET" : method);
+    expect(transport.calls[1]?.init.body).toBe(bodied && !rewrite ? '{"x":1}' : undefined);
   });
 
-  test.each(["GET", "HEAD"] as const)("preserves %s through a 303 redirect", async (method) => {
-    const transport = new FakeTransport((call) =>
-      call === 1 ? redirect("/next", 303) : new Response(null),
-    );
-    await executor(transport).execute({ ...request, method }, signal());
-    expect(transport.calls[1]?.init.method).toBe(method);
-  });
+  test.each(["POST", "PUT"] as const)(
+    "applies same-origin body-header rules for %s through 302",
+    async (method) => {
+      const transport = new FakeTransport((call) =>
+        call === 1 ? redirect("/next", 302) : new Response(null),
+      );
+      const headers = {
+        "Content-Type": "application/merge-patch+json",
+        "content-language": "en",
+        "Content-Encoding": "identity",
+        "Content-Location": "/x",
+        "X-Trace": "1",
+        Authorization: "secret",
+      };
+      expect(
+        await executor(transport).execute(
+          { ...request, method, body: { x: 1 }, headers },
+          signal(),
+        ),
+      ).toMatchObject({ ok: true });
+      expect(transport.calls).toHaveLength(2);
+      expect(transport.calls[1]?.init.headers).toEqual(
+        method === "POST" ? { "X-Trace": "1", Authorization: "secret" } : headers,
+      );
+      expect(transport.calls[1]?.init.method).toBe(method === "POST" ? "GET" : "PUT");
+      expect(transport.calls[1]?.init.body).toBe(method === "POST" ? undefined : '{"x":1}');
+      expect(headers["Content-Type"]).toBe("application/merge-patch+json");
+    },
+  );
 
   test.each(["https://other.test/", "https://public.test:8443/", "http://public.test/"])(
     "drops authored credential headers on origin change to %s",

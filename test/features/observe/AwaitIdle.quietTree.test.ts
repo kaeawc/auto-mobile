@@ -7,6 +7,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import type { ViewHierarchyRequestReader } from "../../../src/features/observe/interfaces/ViewHierarchy";
+import type { ViewHierarchyReadRequest } from "../../../src/features/observe/hierarchyReadArgs";
 import { validGfxinfoOutput, noFrameGfxinfoOutput } from "./gfxinfoFixtures";
 
 const device = { deviceId: "quiet-tree", name: "quiet-tree", platform: "android" as const };
@@ -70,9 +71,33 @@ describe("Android stability signal regressions", () => {
     },
   );
 
+  test("cached device timestamps force newer extractions and settle at 34 ms", async () => {
+    const { timer, factory } = setup();
+    const requests: (ViewHierarchyReadRequest | undefined)[] = [];
+    let cached = { ...tree("launcher", false), updatedAt: 1000 };
+    const reader: ViewHierarchyRequestReader = {
+      getViewHierarchy: async (_query, request) => {
+        requests.push(request);
+        const floor = request?.minTimestamp ?? 0;
+        if (floor > 0) {
+          cached = { ...cached, fresh: true, updatedAt: floor + 16 };
+        }
+        return cached;
+      },
+    };
+    const idle = new AwaitIdle(device, factory, timer, reader);
+    const result = await idle.waitForUiStability("com.android.launcher3", 500);
+    expect(timer.now()).toBe(34);
+    expect(result?.isStable).toBe(true);
+    expect(result?.stabilityWaitMs).toBe(34);
+    expect(requests).toHaveLength(3);
+    expect(requests.map((request) => request?.minTimestamp)).toEqual([undefined, 1001, 1018]);
+    expect(requests.every((request) => request?.requireFreshExtraction === true)).toBe(true);
+  });
+
   test("identical cached reads cannot satisfy the check; falls back stable at 50 ms", async () => {
     const { timer, idle, reader } = setup();
-    reader.configureHierarchy(tree("cached", false));
+    reader.configureHierarchy({ ...tree("cached", false), updatedAt: 1000 });
     const result = await idle.waitForUiStability("com.android.launcher3", 50);
     expect(result?.isStable).toBe(true);
     expect(reader.getCallCount()).toBe(3);

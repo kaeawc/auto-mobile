@@ -81,5 +81,5 @@ internal object PrototypeChatScroll {
 
   /** The `repeat.key` a rendered row stands for, from its identity, or null for any other node. */
   fun rowKey(identity: String): String? =
-    Regex("""\.repeat\[(.*)]\.children\[0]$""").find(identity)?.groupValues?.get(1)
+    Regex("""\.repeat\[(.*)\]\.children\[0\]$""").find(identity)?.groupValues?.get(1)
 }

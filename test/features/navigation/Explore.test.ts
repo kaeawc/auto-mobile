@@ -21,7 +21,7 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../../fakes/FakeDeviceReadiness";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 
@@ -2851,11 +2851,10 @@ describe("Explore", () => {
         name: "iPhone B",
         platform: "ios",
       } as BootedDevice;
-      const sessions = new FakeDeviceSessionManager();
+      const sessions = new FakeDeviceReadiness();
       sessions.setConnectedDevices([iosA, iosB]);
-      const originalDeviceSessionManager =
-        ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: sessions });
+      const originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+      ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: sessions });
       const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
         displayInventory: new FakeDisplayInventoryProvider(),
       });
@@ -2879,7 +2878,7 @@ describe("Explore", () => {
       } finally {
         restorePipelineOverrides();
         ToolRegistry.setCollaboratorsForTesting({
-          deviceSessionManager: originalDeviceSessionManager,
+          deviceReadiness: originalDeviceReadiness,
         });
       }
     });

@@ -125,7 +125,7 @@ async function runLocalCliOutput(
 ): Promise<string> {
   // The workflow warms CtrlProxy in the daemon process before this test runs.
   // Calling the local CLI keeps start and stop in that same process; importing
-  // the tool handler here would create a second cold DeviceSessionManager and
+  // the tool handler here would create a second cold DeviceReadiness and
   // reintroduce the runner-readiness timeout this test is meant to exercise.
   const { stdout } = await execFileAsync(
     process.execPath,

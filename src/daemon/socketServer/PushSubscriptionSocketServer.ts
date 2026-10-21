@@ -1,4 +1,5 @@
 import { PushSubscriberOutbox } from "./PushSubscriberOutbox";
+import { BroadcastFrame } from "./BroadcastFrame";
 import { streamAuthRefusalFields } from "../streamSocketAuth";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Socket } from "node:net";
@@ -334,6 +335,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
   protected pushToSubscribers(data: TPushData): number {
     let sentCount = 0;
     const deadSockets = new Set<Socket>();
+    const frame = new BroadcastFrame((id) => this.createPushMessage(data, id));
 
     for (const [subscriptionId, subscriber] of this.subscribers) {
       if (deadSockets.has(subscriber.socket)) {
@@ -359,9 +361,11 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       }
 
       try {
-        const result = this.sendJson(
+        const message = this.createPushMessage(data, subscriptionId);
+        const result = this.sendOutbound(
           subscriber.socket,
-          this.createPushMessage(data, subscriptionId),
+          message,
+          frame.lineFor(subscriptionId, message),
         );
         if (!result) {
           // write()=false is not a death signal — wait for drain; truly dead peers get reaped by timeoutMs.
@@ -548,6 +552,10 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
 
   /** All push and control writes share the connection FIFO while backpressured. */
   protected override sendJson(socket: Socket, data: unknown): boolean {
+    return this.sendOutbound(socket, data);
+  }
+
+  private sendOutbound(socket: Socket, data: unknown, line?: string): boolean {
     if (socket.destroyed) {
       return false;
     }
@@ -564,7 +572,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       });
     }
     const current = this.connections.get(socket)!;
-    const ok = current.outbox.send(data, current.drainPending);
+    const ok = current.outbox.send(data, current.drainPending, line);
     if (!ok) {
       this.armDrainListener(socket);
     } else if (!connection) {

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import {
   resetDeviceCreationGate,
   setDeviceCreationGate,
 } from "../../src/devices/deviceCreationGate";
 import { logger } from "../../src/utils/logger";
-import type { DeviceClientSimctl } from "../../src/daemon/readiness/DeviceSessionManager";
+import type { DeviceClientSimctl } from "../../src/daemon/readiness/DeviceReadiness";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -123,7 +123,7 @@ function makeManager(state: SimState, runner: FakeIOSCtrlProxyManager, timer = n
     await stop();
   };
   const adb = new FakeAdbExecutor();
-  return DeviceSessionManager.createInstance(
+  return DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), statefulSimctl(state), {
       iosCtrlProxyManager: runner,
     }),

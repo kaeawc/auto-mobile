@@ -1,3 +1,4 @@
+import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { makePool } from "../helpers/makePool";
 import { concreteCtrlProxyClient } from "../helpers/concreteCtrlProxyClient";
 import { readFileSync } from "node:fs";
@@ -55,7 +56,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedApp
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWebSocket } from "../fakes/FakeWebSocket";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
@@ -2464,13 +2465,7 @@ describe("killDevice handler", () => {
         devicePool: pool,
         sessionManager,
         deviceDisconnectMonitor: null,
-        deviceDisconnectMisses: new Map(),
-        deviceDisconnectMissIncarnations: new Map(),
-        confirmedDisconnectedDeviceIds: new Set(),
-        forceDisconnectedDeviceIds: new Set(),
-        forceDisconnectedDeviceGenerations: new Map(),
-        offlineRecoveryAttemptedDeviceIds: new Set(),
-        offlineRecoveryAttemptedIncarnations: new Map(),
+        deviceLoss: new DeviceLossState(),
         deferredSessionRecoverySweeps: new Set(),
       }) as {
         deviceDisconnectMonitor: SingleFlightInterval;
@@ -3865,9 +3860,9 @@ describe("killDevice handler", () => {
 
       // The next resolver still sees the caller's selected device, without a
       // fresh boot observation. Binding the session must preserve its tombstone.
-      const fakeSessionManager = new FakeDeviceSessionManager();
+      const fakeSessionManager = new FakeDeviceReadiness();
       fakeSessionManager.setConnectedDevices([device]);
-      registry.setCollaboratorsForTesting({ deviceSessionManager: fakeSessionManager });
+      registry.setCollaboratorsForTesting({ deviceReadiness: fakeSessionManager });
       registry.setCollaboratorsForTesting({
         toolCallRepository: {
           async recordToolCall(): Promise<void> {},

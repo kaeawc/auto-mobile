@@ -1,3 +1,4 @@
+import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
@@ -95,13 +96,7 @@ function harness() {
   Object.assign(daemon, {
     timer,
     deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map(),
-    deviceDisconnectMissIncarnations: new Map(),
-    confirmedDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceIds: new Set([device.id]),
-    forceDisconnectedDeviceGenerations: new Map(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
+    deviceLoss: new DeviceLossState({ forceDisconnectedIds: new Set([device.id]) }),
     deferredSessionRecoverySweeps: new Set(),
     devicePool: {
       retryDueDeferredSessionRecoveries: async () => {},
@@ -224,7 +219,7 @@ describe("confirmed plan device loss", () => {
       await h.tick();
       await h.tick();
       expect(h.manager.calls).toHaveLength(boundary === "sweep" ? 2 : 5);
-      expect(h.daemon["deviceDisconnectMisses"].has(h.device.id)).toBe(false);
+      expect(h.daemon["deviceLoss"].misses.has(h.device.id)).toBe(false);
       expect(plan.abortController.signal.aborted).toBe(false);
       expect(await h.incidents.list()).toEqual([]);
       expect(h.transportAliases.mapDiscovery([alias])).toEqual([canonical]);
@@ -436,8 +431,8 @@ describe("confirmed plan device loss", () => {
         },
       ]);
       expect(h.manager.platforms.slice(0, 4)).toEqual(["either", "android", "either", "android"]);
-      expect(h.daemon["deviceDisconnectMisses"].get(h.device.id)).toBe(1);
-      expect(h.daemon["confirmedDisconnectedDeviceIds"].size).toBe(0);
+      expect(h.daemon["deviceLoss"].misses.get(h.device.id)).toBe(1);
+      expect(h.daemon["deviceLoss"].confirmedDisconnectedIds.size).toBe(0);
       // A fresh presence observation ends the episode even without replacing the object.
       h.manager.bootedDevices.push({ deviceId: h.device.id, name: "Pixel", platform: "android" });
       await h.tick();
@@ -478,7 +473,7 @@ describe("confirmed plan device loss", () => {
       const plan = h.start("executePlan");
       h.manager.bootedDevices = [];
       if (!rawSignal) {
-        h.daemon["forceDisconnectedDeviceIds"].clear();
+        h.daemon["deviceLoss"].forceDisconnectedIds.clear();
       }
       await h.tick();
       await h.tick();

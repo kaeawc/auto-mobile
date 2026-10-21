@@ -16,8 +16,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
   createDefaultDeviceClientProvider,
-  DeviceSessionManager,
-} from "../../src/daemon/readiness/DeviceSessionManager";
+  DeviceReadiness,
+} from "../../src/daemon/readiness/DeviceReadiness";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -83,7 +83,7 @@ describe("device-client admission seam", () => {
         layoutSeqSum: 0,
       });
       try {
-        const manager = DeviceSessionManager.createInstance(provider);
+        const manager = DeviceReadiness.createInstance(provider);
         await manager.verifyAndroidDevice(SERIAL, { readiness: "booted" }, DEVICE);
         expect(active).toHaveBeenCalledTimes(1);
         await quarantinedPool();
@@ -111,7 +111,7 @@ describe("device-client admission seam", () => {
       const window = new FakeWindow();
       window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
       const provider = new FakeDeviceClientProvider(adb, utils, undefined, { window });
-      const manager = DeviceSessionManager.createInstance(provider, new FakeAdbClientFactory(adb));
+      const manager = DeviceReadiness.createInstance(provider, new FakeAdbClientFactory(adb));
       await manager.verifyAndroidDevice(SERIAL, { readiness: "booted" });
       if (route === "current") {
         manager.setCurrentDevice(DEVICE, "android");
@@ -130,7 +130,7 @@ describe("device-client admission seam", () => {
 
   test("current quarantine refusal preserves selection and never discovers a replacement", async () => {
     const refusal = new DeviceIdentityQuarantinedError("identity unresolved");
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
       new FakeAdbClientFactory(),
       {
@@ -164,7 +164,7 @@ describe("device-client admission seam", () => {
     const window = new FakeWindow();
     window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
     const binding = new FakeDeviceExecutionBinding();
-    const manager = DeviceSessionManager.createInstance(
+    const manager = DeviceReadiness.createInstance(
       new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), undefined, { window }),
       new FakeAdbClientFactory(adb),
       { admissionGate: permissiveDeviceAdmissionGate, executionBinding: binding },

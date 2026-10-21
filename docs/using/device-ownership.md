@@ -778,7 +778,7 @@ unheld, idle, pooled device through `ObservationReadServiceStart`, as described 
 [Reading a device you do not own](../tools.md#reading-a-device-you-do-not-own-deviceid).
 
 On Android, registry readiness for the 18 **Yes** tools uses
-`DeviceSessionManager.ensureAndroidCtrlProxyReady`: `CtrlProxyManager.setup` may
+`DeviceReadiness.ensureAndroidCtrlProxyReady`: `CtrlProxyManager.setup` may
 install or upgrade the CtrlProxy APK, and `enable` writes
 `enabled_accessibility_services` (preserving other services) and
 `accessibility_enabled`. Setup/enable do not directly force-stop or rebind;

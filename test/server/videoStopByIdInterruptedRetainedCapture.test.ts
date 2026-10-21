@@ -22,7 +22,7 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { VideoRecorderService } from "../../src/features/video";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -87,7 +87,7 @@ beforeEach(async () => {
     spyOn(fsPromises, "stat").mockRejectedValue(new Error("fake file has no disk stat")),
     spyOn(logger, "warn").mockImplementation(() => {}),
   ];
-  const sessions = new FakeDeviceSessionManager();
+  const sessions = new FakeDeviceReadiness();
   sessions.setConnectedDevices([device]);
   videoRecording.configure({ deviceDetector: sessions });
   service = new VideoRecorderService({

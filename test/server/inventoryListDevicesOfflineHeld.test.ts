@@ -87,4 +87,36 @@ describe("listDevices tool vs booted resource for a held, adb-offline device", (
     expect(fromTool?.runtime.connection).toEqual(fromResource?.runtime.connection);
     expect(fromTool?.runtime.connection?.state).toBe("offline");
   });
+  test("the held-device state probe receives the request's explicit signal, not an ambient one", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeDeviceUtils();
+    manager.setBootedDevices("android", [android]);
+    manager.setBootedDevices("ios", []);
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = makePool(sessions, "hunt-offline-held-signal", { timer, deviceManager: manager });
+    await pool.initializeWithDevices([android]);
+    await pool.assignDeviceToSession("session-held");
+    manager.setBootedDevices("android", []);
+    const probeSignals: Array<AbortSignal | undefined> = [];
+    manager.getAndroidListedDeviceStates = async (ids, options) => {
+      probeSignals.push(options?.signal);
+      return new Map(Array.from(ids, (id) => [id, "offline"]));
+    };
+    DaemonState.getInstance().initialize(sessions, pool);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
+    });
+
+    const controller = new AbortController();
+    // No runWithAbortSignal scope: only the signal passed to the handler can reach the probe.
+    await ToolRegistry.getTool("listDevices")!.handler(
+      { platform: "android" },
+      undefined,
+      controller.signal,
+    );
+
+    expect(probeSignals).toEqual([controller.signal]);
+  });
 });

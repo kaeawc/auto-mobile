@@ -11,7 +11,7 @@ import type { BootedDevice, SomePlatform } from "../../src/models";
 
 /**
  * FUNNEL 1 for the device-gesture-recording resolver (#6923). It used to discover through
- * `DeviceSessionManager.detectConnectedPlatforms` and never fold the observation
+ * `DeviceReadiness.detectConnectedPlatforms` and never fold the observation
  * into the pool, so the admission gate in `handleRequest` re-read pool state
  * from BEFORE that discovery — the same gap the video-stream and WebRTC
  * resolvers closed in #6888. Selection here is discovery + reconcile + match

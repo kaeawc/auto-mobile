@@ -1,3 +1,4 @@
+import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -186,12 +187,7 @@ function monitorHarness(
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
     deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map<string, number>(),
-    deviceDisconnectMissIncarnations: new Map([[device.id, 1]]),
-    confirmedDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceIds: new Set(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
+    deviceLoss: new DeviceLossState({ missIncarnations: new Map([[device.id, 1]]) }),
     deferredSessionRecoverySweeps: new Set(),
     devicePool: {
       retryDueDeferredSessionRecoveries: async () => {},
@@ -293,14 +289,14 @@ test.each(["emulator-5554", "localhost:5555"])(
     ];
     aliases.fold(initial, await aliases.prepare(initial), new Set(["emulator-5554"]));
     daemon.devicePool.mapAndroidDiscovery = (rows: BootedDevice[]) => aliases.mapDiscovery(rows);
-    daemon.deviceDisconnectMisses.set("emulator-5554", 2);
+    daemon.deviceLoss.misses.set("emulator-5554", 2);
     const sweep = monitor.run();
     await entered.promise;
-    expect(daemon.deviceDisconnectMisses.get("emulator-5554")).toBe(2);
+    expect(daemon.deviceLoss.misses.get("emulator-5554")).toBe(2);
     complete.resolve();
     await sweep;
-    expect(daemon.deviceDisconnectMisses.has("emulator-5554")).toBe(false);
-    expect(daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+    expect(daemon.deviceLoss.misses.has("emulator-5554")).toBe(false);
+    expect(daemon.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
     await monitor.stop();
   },
 );
@@ -338,12 +334,12 @@ test("alternating successful and failed offline probes do not repeat global reco
   fail = true;
   const failedSweep = monitor.run();
   await probeEntered.promise;
-  expect(daemon.offlineRecoveryAttemptedDeviceIds.has(device.id)).toBe(true);
+  expect(daemon.deviceLoss.offlineRecoveryAttemptedIds.has(device.id)).toBe(true);
   failProbe.resolve();
   await failedSweep;
-  expect(daemon.offlineRecoveryAttemptedDeviceIds.has(device.id)).toBe(true);
+  expect(daemon.deviceLoss.offlineRecoveryAttemptedIds.has(device.id)).toBe(true);
   fail = false;
-  daemon.deviceDisconnectMisses.clear();
+  daemon.deviceLoss.misses.clear();
   await monitor.run();
   expect(reconnects).toBe(1);
   device.incarnation++;
@@ -367,7 +363,7 @@ test("B1 defers the global reconnect when another offline candidate owns startup
   daemon.devicePool.getAllDevices = () => [device, protectedDevice];
   daemon.devicePool.isDeviceLeasedForAndroidStartup = (id: string) => id === protectedDevice.id;
   await monitor.run();
-  const attempts = daemon.offlineRecoveryAttemptedDeviceIds.size;
+  const attempts = daemon.deviceLoss.offlineRecoveryAttemptedIds.size;
   const protectedReconnects = reconnects;
   daemon.devicePool.isDeviceLeasedForAndroidStartup = () => false;
   await monitor.run();
@@ -421,8 +417,8 @@ test.each([
       for (let tick = 0; tick < 4; tick++) {
         await monitor.run();
       }
-      expect(daemon.deviceDisconnectMisses.size).toBe(0);
-      expect(daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(daemon.deviceLoss.misses.size).toBe(0);
+      expect(daemon.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
       expect(offlineProbes).toBe(0);
       expect(recoveries).toBe(0);
       expect(cleanups).toBe(0);
@@ -492,7 +488,7 @@ test("concurrent refresh and disconnect monitor do not probe twice or fail disco
     await drainMicrotasks(100);
     expect(normalization).toHaveBeenCalledTimes(1);
     expect(adb.getExecutedCommands()).toHaveLength(calls);
-    expect(daemon.deviceDisconnectMisses.size).toBe(0);
+    expect(daemon.deviceLoss.misses.size).toBe(0);
     release.resolve(createExecResult(usb, ""));
     await expect(sweep).resolves.toBeUndefined();
     expect((await refresh).failure).toBeUndefined();

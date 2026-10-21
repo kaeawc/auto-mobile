@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
 import { BootedDevice } from "../../src/models";
 import {
   clearDirectSessionDevices,
@@ -27,10 +27,10 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     platform: "ios",
   };
 
-  let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: ReturnType<
+  let fakeDeviceReadiness: FakeDeviceReadiness;
+  let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
-  >["deviceSessionManager"];
+  >["deviceReadiness"];
   let restorePipelineOverrides: (() => void) | undefined;
 
   beforeEach(() => {
@@ -38,9 +38,9 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     expect(DaemonState.getInstance().isInitialized()).toBe(false);
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
-    fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    fakeDeviceReadiness = new FakeDeviceReadiness();
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -49,7 +49,7 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
   });
@@ -71,7 +71,7 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
   };
 
   test("resolves device and narrows platform from the direct-session registry", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([android, ios]);
+    fakeDeviceReadiness.setConnectedDevices([android, ios]);
     registerDirectSessionDevice("session-abc", android);
     const tool = registerTool();
 
@@ -81,20 +81,20 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
 
     // Device was resolved from the direct session, and platform was narrowed
     // away from "either".
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyDeviceId()).toBe("emulator-5554");
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("android");
+    expect(fakeDeviceReadiness.getLastEnsureDeviceReadyDeviceId()).toBe("emulator-5554");
+    expect(fakeDeviceReadiness.getLastEnsureDeviceReadyPlatform()).toBe("android");
   });
 
   test("resolves an iOS direct session the same way", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([android, ios]);
+    fakeDeviceReadiness.setConnectedDevices([android, ios]);
     registerDirectSessionDevice("session-ios", ios);
     const tool = registerTool();
 
     const response = await tool.handler({ sessionUuid: "session-ios" });
     expect(response).toEqual({ success: true });
 
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyDeviceId()).toBe(ios.deviceId);
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("ios");
+    expect(fakeDeviceReadiness.getLastEnsureDeviceReadyDeviceId()).toBe(ios.deviceId);
+    expect(fakeDeviceReadiness.getLastEnsureDeviceReadyPlatform()).toBe("ios");
   });
 
   test("does not override an explicitly provided cross-platform deviceId, and leaves platform for the id to resolve", async () => {
@@ -103,26 +103,26 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     // "either" so the production ensureDeviceReady resolves the platform FROM the
     // id — narrowing to the session's "android" here would search only Android
     // devices and reject the iOS id (Codex #5906 P2).
-    fakeDeviceSessionManager.setConnectedDevices([android, ios]);
+    fakeDeviceReadiness.setConnectedDevices([android, ios]);
     registerDirectSessionDevice("session-abc", android);
     const tool = registerTool();
 
     const response = await tool.handler({ sessionUuid: "session-abc", deviceId: ios.deviceId });
     expect(response).toEqual({ success: true });
 
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyDeviceId()).toBe(ios.deviceId);
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("either");
+    expect(fakeDeviceReadiness.getLastEnsureDeviceReadyDeviceId()).toBe(ios.deviceId);
+    expect(fakeDeviceReadiness.getLastEnsureDeviceReadyPlatform()).toBe("either");
   });
 
   test("falls through unchanged when the sessionUuid has no direct-session device", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([android]);
+    fakeDeviceReadiness.setConnectedDevices([android]);
     const tool = registerTool();
 
     const response = await tool.handler({ sessionUuid: "session-unknown" });
     expect(response).toEqual({ success: true });
 
     // No direct session registered: platform stays "either", no deviceId injected.
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("either");
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyDeviceId()).toBeUndefined();
+    expect(fakeDeviceReadiness.getLastEnsureDeviceReadyPlatform()).toBe("either");
+    expect(fakeDeviceReadiness.getLastEnsureDeviceReadyDeviceId()).toBeUndefined();
   });
 });

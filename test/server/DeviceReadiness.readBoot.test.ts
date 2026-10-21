@@ -2,10 +2,10 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import {
-  DeviceSessionManager,
+  DeviceReadiness,
   type ConnectedPlatformScan,
   type DeviceReadyOptions,
-} from "../../src/daemon/readiness/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceReadiness";
 import {
   ActionableError,
   type BootedDevice,
@@ -109,7 +109,7 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
     defaultMode: "light" as const,
     applyOnConnect: false,
   }));
-  const manager = DeviceSessionManager.createInstance(
+  const manager = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(adb, devices, simctlAvailable ? simctl : undefined, {
       window,
       ctrlProxyManager: new FakeCtrlProxyManager(),

@@ -67,7 +67,7 @@ import { type AppearanceSyncTarget } from "./AppearanceSyncScheduler";
 import { Timer } from "../utils/SystemTimer";
 import { IdGenerator } from "../utils/IdGenerator";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
-import { type OfflineEpisode, type DisconnectCandidateIncarnation } from "./disconnectMonitor";
+import { DeviceLossState } from "./deviceLossState";
 import { errorMessage } from "../utils/describeUnknownError";
 import { type ObservationStreamHealth } from "./ObservationStreamHealth";
 import { type ToolSelectionProfileProvenanceLoader } from "./toolSelectionProfileRegistry";
@@ -241,27 +241,7 @@ export class Daemon {
   // an inconclusive probe and (b) restore its record if we refuse (issue #6232).
   private readonly incumbentOwnerGuard: IncumbentOwnerGuard;
 
-  protected deviceDisconnectMisses: Map<string, number> = new Map();
-
-  protected deviceDisconnectMissIncarnations = new Map<string, DisconnectCandidateIncarnation>();
-
-  protected confirmedDisconnectedDeviceIds: Set<string> = new Set();
-
-  protected forceDisconnectedDeviceIds: Set<string> = new Set();
-
-  protected forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
-
-  // Serials that already had one bounded 'adb -s <serial> reconnect' this offline
-  // episode (#7536). Pruned each sweep by pruneStaleOfflineRecoveryAttempts so
-  // a later episode for the same serial gets a fresh attempt.
-  protected offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
-
-  protected offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
-
-  // Start of each candidate's current transitional-state episode (#11090, #11592):
-  // adb offline/unauthorized and simctl Booting/Shutting Down sweeps run against
-  // OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
-  protected offlineEpisodes = new Map<string, OfflineEpisode>();
+  protected readonly deviceLoss = new DeviceLossState();
 
   private observerSessionRegistry: ObserverSessionRegistry;
 
@@ -897,7 +877,8 @@ export class Daemon {
         captureDisconnectCleanup(
           {
             services,
-            forceDisconnectedDeviceGenerations: () => this.forceDisconnectedDeviceGenerations,
+            forceDisconnectedDeviceGenerations: () =>
+              daemon.deviceLoss.forceDisconnectedGenerations,
           },
           deviceId,
           cohort,
@@ -909,17 +890,18 @@ export class Daemon {
       cleanupDisconnectedDevice: (...args) => this.cleanupDisconnectedDevice(...args),
       services,
       lifecycle,
-      forceDisconnectedDeviceIds: () => daemon.forceDisconnectedDeviceIds,
-      confirmedDisconnectedDeviceIds: () => daemon.confirmedDisconnectedDeviceIds,
-      deviceDisconnectMissIncarnations: () => daemon.deviceDisconnectMissIncarnations,
-      offlineEpisodes: () => daemon.offlineEpisodes,
-      offlineRecoveryAttemptedDeviceIds: () => daemon.offlineRecoveryAttemptedDeviceIds,
+      forceDisconnectedDeviceIds: () => daemon.deviceLoss.forceDisconnectedIds,
+      confirmedDisconnectedDeviceIds: () => daemon.deviceLoss.confirmedDisconnectedIds,
+      deviceDisconnectMissIncarnations: () => daemon.deviceLoss.missIncarnations,
+      offlineEpisodes: () => daemon.deviceLoss.offlineEpisodes,
+      offlineRecoveryAttemptedDeviceIds: () => daemon.deviceLoss.offlineRecoveryAttemptedIds,
       setOfflineRecoveryAttemptedDeviceIds: (value) =>
-        (daemon.offlineRecoveryAttemptedDeviceIds = value),
-      offlineRecoveryAttemptedIncarnations: () => daemon.offlineRecoveryAttemptedIncarnations,
+        (daemon.deviceLoss.offlineRecoveryAttemptedIds = value),
+      offlineRecoveryAttemptedIncarnations: () =>
+        daemon.deviceLoss.offlineRecoveryAttemptedIncarnations,
       setOfflineRecoveryAttemptedIncarnations: (value) =>
-        (daemon.offlineRecoveryAttemptedIncarnations = value),
-      forceDisconnectedDeviceGenerations: () => daemon.forceDisconnectedDeviceGenerations,
+        (daemon.deviceLoss.offlineRecoveryAttemptedIncarnations = value),
+      forceDisconnectedDeviceGenerations: () => daemon.deviceLoss.forceDisconnectedGenerations,
       shouldSkipStaleDisconnectCleanup: (...args) => this.shouldSkipStaleDisconnectCleanup(...args),
       isCapturedDisconnectTargetCurrent: (...args) =>
         this.isCapturedDisconnectTargetCurrent(...args),
@@ -1006,7 +988,7 @@ export class Daemon {
       deviceDisconnectMonitor: () => daemon.deviceDisconnectMonitor,
       setDeviceDisconnectMonitor: (value) => (daemon.deviceDisconnectMonitor = value),
       deferredSessionRecoverySweeps: () => daemon.deferredSessionRecoverySweeps,
-      deviceDisconnectMisses: () => daemon.deviceDisconnectMisses,
+      deviceDisconnectMisses: () => daemon.deviceLoss.misses,
       sessionBrokerConfigPath: () => daemon.sessionBrokerConfigPath,
       managedExecutionReowner: () => daemon.managedExecutionReowner,
       setManagedExecutionReowner: (value) => (daemon.managedExecutionReowner = value),

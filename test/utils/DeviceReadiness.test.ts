@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  DeviceSessionManager,
+  DeviceReadiness,
   createDefaultDeviceClientProvider,
-} from "../../src/daemon/readiness/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceReadiness";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -18,7 +18,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { FakeWindow } from "../fakes/FakeWindow";
-import { BootedDevice, AppearanceConfigInput, ExecResult } from "../../src/models";
+import { ActionableError, BootedDevice, AppearanceConfigInput, ExecResult } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { parseAppearanceConfig } from "../../src/features/appearance";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadinessConfig";
@@ -42,9 +42,9 @@ import * as path from "path";
 import * as os from "os";
 
 function createTestSessionManager(
-  ...[provider, adbFactory, options]: Parameters<typeof DeviceSessionManager.createInstance>
-): DeviceSessionManager {
-  return DeviceSessionManager.createInstance(provider, adbFactory, {
+  ...[provider, adbFactory, options]: Parameters<typeof DeviceReadiness.createInstance>
+): DeviceReadiness {
+  return DeviceReadiness.createInstance(provider, adbFactory, {
     ...options,
     appearanceOnConnectDependencies: {
       isSyncEnabled: () => true,
@@ -106,7 +106,7 @@ function makeReadyWindow(): FakeWindow {
   return w;
 }
 
-describe("DeviceSessionManager", () => {
+describe("DeviceReadiness", () => {
   const device: BootedDevice = {
     name: "device-1",
     deviceId: "device-1",
@@ -681,7 +681,7 @@ describe("DeviceSessionManager", () => {
   });
 });
 
-describe("DeviceSessionManager iOS push-update cache invalidation", () => {
+describe("DeviceReadiness iOS push-update cache invalidation", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDeviceUtils: FakeDeviceUtils;
   let originalAppearanceDefaults: AppearanceConfigInput;
@@ -852,7 +852,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
   });
 });
 
-describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
+describe("DeviceReadiness legacy iOS auto-start readiness", () => {
   const iosDevice: BootedDevice = {
     deviceId: "ios-ready-1",
     name: "iPhone 15",
@@ -864,7 +864,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     iosClient: FakeIOSCtrlProxy,
     useConfiguredReadinessTimeout: boolean = false,
     lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
-  ): DeviceSessionManager {
+  ): DeviceReadiness {
     const fakeAdb = new FakeAdbExecutor();
     const fakeDeviceUtils = new FakeDeviceUtils();
     const fakeSimctl = new FakeSimctl();
@@ -1112,7 +1112,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
   });
 });
 
-describe("DeviceSessionManager iOS presentation policy", () => {
+describe("DeviceReadiness iOS presentation policy", () => {
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
@@ -1211,7 +1211,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
   });
 });
 
-describe("DeviceSessionManager dual-platform resolution", () => {
+describe("DeviceReadiness dual-platform resolution", () => {
   const androidDevice: BootedDevice = {
     name: "emulator-5554",
     deviceId: "emulator-5554",
@@ -1285,9 +1285,31 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   test("should throw when both platforms connected and no active device or deviceId", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
-    await expect(manager.ensureDeviceReady("either")).rejects.toThrow(
-      "pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
+    expect(manager.getCurrentDevice()).toBeUndefined();
+    const readiness = manager.ensureDeviceReady("either", undefined, {
+      skipCtrlProxyDownload: true,
+    });
+    await expect(readiness).rejects.toBeInstanceOf(ActionableError);
+    await expect(readiness).rejects.toThrow(
+      "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
     );
+  });
+
+  test("session-scoped readiness leaks the shared current device into sessionless resolution: current behaviour (#11810)", async () => {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+
+    await manager.ensureDeviceReady("ios", iosDevice.deviceId, {
+      sessionId: "session-b",
+      skipCtrlProxyDownload: true,
+    });
+    expect(manager.getCurrentDevice()?.deviceId).toBe("ios-sim-1");
+
+    // The baseline above throws with no prior readiness. The #11810 removal slice will flip
+    // this characterization: session-scoped readiness must no longer choose a sessionless target.
+    const result = await manager.ensureDeviceReady("either", undefined, {
+      skipCtrlProxyDownload: true,
+    });
+    expect(result.deviceId).toBe("ios-sim-1");
   });
 
   test("fails closed when an unusable iOS runner override is set (#4221)", async () => {
@@ -1972,7 +1994,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 });
 
-describe("DeviceSessionManager device-list error formatting (#4227)", () => {
+describe("DeviceReadiness device-list error formatting (#4227)", () => {
   // These messages exist to tell the caller which identifier to use instead.
   // Joining BootedDevice objects renders "[object Object]", destroying the only
   // actionable part of the error.

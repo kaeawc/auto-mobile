@@ -351,7 +351,8 @@ export interface BootedDeviceResourceDependencies {
 }
 
 /** Probes a device's lock state; returns `undefined` when it can't be determined. */
-export type DeviceLockProbe = (device: BootedDevice) => Promise<boolean | undefined>;
+type LockState = boolean | undefined;
+export type DeviceLockProbe = (device: BootedDevice, signal?: AbortSignal) => Promise<LockState>;
 
 // Injected only by tests, which need a deterministic lock state without real device transports.
 // A fake device manager disables production probes unless the test injects a probe explicitly.
@@ -374,13 +375,13 @@ export function setIosLockStateProbe(probe: IosLockStateProbe | null): void {
  * via notifyutil (issue #5106). Physical iOS remains unknown. The caller bounds and handles
  * failures — lock state is advisory, never fatal to the resource.
  */
-async function realDeviceLockProbe(device: BootedDevice): Promise<boolean | undefined> {
+async function realDeviceLockProbe(device: BootedDevice, signal?: AbortSignal): Promise<LockState> {
   if (device.platform !== "android") {
     if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {
       return undefined;
     }
     const probe = injectedIosLockStateProbe ?? new NotifyutilIosLockStateProbe();
-    const lock = await probe.read(device.deviceId, getAbortSignal());
+    const lock = await probe.read(device.deviceId, signal);
     return lock?.locked;
   }
   const lock = await defaultAdbClientFactory.create(device).getDeviceLock();
@@ -395,7 +396,8 @@ function activeLockProbe(): DeviceLockProbe | null {
     return injectedLockProbe ?? realDeviceLockProbe;
   }
   return injectedIosLockStateProbe
-    ? async (device) => (device.platform === "ios" ? realDeviceLockProbe(device) : undefined)
+    ? async (device, signal) =>
+        device.platform === "ios" ? realDeviceLockProbe(device, signal) : undefined
     : null;
 }
 
@@ -422,14 +424,14 @@ function activeOrientationReaderFactory(
  */
 async function probeDeviceLock(
   device: BootedDevice,
-  options: { lockProbe: DeviceLockProbe; timer?: Timer },
+  options: { lockProbe: DeviceLockProbe; timer?: Timer; signal?: AbortSignal },
 ): Promise<boolean | undefined> {
-  const { lockProbe, timer = defaultTimer } = options;
+  const { lockProbe, timer = defaultTimer, signal } = options;
   const deadline = new Error("Lock-state probe timed out");
   try {
-    return await raceWithDeadline(lockProbe(device), {
+    return await raceWithDeadline(lockProbe(device, signal), {
       timer,
-      signal: getAbortSignal(),
+      signal,
       timeoutMs: LOCK_STATE_TIMEOUT_MS,
       label: "Lock-state probe",
       timeoutError: () => deadline,
@@ -489,7 +491,9 @@ function platformObservation(
  * run ONLY the keyguard probe (no service-status), so the desktop's frequent lock poll doesn't pay
  * for isInstalled/isEnabled/sha256 every cycle (issue #5056).
  */
-async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceContent> {
+async function computeDeviceLockStates(
+  signal?: AbortSignal,
+): Promise<DeviceLockStatesResourceContent> {
   const devices: BootedDevice[] = [];
   const succeededPlatforms = new Set<Platform>();
   const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
@@ -533,7 +537,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
   const lockProbe = activeLockProbe();
   if (lockProbe) {
     const results = await Promise.allSettled(
-      devices.map((device) => probeDeviceLock(device, { lockProbe })),
+      devices.map((device) => probeDeviceLock(device, { lockProbe, signal })),
     );
     for (let i = 0; i < devices.length; i++) {
       const result = results[i];
@@ -552,7 +556,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
 }
 
 async function getDeviceLockStates(): Promise<ResourceContent> {
-  const content = await computeDeviceLockStates();
+  const content = await computeDeviceLockStates(getAbortSignal());
   return {
     uri: DEVICE_LOCK_STATES_RESOURCE_URI,
     mimeType: "application/json",
@@ -1479,9 +1483,9 @@ export function readinessFromServiceStatus(
 
 async function enrichDeviceLockStates(
   devices: BootedDeviceInfo[],
-  options: { timer?: Timer } = {},
+  options: { timer?: Timer; signal?: AbortSignal } = {},
 ): Promise<void> {
-  const timer = options.timer ?? defaultTimer;
+  const { timer = defaultTimer, signal } = options;
   const lockProbe = activeLockProbe();
   if (!lockProbe) {
     return;
@@ -1490,7 +1494,7 @@ async function enrichDeviceLockStates(
   const lockResults = await Promise.allSettled(
     devices.map(async (device) =>
       isProbeableDevice(device)
-        ? await probeDeviceLock(probeTarget(device), { lockProbe, timer })
+        ? await probeDeviceLock(probeTarget(device), { lockProbe, timer, signal })
         : undefined,
     ),
   );
@@ -1627,7 +1631,7 @@ async function computeBootedDevicesForPlatforms(
     const probes = [
       ["bootCompletion", () => enrichDeviceBootCompletion(devices, timer, deps)],
       ["serviceStatus", () => enrichDeviceServiceStatuses(devices, timer)],
-      ["lock", () => enrichDeviceLockStates(devices, { timer })],
+      ["lock", () => enrichDeviceLockStates(devices, { timer, signal: controller.signal })],
       ["orientation", () => enrichDeviceOrientations(devices, timer, deps)],
     ] as const;
     for (const [name] of probes) {

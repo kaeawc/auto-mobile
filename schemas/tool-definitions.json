@@ -5127,7 +5127,7 @@
   },
   {
     "name": "inspectPackageSigning",
-    "description": "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "description": "Fresh read of one app's presence (installed/absent/unknown) and signing. Android: a user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and embedded provisioning profile (expiry, UUID). Never cached.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -5139,7 +5139,7 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "userId": {
-          "description": "Android user/profile to inspect; when omitted it is resolved and reported",
+          "description": "Android user/profile to inspect; when omitted it is resolved and reported. Refused on iOS",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
@@ -5172,7 +5172,7 @@
         },
         "platform": {
           "type": "string",
-          "const": "android"
+          "enum": ["android", "ios"]
         },
         "deviceId": {
           "type": "string"
@@ -5326,19 +5326,37 @@
           },
           "required": ["source", "fresh", "observedAt", "scope", "apiLevel"],
           "additionalProperties": {}
+        },
+        "deviceKind": {
+          "type": "string",
+          "enum": ["simulator", "physical"]
         }
       },
-      "required": [
-        "appId",
-        "platform",
-        "deviceId",
-        "userId",
-        "userSource",
-        "presence",
-        "signing",
-        "observation"
-      ],
-      "additionalProperties": {}
+      "required": ["appId", "platform", "deviceId", "presence", "signing", "observation"],
+      "if": {
+        "properties": {
+          "platform": {
+            "const": "android"
+          }
+        },
+        "required": ["platform"]
+      },
+      "then": {
+        "required": ["userId", "userSource"]
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "platform": {
+              "const": "ios"
+            }
+          },
+          "required": ["platform"]
+        },
+        "then": {
+          "required": ["deviceKind"]
+        }
+      }
     },
     "_meta": {
       "automobile/deviceReadOnly": true

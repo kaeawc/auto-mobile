@@ -1872,7 +1872,7 @@ subtree, or the whole active-window tree when owner-less.
 | ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 🔏 <code>inspectPackageSigning</code>                                                            | Android: fresh read of a package's presence (`installed`, `absent`, `unknown`) for one user and its SHA-256 signing certificates, including the complete signer set and rotation history. Never cached.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 🔏 <code>inspectPackageSigning</code>                                                            | Fresh read of an app's presence (`installed`, `absent`, `unknown`) and signing. Android: one user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and the embedded provisioning profile. Never cached.                                                                                                                                                                                                                                                                                                                               |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                           |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -1913,6 +1913,16 @@ termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 `removeKeyValue.fileName` are deprecated aliases for the store selector `name`.
 `setAppPermissions.action` selects `grant`, `revoke`, or `reset`.
+
+On iOS, `getDeepLinks` reads custom URL schemes (`CFBundleURLTypes`) and document
+types from the installed bundle's `Info.plist`, and universal-link hosts from the
+`com.apple.developer.associated-domains` entitlement (`applinks:` entries). The
+Simulator reads its host bundle directly. A physical device (#14094) copies the
+installed bundle to the host with `devicectl device copy from` and reads it the
+same way, so both report the same links for the same build. A failed copy returns
+`success: false` with devicectl's stderr. Physical-device results are cached per
+device, bundle ID and installed version, so repeat calls skip the copy until the
+app is updated.
 
 On iOS Simulator, a stored TCC Photos grant is not proof of effective full
 read/write authorization. `getAppPermissions` reports it as `unknown` with
@@ -2035,7 +2045,7 @@ uninstalls per device, so a guarded check-then-mutate cannot interleave with ano
 mutation; package changes made outside AutoMobile (adb in a terminal, another tool) are not
 visible to that lock, so hold the device exclusively when that matters.
 
-`inspectPackageSigning` (Android) takes `appId` and an optional `userId`; when omitted the
+`inspectPackageSigning` on Android takes `appId` and an optional `userId`; when omitted the
 user is resolved the way `uninstallApp` does and reported as `userId` and `userSource`. Each
 call reads the device (`dumpsys package`, `pm path`, and the installed base APK's signing
 block); nothing is cached, and `observation` records `fresh: true`, `observedAt`, the scope,
@@ -2051,6 +2061,26 @@ installed APK without re-verifying its signatures. JAR (v1)-only APKs, ZIP64 APK
 package on a device whose API level cannot be read report `unavailable`. The signing read pulls
 the installed base APK to a host temp file and removes it afterwards. It does not use CtrlProxy,
 so helper version does not affect the result.
+
+On iOS (#14099) the result has `platform: "ios"` and `deviceKind` (`simulator` or `physical`);
+the Android fields above are unchanged, and `userId` is refused. The Simulator bundle is read in
+place (`simctl get_app_container <udid> <bundle> app`); a physical device's bundle is copied off
+with `devicectl device copy from` and the copy is removed afterwards. Both need macOS. A missing
+app is `absent`; a failed lookup is `unknown`. `signing` is one of:
+
+- `{status: "available", cdHash, identifier, teamId, signingIdentity, adHoc, authorities,
+  entitlements, provisioningProfile, warnings?}`, from `codesign -dvvv`, the signed entitlements,
+  and `security cms -D` on `embedded.mobileprovision`. iOS has no SHA-256 signer set, so the
+  identity is the CodeDirectory hash (`cdHash`) plus `teamId` and the certificate chain
+  (`authorities`, leaf first). `teamId` and `signingIdentity` are null for ad-hoc (Simulator)
+  signatures.
+- `{status: "unsigned", reason}` when codesign reports no signature.
+- `{status: "unavailable", reason}` when codesign itself fails.
+
+`provisioningProfile` is null when the bundle embeds none (Simulator and App Store builds);
+otherwise it reports `name`, `uuid`, `teamIds`, `expirationDate`, `expired` (against host time)
+and `provisionedDeviceCount`. A failed entitlement or profile read leaves that field null and
+adds a `warnings` entry instead of failing the call.
 
 `openLink.acceptOpenAlert` automatically taps Open on an iOS system
 "Open in <app>?" alert. On Android, `chooserAppPackage` selects the exact package

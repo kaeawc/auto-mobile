@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { StartupFailureStore } from "../DaemonStartupFailureTracker";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { resolveDaemonInstallSpecifier } from "../../constants/release";
+import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
+import { recordedProcessGenerationToken } from "../processGenerationFields";
+import type { DaemonStatus } from "../types";
 
 const generationKeySchema = z.object({
   pid: z.number().int().positive().optional(),
@@ -45,7 +49,48 @@ export function takeoverDeferralBoundExceeded(
         elapsed >= TAKEOVER_DEFERRAL_TIME_BOUND_MS;
 }
 
-/** Called under the daemon startup lock, so independent CLI launches share one generation count. */
+/** Record a refused admission without ever authorizing an automatic stop of its owner. */
+export function deferredRestartError({
+  ledger,
+  incumbent,
+  kind,
+  original,
+  nowMs,
+  subject,
+}: {
+  ledger: TakeoverDeferralLedger;
+  incumbent: DaemonStatus;
+  kind: TakeoverDeferralKind;
+  original: DaemonRestartDeferredError;
+  nowMs: number;
+  subject: "older daemon" | "daemon";
+}): DaemonRestartDeferredError {
+  const record = ledger.recordDeferral(
+    {
+      pid: incumbent.pid,
+      startedAt: incumbent.startedAt,
+      processGenerationToken: recordedProcessGenerationToken(incumbent),
+    },
+    nowMs,
+  );
+  if (!takeoverDeferralBoundExceeded(kind, record, nowMs)) {
+    return original;
+  }
+  const action = subject === "older daemon" ? "takeover" : "restart";
+  const reason =
+    `${subject} pid ${incumbent.pid} (version ${incumbent.version ?? "unknown"}) has deferred this ${action} ` +
+    `${record.attempts} times since ${new Date(record.firstDeferredAtMs).toISOString()} (${original.message}); ` +
+    `it is never stopped automatically — run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` ` +
+    "to replace it once no device operation is active";
+  logger.warn(reason);
+  return new DaemonRestartDeferredError(reason);
+}
+
+/**
+ * The start path calls this under the daemon startup lock, so independent CLI launches share one
+ * generation count. The proxy's expected-generation restart records without that lock; a lost
+ * concurrent update only delays guidance by an attempt and never authorizes a stop.
+ */
 export class DefaultTakeoverDeferralLedger implements TakeoverDeferralLedger {
   private unpersistedRecord: DeferralRecord | undefined;
 

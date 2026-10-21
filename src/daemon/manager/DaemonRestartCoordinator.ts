@@ -30,10 +30,12 @@ import { type DaemonProcessRecord, type DaemonProcessSignaler } from "../process
 import { stderrLog } from "./DaemonLaunch";
 import type { WaitForStopResult } from "./DaemonShutdown";
 import type { DaemonStartResult } from "../manager";
+import type { TakeoverDeferralLedger } from "./TakeoverDeferralLedger";
 
 /** Only the replaceable manager seams used by DaemonRestartCoordinator. */
 export interface DaemonRestartCoordinatorHost {
   readonly timer: Timer;
+  readonly takeoverDeferrals: TakeoverDeferralLedger;
   acquireLock(): boolean;
   releaseLock(): void;
   createClient(options?: DaemonClientFactoryOptions): DaemonClientLike;
@@ -153,7 +155,12 @@ export class DaemonRestartCoordinator {
 
   /** Adapter exposing the lifecycle primitives {@link daemonRestart} sequences. */
   private restartHost(): DaemonRestartHost {
+    const host = this.host;
     return {
+      get takeoverDeferrals() {
+        return host.takeoverDeferrals;
+      },
+      now: () => this.host.timer.now(),
       log: (message) => stderrLog(message),
       sleep: (ms) => this.host.timer.sleep(ms),
       acquireLock: () => this.host.acquireLock(),

@@ -59,6 +59,8 @@ data class PrototypeCondition(
   val not: PrototypeCondition? = null,
   val data: String? = null,
   val valid: PrototypeValidityKeys? = null,
+  /** With [data]: holds when that value is missing, `[]`, `{}` or `""` (#14207). */
+  val empty: Boolean? = null,
 )
 
 @Serializable
@@ -138,6 +140,8 @@ data class PrototypeStyle(
   val alpha: Double? = null,
   /** Scale (0.5-1) a tappable node shrinks to while pressed; absent leaves it unscaled. */
   val pressScale: Double? = null,
+  /** An animated highlight sweep over a loading placeholder's background (#14207). */
+  val shimmer: Boolean? = null,
   val alignment: String? = null,
   val arrangement: String? = null,
   val spacing: Double? = null,

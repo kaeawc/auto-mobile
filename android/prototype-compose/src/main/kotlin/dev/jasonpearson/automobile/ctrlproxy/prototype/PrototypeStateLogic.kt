@@ -127,6 +127,7 @@ private fun PrototypeStyle.mergedOver(prototype: PrototypeStyle): PrototypeStyle
     offset = prototype.offset ?: offset,
     alpha = prototype.alpha ?: alpha,
     pressScale = prototype.pressScale ?: pressScale,
+    shimmer = prototype.shimmer ?: shimmer,
     alignment = prototype.alignment ?: alignment,
     arrangement = prototype.arrangement ?: arrangement,
     spacing = prototype.spacing ?: spacing,

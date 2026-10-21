@@ -1320,6 +1320,8 @@ private fun prototypeNodeModifier(
   style.gradient?.let {
     modifier = modifier.background(prototypeGradientBrush(it, prototypePalette()), shape)
   }
+  // A loading placeholder's highlight sweep, over the background and inside the clip (#14207).
+  modifier = modifier.prototypeShimmer(style.shimmer == true)
   style.border?.let {
     val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)

@@ -2281,6 +2281,22 @@ pinned to the material3 supplied by `androidx-compose-bom` in
 window, not a SearchBar popup/dialog or lazy list that drops rows, so `observe`
 sees every result row.
 
+## Loading and empty states (#14207, `prototype_loading_states_v1`, not device-verified)
+
+A data condition may test emptiness instead of comparing: `{data: "/feed", empty: true}` holds
+when the value is missing, `[]`, `{}` or `""` (`null` cannot be stored in `/data`), and
+`empty: false` holds otherwise. `empty` takes the place of `equals`, `notEquals`, `gt` and `lt`
+(exactly one is required), and `{key, empty}` is rejected at `<path>.empty` with
+`empty applies only to data conditions`. Like other data conditions it is resolved on the device
+against the current `/data`, so a request response or data action flips it.
+
+Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `column` or `card`
+over its background and inside its clip; any other node type is rejected at
+`<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
+animator scale 0 no band is drawn, so screenshots see the plain placeholder. A `repeat` of literal
+placeholder rows makes a skeleton list. The iOS agent evaluates `empty` but does not draw shimmer
+yet and does not advertise the capability (#14689).
+
 ## Rich text
 
 A text node has exactly one of `text` or `spans`; plain `text: ""` remains valid.

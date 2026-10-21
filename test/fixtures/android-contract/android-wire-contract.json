@@ -6699,6 +6699,12 @@
         "type": "object:PrototypeValidityKeys",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "empty",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeContainer": [
@@ -7513,6 +7519,12 @@
       {
         "name": "pressScale",
         "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shimmer",
+        "type": "boolean",
         "nullable": true,
         "hasDefault": true
       },

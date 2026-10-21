@@ -90,6 +90,17 @@ enum PrototypeDataValues {
         .object(item.filter { PrototypeRepeat.isFieldName($0.key) && isScalar($0.value) })
     }
 
+    /// A missing value, `null`, `[]`, `{}` or `""` is empty (#14207); every other value is not.
+    static func isEmpty(_ value: JSONValue?) -> Bool {
+        switch value {
+        case nil, .null?: true
+        case let .array(items)?: items.isEmpty
+        case let .object(members)?: members.isEmpty
+        case let .string(text)?: text.isEmpty
+        case .bool?, .number?: false
+        }
+    }
+
     static func holds(_ condition: [String: JSONValue], data: [String: JSONValue]?) -> Bool {
         let value = condition["data"]?.stringValue.flatMap {
             PrototypeDataPointer.resolve(data, pointer: $0)
@@ -103,6 +114,7 @@ enum PrototypeDataValues {
         }
         if let operand = condition["equals"] { return equal(operand) }
         if let operand = condition["notEquals"] { return !equal(operand) }
+        if case let .bool(empty)? = condition["empty"] { return isEmpty(value) == empty }
         guard case let .number(left)? = value, left.isFinite else { return false }
         if case let .number(right)? = condition["gt"], right.isFinite { return left > right }
         if case let .number(right)? = condition["lt"], right.isFinite { return left < right }

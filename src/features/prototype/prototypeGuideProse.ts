@@ -135,6 +135,25 @@ before device requests when it is absent. The Android and iOS implementations sh
 iOS uses a drawn field with SF Symbol icons, not SwiftUI \`.searchable\`; these differences
 are reported in \`platformNotes\`.
 
+## Loading, empty and error states
+
+(needs \`prototype_loading_states_v1\`) \`{data: "/feed", empty: true}\` holds when the value is
+missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
+it cannot be combined with \`equals\`, \`notEquals\`, \`gt\` or \`lt\`, and it applies to data
+conditions only. Style \`shimmer: true\` on a \`box\`, \`row\`, \`column\` or \`card\` sweeps an
+animated highlight over its background and reads "Loading" to accessibility; it is static under
+\`motion: "none"\` or animator scale 0. The canonical trio uses a request's \`statusKey\`:
+
+- **Loading:** a column with \`visibleWhen: {key: "feedStatus", equals: "loading"}\` that repeats a
+  few literal placeholder rows styled \`{shimmer: true, height: {dp: 56}, background:
+  "surfaceVariant", cornerRadius: "medium"}\`.
+- **Empty:** \`visibleWhen: {all: [{key: "feedStatus", equals: "success"}, {data: "/feed",
+  empty: true}]}\`, with the "No posts yet" copy.
+- **Error:** \`visibleWhen: {key: "feedStatus", equals: "error"}\`, with a retry button that runs
+  the request again.
+
+The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent does not draw shimmer yet (#14689).
+
 ## Rich text
 
 A text node has exactly one of \`text\` or \`spans\`; plain \`text: ""\` remains valid.

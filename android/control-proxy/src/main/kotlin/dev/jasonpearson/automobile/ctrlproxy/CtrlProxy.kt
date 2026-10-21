@@ -909,6 +909,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
+      // Read once when this service instance starts, not on each hierarchy capture.
+      pruneBaselineWrappers = readBaselineWrapperPruningEnabled(),
       prototypeHiddenReason = { displayId, captured ->
         if (::prototypeController.isInitialized)
           prototypeController.hiddenReason(displayId, captured)

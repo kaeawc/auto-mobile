@@ -45,6 +45,10 @@ import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLed
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+} from "../../src/utils/directSessionDeviceRegistry";
 
 const writtenObservation = z.looseObject({
   viewHierarchy: z.looseObject({
@@ -88,6 +92,7 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   afterEach(() => {
+    clearDirectSessionDevices();
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     restoreDefaultPipelineOverrides?.();
@@ -477,6 +482,7 @@ describe("ToolRegistry device-aware pipeline", () => {
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {
     const fakeDeviceReadiness = new FakeDeviceReadiness();
     fakeDeviceReadiness.setConnectedDevices([device]);
+    registerDirectSessionDevice("session-1", device);
     const log = new FakeLogger();
     const registry = new ToolRegistryClass(undefined, log);
 

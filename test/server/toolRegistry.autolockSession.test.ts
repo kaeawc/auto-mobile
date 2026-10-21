@@ -14,6 +14,10 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+} from "../../src/utils/directSessionDeviceRegistry";
 
 let policyReads = 0;
 const env = new Proxy<Record<string, string | undefined>>(
@@ -92,6 +96,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   });
 
   afterEach(() => {
+    clearDirectSessionDevices();
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
@@ -254,6 +259,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   test("allows the call when a sessionUuid is provided", async () => {
     setAutolock(true);
     fakeDeviceReadiness.setConnectedDevices([androidA, androidB]);
+    registerDirectSessionDevice("session-123", androidA);
 
     const tool = registerTool("autolockWithSession");
 

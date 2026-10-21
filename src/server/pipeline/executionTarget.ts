@@ -45,7 +45,6 @@ import { getDeviceLabelMap } from "../deviceLabelMapping";
 import { executionTracker } from "../../daemon/executionTracker";
 import {
   assertBindingControlAccess,
-  assertDeviceReadRouting,
   assertSessionDeviceRouting,
   assertToolCallerHoldsDevice,
   assertToolControlTargetIdentity,
@@ -59,6 +58,8 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
+import { DeviceOutsideBoundSessionError } from "../../daemon/deviceOutsideBoundSessionRefusal";
+import { DirectSessionNotActiveError } from "../../models/DirectSessionNotActiveError";
 
 export interface ExecutionTargetInput {
   name: string;
@@ -506,22 +507,24 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   }
 
   private adoptDirectSessionDevice(state: TargetResolution, sessionUuid: string): void {
-    const { args, options } = state.input;
     const directSession = resolveDirectSessionDevice(sessionUuid);
-    assertDeviceReadRouting(args, options, directSession?.device.deviceId);
     if (!directSession) {
-      logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
-    } else if (!state.providedDeviceId) {
+      throw new DirectSessionNotActiveError(sessionUuid);
+    }
+    if (state.providedDeviceId && state.providedDeviceId !== directSession.device.deviceId) {
+      throw new DeviceOutsideBoundSessionError(
+        sessionUuid,
+        directSession.device,
+        { deviceId: state.providedDeviceId },
+        `${state.input.name} deviceId '${state.providedDeviceId}' does not match session '${sessionUuid}' device '${directSession.device.deviceId}'. ` +
+          "Omit deviceId to target the session's device.",
+      );
+    }
+    if (!state.providedDeviceId) {
       state.providedDeviceId = directSession.device.deviceId;
       logger.info(
         `[ToolRegistry] Resolved device from direct session ${sessionUuid}: ${state.providedDeviceId}`,
       );
-      // Adopt the session's platform only when we also adopted its device. An
-      // explicitly-provided deviceId names the target unambiguously, so leave
-      // platform as "either" and let ensureDeviceReady infer it from the id —
-      // narrowing to the session's platform here would send an explicit
-      // cross-platform deviceId to the wrong platform's search and fail
-      // (mirrors the #5870 deviceId-resolves-platform rule).
       state.platform = directSession.device.platform;
     }
   }

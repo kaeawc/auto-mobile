@@ -6695,6 +6695,12 @@
         "hasDefault": true
       },
       {
+        "name": "platform",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "valid",
         "type": "object:PrototypeValidityKeys",
         "nullable": true,
@@ -6849,6 +6855,28 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypePermissionRequirement": [
+      {
+        "name": "name",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "purpose",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers": [
+      {
+        "name": "on",
+        "type": "map",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeRadioOption": [
       {
         "name": "value",
@@ -6861,6 +6889,26 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeRequires": [
+      {
+        "name": "platform",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "permissions",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "background",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding": [
@@ -6977,6 +7025,18 @@
       {
         "name": "storage",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageBlock",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "requires",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRequires",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "platform",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers",
         "nullable": true,
         "hasDefault": true
       }
@@ -9053,6 +9113,50 @@
       {
         "name": "indicator",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "platform": [
+      {
+        "name": "call",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "args",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "into",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "statusKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "timeoutMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onSuccess",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onError",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }

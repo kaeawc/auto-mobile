@@ -2020,6 +2020,53 @@
               "optional": true
             }
           }
+        },
+        "scrollTo": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["scrollTo"]
+              },
+              "optional": false
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "to": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": ["start", "end"]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "key": {
+                        "rule": {
+                          "kind": "scalar"
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": false
+            },
+            "animated": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            }
+          }
         }
       }
     },
@@ -6479,6 +6526,36 @@
               "rule": {
                 "kind": "ref",
                 "name": "scrollRefresh"
+              },
+              "optional": true
+            },
+            "reverse": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "stickToEnd": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "atEndKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "onStartReached": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
               },
               "optional": true
             },

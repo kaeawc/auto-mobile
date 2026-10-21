@@ -146,7 +146,8 @@ export type FieldKind =
   | "dataPath"
   | "requestInto"
   | "request"
-  | "deviceRequest";
+  | "deviceRequest"
+  | "scrollTo";
 
 /** True for the kinds holding a `/data/...` path with `{index}` segments. */
 export const isDataPathKind = (kind: FieldKind): boolean =>
@@ -223,6 +224,22 @@ function mapBinding(value: unknown, at: string, visit: FieldVisitor): unknown {
     : visit(value, at, "emitBinding");
 }
 
+function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
+  mapField(action, "name", path, "emitName", visit);
+  mapField(action, "context", path, "emitContext", visit);
+  if (record(action.context)) {
+    action.context = Object.fromEntries(
+      Object.entries(record(action.context)!).map(([name, value]) => {
+        const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+          ? `${path}.context.${name}`
+          : `${path}.context[${JSON.stringify(name)}]`;
+        return [name, mapBinding(value, at, visit)];
+      }),
+    );
+  }
+  mapKeyList(action, "requireValid", path, visit);
+}
+
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   switch (action.type) {
     case "setState":
@@ -230,19 +247,7 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       mapField(action, "value", path, "operand", visit);
       break;
     case "emit":
-      mapField(action, "name", path, "emitName", visit);
-      mapField(action, "context", path, "emitContext", visit);
-      if (record(action.context)) {
-        action.context = Object.fromEntries(
-          Object.entries(record(action.context)!).map(([name, value]) => {
-            const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
-              ? `${path}.context.${name}`
-              : `${path}.context[${JSON.stringify(name)}]`;
-            return [name, mapBinding(value, at, visit)];
-          }),
-        );
-      }
-      mapKeyList(action, "requireValid", path, visit);
+      mapEmitAction(action, path, visit);
       break;
     case "toggle":
     case "increment":
@@ -261,6 +266,10 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "request":
       mapRequestAction(action, path, visit);
+      break;
+    case "scrollTo":
+      // Marks the whole action so the chat scroll gate can locate it (#14232).
+      visit(action, path, "scrollTo");
       break;
     default:
       break;
@@ -369,7 +378,7 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
 
 /** State-key fields a node binds besides its condition and action keys. */
 function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
-  for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey"]) {
+  for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey"]) {
     mapField(node, field, path, "key", visit);
   }
   for (const part of ["trailing", "openWhen", "refresh"]) {
@@ -480,7 +489,15 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
     );
   }
   const bind = (entry: unknown) => (typeof entry === "string" ? bindText(entry, instance) : entry);
-  for (const field of ["key", "stateKey", "statusKey", "activeKey", "hourKey", "minuteKey"]) {
+  for (const field of [
+    "key",
+    "stateKey",
+    "statusKey",
+    "activeKey",
+    "hourKey",
+    "minuteKey",
+    "atEndKey",
+  ]) {
     if (copy[field] !== undefined) {
       copy[field] = bind(copy[field]);
     }

@@ -346,6 +346,18 @@ data class PrototypeAppendDataAction(val path: String, val value: EmitContextBin
 data class PrototypeRemoveDataAction(val path: String) : PrototypeAction()
 
 /**
+ * Moves the scroll whose id is [scroll] (`prototype_chat_scroll_v1`, #14232): [to] is `"start"`,
+ * `"end"` or `{key: value}`, a `repeat.key` value of a row inside it, kept as JSON.
+ */
+@SerialName("scrollTo")
+@Serializable
+data class PrototypeScrollToAction(
+  val scroll: String,
+  val to: JsonElement,
+  val animated: Boolean? = null,
+) : PrototypeAction()
+
+/**
  * An HTTP call from a tap (`prototype_network_v1`, #12523): the response goes to [into] (and its
  * `<into>__meta` sibling), [statusKey] follows `loading`, `success` and `error`, and [onSuccess] or
  * [onError] runs afterwards. [headers] and [query] entries are a literal string or a value binding
@@ -1241,6 +1253,14 @@ data class PrototypeScrollNode(
   override val span: Int? = null,
   val axis: String = "vertical",
   val refresh: PrototypeScrollRefresh? = null,
+  /** Chat lists (`prototype_chat_scroll_v1`, #14232): anchored at the end of its content. */
+  val reverse: Boolean? = null,
+  /** Follows rows appended while the scroll is at its end. */
+  val stickToEnd: Boolean? = null,
+  /** A boolean state key the runtime keeps true while the scroll is at its end. */
+  val atEndKey: String? = null,
+  /** Run once each time the scroll reaches its start, to load older history. */
+  val onStartReached: List<PrototypeAction>? = null,
   val child: PrototypeNode,
 ) : PrototypeNode()
 

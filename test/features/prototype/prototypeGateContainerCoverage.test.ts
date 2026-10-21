@@ -60,6 +60,7 @@ const fixtures: Record<string, Node> = {
     text: "@ana",
     linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
   },
+  prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
   prototype_menus_v1: {
     type: "menu",
     openWhen: { key: "liked", equals: true },

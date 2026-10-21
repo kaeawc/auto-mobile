@@ -463,6 +463,214 @@
     }
   },
   {
+    "name": "audit",
+    "description": "Audit the current screen on demand, with every audit feature flag off and without changing flag state. kinds: accessibility (WCAG: contrast, touch targets, labels, headings; default), performance (UI jank and touch latency of the foreground app), memory (a memory snapshot of appId). Violations carry the element from this observation. scope.container limits the accessibility audit to one element's subtree. baseline record saves the accessibility violations under a name; compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn. failOn error|warning makes the call fail when findings reach that severity, for plan assertions; default never. Android only.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "kinds": {
+          "description": "Audits to run (default: accessibility)",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["accessibility", "performance", "memory"]
+          }
+        },
+        "appId": {
+          "description": "Package to audit (default: the foreground app)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "scope": {
+          "description": "Limit the accessibility audit to one container's subtree",
+          "type": "object",
+          "properties": {
+            "container": {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource id",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "text": {
+                  "description": "Container text or content-desc",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["container"],
+          "additionalProperties": false
+        },
+        "baseline": {
+          "description": "Named accessibility baseline",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "Baseline name",
+              "type": "string",
+              "minLength": 1
+            },
+            "mode": {
+              "description": "record saves; compare reports the diff",
+              "type": "string",
+              "enum": ["compare", "record"]
+            }
+          },
+          "required": ["name", "mode"],
+          "additionalProperties": false
+        },
+        "failOn": {
+          "description": "Fail the call at this violation severity (default never: report only)",
+          "type": "string",
+          "enum": ["error", "warning", "never"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "accessibility": {
+          "type": "object",
+          "properties": {
+            "violations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "totalViolations": {
+              "type": "number"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "summary": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            },
+            "screenId": {
+              "type": "string"
+            }
+          },
+          "required": ["violations", "totalViolations", "truncated", "summary", "screenId"],
+          "additionalProperties": {}
+        },
+        "performance": {
+          "type": "object",
+          "properties": {
+            "passed": {
+              "type": "boolean"
+            }
+          },
+          "required": ["passed"],
+          "additionalProperties": {}
+        },
+        "memory": {
+          "type": "object",
+          "properties": {
+            "passed": {
+              "type": "boolean"
+            }
+          },
+          "required": ["passed"],
+          "additionalProperties": {}
+        },
+        "baselineDiff": {
+          "type": "object",
+          "properties": {
+            "new": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "fixed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unchanged": {
+              "type": "number"
+            }
+          },
+          "required": ["new", "fixed", "unchanged"],
+          "additionalProperties": false
+        },
+        "baselineRecorded": {
+          "type": "string"
+        },
+        "unsupported": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "failed"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "severity": {
+              "type": "string"
+            },
+            "fingerprint": {
+              "type": "string"
+            }
+          },
+          "required": ["type", "severity", "fingerprint"],
+          "additionalProperties": {}
+        }
+      }
+    }
+  },
+  {
     "name": "barrier",
     "description": "Synchronize multiple devices at a barrier, then let all proceed concurrently (no serialized section).",
     "inputSchema": {
@@ -2563,6 +2771,7 @@
               "accessibility",
               "accessibilityFocus",
               "appLifecycle",
+              "audit",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -2693,6 +2902,7 @@
               "accessibility",
               "accessibilityFocus",
               "appLifecycle",
+              "audit",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -20514,6 +20724,7 @@
               "accessibility",
               "accessibilityFocus",
               "appLifecycle",
+              "audit",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -26802,6 +27013,7 @@
             "accessibility",
             "accessibilityFocus",
             "appLifecycle",
+            "audit",
             "biometricAuth",
             "changeLocalization",
             "clearKeyValueFile",
@@ -26898,6 +27110,7 @@
               "accessibility",
               "accessibilityFocus",
               "appLifecycle",
+              "audit",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",

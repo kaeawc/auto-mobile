@@ -1,3 +1,4 @@
+import type { BootedDevice } from "../../../models";
 import type { CtrlProxyLocationRequest, CtrlProxyLocationResult } from "../../observe/ios/types";
 
 /** The CtrlProxy runner's `request_location` (`XCUIDevice.location`), used on physical iOS. */
@@ -8,6 +9,9 @@ export interface IosRunnerLocationClient {
     signal?: AbortSignal,
   ): Promise<CtrlProxyLocationResult>;
 }
+
+/** How a composition root hands the runner to the location tool (#11806: no `getInstance` here). */
+export type IosRunnerLocationResolver = (device: BootedDevice) => IosRunnerLocationClient;
 
 const IOS_RUNNER_LOCATION_UNSUPPORTED =
   "Location simulation on a physical iOS device needs a CtrlProxy runner that supports " +
@@ -27,11 +31,12 @@ export async function sendRunnerLocation(
 
 export class IosRunnerLocationError extends Error {
   readonly unsupported: boolean;
-  constructor(result: CtrlProxyLocationResult) {
+  constructor(result: CtrlProxyLocationResult, message?: string) {
     super(
-      result.unsupported
-        ? IOS_RUNNER_LOCATION_UNSUPPORTED
-        : (result.error ?? "runner refused the fix"),
+      message ??
+        (result.unsupported
+          ? IOS_RUNNER_LOCATION_UNSUPPORTED
+          : (result.error ?? "runner refused the fix")),
     );
     this.unsupported = result.unsupported === true;
   }

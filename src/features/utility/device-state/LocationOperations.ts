@@ -18,7 +18,6 @@ import {
   type EndedLocationRoute,
 } from "../LocationRoutePlayer";
 import { LocationWriteAdmissionError } from "./LocationWriteAdmissionError";
-import { IOSCtrlProxyClient } from "../../observe/ios";
 import {
   IosRunnerLocationError,
   sendRunnerLocation,
@@ -166,6 +165,10 @@ interface LocationOperationsDependencies {
   runnerLocation?: () => IosRunnerLocationClient | undefined;
 }
 
+const PHYSICAL_IOS_RUNNER_MISSING =
+  "Location simulation on a physical iOS device is not available from this entry point; " +
+  "use the MCP server or daemon, which connect the CtrlProxy runner.";
+
 export class LocationOperations {
   constructor(private readonly dependencies: LocationOperationsDependencies) {}
 
@@ -177,11 +180,16 @@ export class LocationOperations {
     return traits.isEmulator === true;
   }
 
+  /** Throws an unsupported failure when this entry point wired no runner (#14091). */
   private runnerLocation(): IosRunnerLocationClient {
-    return (
-      this.dependencies.runnerLocation?.() ??
-      IOSCtrlProxyClient.getInstance(this.dependencies.device())
-    );
+    const runner = this.dependencies.runnerLocation?.();
+    if (!runner) {
+      throw new IosRunnerLocationError(
+        { success: false, unsupported: true, totalTimeMs: 0 },
+        PHYSICAL_IOS_RUNNER_MISSING,
+      );
+    }
+    return runner;
   }
 
   private isPhysicalIos(): boolean {
@@ -266,9 +274,17 @@ export class LocationOperations {
       return { supported: true, error: invalid };
     }
     if (input.mode === "route") {
-      return this.startLocationRoute(input);
+      return this.physicalIosRunnerMissing() ?? this.startLocationRoute(input);
     }
     return this.writeStaticLocation(input);
+  }
+
+  /** A route on physical iOS needs the injected runner; report it unsupported up front. */
+  private physicalIosRunnerMissing(): DeviceLocationState | undefined {
+    if (!this.isPhysicalIos() || this.dependencies.runnerLocation?.()) {
+      return undefined;
+    }
+    return { supported: false, method: "ios_ctrl_proxy", error: PHYSICAL_IOS_RUNNER_MISSING };
   }
 
   private assertLocationWriteAdmitted(): void {

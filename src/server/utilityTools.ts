@@ -21,6 +21,7 @@ import {
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
 import { isIosSimulatorDevice } from "../features/action/IosSimulatorPermissions";
+import type { IosRunnerLocationResolver } from "../features/utility/device-state/IosRunnerLocation";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
 import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
@@ -836,11 +837,17 @@ function createSessionDeviceState(
   sessionUuid: string | undefined,
   sessionManager: SessionManager | undefined,
   networkFilterBridge: NetworkFilterBridge | undefined,
+  iosRunnerLocation: IosRunnerLocationResolver | undefined,
 ): {
   deviceState: DeviceState;
   useIosAppNetworkRule: (rule: IosAppNetworkRuleCommandContext | undefined) => void;
 } {
   let iosAppNetworkRule: IosAppNetworkRuleCommandContext | undefined;
+  // One runner client serves the write and the session's release-time clear (#14091).
+  const runnerLocation =
+    device.platform === "ios" && !isIosSimulatorDevice(device)
+      ? iosRunnerLocation?.(device)
+      : undefined;
   const deviceState = new DeviceState(device, {
     networkFilterBridge,
     iosAppNetworkRule: () => iosAppNetworkRule,
@@ -855,7 +862,9 @@ function createSessionDeviceState(
       sessionManager,
       sessionUuid,
       device,
+      runnerLocation,
     }),
+    iosRunnerLocation: runnerLocation,
   });
   return {
     deviceState,
@@ -882,6 +891,8 @@ export function registerUtilityTools(
   options: SetActiveDeviceSeams & {
     /** iOS Simulator network-extension controller; defaults to the installed one. */
     networkFilterBridge?: NetworkFilterBridge;
+    /** Physical iOS location runner (#14091); without it physical iOS location is unsupported. */
+    iosRunnerLocation?: IosRunnerLocationResolver;
   } = {},
 ) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
@@ -901,6 +912,7 @@ export function registerUtilityTools(
       args.sessionUuid,
       sessionManager,
       options.networkFilterBridge,
+      options.iosRunnerLocation,
     );
     // Single decision for whether an applied networkCondition needs a session
     // restore slot: a degrading request on an Android emulator (issue #6012).

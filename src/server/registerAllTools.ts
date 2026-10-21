@@ -35,6 +35,7 @@ import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
+import type { IosRunnerLocationResolver } from "../features/utility/device-state/IosRunnerLocation";
 
 export interface RegisterAllToolsOptions {
   /**
@@ -47,6 +48,8 @@ export interface RegisterAllToolsOptions {
   includeDoctor?: boolean;
   /** Register the session tool-selection tools. The CLI has no session to select for. Default true. */
   includeToolSelection?: boolean;
+  /** Physical iOS location runner (#14091), resolved by the composition root (#11806). */
+  iosRunnerLocation?: IosRunnerLocationResolver;
 }
 
 /**
@@ -60,7 +63,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSwipeAtTools();
   registerMultiTouchTools();
   registerAppTools();
-  registerUtilityTools();
+  registerUtilityTools({ iosRunnerLocation: options.iosRunnerLocation });
   registerDeviceTools();
   registerDeepLinkTools();
   registerNavigationTools();

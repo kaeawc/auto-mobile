@@ -42,6 +42,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { ResourceRegistry } from "./resourceRegistry";
 
 import { registerAllTools } from "./registerAllTools";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
@@ -188,7 +189,10 @@ export function registerMcpTools(daemonMode: boolean): void {
     lastToolRegistration?.daemonMode !== daemonMode ||
     lastToolRegistration.removalEpoch !== removalEpoch
   ) {
-    registerAllTools({ daemonMode });
+    registerAllTools({
+      daemonMode,
+      iosRunnerLocation: (device) => IOSCtrlProxyClient.getInstance(device),
+    });
     lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };
   }
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));

@@ -6,7 +6,6 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { IOSCtrlProxyClient } from "../observe/ios";
 import type { IosRunnerLocationClient } from "./device-state/LocationOperations";
 
 // Match the clock restore cadence in sessionManager.ts; simctl gets a 5s attempt budget.
@@ -14,8 +13,13 @@ const MOCK_LOCATION_CLEAR_RETRY_DELAY_MS = 250;
 const MOCK_LOCATION_CLEAR_TIMEOUT_MS = 5_000;
 
 export interface MockLocationClears {
-  markSet(sessionId: string, device: BootedDevice): void;
-  clearLateSet(options: { sessionId: string; device: BootedDevice }): Promise<void> | null;
+  /** `runner` clears a physical iOS fix; without it a physical device is not tracked. */
+  markSet(sessionId: string, device: BootedDevice, runner?: IosRunnerLocationClient): void;
+  clearLateSet(options: {
+    sessionId: string;
+    device: BootedDevice;
+    runner?: IosRunnerLocationClient;
+  }): Promise<void> | null;
   clearAfter(sessionId: string, deviceId: string, settled: Promise<unknown>): Promise<void> | null;
   retireDevice(deviceId: string): void;
   abandonClear(sessionId: string, deviceId: string): void;
@@ -24,6 +28,8 @@ export interface MockLocationClears {
 interface LocationMarker {
   sessionId: string;
   device: BootedDevice;
+  /** The CtrlProxy runner that set a physical iOS fix and clears it (#14091). */
+  runner?: IosRunnerLocationClient;
   controller: AbortController;
   cleanup?: Promise<void>;
 }
@@ -31,8 +37,6 @@ interface LocationMarker {
 interface MockLocationClearOptions {
   timer?: Timer;
   simctlFactory?: (device: BootedDevice) => Pick<SimCtlClient, "executeCommandArgs">;
-  /** Physical iOS clear through the CtrlProxy runner (#14091). */
-  runnerLocationFactory?: (device: BootedDevice) => IosRunnerLocationClient;
   backoff?: BackoffPolicy;
 }
 
@@ -44,38 +48,51 @@ export class MockLocationClearRegistry implements MockLocationClears {
   private readonly markers = new Map<string, LocationMarker>();
   private readonly timer: Timer;
   private readonly simctlFactory: NonNullable<MockLocationClearOptions["simctlFactory"]>;
-  private readonly runnerLocationFactory: NonNullable<
-    MockLocationClearOptions["runnerLocationFactory"]
-  >;
   private readonly backoff: BackoffPolicy;
 
   constructor(options: MockLocationClearOptions = {}) {
     this.timer = options.timer ?? defaultTimer;
     this.simctlFactory = options.simctlFactory ?? ((device) => new SimCtlClient(device));
-    this.runnerLocationFactory =
-      options.runnerLocationFactory ?? ((device) => IOSCtrlProxyClient.getInstance(device));
     this.backoff = options.backoff ?? fixedBackoff(MOCK_LOCATION_CLEAR_RETRY_DELAY_MS);
   }
 
-  markSet(sessionId: string, device: BootedDevice): void {
-    this.rememberSet(sessionId, device);
+  markSet(sessionId: string, device: BootedDevice, runner?: IosRunnerLocationClient): void {
+    this.rememberSet(sessionId, device, runner);
   }
 
   /** A released owner's late fix needs immediate cleanup, not new session attribution. */
-  clearLateSet(options: { sessionId: string; device: BootedDevice }): Promise<void> | null {
-    this.rememberSet(options.sessionId, options.device);
+  clearLateSet(options: {
+    sessionId: string;
+    device: BootedDevice;
+    runner?: IosRunnerLocationClient;
+  }): Promise<void> | null {
+    this.rememberSet(options.sessionId, options.device, options.runner);
     return this.clearAfter(options.sessionId, options.device.deviceId, Promise.resolve());
   }
 
-  private rememberSet(sessionId: string, device: BootedDevice): void {
+  private rememberSet(
+    sessionId: string,
+    device: BootedDevice,
+    runner: IosRunnerLocationClient | undefined,
+  ): void {
     if (device.platform !== "ios") {
+      return;
+    }
+    if (!isIosSimulatorDevice(device) && !runner) {
+      // Without the runner that set it there is nothing to clear a physical fix with.
+      logger.debug(`No runner to clear the physical iOS location on ${device.deviceId}`);
       return;
     }
     const previous = this.markers.get(device.deviceId);
     if (previous?.sessionId === sessionId) {
       return;
     }
-    this.markers.set(device.deviceId, { sessionId, device, controller: new AbortController() });
+    this.markers.set(device.deviceId, {
+      sessionId,
+      device,
+      runner,
+      controller: new AbortController(),
+    });
     previous?.controller.abort();
   }
 
@@ -150,7 +167,7 @@ export class MockLocationClearRegistry implements MockLocationClears {
     const attemptController = new AbortController();
     const signal = AbortSignal.any([marker.controller.signal, attemptController.signal]);
     try {
-      await raceWithDeadline(() => this.clearCommand(marker.device, signal), {
+      await raceWithDeadline(() => this.clearCommand(marker, signal), {
         timer: this.timer,
         timeoutMs: MOCK_LOCATION_CLEAR_TIMEOUT_MS,
         signal,
@@ -175,8 +192,9 @@ export class MockLocationClearRegistry implements MockLocationClears {
     }
   }
 
-  private async clearCommand(device: BootedDevice, signal: AbortSignal): Promise<void> {
-    if (isIosSimulatorDevice(device)) {
+  private async clearCommand(marker: LocationMarker, signal: AbortSignal): Promise<void> {
+    const { device, runner } = marker;
+    if (isIosSimulatorDevice(device) || !runner) {
       await this.simctlFactory(device).executeCommandArgs(
         ["location", device.deviceId, "clear"],
         MOCK_LOCATION_CLEAR_TIMEOUT_MS,
@@ -184,7 +202,7 @@ export class MockLocationClearRegistry implements MockLocationClears {
       );
       return;
     }
-    const result = await this.runnerLocationFactory(device).requestLocation(
+    const result = await runner.requestLocation(
       { clear: true },
       MOCK_LOCATION_CLEAR_TIMEOUT_MS,
       signal,

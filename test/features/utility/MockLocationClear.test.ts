@@ -30,14 +30,10 @@ beforeEach(() => {
 });
 afterEach(() => warn.mockRestore());
 
-function harness(simctl = new FakeSimctl(), runner = new FakeIOSCtrlProxy()) {
+function harness(simctl = new FakeSimctl()) {
   const timer = new FakeTimer();
   const registry = new LocationRouteRegistry(timer);
-  const clears = new MockLocationClearRegistry({
-    timer,
-    simctlFactory: () => simctl,
-    runnerLocationFactory: () => runner,
-  });
+  const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
   let release!: Parameters<SessionManager["onSessionRelease"]>[0];
   let unbound!: Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
   const pending: Array<{ deviceId: string; promise: Promise<unknown> }> = [];
@@ -267,11 +263,21 @@ describe("session mock location clear", () => {
   test("a physical iOS fix is cleared through the runner on release, never simctl (#14091)", async () => {
     const runner = new FakeIOSCtrlProxy();
     const physical = { ...ios, deviceId: "00008110-0012345678901234" };
-    const h = harness(new FakeSimctl(), runner);
-    h.clears.markSet("s", physical);
+    const h = harness();
+    h.clears.markSet("s", physical, runner);
     h.release("s", physical.deviceId);
     await h.pending[0].promise;
     expect(runner.locationHistory).toEqual([{ clear: true }]);
+    expect(h.simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  test("a physical iOS fix with no runner to clear it is not tracked (#14091)", async () => {
+    const physical = { ...ios, deviceId: "00008110-0012345678901234" };
+    const h = harness();
+    h.clears.markSet("s", physical);
+    h.release("s", physical.deviceId);
+    await flush();
+    expect(h.pending).toEqual([]);
     expect(h.simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 

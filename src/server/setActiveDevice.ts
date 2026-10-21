@@ -10,6 +10,7 @@ import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BootedDevice, Platform, SomePlatform } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
+import { DirectSessionNotActiveError } from "../models/DirectSessionNotActiveError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { DeviceReadiness, type DeviceReadyOptions } from "../daemon/readiness/DeviceReadiness";
 import { logger } from "../utils/logger";
@@ -513,6 +514,9 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       const sessionUuid = args.sessionUuid;
       const sessionScoped =
         Boolean(sessionUuid) && defaultDaemonContext.sessionManager() !== undefined;
+      if (sessionUuid && !sessionScoped && !resolveDirectSessionDevice(sessionUuid)) {
+        throw new DirectSessionNotActiveError(sessionUuid);
+      }
       if (args.display !== undefined && !sessionScoped) {
         throw new DisplayPinNeedsSessionError();
       }

@@ -684,7 +684,8 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         packageName: hierarchy.packageName,
         hierarchy: { node: compact.node },
         updatedAt: hierarchy.updatedAt,
-        ...(compact.truncated ? { truncated: true } : {}),
+        // undefined is omitted by JSON.stringify; a spread here trips the wire-parity emit scan.
+        truncated: compact.truncated ? true : undefined,
       });
       const recording = recorder.recordLayoutEvent({
         timestamp: this.timer.now(),

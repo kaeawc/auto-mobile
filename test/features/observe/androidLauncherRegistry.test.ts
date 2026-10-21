@@ -32,14 +32,28 @@ const EXEMPT_PRE_EVIDENCE_LAUNCHERS: readonly string[] = [
   "com.oneplus.launcher",
 ];
 
-/** The quoted package names inside the Kotlin `ANDROID_LAUNCHERS = listOf(...)` literal. */
+/**
+ * The quoted package names in the Kotlin `ANDROID_LAUNCHERS` declaration. The whole
+ * initializer, up to the next top-level declaration, must be a single `listOf(...)` of
+ * string literals: anything else (a concatenated `+ listOf(...)`, a computed value) fails
+ * here rather than escaping the parity check.
+ */
 function kotlinLauncherList(source: string): string[] {
-  const start = source.indexOf("private val ANDROID_LAUNCHERS");
+  const marker = "private val ANDROID_LAUNCHERS =";
+  const start = source.indexOf(marker);
   expect(start).toBeGreaterThanOrEqual(0);
-  const open = source.indexOf("listOf(", start);
-  const close = source.indexOf(")", open);
-  const body = source.slice(open, close).replace(/\/\/[^\n]*/g, "");
-  return [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  const afterMarker = source.slice(start + marker.length);
+  // The declaration ends where the next top-level (column-0) line begins.
+  const end = afterMarker.search(/\n(?=\S)/);
+  const initializer = (end === -1 ? afterMarker : afterMarker.slice(0, end))
+    .replace(/\/\/[^\n]*/g, "")
+    .trim();
+  const match = /^listOf\(((?:\s*"[^"]+"\s*,?)*)\s*\)$/.exec(initializer);
+  expect(
+    match,
+    `ANDROID_LAUNCHERS must be one listOf(...) literal, got: ${initializer}`,
+  ).not.toBeNull();
+  return [...(match?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((entry) => entry[1]);
 }
 
 describe("Android launcher registry (#14056)", () => {

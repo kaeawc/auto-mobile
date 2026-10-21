@@ -278,7 +278,9 @@ export class SwipeOn extends BaseVisualChange {
     const parser = dependencies.parser ?? new DefaultElementParser();
     this.scrollables = dependencies.scrollables ?? new DefaultScrollableElementsQuery();
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
-    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityService =
+      dependencies.accessibilityService ??
+      AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
     return parser;
   }

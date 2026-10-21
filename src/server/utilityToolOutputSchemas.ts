@@ -38,6 +38,7 @@ const displayConfigValuesOutputSchema = z
     fontScale: z.union([z.number(), z.literal("default")]).optional(),
     density: z.union([z.number(), z.enum(["smaller", "default", "larger"])]).optional(),
     theme: displayThemeOutputSchema.optional(),
+    contentSize: z.string().optional(),
     increaseContrast: z.boolean().optional(),
     reduceMotion: z.boolean().optional(),
     boldText: z.boolean().optional(),

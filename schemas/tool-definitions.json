@@ -1827,13 +1827,13 @@
   },
   {
     "name": "displayConfig",
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme only (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner). On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "fontScale": {
-          "description": "System text scale, or 'default' to remove Android's explicit override and restore its inherited default. Android only. Omit to leave unchanged.",
+          "description": "System text scale, or 'default' to remove Android's explicit override and restore its inherited default. On the iOS Simulator, selects the nearest Dynamic Type category (1 = large; 'default' = large). Omit to leave unchanged.",
           "anyOf": [
             {
               "type": "number",
@@ -1844,6 +1844,24 @@
               "type": "string",
               "const": "default"
             }
+          ]
+        },
+        "contentSize": {
+          "description": "iOS Simulator only: an exact Dynamic Type category for `simctl ui content_size`, instead of the nearest one to fontScale. Cannot be combined with fontScale. Omit to leave unchanged.",
+          "type": "string",
+          "enum": [
+            "extra-small",
+            "small",
+            "medium",
+            "large",
+            "extra-large",
+            "extra-extra-large",
+            "extra-extra-extra-large",
+            "accessibility-medium",
+            "accessibility-large",
+            "accessibility-extra-large",
+            "accessibility-extra-extra-large",
+            "accessibility-extra-extra-extra-large"
           ]
         },
         "density": {
@@ -1901,7 +1919,7 @@
           "type": "boolean"
         },
         "reset": {
-          "description": "On Android, restore font scale and density to device defaults. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
+          "description": "On Android, restore font scale and density to device defaults. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
           "type": "boolean"
         },
         "platform": {
@@ -2073,6 +2091,9 @@
               "type": "string",
               "enum": ["light", "dark", "system", "custom"]
             },
+            "contentSize": {
+              "type": "string"
+            },
             "increaseContrast": {
               "type": "boolean"
             },
@@ -2108,6 +2129,7 @@
           "absentArguments": [
             "reset",
             "fontScale",
+            "contentSize",
             "density",
             "theme",
             "increaseContrast",
@@ -3367,6 +3389,7 @@
               "sendKeys",
               "sendSms",
               "setActiveDevice",
+              "setAppLinks",
               "setAppPermissions",
               "setDeviceResources",
               "setDeviceState",
@@ -3503,6 +3526,7 @@
               "sendKeys",
               "sendSms",
               "setActiveDevice",
+              "setAppLinks",
               "setAppPermissions",
               "setDeviceResources",
               "setDeviceState",
@@ -3737,7 +3761,7 @@
   },
   {
     "name": "getDeepLinks",
-    "description": "Query app deep links",
+    "description": "Query app deep links. On Android 12+ also reports appLinks: each web domain's App Links verification state, user selection, and whether the app may open it without a chooser.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3846,6 +3870,42 @@
           "items": {
             "type": "string"
           }
+        },
+        "appLinks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "autoVerify": {
+                "type": "boolean"
+              },
+              "userSelected": {
+                "type": "boolean"
+              },
+              "approvedForLinks": {
+                "type": "boolean"
+              }
+            },
+            "required": ["domain", "autoVerify", "userSelected", "approvedForLinks"],
+            "additionalProperties": {}
+          }
+        },
+        "appLinksUserId": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "appLinkHandlingAllowed": {
+          "type": "boolean"
+        },
+        "appLinksUnavailable": {
+          "type": "string"
         },
         "note": {
           "type": "string"
@@ -22414,6 +22474,7 @@
               "sendKeys",
               "sendSms",
               "setActiveDevice",
+              "setAppLinks",
               "setAppPermissions",
               "setDeviceResources",
               "setDeviceState",
@@ -26767,6 +26828,213 @@
     }
   },
   {
+    "name": "setAppLinks",
+    "description": "Android 12+: change an app's App Links state so https links open the app directly (or not). approve force-verifies autoVerify domains, reset clears them to none, reverify re-runs verification, userSelection enables/disables domains for a user, restore writes back the state recorded before the first change. Returns what changed, the per-domain state after, and a restore receipt; in a daemon session, release or rebind restores it. Read state with getDeepLinks.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Android package name.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "userId": {
+          "description": "Android user for userSelection and the read-back; defaults to the current user.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "action": {
+          "description": "approve: force-approve autoVerify domains (pm set-app-links 2). reset: clear verification to none (pm set-app-links 0). reverify: ask the verifier again (asynchronous). userSelection: enable or disable domains for the user. restore: write back the state recorded before the first setAppLinks change.",
+          "type": "string",
+          "enum": ["approve", "reset", "reverify", "userSelection", "restore"]
+        },
+        "domains": {
+          "description": "approve, reset, userSelection: domains to change; omit for every declared domain.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*$"
+          }
+        },
+        "enabled": {
+          "description": "userSelection only: true enables the domains for the user, false disables them.",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "action": {
+          "type": "string"
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string"
+              },
+              "before": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "after": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": ["domain", "before", "after"],
+            "additionalProperties": {}
+          }
+        },
+        "unapplied": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "appLinks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "autoVerify": {
+                "type": "boolean"
+              },
+              "userSelected": {
+                "type": "boolean"
+              },
+              "approvedForLinks": {
+                "type": "boolean"
+              }
+            },
+            "required": ["domain", "autoVerify", "userSelected", "approvedForLinks"],
+            "additionalProperties": {}
+          }
+        },
+        "appLinkHandlingAllowed": {
+          "type": "boolean"
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "onSessionRelease": {
+              "type": "boolean"
+            },
+            "verification": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "domain": {
+                    "type": "string"
+                  },
+                  "original": {
+                    "type": "string"
+                  },
+                  "restoreAs": {
+                    "type": "string"
+                  },
+                  "exact": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["domain", "original", "restoreAs", "exact"],
+                "additionalProperties": {}
+              }
+            },
+            "userSelections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "enabled": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["userId", "enabled"],
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": ["onSessionRelease"],
+          "additionalProperties": {}
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "userId", "action", "changed", "appLinks"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string"
+            },
+            "userSelected": {
+              "type": "boolean"
+            }
+          },
+          "required": ["userSelected"],
+          "additionalProperties": {}
+        }
+      }
+    }
+  },
+  {
     "name": "setAppPermissions",
     "description": "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     "inputSchema": {
@@ -29254,6 +29522,7 @@
             "sendKeys",
             "sendSms",
             "setActiveDevice",
+            "setAppLinks",
             "setAppPermissions",
             "setDeviceResources",
             "setDeviceState",
@@ -29356,6 +29625,7 @@
               "sendKeys",
               "sendSms",
               "setActiveDevice",
+              "setAppLinks",
               "setAppPermissions",
               "setDeviceResources",
               "setDeviceState",

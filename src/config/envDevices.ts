@@ -65,6 +65,12 @@ export const DEVICES_ENV = {
     default: "off",
     doc: "Forbid the prototype-viewer release download (1/true).",
   },
+  BUNDLETOOL_JAR: {
+    name: "AUTOMOBILE_BUNDLETOOL_JAR",
+    kind: "path",
+    default: "unset",
+    doc: "Path to a bundletool-all jar run with java for .aab/.apks installs; else bundletool on PATH.",
+  },
   MANAGED_ADB_SERVER: {
     name: "AUTOMOBILE_MANAGED_ADB_SERVER",
     legacyName: "AUTO_MOBILE_MANAGED_ADB_SERVER",

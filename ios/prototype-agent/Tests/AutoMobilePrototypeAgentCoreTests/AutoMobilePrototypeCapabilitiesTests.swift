@@ -12,9 +12,10 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         ))
         let required = try Set(JSONDecoder().decode([String].self, from: data))
         let supported = Set(AutoMobilePrototypeCapabilities.supported)
-        // Intentional gaps, each with its reason; remove them when supported.
-        // #14689: shimmer (#14207) is drawn on Android only until the SwiftUI side lands.
-        let exclusions: Set<String> = ["prototype_loading_states_v1"]
+        // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
+        // when supported. Chat-list scrolls (#14232) are drawn on Android only so far (#14671);
+        // shimmer (#14207) is drawn on Android only until the SwiftUI side lands (#14689).
+        let exclusions: Set<String> = ["prototype_chat_scroll_v1", "prototype_loading_states_v1"]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")
         XCTAssertEqual(required.subtracting(supported).subtracting(exclusions).sorted(), [])

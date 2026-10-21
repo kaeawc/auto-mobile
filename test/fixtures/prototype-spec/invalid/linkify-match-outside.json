@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "h": ""
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "setState",
+          "key": "h",
+          "value": {
+            "match": "text"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].value.match",
+  "expectedMessage": "{match} is only available inside linkify.onTap"
+}

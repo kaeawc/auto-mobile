@@ -8,6 +8,8 @@ import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeRequestsError } from "./prototypeRequest";
+import { prototypeLinkifyError } from "./prototypeLinkify";
+import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
@@ -507,6 +509,9 @@ function visitChoice(
     if (option.kind === "number") {
       return typeof value === "number";
     }
+    if (option.kind === "scalar") {
+      return ["string", "number", "boolean"].includes(typeof value);
+    }
     return typeof value === "string";
   });
   // Several options can accept the same JSON type (a hex colour or a role name are both strings).
@@ -724,6 +729,8 @@ function behaviourErrors(
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
     prototypeLoadingStatesError(context.nodes) ??
+    prototypeLinkifyError(value) ??
+    prototypeChatScrollError(context.nodes, context.actions) ??
     pagerErrors(context) ??
     stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats)

@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypeChatScrollRules.chatScrollErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.pagerErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.stackErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.swipeActionsErrors
 import dev.jasonpearson.automobile.protocol.PrototypeDataRules.dataActionErrors
+import dev.jasonpearson.automobile.protocol.PrototypeLinkifyRules.linkifyErrors
 import dev.jasonpearson.automobile.protocol.PrototypeLoadingStatesRules.shimmerErrors
 import dev.jasonpearson.automobile.protocol.PrototypeRequestRules.requestActionErrors
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.definitions
@@ -115,6 +117,8 @@ internal object PrototypeSpecInput {
         ?: dataActionErrors(context, value)
         ?: requestActionErrors(context)
         ?: shimmerErrors(context)
+        ?: linkifyErrors(value, context)
+        ?: chatScrollErrors(context)
         ?: swipeActionsErrors(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)

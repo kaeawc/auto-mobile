@@ -176,7 +176,8 @@ export const selectAllTextSchema = selectAllTextTool.schema;
 
 export const shakeTool = defineDeviceTool({
   name: "shake",
-  description: "Shake device; iOS Simulator only.",
+  description:
+    "Shake device; iOS Simulator and Android emulator only (unsupported on physical iOS and Android devices).",
   input: shakeInput,
   options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
 });

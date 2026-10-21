@@ -1,10 +1,15 @@
 import { BaseActionResult } from "./BaseActionResult";
 import type { Platform } from "./Platform";
 
-export type CrashAppMechanism = "android_am_crash" | "ios_simulator_sigabrt" | "unsupported";
+export type CrashAppMechanism =
+  | "android_am_crash"
+  | "ios_simulator_sigabrt"
+  | "ios_device_sigabrt"
+  | "unsupported";
 
 export interface CrashAppEvidence {
-  source: "android_logcat" | "ios_unified_log" | "android_dropbox" | "ios_crash_report";
+  /** `none`: physical iOS, where crash reports cannot be read yet (#14103); see `summary`. */
+  source: "android_logcat" | "ios_unified_log" | "android_dropbox" | "ios_crash_report" | "none";
   summary: string;
 }
 
@@ -34,7 +39,10 @@ export type CrashAppCrashReport =
  * Stable result of an intentional application-crash request.
  *
  * `success` and `confirmed` require fresh OS crash evidence for the target
- * process, not merely command dispatch or process disappearance.
+ * process, not merely command dispatch or process disappearance. The one
+ * exception is physical iOS (#14096): there `success` means SIGABRT was delivered
+ * and the process exited, `confirmed` stays false, and `evidence.source` is
+ * `none` until crash reports can be read from the device (#14103).
  */
 export interface CrashAppResult extends BaseActionResult {
   supported: boolean;

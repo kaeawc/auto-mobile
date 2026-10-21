@@ -2216,6 +2216,29 @@ size modifiers sit on the box. iOS uses `refreshable`, whose async closure stays
 is false again; a key set true without a pull (an agent patch) shows a plain `ProgressView` at the
 top because SwiftUI cannot start `refreshable` programmatically.
 
+## Chat lists (`prototype_chat_scroll_v1`, #14232, not device-verified)
+
+A vertical `scroll` can be a conversation view:
+
+| Field            | Rule                                                                                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reverse`        | Anchors the scroll at the end of its content (Android `verticalScroll(reverseScrolling = true)`), so the newest row is at the bottom and growth keeps the end in view. |
+| `stickToEnd`     | A forward scroll at its end follows rows appended to it. A reverse scroll is anchored at its end already.                                                              |
+| `atEndKey`       | A declared boolean state key the runtime writes when the end position changes, as a `change` event, for a "new messages" pill.                                         |
+| `onStartReached` | 1 to 32 actions run once each time the scroll reaches its start (edge-triggered; a list that fits never fires), for loading older history.                             |
+
+The options need a vertical scroll (`Chat scroll options need a vertical scroll` at the option's
+path), and `atEndKey` a declared boolean state key. `scrollTo {scroll, to, animated?}` moves the
+scroll whose `id` is `scroll`; exactly one scroll may carry that id (`Unknown scroll id`,
+`Duplicate scroll id` at `.scroll`). `to` is `"start"`, `"end"` or `{key: value}`, a `repeat.key`
+value of a row inside the scroll; a key that is not laid out drops the request. `animated` defaults
+to true. Scrolling is not a state change and emits nothing. A composer is a row with a `textField`
+(`imeAction: "send"`, `onSubmit`) and a send `iconButton`, padded with
+`safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}`; whether a fullscreen overlay
+receives IME insets is owed device verification, like the bottom-sheet lift (#10262). Rows off
+screen are absent from `observe`; `swipeOn lookFor` still finds them. The iOS agent does not
+advertise the capability yet (#14671), so the host refuses these specs there.
+
 ## Swipe actions (not device-verified)
 
 A `row` or `listItem` may declare `swipeActions: {start?, end?, fullSwipe?}` (needs
@@ -2316,6 +2339,23 @@ these selectors act across windows because tapOn refuses layer with accessibilit
 Use `tapAt` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
 `rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.
+
+### Linkify (#14233)
+
+`linkify: {kinds, style?, onTap}` on a text node with `text` (not `spans`) turns @mentions,
+#hashtags and URLs in the resolved text into links, for content from data such as `{item.body}`.
+`kinds` lists 1 to 3 of `mention`, `hashtag` and `url`; `style` takes the span style fields; a tap on
+a match runs `onTap` (1 to 32 actions). The grammar is fixed and shared by every runtime
+(`test/fixtures/prototype-spec/linkify/cases.json`): a match starts at the start of the text or
+after whitespace; a mention is `@` and 1 to 30 of `[A-Za-z0-9_]` (so `ana@example.com` is not one);
+a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a URL is `http://` or
+`https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
+`{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
+value, a `setData` / `appendData` value or an emit context entry, for example
+`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused, as
+are repeat bindings inside `onTap`. A URL tap never opens a browser; that is the `links.open`
+platform call. Matches are links like tappable spans (Android `tapOn {accessibilityLink}`, iOS
+`tapAt`) and require `prototype_linkify_v1`.
 
 Owed device checks (later platform passes): advertise the capability only after renderer support;
 verify mixed span styles, resolved concatenated observe text, per-span actions without URL navigation,

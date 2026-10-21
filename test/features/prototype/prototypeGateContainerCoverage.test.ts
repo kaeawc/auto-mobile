@@ -56,6 +56,12 @@ const fixtures: Record<string, Node> = {
   },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_rich_text_v1: { type: "text", spans: [{ text: "Hello" }] },
+  prototype_linkify_v1: {
+    type: "text",
+    text: "@ana",
+    linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
+  },
+  prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
   prototype_menus_v1: {
     type: "menu",
     openWhen: { key: "liked", equals: true },

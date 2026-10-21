@@ -15,6 +15,7 @@ object ValidTools {
     MIGRATED_LEGACY_TOOLS +
       setOf(
         "accessibility",
+        "accessibilityAction",
         "accessibilityFocus",
         "audit",
         "barrier",
@@ -44,6 +45,7 @@ object ValidTools {
         "installApp",
         "keyboard",
         "killDevice",
+        "killProfile",
         "launchApp",
         "listApps",
         "listDeviceImages",
@@ -66,6 +68,7 @@ object ValidTools {
         "selectAllText",
         "sendKeys",
         "setActiveDevice",
+        "setAppLinks",
         "setAppPermissions",
         "setDeviceState",
         "setKeyValue",
@@ -84,6 +87,7 @@ object ValidTools {
         "videoRecording",
         "appLifecycle",
         "displayConfig",
+        "displayProfile",
         "getAndroid",
         "getApple",
         "getDataStore",

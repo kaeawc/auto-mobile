@@ -354,7 +354,40 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
       """{"type":"request_action","requestId":"a1","action":"long_click","resourceId":"com.app:id/x"}""",
     )
     assertEquals(
-      "requestAction" to listOf<Any?>("a1", "long_click", "com.app:id/x", null),
+      "requestAction" to
+        listOf<Any?>("a1", "long_click", "com.app:id/x", null, NodeActionArguments()),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `dispatches request_action arguments for custom and set_progress`() = runTest {
+    dispatch(
+      """{"type":"request_action","requestId":"a3","action":"custom","resourceId":"com.app:id/row","customAction":"Archive"}""",
+    )
+    assertEquals(
+      "requestAction" to
+        listOf<Any?>(
+          "a3",
+          "custom",
+          "com.app:id/row",
+          null,
+          NodeActionArguments(customAction = "Archive"),
+        ),
+      lastCall,
+    )
+    dispatch(
+      """{"type":"request_action","requestId":"a4","action":"set_progress","resourceId":"com.app:id/slider","progress":0.75}""",
+    )
+    assertEquals(
+      "requestAction" to
+        listOf<Any?>(
+          "a4",
+          "set_progress",
+          "com.app:id/slider",
+          null,
+          NodeActionArguments(progress = 0.75f),
+        ),
       lastCall,
     )
   }
@@ -375,6 +408,7 @@ internal class CtrlProxyMessageHandlerTextInputTest : CtrlProxyMessageHandlerFix
             collectionRow = 4,
             collectionColumn = 0,
           ),
+          NodeActionArguments(),
         ),
       lastCall,
     )

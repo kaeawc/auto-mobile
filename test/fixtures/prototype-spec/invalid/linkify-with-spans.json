@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "spans": [
+        {
+          "text": "@ana"
+        }
+      ],
+      "linkify": {
+        "kinds": ["mention"],
+        "onTap": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.linkify",
+  "expectedMessage": "linkify applies to text, not spans"
+}

@@ -1167,12 +1167,9 @@ export class TwoDaemonWorld {
           this.discovery.setBootedDevices("android", this.onlineDevices());
           const session = reservation.session;
           if (session && session.assignedDevice === device.deviceId) {
-            await process.manager.releaseSessionIfOwned(
-              session.sessionId,
-              session,
-              device.deviceId,
-              "device-killed",
-            );
+            await process.manager.releaseSession(session.sessionId, "device-killed", {
+              expectedOwner: { session: session, deviceId: device.deviceId },
+            });
           }
           if (process.pool.getDevice(device.deviceId) === reservation.device) {
             await process.pool.retireDeviceForShutdown(reservation.device);

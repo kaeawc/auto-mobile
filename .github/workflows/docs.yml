@@ -240,6 +240,13 @@ jobs:
             scripts/ci/resolve-coverage-badge-run.sh keep-published site swift-coverage-badge.json "$base/swift-coverage-badge.json"
           fi
 
+      # Test-count badges (#11871) are derived from a source grep of this
+      # checkout and published as shields.io endpoint JSON, replacing the old
+      # README rewrite that committed to main on every merge. After "Build
+      # documentation" for the same reason as the coverage badges above.
+      - name: "Generate test count badges"
+        run: bash scripts/coverage/generate-test-count-badges.sh site
+
       - name: "Setup Pages"
         uses: actions/configure-pages@v5
 

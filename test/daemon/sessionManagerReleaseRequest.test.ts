@@ -22,9 +22,9 @@ afterEach(() => {
 
 // The request-only controls are consumed at the entry point; release listeners keep seeing exactly
 // the SessionReleaseOptions the caller supplied (#11800).
-test("allowExpired and commitFence never reach release listeners", async () => {
+test("allowExpired, commitFence, and expectedOwner never reach release listeners", async () => {
   const manager = create();
-  await manager.createSession("s1", "emulator-5554", "android");
+  const session = await manager.createSession("s1", "emulator-5554", "android");
   const seen: SessionReleaseOptions[] = [];
   manager.onSessionRelease((_id, _device, _reason, _snapshot, options) => {
     seen.push(options);
@@ -33,6 +33,7 @@ test("allowExpired and commitFence never reach release listeners", async () => {
   const deviceId = await manager.releaseSession("s1", "explicit-release", {
     allowExpired: true,
     commitFence: () => true,
+    expectedOwner: { session, deviceId: "emulator-5554" },
     deviceIdentityReplaced: true,
   });
 
@@ -50,6 +51,19 @@ test("a declining commit fence supersedes the release and keeps the session", as
 
   expect(result).toEqual({ superseded: true });
   expect(manager.getSession("s1")).not.toBeNull();
+});
+
+test("an owned release forwards a declining commit fence and keeps the session", async () => {
+  const manager = create();
+  const session = await manager.createSession("s1", "emulator-5554", "android");
+
+  const deviceId = await manager.releaseSession("s1", "device-killed", {
+    expectedOwner: { session, deviceId: "emulator-5554" },
+    commitFence: () => false,
+  });
+
+  expect(deviceId).toBeNull();
+  expect(manager.getSession("s1")).toBe(session);
 });
 
 test("releaseSessionUnlessSuperseded without a fence releases like releaseSession", async () => {

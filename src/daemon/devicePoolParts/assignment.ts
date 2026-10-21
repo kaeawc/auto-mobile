@@ -92,9 +92,12 @@ export interface AssignmentOperations {
     stats: ReturnType<DevicePoolOperations["getStats"]>;
     deviceIds: ReadonlySet<string>;
   }>;
-  readLiveInventoryDeviceIds(): Promise<Set<string>>;
-  readInventoryDiscovery(platform: Platform): Promise<BootedDeviceDiscovery>;
-  assertEmptyInventoryIsKnown(read: ReadonlyMap<Platform, BootedDeviceDiscovery>): Promise<void>;
+  readLiveInventoryDeviceIds(signal?: AbortSignal): Promise<Set<string>>;
+  readInventoryDiscovery(platform: Platform, signal?: AbortSignal): Promise<BootedDeviceDiscovery>;
+  assertEmptyInventoryIsKnown(
+    read: ReadonlyMap<Platform, BootedDeviceDiscovery>,
+    signal?: AbortSignal,
+  ): Promise<void>;
   refreshForeignOwnership(requireCurrent?: boolean): Promise<void>;
   countForeignDrivenDevices(platform?: Platform): number;
 }
@@ -337,14 +340,14 @@ export class DevicePoolAssignment {
    * stale pool tally and never zero. A source whose tooling is not installed on this host is not
    * incomplete (#11605) -- unless a pooled device depends on it, which proves the tooling existed.
    */
-  async readLiveInventoryDeviceIds(): Promise<Set<string>> {
+  async readLiveInventoryDeviceIds(signal = getAbortSignal()): Promise<Set<string>> {
     const live = new Set<string>();
     const read = new Map<Platform, BootedDeviceDiscovery>();
     for (const platform of ["android", "ios"] as const) {
       if (this.callbacks.getDevicesByPlatform(platform).length === 0) {
         continue;
       }
-      const discovery = await this.readInventoryDiscovery(platform);
+      const discovery = await this.readInventoryDiscovery(platform, signal);
       read.set(platform, discovery);
       // Only a pooled device whose own discovery source failed is unknown; a failure of a source
       // none of them depends on (devicectl for a simulator-only pool) leaves the answer exact.
@@ -369,6 +372,7 @@ export class DevicePoolAssignment {
         discovered: devices,
         devicePool: this.callbacks,
         deviceManager: this.state.deviceManager,
+        signal,
         // A held device discovery misses and the probe cannot place is unknown, never zero.
         onProbeFailure: "throw",
       });
@@ -384,15 +388,18 @@ export class DevicePoolAssignment {
       }
     }
     if (live.size === 0) {
-      await this.assertEmptyInventoryIsKnown(read);
+      await this.assertEmptyInventoryIsKnown(read, signal);
     }
     return live;
   }
 
-  async readInventoryDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
+  async readInventoryDiscovery(
+    platform: Platform,
+    signal = getAbortSignal(),
+  ): Promise<BootedDeviceDiscovery> {
     return expectingPooledSources(
       await this.state.deviceManager.getBootedDevicesDetailed(platform, {
-        signal: getAbortSignal(),
+        signal,
       }),
       this.callbacks.getAllDevices(),
     );
@@ -406,9 +413,10 @@ export class DevicePoolAssignment {
    */
   async assertEmptyInventoryIsKnown(
     read: ReadonlyMap<Platform, BootedDeviceDiscovery>,
+    signal = getAbortSignal(),
   ): Promise<void> {
     for (const platform of ["android", "ios"] as const) {
-      const discovery = read.get(platform) ?? (await this.readInventoryDiscovery(platform));
+      const discovery = read.get(platform) ?? (await this.readInventoryDiscovery(platform, signal));
       if (incompleteDiscoverySources(discovery, [platform]).length > 0) {
         throw new BootedDeviceDiscoveryIncompleteError(
           platform,

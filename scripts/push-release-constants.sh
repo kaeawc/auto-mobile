@@ -14,7 +14,7 @@
 #
 #   AUTO_MOBILE_PR_TOKEN is an admin actor and bypasses the green-main ruleset,
 #   so the push lands with no PR and no status checks — the same mechanism
-#   push-readme-badges.sh already uses for the README badge commit.
+#   the retired README badge commit job used (removed in #11871).
 #
 # Why re-sync + regenerate instead of rebase-and-push:
 #   Each attempt hard-resets to the latest origin/main and regenerates the

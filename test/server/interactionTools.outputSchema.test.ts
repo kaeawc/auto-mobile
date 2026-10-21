@@ -10,6 +10,7 @@ import type { SendKeysResult } from "../../src/features/action/SendKeys";
 import { AndroidImeCatalog } from "../../src/features/action/AndroidImeCatalog";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { defaultKeyboardProfileRestoreRegistry } from "../../src/features/action/KeyboardProfileRestore";
 import {
   type InteractionToolDependencies,
   registerInteractionTools,
@@ -169,11 +170,13 @@ test("keyboard setProfile preserves the profile text", async () => {
       {
         activeProfileId: result.activeProfileId,
         previousProfileId: result.previousProfileId,
+        restoresOnRelease: false,
       },
     );
   } finally {
     supported.mockRestore();
     select.mockRestore();
+    defaultKeyboardProfileRestoreRegistry.forget(device.deviceId);
   }
 });
 

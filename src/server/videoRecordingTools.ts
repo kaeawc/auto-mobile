@@ -2,7 +2,8 @@ import { OrphanRecorderActiveError } from "../daemon/orphanRecorderRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
 import { ActionableError, type BootedDevice, type VideoRecordingConfigInput } from "../models";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { videoRecordingResultSchema } from "./videoRecordingToolOutputSchemas";
 import {
   getStartupOrphanCaptures,
   heldVideoRecordingOwner,
@@ -216,7 +217,7 @@ function createVideoStartResponse(output: {
     throw new ActionableError(message);
   }
 
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     action: "start",
     skipped: skipped.length > 0 ? skipped : undefined,
     count: recordings.length,
@@ -415,7 +416,7 @@ export function createVideoStopResponse(output: {
     );
   }
 
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     action: "stop",
     count: results.length,
     recordings: results,
@@ -646,6 +647,7 @@ export function registerVideoRecordingTools(
           ? "booted"
           : "automationReady",
       nonDeviceHandler: videoRecordingNonDeviceHandler,
+      outputSchema: videoRecordingResultSchema,
     },
   );
 }

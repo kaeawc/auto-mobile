@@ -21,6 +21,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { emulatorConsoleReportsFailure } from "../utility/DeviceState";
+import { parseEmulatorSensorReadback } from "../utility/EmulatorSensors";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
@@ -233,9 +234,9 @@ export class Shake extends BaseVisualChange {
       if (emulatorConsoleReportsFailure(result.stdout, result.stderr)) {
         throw new Error("emulator rejected acceleration read-back");
       }
-      const acceleration = parseAccelerationReadback(result.stdout);
+      const acceleration = parseEmulatorSensorReadback(result.stdout, "acceleration");
       if (acceleration) {
-        return { acceleration };
+        return { acceleration: acceleration.join(":") };
       }
       throw new Error("unrecognized acceleration read-back");
     } catch (error) {
@@ -250,25 +251,6 @@ export class Shake extends BaseVisualChange {
       };
     }
   }
-}
-
-function parseAccelerationReadback(stdout: string): string | undefined {
-  const accelerationLines = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("acceleration ="));
-  if (accelerationLines.length !== 1) {
-    return undefined;
-  }
-  const value = accelerationLines[0].slice("acceleration =".length).trim();
-  const components = value.split(":").map((component) => component.trim());
-  if (
-    components.length !== 3 ||
-    components.some((component) => component.length === 0 || !Number.isFinite(Number(component)))
-  ) {
-    return undefined;
-  }
-  return components.map((component) => String(Number(component))).join(":");
 }
 
 function isValidShakeOptions(duration: number, intensity: number, platform: string): boolean {

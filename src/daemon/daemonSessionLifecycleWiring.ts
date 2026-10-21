@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { registerLocationRouteSessionCleanup } from "../features/utility/LocationRoutePlayer";
 import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
+import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -95,6 +96,7 @@ export function wireSessionLifecycle(
   registerLocationRouteSessionCleanup(sessionManager);
   registerNetworkStateSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
+  registerEmulatorSensorSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {

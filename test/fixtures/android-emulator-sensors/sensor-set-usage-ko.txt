@@ -1,0 +1,1 @@
+KO: Usage: "set <sensorname> <value-a>[:<value-b>[:<value-c>]]"

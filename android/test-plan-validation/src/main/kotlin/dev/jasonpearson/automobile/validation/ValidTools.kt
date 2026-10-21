@@ -15,6 +15,7 @@ object ValidTools {
     MIGRATED_LEGACY_TOOLS +
       setOf(
         "accessibility",
+        "accessibilityAction",
         "accessibilityFocus",
         "audit",
         "barrier",
@@ -101,6 +102,7 @@ object ValidTools {
         "setDeviceResources",
         "setPosture",
         "setPreference",
+        "setSensor",
         "setToolEnabled",
         "snapshotOf",
         "stageSessionDownloads",

@@ -55,8 +55,9 @@ Use `init --broker-batch /absolute/broker-batch.json --count 1` for the broker
 harness. Daemon 1 is the sole broker. Init can also create extra plain daemons,
 but device scenarios and broker acceptance require exactly one daemon total.
 The batch input has `schemaVersion: 1`, `limits` (`totalDeviceCap`, `sessionCap`,
-`idlePoolCap`), `reuseCleanDevices`, explicit per-platform `defaults`, and a
-`clients` array. Each client has a unique `name` matching `^[a-z0-9-]{1,32}$`,
+`idlePoolCap`), `reuseCleanDevices`, optional `reuseAndroidCleanDevices`,
+explicit per-platform `defaults`, and a `clients` array. Each client has a
+unique `name` matching `^[a-z0-9-]{1,32}$`,
 `platform`, and optional `hardware`, `os`, `idleTimeoutMs`, and
 `preparationTimeoutMs`. Hardware can be an archetype string or a product hardware
 selector; OS uses the product requirement contract. See
@@ -79,8 +80,9 @@ level (36). Among installed images of the same release the resolver prefers the
 
 `--max-devices` defaults to **2**, with a hard cap of **4**, and must cover
 `totalDeviceCap`. Zero pooling is the default: `idlePoolCap: 0` and
-`reuseCleanDevices: false`. Reserve `init --allow-reuse` for a deliberate
-clean-reuse scenario; it permits nonzero pooling but does not enable it by
+`reuseCleanDevices: false` and `reuseAndroidCleanDevices: false`. Reserve
+`init --allow-reuse` for a deliberate clean-reuse scenario; it permits
+nonzero pooling but does not enable it by
 itself. There is currently no named clean-reuse runner scenario, and the device
 scenario/acceptance adapter requires zero pooling. Do not use reuse for the
 ordinary batch or claim destruction evidence from a reuse experiment.

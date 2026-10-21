@@ -21,6 +21,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
   ...pendingTools(
     [
       "accessibility",
+      "accessibilityAction",
       "biometricAuth",
       "changeLocalization",
       "clipboard",
@@ -34,6 +35,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "putAppFile",
       "resetKeychain",
       "rotate",
+      "setSensor",
       "windowMode",
       "setAppPermissions",
       "setDeviceState",
@@ -65,6 +67,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
     [
       "accessibilityFocus",
       "appLifecycle",
+      "audit",
       "crashApp",
       "dragAndDrop",
       "dragPath",

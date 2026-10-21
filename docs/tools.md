@@ -2458,6 +2458,19 @@ to the value it replaced, and acquisition-time reset (#11145) covers all three.
 | `reduceMotion`     | `true`: Remove animations, all three animation scales set to `0`; `false` restores the scales it replaced, otherwise `1` | `"partial"`: `defaults write com.apple.Accessibility ReduceMotionEnabled -bool YES` in the Simulator                     | `false`      |
 | `boldText`         | `true` on API 31+: `settings put secure font_weight_adjustment 300`; `false` below API 31                                | `"partial"`: `defaults write com.apple.Accessibility EnhancedTextLegibilityEnabled -bool YES` in the Simulator           | `false`      |
 
+On Android, `displayConfig` also reads and sets the display accessibility settings
+(#14076). High-contrast text and Bold text are `increaseContrast` and `boldText` above.
+Each is verified by reading the setting back, restored by `reset` and by acquisition-time
+reset (#11145), and reported unsupported on the iOS Simulator:
+
+| Field                | Android setting                                                                                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `colorInversion`     | `secure accessibility_display_inversion_enabled`                                                                                                                                                                          |
+| `colorCorrection`    | `off`, `deuteranomaly`, `protanomaly`, `tritanomaly` or `grayscale`: `secure accessibility_display_daltonizer` (mode, written first) and `accessibility_display_daltonizer_enabled`; `off` keeps the device's chosen mode |
+| `magnification`      | `secure accessibility_display_magnification_enabled`: the triple-tap gesture, which does not zoom until it is performed                                                                                                   |
+| `magnificationScale` | `secure accessibility_display_magnification_scale` (1 to 8; AOSP default 2)                                                                                                                                               |
+| `extraDim`           | API 31+: `secure reduce_bright_colors_activated`; below API 31 it is unsupported                                                                                                                                          |
+
 Research outcome for the iOS Simulator `reduceMotion` and `boldText` fields:
 partial with relaunch. simctl has no verb for either, so `displayConfig` writes
 the `com.apple.Accessibility` default inside the Simulator and reads it back from

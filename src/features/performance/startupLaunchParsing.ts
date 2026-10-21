@@ -65,7 +65,7 @@ export function parseFullyDrawnReports(
   sinceTimestampMs: number,
 ): FullyDrawnReport[] {
   const reports: FullyDrawnReport[] = [];
-  for (const line of output.split("\n")) {
+  for (const line of output.split(/\r?\n/)) {
     const parsed = parseActivityManagerLogcatLine(line);
     if (!parsed || parsed.timestampMs < sinceTimestampMs) {
       continue;
@@ -89,7 +89,7 @@ export function parseFullyDrawnReports(
  */
 export function parseResolvedActivity(output: string, packageName: string): string | null {
   const lines = output
-    .split("\n")
+    .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   const component = lines.reverse().find((line) => /^[\w.]+\/[\w.$]+$/.test(line));

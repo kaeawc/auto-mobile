@@ -66,6 +66,13 @@ describe("parseFullyDrawnReports", () => {
     expect(report.fullyDrawnMs).toBe(1950);
   });
 
+  test("reads CRLF output, as adb on a Windows host can print it", () => {
+    const crlf = fixture("logcat-fully-drawn-api34.txt").replace(/\r?\n/g, "\r\n");
+    expect(parseFullyDrawnReports(crlf, PLAYGROUND, 0)).toHaveLength(1);
+    const resolved = fixture("resolve-activity-launcher.txt").replace(/\r?\n/g, "\r\n");
+    expect(parseResolvedActivity(resolved, PLAYGROUND)).toBe(COMPONENT);
+  });
+
   test("drops lines logged before the launch", () => {
     expect(
       parseFullyDrawnReports(fixture("logcat-fully-drawn-api34.txt"), PLAYGROUND, 1729500000901),

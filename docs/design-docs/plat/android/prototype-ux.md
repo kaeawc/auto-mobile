@@ -891,6 +891,31 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)
+
+- **Animated style.** A node's `animate: {durationMs?, easing?}` (0–2000 ms, default 300;
+  `standard` (default), `emphasized`, `linear` or `spring`, which ignores the duration) makes
+  changes to its `alpha`, `offset`, `scale`, `rotation`, `background` and `color` animate, for
+  example a heart that grows and turns red when a `styleWhen` matches. Without `animate` those
+  changes stay instant.
+- **Scale and rotation.** Style `scale` (0–4) and `rotation` (-360..360 degrees) are drawn about
+  the node's centre without changing its layout slot, like `offset`; `styleWhen` can set them.
+- **Transitions.** `transition` also takes `slideStart` and `slideEnd`, which slide in from and out
+  to that edge (a drawer), and `scale`, which scales in with a fade. Start and end follow the layout
+  direction, so drawers mirror in right-to-left locales.
+- **Zoomable images.** An `image` with `zoomable: {maxScale}` (1–8) pinches between 1 and
+  `maxScale`, pans within its own bounds once zoomed, and toggles between 1x and 2x (or
+  `maxScale`) on a double tap; TalkBack gets "Zoom in" and "Zoom out" actions. The zoom is clipped
+  to the image's box and does not change its layout or reported bounds. `onTap` still runs; a
+  zoomable image cannot also have `onDoubleTap` (rejected at `<path>.zoomable`).
+- **Reduced motion.** Under `motion: "none"` or animator duration scale 0, style changes and
+  transitions snap, so `observe` and screenshots stay deterministic. Zoom changes are always applied
+  directly.
+
+Android draws scale and rotation with a `graphicsLayer`, animates with `animateFloatAsState` and
+`animateColorAsState`, and zooms with `transformable`. The iOS agent does not implement motion v2
+yet and does not advertise the capability (#14684), so the host refuses these fields there.
+
 ## Actions and state
 
 | Action `type` | Properties                                                                                                                                                                                                  |

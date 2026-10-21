@@ -148,6 +148,18 @@ before device requests when it is absent. The Android and iOS implementations sh
 iOS uses a drawn field with SF Symbol icons, not SwiftUI \`.searchable\`; these differences
 are reported in \`platformNotes\`.
 
+## Motion v2
+
+(needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default
+300; \`standard\`, \`emphasized\`, \`linear\` or \`spring\`) animates changes to its \`alpha\`,
+\`offset\`, \`scale\`, \`rotation\`, \`background\` and \`color\`, typically from \`styleWhen\`; without
+it they are instant. Style \`scale\` (0-4) and \`rotation\` (degrees, -360..360) draw about the
+node's centre without moving siblings. \`transition\` also takes \`slideStart\` / \`slideEnd\`
+(slide in from that edge, mirrored right to left: drawers) and \`scale\`. An \`image\` with
+\`zoomable: {maxScale}\` (1-8) pinches, pans when zoomed and toggles 1x/2x on a double tap, with
+accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
+\`motion: "none"\` or animator scale 0. The iOS agent does not support it yet (#14684).
+
 ## Charts
 
 \`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or

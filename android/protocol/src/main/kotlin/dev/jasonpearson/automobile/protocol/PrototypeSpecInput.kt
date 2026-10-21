@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.stackErrors
 import dev.jasonpearson.automobile.protocol.PrototypeContainerRules.swipeActionsErrors
 import dev.jasonpearson.automobile.protocol.PrototypeDataRules.dataActionErrors
 import dev.jasonpearson.automobile.protocol.PrototypeLinkifyRules.linkifyErrors
+import dev.jasonpearson.automobile.protocol.PrototypeMotionRules.motionErrors
 import dev.jasonpearson.automobile.protocol.PrototypePlatformRules.platformErrors
 import dev.jasonpearson.automobile.protocol.PrototypeRequestRules.requestActionErrors
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.definitions
@@ -110,6 +111,7 @@ internal object PrototypeSpecInput {
 
   private fun nodeVocabularyErrors(value: JsonElement, context: Context): PrototypeSpecError? =
     platformErrors(value, context)
+      ?: motionErrors(context)
       ?: chartErrors(value, context)
       ?: linkifyErrors(value, context)
       ?: chatScrollErrors(context)

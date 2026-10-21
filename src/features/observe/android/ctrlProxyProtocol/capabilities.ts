@@ -91,6 +91,8 @@ export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1"
 export const PROTOTYPE_PLATFORM_CAPABILITY = "prototype_platform_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
+/** Node `animate`, style `scale`/`rotation`, horizontal and scale transitions, zoomable images (#14208). */
+export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 /** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
 export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */

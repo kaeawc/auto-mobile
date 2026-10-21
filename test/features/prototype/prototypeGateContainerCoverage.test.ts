@@ -58,6 +58,7 @@ const fixtures: Record<string, Node> = {
     activeKey: "active",
     child: label,
   },
+  prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
   prototype_chart_v1: {
     type: "chart",
     variant: "line",

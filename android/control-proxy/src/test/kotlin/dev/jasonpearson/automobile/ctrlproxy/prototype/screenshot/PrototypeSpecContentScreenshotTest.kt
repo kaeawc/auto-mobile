@@ -510,6 +510,19 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
     )
 
+  // Pending: #14208 scale, rotation and colour applied by styleWhen, settled (no motion in
+  // screenshots); no Linux baseline recorded yet.
+  @Test
+  fun motionV2Liked() =
+    prototypeScreenshotTest(
+      "motion_v2_liked",
+      validPrototypeFixture(
+        "motion-v2",
+        stateOverrides = mapOf("liked" to OPEN, "drawer" to OPEN),
+      ),
+      pending = true,
+    )
+
   // Pending: #14209 line, area, bar and ring charts; no Linux baselines recorded yet.
   @Test
   fun chartVariants() =

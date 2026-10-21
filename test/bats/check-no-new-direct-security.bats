@@ -12,6 +12,10 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../../src/utils/io.ts" "$repo_dir/src/utils/"
   ln -s "$BATS_TEST_DIRNAME/../../node_modules" "$repo_dir/node_modules"
   git -C "$repo_dir" init -q
+  # Newer Git runs auto-maintenance detached after commit/fetch; a background
+  # writer in .git races teardown's rm -rf ("Directory not empty", #14019).
+  git -C "$repo_dir" config maintenance.auto false
+  git -C "$repo_dir" config gc.auto 0
   git -C "$repo_dir" config user.email test@example.com
   git -C "$repo_dir" config user.name test
   touch "$repo_dir/src/existing.ts"

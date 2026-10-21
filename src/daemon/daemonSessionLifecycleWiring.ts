@@ -2,6 +2,7 @@ import { lazySessionReleasePool } from "./releaseSessionAndDevice";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { registerLocationRouteSessionCleanup } from "../features/utility/LocationRoutePlayer";
+import { registerStatusBarSessionCleanup } from "./statusBarSessionCleanup";
 import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
 import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
 import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
@@ -98,6 +99,7 @@ export function wireSessionLifecycle(
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
   registerNetworkStateSessionCleanup(sessionManager);
+  registerStatusBarSessionCleanup(sessionManager);
   registerAppLinksSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
   registerEmulatorSensorSessionCleanup(sessionManager);

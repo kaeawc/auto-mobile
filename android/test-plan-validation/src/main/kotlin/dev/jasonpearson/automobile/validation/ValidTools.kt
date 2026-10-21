@@ -113,6 +113,7 @@ object ValidTools {
         "setToolEnabled",
         "snapshotOf",
         "stageSessionDownloads",
+        "statusBar",
         "tapAny",
         "tapAt",
         "wakeAndUnlock",

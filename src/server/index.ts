@@ -1,3 +1,4 @@
+import type { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
@@ -92,6 +93,7 @@ import {
 } from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
+  deviceReadiness?: DeviceReadiness;
   iosDependencies?: IosDoctorDependencies;
   debug?: boolean;
   sessionContext?: {
@@ -310,6 +312,9 @@ function resolveBindingStore(options: McpServerOptions): {
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
+  if (options.deviceReadiness) {
+    ToolRegistry.setDeviceReadiness(options.deviceReadiness);
+  }
   const bindingStore = resolveBindingStore(options);
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,

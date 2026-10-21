@@ -886,7 +886,8 @@ export function registerUtilityTools(
 ) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
     displayInventory: options.displayInventory,
-    legacyDeviceSelection: options.legacyDeviceSelection,
+    legacyDeviceSelection:
+      options.legacyDeviceSelection ?? (() => ToolRegistry.getDeviceReadiness()),
     resumeCtrlProxy: resumeCtrlProxyIfCurrentlyBooted,
   });
 

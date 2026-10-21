@@ -286,6 +286,7 @@ test/daemon/observerReleaseBroadcast.test.ts
 test/daemon/observerSessionRegistry.test.ts
 test/daemon/observerSessionRequestHandlers.test.ts
 test/daemon/outboundWriteGuard.test.ts
+test/daemon/ownedFileRemoval.test.ts
 test/daemon/ownerConflictLeash.test.ts
 test/daemon/ownerDisconnectReleaseRearm.test.ts
 test/daemon/ownerDisconnectReleaseRemaining.test.ts

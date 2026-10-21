@@ -1,5 +1,6 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { getTextRequestDeadlineMs } from "../../../src/features/action/textTransportTimeout";
+import type { InputTextOptions } from "../../../src/features/action/InputText";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -75,8 +76,8 @@ describe("SetUIState", () => {
       keyboard,
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -350,8 +351,8 @@ describe("SetUIState", () => {
         return result;
       });
       const executeInput = fakeInput.execute.bind(fakeInput);
-      spyOn(fakeInput, "execute").mockImplementation(async (text, imeAction) => {
-        const result = await executeInput(text, imeAction);
+      spyOn(fakeInput, "execute").mockImplementation(async (text, options) => {
+        const result = await executeInput(text, options);
         if (result.success) {
           fakeFieldTypeDetector.setTextValue(focusedKey, text);
         }
@@ -678,9 +679,9 @@ describe("SetUIState", () => {
           },
         },
         inputText: {
-          execute: async (text, _imeAction, _dismissKeyboard, _mode, signal) => {
+          execute: async (text, _options, call) => {
             const result = await fakeInput.execute(text);
-            onInput(text, signal);
+            onInput(text, call?.signal);
             return result;
           },
         },
@@ -2082,8 +2083,8 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -2248,8 +2249,8 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -2346,8 +2347,8 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -2532,8 +2533,8 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     const setUIState = new SetUIState(device, null, {
       tapOnElement: tapReportingFullCompletion,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;
@@ -2710,8 +2711,8 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
       inputText: {
-        execute: async (text: string, imeAction?: string) => {
-          const result = await fakeInput.execute(text, imeAction);
+        execute: async (text: string, options?: InputTextOptions) => {
+          const result = await fakeInput.execute(text, options);
           const calls = fakeTap.getCalls();
           const target = calls[calls.length - 1]?.options;
           const key = target?.elementId ?? target?.text;

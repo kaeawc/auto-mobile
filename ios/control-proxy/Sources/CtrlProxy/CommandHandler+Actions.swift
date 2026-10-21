@@ -134,6 +134,8 @@ extension CommandHandler {
             }
         }
 
+        await sdkHierarchyClient?.appLifecycleDidChange()
+
         // Explicit state transition: switch tracking to launched app.
         await trackedAsync("switchForegroundApp") {
             await self.elementLocator.switchForegroundApp(bundleId: bundleId)

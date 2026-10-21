@@ -359,7 +359,7 @@ export const DAEMON_ENV = {
     kind: "int",
     default: "see docs",
     min: 1,
-    doc: "openLink MCP budget in ms: daemon decides; explicit client or daemon value applies; daemon wins if both set. Client connection timeout does not floor it.",
+    doc: "openLink MCP budget in ms: daemon decides; explicit client or daemon value applies; daemon wins if both set. The client connection timeout (default 120 s) is bypassed only when an explicit value is set in the client or daemon process; with neither set it still floors the budget.",
   },
   DEVICE_RECOVERY_ON_LOSS: {
     name: "AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS",

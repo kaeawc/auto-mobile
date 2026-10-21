@@ -293,12 +293,18 @@ export class DaemonRestartCoordinator {
       });
       const result = republishResultSchema.passthrough().parse(raw);
       if (!result.accepted || typeof result.maintenanceToken !== "string") {
-        throw new DaemonRestartDeferredError(result.reason ?? "maintenance admission unavailable");
+        throw new DaemonRestartDeferredError(
+          result.reason ?? "maintenance admission unavailable",
+          result.reason,
+        );
       }
       maintenanceToken = result.maintenanceToken;
       const admitted = await this.host.admitMaintenanceRestart(expected, maintenanceToken);
       if (!admitted.accepted) {
-        throw new DaemonRestartDeferredError(admitted.reason ?? "maintenance admission refused");
+        throw new DaemonRestartDeferredError(
+          admitted.reason ?? "maintenance admission refused",
+          admitted.reason,
+        );
       }
       return { accepted: true };
     } finally {

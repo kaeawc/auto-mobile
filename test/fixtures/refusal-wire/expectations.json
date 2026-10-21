@@ -518,6 +518,14 @@
         "retryAfterMs": 1000
       }
     },
+    "daemon_restart_options_unknown": {
+      "expected": "fail",
+      "fields": {
+        "code": "daemon_restart_options_unknown",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "daemon_restart_pending": {
       "expected": "retry",
       "fields": {

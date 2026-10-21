@@ -1,3 +1,4 @@
+import { DaemonRestartOptionsUnknownError } from "../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
 import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
@@ -740,6 +741,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(new DaemonRestartDeferredError("a device operation is active")),
   ],
   [
+    "daemon_restart_options_unknown",
+    "DaemonRestartOptionsUnknownError via shapeToolCallError",
+    () => shaped(new DaemonRestartOptionsUnknownError()),
+  ],
+  [
     "daemon_restart_pending",
     "daemonRestartPendingToolResult",
     () => {
@@ -1196,6 +1202,7 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   "session_recovery_pending",
   "daemon_restart_pending",
   "daemon_restart_deferred",
+  "daemon_restart_options_unknown",
   "viewer_read_only",
   "target_identity_unresolved",
   "cancelled",

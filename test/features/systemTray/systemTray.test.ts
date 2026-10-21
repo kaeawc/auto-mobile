@@ -4767,7 +4767,8 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
 
     expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
     expect(swipes()).toHaveLength(1);
-    expect(timer.now()).toBe(3125);
+    // Verification gets its full window after the group expansion settle.
+    expect(timer.now()).toBe(EXPAND_GROUP_SETTLE_MS + 3125);
     expect(reopenTimes.length).toBeGreaterThan(0);
     for (let index = 1; index < reopenTimes.length; index++) {
       expect(reopenTimes[index] - reopenTimes[index - 1]).toBeGreaterThanOrEqual(
@@ -4785,7 +4786,8 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
 
     expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
     expect(swipes()).toHaveLength(1);
-    expect(timer.now()).toBe(3125);
+    // Verification gets its full window after the group expansion settle.
+    expect(timer.now()).toBe(EXPAND_GROUP_SETTLE_MS + 3125);
   });
 
   test("propagates cancellation during a post-swipe read", async () => {
@@ -4805,7 +4807,7 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
     expect(timer.now()).toBeLessThan(3125);
   });
 
-  test("bounds a hung reopen by the shared deadline and cancels its pending work", async () => {
+  test("bounds a hung reopen by the post-swipe deadline and cancels its pending work", async () => {
     const { observer, swipes, timer, reopenTimes, drain } = setup();
     const execute = observer.execute.bind(observer);
     let reopenSignal: AbortSignal | undefined;
@@ -4821,7 +4823,8 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
     });
 
     expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 0, stalled: true });
-    expect(timer.now()).toBe(3125);
+    // Verification gets its full window after the group expansion settle.
+    expect(timer.now()).toBe(EXPAND_GROUP_SETTLE_MS + 3125);
     expect(reopenTimes).toHaveLength(1);
     expect(reopenSignal?.aborted).toBe(true);
   });
@@ -4864,6 +4867,56 @@ describe("Android systemTray clearAll progress budget", () => {
     ToolRegistry.clearTools();
   });
 
+  // Repeat a captured child row within its group. Identical rows exercise
+  // signature counts as siblings leave, without inventing parser input.
+  const groupedObservation = (state: "collapsed" | "expanded", remaining: number) => {
+    const captured = headerlessTwoNotificationGroups[state];
+    const root: TestHierarchyNode = captured.hierarchy.node ?? {};
+    const group = root.node?.[0];
+    const container = group?.node?.find(
+      (node) => node["resource-id"] === "com.android.systemui:id/notification_children_container",
+    );
+    const row = container?.node?.find(
+      (node) => node["resource-id"] === "com.android.systemui:id/expandableNotificationRow",
+    );
+    if (!group || !container || !row) {
+      throw new Error("Captured notification group is missing its child row");
+    }
+    return createObservation(
+      createHierarchyForTest({
+        ...captured,
+        hierarchy: {
+          node: {
+            ...root,
+            node:
+              remaining === 0
+                ? []
+                : [
+                    {
+                      ...group,
+                      node: group.node?.map((node) =>
+                        node === container
+                          ? {
+                              ...container,
+                              node: [
+                                ...(container.node ?? []).filter(
+                                  (child) =>
+                                    child["resource-id"] !==
+                                    "com.android.systemui:id/expandableNotificationRow",
+                                ),
+                                ...Array.from({ length: remaining }, () => structuredClone(row)),
+                              ],
+                            }
+                          : node,
+                      ),
+                    },
+                  ],
+          },
+        },
+      }),
+    );
+  };
+
   const setup = (stuckAfter = 3) => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -4879,52 +4932,7 @@ describe("Android systemTray clearAll progress budget", () => {
       return executeCommand(command, options);
     });
 
-    // Repeat a captured child row within its expanded group. Identical rows
-    // exercise signature counts as siblings leave, without inventing parser input.
-    const captured = headerlessTwoNotificationGroups.expanded;
-    const root: TestHierarchyNode = captured.hierarchy.node ?? {};
-    const group = root.node?.[0];
-    const container = group?.node?.find(
-      (node) => node["resource-id"] === "com.android.systemui:id/notification_children_container",
-    );
-    const row = container?.node?.find(
-      (node) => node["resource-id"] === "com.android.systemui:id/expandableNotificationRow",
-    );
-    if (!group || !container || !row) {
-      throw new Error("Captured expanded notification group is missing its child row");
-    }
-    const observations = [3, 2, 1].map((remaining) =>
-      createObservation(
-        createHierarchyForTest({
-          ...captured,
-          hierarchy: {
-            node: {
-              ...root,
-              node: [
-                {
-                  ...group,
-                  node: group.node?.map((node) =>
-                    node === container
-                      ? {
-                          ...container,
-                          node: [
-                            ...(container.node ?? []).filter(
-                              (child) =>
-                                child["resource-id"] !==
-                                "com.android.systemui:id/expandableNotificationRow",
-                            ),
-                            ...Array.from({ length: remaining }, () => structuredClone(row)),
-                          ],
-                        }
-                      : node,
-                  ),
-                },
-              ],
-            },
-          },
-        }),
-      ),
-    );
+    const observations = [3, 2, 1].map((remaining) => groupedObservation("expanded", remaining));
     observations.push(createEmptyTrayObservation());
     let verifiedSwipes = 0;
     observer.setObserveResult(() => {
@@ -4953,6 +4961,61 @@ describe("Android systemTray clearAll progress budget", () => {
     return { timer, swipes, drain };
   };
 
+  test.each([2, 3])(
+    "drains %i re-collapsing grouped rows after slow shade readiness and reads",
+    async (rows) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adb = new FakeAdbExecutor();
+      const observer = new FakeObserveScreen();
+      const gestures: string[] = [];
+      let expanded = false;
+      let swipeCount = 0;
+      const executeCommand = adb.executeCommand.bind(adb);
+      spyOn(adb, "executeCommand").mockImplementation((command, options) => {
+        if (command.startsWith("shell input tap")) {
+          expanded = true;
+          gestures.push("expand");
+        } else if (command.startsWith("shell input swipe")) {
+          expect(expanded).toBe(true);
+          expanded = false;
+          swipeCount++;
+          gestures.push("swipe");
+        }
+        return executeCommand(command, options);
+      });
+      observer.setObserveResult((index) => {
+        // Readiness uses almost its entire 5s window. Expansion then needs its
+        // 500ms settle and a real-device-like 1.5s read, as does verification.
+        timer.advanceTime(index === 0 ? 4500 : 1500);
+        return groupedObservation(expanded ? "expanded" : "collapsed", rows - swipeCount);
+      });
+      setSystemTrayDependencies({
+        timer,
+        adbFactory: () => adb,
+        observeScreenFactory: () => observer,
+      });
+
+      const {
+        swipeCount: actualSwipes,
+        dismissedCount,
+        stalled,
+      } = await clearMatchingSystemTrayNotifications(
+        device,
+        { appId: "com.android.shell" },
+        ["Delta"],
+        5000,
+      );
+      expect({ swipeCount: actualSwipes, dismissedCount, stalled }).toEqual({
+        swipeCount: rows,
+        dismissedCount: rows,
+        stalled: false,
+      });
+      expect(gestures).toEqual(Array.from({ length: rows }, () => ["expand", "swipe"]).flat());
+      expect(timer.now()).toBe(4500 + rows * (500 + 1500 + 1500));
+    },
+  );
+
   test("drains three grouped notifications across multiple awaitTimeout budgets", async () => {
     const { timer, swipes, drain } = setup();
 
@@ -4967,7 +5030,8 @@ describe("Android systemTray clearAll progress budget", () => {
 
     expect(await drain()).toMatchObject({ swipeCount: 2, dismissedCount: 1, stalled: true });
     expect(swipes()).toHaveLength(2);
-    expect(timer.now()).toBe(8000);
+    // First dismissal takes 3000ms; the next swipe takes 2600ms, then gets 5000ms to verify.
+    expect(timer.now()).toBe(10600);
   });
 
   test("respects maxSwipes even while dismissals keep making progress", async () => {

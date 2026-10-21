@@ -194,6 +194,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/proxy/DaemonAssetVersionMismatchError": nsDaemonAssetVersionMismatchError,
   "daemon/proxy/DaemonBoundSessionExpiredError": nsDaemonBoundSessionExpiredError,
   "daemon/proxy/DaemonBuildMismatchError": nsDaemonBuildMismatchError,
+  "daemon/proxy/DaemonRestartOptionsUnknownError": nsDaemonRestartOptionsUnknownError,
   "daemon/proxy/DaemonConnectionSessionReleasedError": nsDaemonConnectionSessionReleasedError,
   "daemon/proxy/DaemonRestartOptionsUnknownError": nsDaemonRestartOptionsUnknownError,
   "daemon/proxy/DaemonSessionStalledError": nsDaemonSessionStalledError,
@@ -259,6 +260,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Excluded emulator console port refusal (#14743) carries no retryable flag, so shapeToolCallError and the daemon failure frame emit only 'Error: ...' message text, and provisionDevice wraps it as platform_command_failed; emulator_console_port_excluded never reaches a client as a structured wire field.",
   "features/action/androidLaunchIntent":
     "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
+  "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":
+    "Emulator launch refusal is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
     INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,

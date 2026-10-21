@@ -190,6 +190,7 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionScreenLock.ts#createSessionScreenLockMutation": 1,
   "sessionScreenLock.ts#isLiveOn": 1,
   "sessionScreenReader.ts#runSessionScreenReaderMutation": 1,
+  "sessionSensor.ts#runSessionSensorMutation": 1,
   "setActiveDevice.ts#admitSessionlessSelection": 1,
   "setActiveDevice.ts#assertDeviceOwner": 1,
   "setActiveDevice.ts#bindRequestedDevice": 1,

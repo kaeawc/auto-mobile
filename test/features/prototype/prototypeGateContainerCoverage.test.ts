@@ -55,6 +55,7 @@ const fixtures: Record<string, Node> = {
     child: label,
   },
   prototype_rich_text_v1: { type: "text", spans: [{ text: "Hello" }] },
+  prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
   prototype_menus_v1: {
     type: "menu",
     openWhen: { key: "liked", equals: true },

@@ -11,6 +11,8 @@ import {
 import type { AndroidLogRequest } from "../../../src/features/deviceLogs/AndroidLogReader";
 import { parseThreadtime } from "../../../src/features/deviceLogs/logcatQuery";
 import type { BootedDevice } from "../../../src/models";
+import { executableOfApp } from "../../../src/server/getLogsTools";
+import { unifiedLogPredicate } from "../../../src/server/unifiedLogWindow";
 
 const ANDROID: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const SIMULATOR: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "SIM-UDID" };
@@ -155,6 +157,59 @@ describe("GetLogs", () => {
     ]);
     expect(result.attribution).toBe("subsystem");
     expect(result.warnings[0]).toContain("Android-only filters ignored on iOS: tags");
+  });
+
+  test("iOS: also matches the app's process and warns when nothing matched (#14739)", async () => {
+    const calls: unknown[] = [];
+    const ios: IosUnifiedLogSource = {
+      resolveProcessName: async () => "Preferences",
+      collect: async (...args) => {
+        calls.push([args[0], args[4]]);
+        return "";
+      },
+    };
+    const result = await new GetLogs({
+      clock: clock(),
+      android: () => new RecordingAndroid(),
+      ios: () => ios,
+    }).execute(SIMULATOR, { appId: "com.apple.Preferences" });
+
+    expect(calls).toEqual([["com.apple.Preferences", "Preferences"]]);
+    expect(result.attribution).toBe("process");
+    expect(result.warnings).toEqual([expect.stringContaining("process Preferences")]);
+  });
+
+  test("iOS: a failed process lookup falls back to the subsystem with a warning (#14739)", async () => {
+    const ios: IosUnifiedLogSource = {
+      resolveProcessName: async () => {
+        throw new Error("listapps timed out");
+      },
+      collect: async () => "2026-10-21 08:15:30.123 I  App[1:2] [com.example:ui] shown",
+    };
+    const result = await new GetLogs({
+      clock: clock(),
+      android: () => new RecordingAndroid(),
+      ios: () => ios,
+    }).execute(SIMULATOR, { appId: "com.example" });
+
+    expect(result.attribution).toBe("subsystem");
+    expect(result.lines).toHaveLength(1);
+    expect(result.warnings).toEqual([expect.stringContaining("listapps timed out")]);
+  });
+
+  test("unifiedLogPredicate adds an escaped process clause (#14739)", () => {
+    expect(unifiedLogPredicate("com.example")).toBe(
+      'subsystem == "com.example" OR subsystem BEGINSWITH "com.example."',
+    );
+    expect(unifiedLogPredicate("com.example", 'My"App')).toBe(
+      'subsystem == "com.example" OR subsystem BEGINSWITH "com.example." OR process == "My\\"App"',
+    );
+  });
+
+  test("executableOfApp reads CFBundleExecutable from a listapps record", () => {
+    const apps = [{ bundleId: "com.apple.Preferences", CFBundleExecutable: "Preferences" }];
+    expect(executableOfApp(apps, "com.apple.Preferences")).toBe("Preferences");
+    expect(executableOfApp(apps, "com.other")).toBeUndefined();
   });
 
   test("iOS without appId is refused", async () => {

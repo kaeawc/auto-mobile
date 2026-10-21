@@ -12,7 +12,7 @@ import { logger } from "../../utils/logger";
 import { SOCKET_PATH } from "../constants";
 import { ENV, readEnvRaw } from "../../config/env";
 import { PidFileData, type AuxiliaryDaemonSocketName } from "../types";
-import { statSync } from "node:fs";
+import { statFileIdentity, type SocketFileIdentity } from "../socketFileIdentity";
 import { mkdir } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import {
@@ -56,10 +56,10 @@ export interface DaemonIdentityHost {
 
 /** Publishes PID identity and records precisely which socket paths this daemon owns. */
 export class DaemonIdentity {
-  private readonly boundSocketIdentities = new Map<string, { dev: number; ino: number }>();
+  private readonly boundSocketIdentities = new Map<string, SocketFileIdentity>();
   constructor(
     private readonly host: DaemonIdentityHost,
-    private readonly files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statSync },
+    private readonly files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statFileIdentity },
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly databasePath: () => string = getDatabasePath,
     private readonly reportStartupFailure: (message: string) => void = (message) => {
@@ -267,7 +267,7 @@ export class DaemonIdentity {
     expectedPid?: number;
     socketBindCommitted: boolean;
     socketPaths: string[];
-    socketFileIdentities: ReadonlyMap<string, { dev: number; ino: number }>;
+    socketFileIdentities: ReadonlyMap<string, SocketFileIdentity>;
   } {
     // Gate destructive cleanup on actually holding the socket bind. A lock-less
     // contender refused over a live sibling (issue #6232) has written its early

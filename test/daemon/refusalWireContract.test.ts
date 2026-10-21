@@ -50,6 +50,7 @@ import * as nsDaemonAssetVersionMismatchError from "../../src/daemon/proxy/Daemo
 import * as nsDaemonBoundSessionExpiredError from "../../src/daemon/proxy/DaemonBoundSessionExpiredError";
 import * as nsDaemonBuildMismatchError from "../../src/daemon/proxy/DaemonBuildMismatchError";
 import * as nsDaemonConnectionSessionReleasedError from "../../src/daemon/proxy/DaemonConnectionSessionReleasedError";
+import * as nsDaemonRestartOptionsUnknownError from "../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 import * as nsDaemonSessionStalledError from "../../src/daemon/proxy/DaemonSessionStalledError";
 import * as nsDaemonToolOutcomeUnknownError from "../../src/daemon/proxy/DaemonToolOutcomeUnknownError";
 import * as nsDaemonToolUnavailableError from "../../src/daemon/proxy/DaemonToolUnavailableError";
@@ -193,6 +194,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/proxy/DaemonAssetVersionMismatchError": nsDaemonAssetVersionMismatchError,
   "daemon/proxy/DaemonBoundSessionExpiredError": nsDaemonBoundSessionExpiredError,
   "daemon/proxy/DaemonBuildMismatchError": nsDaemonBuildMismatchError,
+  "daemon/proxy/DaemonRestartOptionsUnknownError": nsDaemonRestartOptionsUnknownError,
   "daemon/proxy/DaemonConnectionSessionReleasedError": nsDaemonConnectionSessionReleasedError,
   "daemon/proxy/DaemonSessionStalledError": nsDaemonSessionStalledError,
   "daemon/proxy/DaemonToolOutcomeUnknownError": nsDaemonToolOutcomeUnknownError,
@@ -255,6 +257,8 @@ const INSTALLER_ERROR_EXEMPTION =
 const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
   "features/action/androidLaunchIntent":
     "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
+  "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":
+    "Emulator launch refusal is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
     INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,

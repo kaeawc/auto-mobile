@@ -19,6 +19,7 @@ import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/utils/stor
 import { buildPlist, PlistReal } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 import { createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
 
 const device = {
@@ -126,7 +127,7 @@ class FakeContainerSimctl {
   writeError?: string;
   processList = "PID\tStatus\tLabel\n";
   processListError?: string;
-  onCommand?: () => void;
+  onCommand?: (args: string[], timeoutMs?: number) => void;
   async executeCommand(): Promise<{ stdout: string; stderr: string }> {
     throw new Error("Unexpected string command");
   }
@@ -135,7 +136,7 @@ class FakeContainerSimctl {
     timeoutMs?: number,
   ): Promise<{ stdout: string; stderr: string }> {
     this.calls.push({ args, timeoutMs });
-    this.onCommand?.();
+    this.onCommand?.(args, timeoutMs);
     if (args[2] === "launchctl") {
       if (this.processListError) {
         throw new Error(this.processListError);
@@ -840,25 +841,85 @@ describe("iOS app UserDefaults resolution", () => {
     test(`genuine missing app: ${message}`, async () => {
       const { preferences, simctl } = harness("absent");
       simctl.containerError = message;
-      await expect(preferences.getPreference(input)).rejects.toThrow(
-        "not installed on this simulator",
-      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const error = await preferences.getPreference(input).catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toContain("not installed on this simulator");
+        expect((error as Error).cause).toBeInstanceOf(Error);
+        expect(((error as Error).cause as Error).message).toBe(message);
+        expect(simctl.calls).toHaveLength(1);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
     });
   }
-  for (const message of [
-    "simctl timed out after 10000ms",
-    "Invalid device: unavailable",
-    "permission denied",
-  ]) {
+  for (const message of ["simctl timed out", "Invalid device: unavailable", "permission denied"]) {
     test(`container failures preserve retry advice: ${message}`, async () => {
-      const { preferences, simctl } = harness("absent");
+      const { preferences, simctl, timer } = harness("absent");
       simctl.containerError = message;
-      await expect(preferences.getPreference(input)).rejects.toThrow(message);
-      await expect(preferences.getPreference(input)).rejects.toThrow(
-        "Check simulator availability and retry",
-      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const error = await preferences.getPreference(input).catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe(
+          `Failed to resolve the data container for '${input.appId}': ${message}. Check simulator availability and retry.`,
+        );
+        expect(((error as Error).cause as Error).message).toBe(message);
+        expect(((error as Error).cause as Error).cause).toBeUndefined();
+        expect(timer.now()).toBe(0);
+      } finally {
+        warn.mockRestore();
+      }
     });
   }
+  test("container retry warns with the original transient failure", async () => {
+    const { preferences, simctl } = harness("absent");
+    simctl.onCommand = () => {
+      simctl.containerError = simctl.calls.length === 1 ? "simctl timed out" : undefined;
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await preferences.getPreference(input);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toBe(
+        "Retrying iOS container lookup after transient failure: simctl timed out",
+      );
+      expect((warn.mock.calls[0][1] as Error).message).toBe("simctl timed out");
+      expect(simctl.calls).toHaveLength(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("plist read race preserves its timeout message", async () => {
+    const { preferences, plist, timer } = harness("absent");
+    const read = spyOn(plist, "readXmlFile").mockImplementation(async () => {
+      timer.advanceTime(10000);
+      return plist.xml;
+    });
+    try {
+      await expect(preferences.getPreference(input)).rejects.toThrow(
+        "iOS UserDefaults request timed out after 10000ms.",
+      );
+    } finally {
+      read.mockRestore();
+    }
+  });
+  test("plist write read-back race reports its command bound and operation budget", async () => {
+    const { preferences, plist, timer } = harness("absent");
+    const read = spyOn(plist, "readXmlFile").mockImplementation(async () => {
+      timer.advanceTime(10000);
+      return plist.xml;
+    });
+    try {
+      await expect(preferences.setPreference({ ...input, type: "int", value: 42 })).rejects.toThrow(
+        "iOS UserDefaults request timed out after 10000ms (operation budget 30000ms).",
+      );
+    } finally {
+      read.mockRestore();
+    }
+  });
   test("empty container is a resolution failure, not app-not-installed", async () => {
     const { preferences, simctl } = harness("absent");
     simctl.containerPath = "";
@@ -870,7 +931,132 @@ describe("iOS app UserDefaults resolution", () => {
     await expect(preferences.setPreference({ ...input, type: "int", value: 42 })).rejects.toThrow(
       "Check simulator availability and retry",
     );
-    expect(simctl.calls).toHaveLength(1);
+    expect(simctl.calls).toHaveLength(2);
+  });
+  for (const operation of ["read", "write"] as const) {
+    test(`${operation}: retries a timed-out container lookup while budget remains`, async () => {
+      const { preferences, timer, simctl, plist } = harness("absent");
+      plist.setValue(42, "int");
+      simctl.onCommand = (args) => {
+        if (args[0] === "get_app_container" && simctl.calls.length === 1) {
+          timer.advanceTime(10000);
+        }
+      };
+      const result = await (operation === "write"
+        ? preferences.setPreference({ ...input, type: "int", value: 42 })
+        : preferences.getPreference(input));
+      expect(result.value).toBe(42);
+      expect(result.storeRoute).toBe("container-plist");
+      expect(result.verified).toBe(operation === "write" ? true : undefined);
+      expect(simctl.calls.map((call) => call.args[0])).toEqual(
+        operation === "write"
+          ? ["get_app_container", "get_app_container", "spawn"]
+          : ["get_app_container", "get_app_container"],
+      );
+      expect(simctl.calls.slice(0, 2).map((call) => call.timeoutMs)).toEqual([10000, 10000]);
+      expect(timer.now()).toBe(10000);
+    });
+    test(`${operation}: two container timeouts report the command bound, not operation exhaustion`, async () => {
+      const { preferences, timer, simctl, plist } = harness("absent");
+      simctl.onCommand = () => timer.advanceTime(10000);
+      await expect(
+        operation === "write"
+          ? preferences.setPreference({ ...input, type: "int", value: 42 })
+          : preferences.getPreference(input),
+      ).rejects.toThrow(
+        operation === "write"
+          ? "get_app_container timed out after 10000ms (operation budget 30000ms)"
+          : "get_app_container timed out after 10000ms",
+      );
+      expect(simctl.calls).toHaveLength(2);
+      expect(simctl.calls.every((call) => call.args[0] === "get_app_container")).toBeTrue();
+      expect(plist.paths).toEqual([]);
+      expect(timer.now()).toBe(20000);
+    });
+    test(`${operation}: expired never-resolving container race labels its command bound`, async () => {
+      const { preferences, timer, simctl } = harness("absent");
+      const command = spyOn(simctl, "executeCommandArgs").mockImplementation((args, timeoutMs) => {
+        simctl.calls.push({ args, timeoutMs });
+        timer.advanceTime(10000);
+        return new Promise(() => {});
+      });
+      try {
+        await expect(
+          operation === "write"
+            ? preferences.setPreference({ ...input, type: "int", value: 42 })
+            : preferences.getPreference(input),
+        ).rejects.toThrow(
+          operation === "write"
+            ? "get_app_container timed out after 10000ms (operation budget 30000ms)"
+            : "get_app_container timed out after 10000ms",
+        );
+        expect(simctl.calls).toHaveLength(2);
+        expect(timer.now()).toBe(20000);
+      } finally {
+        command.mockRestore();
+      }
+    });
+    test(`${operation}: transient CoreSimulator container failure retries once`, async () => {
+      const { preferences, simctl, plist } = harness("absent");
+      plist.setValue(42, "int");
+      simctl.onCommand = () => {
+        simctl.containerError =
+          simctl.calls.length === 1 ? "CoreSimulatorService connection interrupted" : undefined;
+      };
+      const result = await (operation === "write"
+        ? preferences.setPreference({ ...input, type: "int", value: 42 })
+        : preferences.getPreference(input));
+      expect(result.value).toBe(42);
+      expect(simctl.calls.filter((call) => call.args[0] === "get_app_container")).toHaveLength(2);
+    });
+    test(`${operation}: missing app never retries even with transient text`, async () => {
+      const { preferences, simctl } = harness("absent");
+      simctl.containerError =
+        "Application not found. CoreSimulatorService connection reset; timed out";
+      await expect(
+        operation === "write"
+          ? preferences.setPreference({ ...input, type: "int", value: 42 })
+          : preferences.getPreference(input),
+      ).rejects.toThrow("not installed on this simulator");
+      expect(simctl.calls).toHaveLength(1);
+    });
+  }
+  test("container lookup uses the remaining write budget and reports operation exhaustion without retry", async () => {
+    const timer = new FakeTimer();
+    const simctl = new FakeContainerSimctl();
+    const preferences = new AppPreferences(device, {
+      timer,
+      simctl,
+      iosKeyValueClientProvider: () => {
+        timer.advanceTime(25000);
+        return null;
+      },
+    });
+    simctl.onCommand = (_args, timeoutMs) => timer.advanceTime(timeoutMs!);
+    await expect(preferences.setPreference({ ...input, type: "int", value: 42 })).rejects.toThrow(
+      "preference operation timed out after 30000ms",
+    );
+    expect(simctl.calls).toEqual([
+      { args: ["get_app_container", device.deviceId, input.appId, "data"], timeoutMs: 5000 },
+    ]);
+    expect(timer.now()).toBe(30000);
+  });
+  test("exhausted write budget never starts container lookup or defaults write", async () => {
+    const timer = new FakeTimer();
+    const simctl = new FakeContainerSimctl();
+    const preferences = new AppPreferences(device, {
+      timer,
+      simctl,
+      iosKeyValueClientProvider: () => {
+        timer.advanceTime(30000);
+        return null;
+      },
+    });
+    await expect(preferences.setPreference({ ...input, type: "int", value: 42 })).rejects.toThrow(
+      "preference operation timed out after 30000ms",
+    );
+    expect(simctl.calls).toEqual([]);
+    expect(timer.now()).toBe(30000);
   });
   test("missing plist/key warns; malformed XML/permissions surface", async () => {
     const { preferences, plist } = harness("absent");

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { DefaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import { toActionableError } from "../../models/ActionableError";
 import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../utils/storageSdkErrors";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -68,6 +69,23 @@ import {
   preferenceWriteWarning,
   physicalIosUserDefaultsRequireSdkError,
 } from "./preferenceValues";
+
+const IOS_MISSING_APP_PATTERN =
+  /Application not found|No such file or directory|NSPOSIXErrorDomain, code=2/i;
+const IOS_CONTAINER_LOOKUP_ATTEMPTS = 2;
+
+function iosPreferenceTimeoutSuffix(
+  deadlineMs: number | undefined,
+  commandTimeoutMs: number,
+  includeOperationBudget: boolean,
+): string {
+  return includeOperationBudget &&
+    deadlineMs !== undefined &&
+    commandTimeoutMs !== IOS_PREFERENCE_SDK_TIMEOUT_MS
+    ? ` (operation budget ${IOS_DEFAULTS_OPERATION_TIMEOUT_MS}ms)`
+    : "";
+}
+
 export {
   type PreferenceValueType,
   type PreferenceResultType,
@@ -452,14 +470,38 @@ export class AppPreferences {
       return { kind: "container-plist", store, domain, unavailableGroup: true };
     }
     let container: string;
+    const lookupDeadlineMs = deadlineMs ?? this.iosDefaultsDeadline();
     try {
-      const result = await this.iosPreferenceCommand(
-        (timeoutMs) =>
-          this.getSimctl().executeCommandArgs(
-            ["get_app_container", this.device.deviceId, input.appId!, "data"],
-            timeoutMs,
+      const result = await new DefaultRetryExecutor(this.timer).executeOrThrow(
+        () =>
+          this.iosPreferenceCommand(
+            (timeoutMs) =>
+              this.getSimctl().executeCommandArgs(
+                ["get_app_container", this.device.deviceId, input.appId!, "data"],
+                timeoutMs,
+              ),
+            lookupDeadlineMs,
+            IOS_DEFAULTS_COMMAND_TIMEOUT_MS,
+            "get_app_container",
+            deadlineMs !== undefined,
           ),
-        deadlineMs,
+        {
+          maxAttempts: IOS_CONTAINER_LOOKUP_ATTEMPTS,
+          delays: 0,
+          expectedFailure: {
+            reason: "App is not installed on this simulator",
+            matches: (error) => IOS_MISSING_APP_PATTERN.test(errorMessage(error)),
+          },
+          shouldRetry: (error) =>
+            this.timer.now() < lookupDeadlineMs &&
+            !IOS_MISSING_APP_PATTERN.test(errorMessage(error)) &&
+            isRetryableIosDefaultsError(error),
+          onRetry: (error) =>
+            logger.warn(
+              `Retrying iOS container lookup after transient failure: ${errorMessage(error)}`,
+              error,
+            ),
+        },
       );
       container = result.stdout.trim();
       if (!container) {
@@ -467,11 +509,10 @@ export class AppPreferences {
       }
     } catch (error) {
       const detail = errorMessage(error);
-      if (
-        /Application not found|No such file or directory|NSPOSIXErrorDomain, code=2/i.test(detail)
-      ) {
+      if (IOS_MISSING_APP_PATTERN.test(detail)) {
         throw new ActionableError(
           `App '${input.appId}' is not installed on this simulator: ${detail}. Install the app and retry.`,
+          { cause: error },
         );
       }
       throw new ActionableError(
@@ -621,20 +662,26 @@ export class AppPreferences {
     operation: (timeoutMs: number) => Promise<T>,
     deadlineMs?: number,
     commandTimeoutMs = IOS_DEFAULTS_COMMAND_TIMEOUT_MS,
+    commandName = "iOS UserDefaults request",
+    includeOperationBudgetInTimeout = true,
   ): Promise<T> {
-    const remainingMs = Math.min(
-      commandTimeoutMs,
-      deadlineMs === undefined ? commandTimeoutMs : deadlineMs - this.timer.now(),
-    );
+    const operationRemainingMs =
+      deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
+    const remainingMs = Math.min(commandTimeoutMs, operationRemainingMs ?? commandTimeoutMs);
     if (remainingMs <= 0) {
       throw iosDefaultsOperationTimeoutError();
     }
     const operationDeadlineMs = this.timer.now() + remainingMs;
+    const timeoutSuffix = iosPreferenceTimeoutSuffix(
+      deadlineMs,
+      commandTimeoutMs,
+      includeOperationBudgetInTimeout,
+    );
     const timeoutError =
-      deadlineMs === undefined || commandTimeoutMs === IOS_PREFERENCE_SDK_TIMEOUT_MS
-        ? () =>
-            new ActionableError(`iOS UserDefaults request timed out after ${commandTimeoutMs}ms.`)
-        : iosDefaultsOperationTimeoutError;
+      operationRemainingMs !== undefined && operationRemainingMs <= commandTimeoutMs
+        ? iosDefaultsOperationTimeoutError
+        : () =>
+            new ActionableError(`${commandName} timed out after ${remainingMs}ms${timeoutSuffix}.`);
     const value = await raceWithDeadline(
       () => operation(Math.min(IOS_DEFAULTS_COMMAND_TIMEOUT_MS, remainingMs)),
       { timer: this.timer, timeoutMs: remainingMs, label: "iOS UserDefaults", timeoutError },

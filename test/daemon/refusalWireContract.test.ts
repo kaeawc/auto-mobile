@@ -33,6 +33,7 @@ import * as androidDeviceIdentityUnresolved from "../../src/devices/AndroidDevic
 import * as androidAvdIdentityUnresolved from "../../src/devices/AndroidAvdIdentityUnresolvedError";
 import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
 import * as iosHomeLaunchTimeout from "../../src/models/IosHomeLaunchTimeoutError";
+import * as sdkCapabilityQuery from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentError";
 import * as streamPolicy from "../../src/daemon/streamSubscriptionPolicy";
 import * as namespaceGuard from "../../src/daemon/sharedNamespaceGuard";
@@ -175,6 +176,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "devices/AndroidAvdIdentityUnresolvedError": androidAvdIdentityUnresolved,
   "models/DeviceShutdownTimeoutError": shutdownTimeout,
   "models/IosHomeLaunchTimeoutError": iosHomeLaunchTimeout,
+  "features/observe/ios/SdkCapabilityQueryError": sdkCapabilityQuery,
   "models/SessionRecoveryAssignmentError": recoveryAssignment,
   "daemon/streamSubscriptionPolicy": streamPolicy,
   "daemon/sharedNamespaceGuard": namespaceGuard,
@@ -276,6 +278,10 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Export identity mismatch is mapped to a {success:false, code} daemon reply by the export handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
   "daemon/sessionBroker/SessionRequestOwnerMismatchError":
     "Request owner mismatch is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply (retryAfterMs only when retryable) by the release/abandon handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+  "daemon/sessionBroker/SessionBrokerInvariantError":
+    "Store precondition failure raised inside the broker; it is classified as a permanent clean-release failure by cleanReleaseFailure.ts and never serialized as a coded tool or daemon refusal (session_broker_invariant_failed appears nowhere on the wire). It reaches daemon RPCs only as an untyped rethrow (brokerRejection rethrows unknown errors; store requireValue/ownedResource can throw it out of releaseOnce).",
+  "daemon/sessionBroker/SessionBrokerStoppingError":
+    "Shutdown refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
 };
 
 interface CodedErrorModule {
@@ -518,6 +524,7 @@ function readFields(payload: WirePayload): RefusalFields {
     ...(typeof retryAfterMs === "number" && retryAfterMs > 0 ? { retryAfterMs } : {}),
     ...(typeof recovering === "boolean" ? { recovering } : {}),
     ...(payload.externalDevices ? { externalDevices: payload.externalDevices } : {}),
+    ...(payload.heldDevices ? { heldDevices: payload.heldDevices } : {}),
   };
 }
 
@@ -952,6 +959,12 @@ describe("refusal wire contract", () => {
     const rows = Object.values(expectations.codes).map((row) => row.fields);
     expect(rows.some((fields) => fields.retryAfterMs !== undefined)).toBe(true);
     expect(rows.some((fields) => fields.externalDevices !== undefined)).toBe(true);
+    expect(rows.some((fields) => fields.heldDevices !== undefined)).toBe(true);
+    expect(
+      rows.some(
+        (fields) => fields.heldDevices?.length === 2 && fields.externalDevices === undefined,
+      ),
+    ).toBe(true);
     expect(rows.some((fields) => fields.acquireNewSession)).toBe(true);
   });
 
@@ -1147,6 +1160,13 @@ describe("refusal wire contract", () => {
       string | undefined,
     ])[] = [
       [
+        "SDK capability query timeout",
+        () => new sdkCapabilityQuery.SdkCapabilityQueryError("timeout", "SDK probe timed out"),
+        "timeout",
+        true,
+        undefined,
+      ],
+      [
         "plan lock",
         () => new planLockRefusal.PlanExecutionInProgressError("session"),
         "plan_execution_in_progress",
@@ -1279,6 +1299,24 @@ describe("refusal wire contract", () => {
       expect(planRefusalFields(error).details).toMatchObject({ code: "session_recovery_pending" });
     });
   });
+
+  test.each(["cancelled", "timeout", "not_connected", "sdk_capability_query_failed"] as const)(
+    "SDK capability query %s carries code and retryable on every wire",
+    (code) => {
+      const error = new sdkCapabilityQuery.SdkCapabilityQueryError(code, "SDK probe failed");
+      const mcp = shapedRefusalResult(error);
+      expect(mcp.isError).toBe(true);
+      expect(JSON.parse(mcp.content[0].text)).toEqual({
+        success: false,
+        error: "SDK probe failed",
+        code,
+        retryable: true,
+      });
+      expect(isTypedToolRefusal(error)).toBe(true);
+      expect(mcpRequestFailureDetails(error, undefined)).toEqual({ code, retryable: true });
+      expect(planRefusalFields(error)).toEqual({ code, retryable: true });
+    },
+  );
 
   describe("surfaces that carry a refusal but are not a tool result", () => {
     test("committed surface fixtures equal what the real serializers emit", () => {

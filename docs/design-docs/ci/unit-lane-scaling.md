@@ -223,7 +223,7 @@ Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
 and its retry window is judged against the lane cap at its own end time. A
 wall-budget timeout whose own attempt calibration reaches
 `AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN` (default 2.5x) skips the same-runner retry
-and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`) qualifies
+and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`, `TypeScript Code Coverage`) qualifies
 itself: its last step (`if: failure()`) runs
 `scripts/ci/rerun-contended-runner.sh dispatch` against the job's own step summary,
 and on attempt 1 only dispatches the `workflow_dispatch` Rerun contended runner
@@ -379,3 +379,21 @@ held in both passes.
 | Biggest lever                 | Fewer isolates. Sharing processes for the 1,178 no-signal files cuts the suite by about 37%. A fully shared realm cuts it by 77% but leaks across files. |
 | Shard balancing               | Round-robin is within ±13% on CI at 3 shards. LPT gains about 6% and does not address the timeouts.                                                      |
 | Timeout and shutdown failures | Runner-wide slowness, which hits all shards together. Fewer isolates shorten the window, and a retry or infra classification handles the remainder.      |
+
+### Host coordination and cancellation
+
+Unit and changed lanes now acquire host slots before choosing their shard
+count. `AUTOMOBILE_HOST_TEST_SLOTS` defaults to ceil(logical cores / 2), minimum
+two; `off` disables it. The shared pool lives in the coordination directory's
+`test-slots` subdirectory. A sole holder of the entire pool can acquire extra
+slots up to its existing worker demand, retaining idle-host and hosted-runner
+parallelism. Other concurrent lanes use remaining base slots, or one unslotted
+worker if none are free. Explicit `AUTOMOBILE_UNIT_TEST_WORKERS` remains an
+upper bound. Targeted `--parallel` also respects the selected file count.
+
+Signal/EXIT cleanup stops shard and watchdog process groups and releases
+slots. Watchdogs notice a dead caller within a one-second poll, and chunk
+loops check the original lane owner before each group. See
+`scripts/README.md` for the environment controls and overloaded-host retry
+suppression. Changed-file selection remains Bun's responsibility; a shared
+changed-file list is deferred.

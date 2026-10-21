@@ -220,12 +220,16 @@ export class BoundSessionFenceGate {
       this.port.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice") &&
       !this.platformSelectorTargetsBoundSession(name, callerArgs);
-    const routingArgs =
-      name === SET_TOOL_ENABLED_TOOL_NAME
-        ? this.withAcquiredDeviceRoute(callerArgs)
-        : isSessionAcquisition || isTerminalSessionlessDiscovery
-          ? callerArgs
-          : this.withBoundSessionUuid(callerArgs, usesDeviceSelector, name);
+    const omitBoundSession =
+      isSessionAcquisition ||
+      isTerminalSessionlessDiscovery ||
+      this.port.isDeviceInventoryTool(name);
+    const routingArgs = this.routingArgsForTool(
+      name,
+      callerArgs,
+      usesDeviceSelector,
+      omitBoundSession,
+    );
     const canUseSurvivingSession = this.canUseSurvivingSession(
       callerArgs,
       usesDeviceSelector,
@@ -244,6 +248,21 @@ export class BoundSessionFenceGate {
       allowReleasedSession:
         isSessionAcquisition || isTerminalSessionlessDiscovery || canUseSurvivingSession,
     };
+  }
+
+  private routingArgsForTool(
+    name: string,
+    callerArgs: Record<string, unknown>,
+    usesDeviceSelector: boolean,
+    omitBoundSession: boolean,
+  ): Record<string, unknown> {
+    if (name === SET_TOOL_ENABLED_TOOL_NAME) {
+      return this.withAcquiredDeviceRoute(callerArgs);
+    }
+    // Inventory retains an explicit caller route but never inherits the proxy's binding.
+    return omitBoundSession
+      ? callerArgs
+      : this.withBoundSessionUuid(callerArgs, usesDeviceSelector, name);
   }
 
   /**

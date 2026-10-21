@@ -2,8 +2,10 @@ import {
   SessionRequestOwnerMismatchError,
   SESSION_BROKER_RETRY_AFTER_MS,
 } from "./SessionRequestOwnerMismatchError";
+import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { z } from "zod";
 import { SessionExportIdentityMismatchError } from "./store";
+import { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
 import { parseSessionConfig } from "../../devices/sessionConfig";
 import { SESSION_OWNER_EXITED_CODE } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -40,6 +42,13 @@ const releaseParams = z
     livenessOwnerToken: ownerToken,
     // Set only by a proxy whose execution owner died (#12791); a client release omits it.
     reason: z.literal(SESSION_OWNER_EXITED_CODE).optional(),
+    replyBudgetMs: z.preprocess(
+      (value) => (typeof value === "number" && !Number.isFinite(value) ? undefined : value),
+      z
+        .number()
+        .transform((value) => Math.max(0, Math.min(value, SESSION_BROKER_RELEASE_REPLY_BUDGET_MS)))
+        .nullish(),
+    ),
   })
   .strict();
 
@@ -143,8 +152,16 @@ async function handleSessionExport(
 }
 
 function brokerRejection(error: unknown): DaemonMethodResult {
-  if (error instanceof SessionRequestOwnerMismatchError) {
-    logger.warn(`Session broker rejected request ownership: ${errorMessage(error)}`);
+  if (
+    error instanceof SessionRequestOwnerMismatchError ||
+    error instanceof SessionBrokerStoppingError
+  ) {
+    const message = `Session broker rejected request: ${errorMessage(error)}`;
+    if (error.retryable) {
+      logger.debug(message);
+    } else {
+      logger.warn(message);
+    }
     return {
       success: false,
       code: error.code,
@@ -242,7 +259,11 @@ export async function handleReleaseBrokerSession(
     }
     return {
       success: true,
-      result: { ...(await service.broker.release(parsed.data.sessionId, parsed.data.reason)) },
+      result: {
+        ...(await service.broker.release(parsed.data.sessionId, parsed.data.reason, {
+          replyBudgetMs: parsed.data.replyBudgetMs ?? undefined,
+        })),
+      },
     };
   } catch (error) {
     return brokerRejection(error);

@@ -80,7 +80,9 @@ export class McpRouting {
         request.params?.name,
       );
       const toLane = (resolved: McpForwardRoute) =>
-        this.callbacks.withDeviceReadLane(resolved, request, socketSessionId);
+        isHostInventoryCall(request.params?.name, request.params?.arguments)
+          ? { ...resolved, executionKey: "host:inventory" }
+          : this.callbacks.withDeviceReadLane(resolved, request, socketSessionId);
       return route instanceof Promise ? route.then(toLane) : toLane(route);
     }
     return this.callbacks.withAdmittedBoundSession(

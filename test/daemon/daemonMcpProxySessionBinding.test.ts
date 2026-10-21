@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
@@ -23,12 +23,11 @@ function acquired(sessionUuid: string): ToolResult {
   };
 }
 
-let restoreAvailability: () => void;
+let available: ReturnType<typeof spyOn<typeof DaemonClient, "isAvailable">>;
 let proxies: DaemonMcpProxy[];
 
 beforeEach(() => {
-  const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-  restoreAvailability = () => available.mockRestore();
+  available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   proxies = [];
 });
 
@@ -36,7 +35,7 @@ afterEach(async () => {
   for (const proxy of proxies) {
     await proxy.close();
   }
-  restoreAvailability();
+  available.mockRestore();
 });
 
 function connect(answer: ToolAnswer): { proxy: DaemonMcpProxy; client: FakeDaemonClient } {
@@ -244,4 +243,8 @@ describe("setActiveDevice and owner proof on a named session (#11344 review)", (
     await proxy.callTool("pressButton", { button: "home" });
     expect(rawParams.at(-1)).not.toHaveProperty(DAEMON_OWNED_SESSIONS_PARAM);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

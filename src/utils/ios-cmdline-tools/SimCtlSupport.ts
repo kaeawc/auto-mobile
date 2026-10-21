@@ -90,6 +90,12 @@ export interface AppleDeviceType {
   modelIdentifier?: string;
 }
 
+/** One coherent host catalog snapshot for exact simulator specification checks. */
+export interface SimCtlCatalog {
+  runtimes: AppleDeviceRuntime[];
+  deviceTypes: AppleDeviceType[];
+}
+
 export interface SimCtlFileSystem {
   mkdtemp(prefix: string): Promise<string>;
   writeFile(path: string, data: string, encoding: "utf8"): Promise<void>;
@@ -234,6 +240,13 @@ export interface SimCtl {
     options?: { bypassCache?: boolean; signal?: AbortSignal },
   ): Promise<DeviceInfo[]>;
 
+  /** Fresh raw device row, without enrichment or caching; absent/ambiguous UDIDs return undefined. */
+  readSimulatorTarget(
+    udid: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<AppleDevice | undefined>;
+
   /**
    * Get the list of booted simulator UDIDs
    * @returns Promise with an array of booted devices
@@ -351,9 +364,13 @@ export interface SimCtl {
    * @param appPath - Path to the .app bundle
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @param options - `timeoutMs` is the explicit bound for this install (it kills the child). Without
-   *   one, the default command budget applies only when no request signal is in scope.
+   *   one, the default command budget applies. `signal` cancels earlier.
    */
-  installApp(appPath: string, deviceId?: string, options?: { timeoutMs?: number }): Promise<void>;
+  installApp(
+    appPath: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
 
   /**
    * Uninstall an app from the simulator
@@ -610,4 +627,15 @@ export function simulatorModel(
   profile: SimulatorDeviceTypeProfile | null,
 ): string | undefined {
   return model ?? profile?.modelIdentifier ?? undefined;
+}
+
+/** The single raw row for a UDID across runtimes; absent or ambiguous UDIDs return undefined. */
+export function findUniqueSimulatorRow(
+  listing: SimulatorList,
+  udid: string,
+): AppleDevice | undefined {
+  const rows = Object.entries(listing.devices).flatMap(([runtime, devices]) =>
+    devices.filter((device) => device.udid === udid).map((device) => ({ ...device, runtime })),
+  );
+  return rows.length === 1 ? rows[0] : undefined;
 }

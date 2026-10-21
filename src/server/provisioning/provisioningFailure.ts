@@ -10,6 +10,7 @@ import {
 } from "../../devices/exactDeviceProvisioning";
 import { type VirtualDeviceLifecycleLease } from "../../devices/virtualDeviceLifecycleCoordinator";
 import {
+  attachProvisionDeviceLifecycle,
   DeviceToolsDependencies,
   ProvisionDeviceArgs,
   RecordProvisionDeviceLifecycle,
@@ -36,6 +37,8 @@ export async function rethrowFailedProvisionDeviceLifecycle(
   provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
   {
     creationStarted,
+    retainCreatedForRetry,
+    signal,
     takeLifecycleLease,
     error,
     unownedColdBootSettlement,
@@ -44,6 +47,8 @@ export async function rethrowFailedProvisionDeviceLifecycle(
     observedRuntimeDevice,
   }: {
     creationStarted: boolean;
+    retainCreatedForRetry?: boolean;
+    signal?: AbortSignal;
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined;
     error: unknown;
     unownedColdBootSettlement: Promise<void> | undefined;
@@ -100,6 +105,19 @@ export async function rethrowFailedProvisionDeviceLifecycle(
     createdDevice,
     observedRuntimeDevice,
   );
+  // An abort after this decision is handled by the binding journal's terminal cleanup;
+  // it remains the owner of the retained identity until retry or confirmed destruction.
+  if (retainCreatedForRetry && !signal?.aborted) {
+    // The binding's open creation journal owns this exact identity until retry or destruction.
+    const lifecycle = {
+      state: "created_not_ready" as const,
+      phase: "readiness",
+      device: lifecycleDevice,
+      reason: provisionDeviceLifecycleReason(provisionFailure),
+    };
+    recordLifecycle(lifecycle);
+    throw attachProvisionDeviceLifecycle(provisionFailure, lifecycle);
+  }
   recordLifecycle({
     state: "cleanup_in_progress",
     phase: "cleanup",

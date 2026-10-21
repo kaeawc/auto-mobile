@@ -1,10 +1,12 @@
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DaemonBroker } from "../../src/daemon/daemonCore/DaemonBroker";
+import { daemonSocketServerDouble } from "../../src/daemon/daemonSocketServer";
 import type { SqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
@@ -261,7 +263,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
     }
   });
 
-  test("startup prepares the HTTP token before binding and publishes it after binding", async () => {
+  test("a contender refused at the control socket preserves the incumbent HTTP token", async () => {
     const server = new FakeHttpServer(false);
     const listener: HttpListener = server;
     const { daemon, internals, tokenStore } = await makeDaemon(
@@ -320,16 +322,69 @@ describe("Daemon.start() tool-call-end wiring", () => {
     };
     try {
       await expect(daemon.startOn(host)).rejects.toBeInstanceOf(StartupStopped);
-      expect(events).toEqual(["prepare", "listen", "http", "token", "pool", "redrive", "bind"]);
+      expect(events).toEqual(["prepare", "listen", "http", "pool", "redrive", "bind"]);
+      expect(tokenStore.read()).toBe("stale-token");
     } finally {
       spies.reverse().forEach((spy) => spy.mockRestore());
       internals.testHooks.stopSessionTimers();
     }
   });
 
-  test("token publication failure after HTTP binding stops startup before device discovery", async () => {
+  test("starts broker recovery exactly once after the control socket bind", async () => {
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    daemon.testHooks.overrideStartupStages({ stopAfterFailedStartup: async () => {} });
+    const start = mock(() => {});
+    const install = spyOn(DaemonBroker.prototype, "installSessionBroker").mockResolvedValue({
+      start,
+    });
+    const spies = [
+      install,
+      spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(false),
+      spyOn(daemon, "initializeDatabase").mockResolvedValue(undefined),
+      spyOn(daemon, "initializeDevicePoolWithTimeout").mockResolvedValue(undefined),
+      spyOn(daemon, "initializeIosServices").mockResolvedValue(undefined),
+      spyOn(logger, "info").mockImplementation(() => {}),
+    ];
+    const bind = mock(async () => {
+      expect(install).toHaveBeenCalledTimes(1);
+      expect(start).not.toHaveBeenCalled();
+      return daemonSocketServerDouble({ isListening: () => true });
+    });
+    const host: DaemonStartHost = {
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: () => {},
+      writeEarlyOwnerRecord: async () => {},
+      openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+      prepareHttpToken: () => {},
+      publishHttpToken: () => {},
+      startHttpIngress: async () => {},
+      sweepStaleAppearanceConfigs: async () => {},
+      redriveRecorderTeardowns: async () => true,
+      bindControlSocket: bind,
+      startServicesAfterSocketBind: async () => {
+        expect(bind).toHaveBeenCalledTimes(1);
+        expect(start).toHaveBeenCalledTimes(1);
+      },
+      startMaintenanceMonitors: () => {},
+    };
+    try {
+      // startOn runs the real startThroughSocketBind and startAfterSocketBind stages.
+      await daemon.startOn(host);
+      expect(bind).toHaveBeenCalledTimes(1);
+      expect(start).toHaveBeenCalledTimes(1);
+    } finally {
+      spies.reverse().forEach((spy) => spy.mockRestore());
+      daemon.testHooks.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test("token publication failure after control binding fails startup", async () => {
     const { daemon, tokenStore } = await makeDaemon({ port: 3161 });
     const database = spyOn(daemon, "initializeDatabase").mockResolvedValue(undefined);
+    const pool = spyOn(daemon, "initializeDevicePoolWithTimeout").mockResolvedValue(undefined);
+    const ios = spyOn(daemon, "initializeIosServices").mockResolvedValue(undefined);
     const write = spyOn(tokenStore, "write").mockImplementation(() => {
       throw new Error("Token publication failed");
     });
@@ -345,6 +400,10 @@ describe("Daemon.start() tool-call-end wiring", () => {
       writeEarlyOwnerRecord: async () => {},
       openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
       startHttpIngress,
+      sweepStaleAppearanceConfigs: async () => {},
+      redriveRecorderTeardowns: async () => true,
+      bindControlSocket: async () =>
+        new UnixSocketServer("/memory/unbound.sock", DaemonState.getInstance()),
     };
     try {
       await expect(daemon.startOn(host)).rejects.toThrow("Token publication failed");
@@ -353,6 +412,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
       expect(tokenStore.read()).toBeUndefined();
     } finally {
       write.mockRestore();
+      pool.mockRestore();
+      ios.mockRestore();
       database.mockRestore();
       daemon.testHooks.stopSessionTimers();
     }
@@ -425,7 +486,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
   });
 
   test.each([false, true])("registry retirement startup ordering (broker: %s)", async (broker) => {
-    const { internals, timer } = await makeDaemon({ port: 3161, debug: true });
+    const { internals, timer, tokenStore } = await makeDaemon({ port: 3161, debug: true });
+    tokenStore.write("incumbent-token");
     const events: string[] = [];
     let stopped = false;
     const spies = [
@@ -471,6 +533,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       sweepStaleAppearanceConfigs: async () => {},
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {
+        expect(tokenStore.read()).toBe("incumbent-token");
         events.push("bind");
         return new UnixSocketServer("/memory/unbound.sock", DaemonState.getInstance(), timer);
       },
@@ -484,6 +547,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       } else {
         await internals.testHooks.startThroughSocketBind();
         expect(events).toEqual(["ingress", "pool", "bind", "retirement"]);
+        expect(tokenStore.read()).not.toBe("incumbent-token");
         expect(stopped).toBe(false);
         await internals.testHooks.closeManagedExecutionRelease();
         expect(stopped).toBe(true);

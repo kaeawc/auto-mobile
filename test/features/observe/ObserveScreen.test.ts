@@ -611,6 +611,12 @@ describe("ObserveScreen", function () {
 
     test("prefers an SDK-backed iOS screen identity for the observed bundle", async function () {
       const viewHierarchy = new FakeViewHierarchy();
+      const getIdentity = viewHierarchy.getScreenIdentity.bind(viewHierarchy);
+      let identityCaptureTimestamp: number | undefined;
+      viewHierarchy.getScreenIdentity = (appId?: string, capturedAt?: number) => {
+        identityCaptureTimestamp = capturedAt;
+        return getIdentity(appId);
+      };
       viewHierarchy.configureHierarchy({
         packageName: "dev.jasonpearson.automobile.Playground",
         updatedAt: 123,
@@ -648,6 +654,7 @@ describe("ObserveScreen", function () {
           confidence: "high",
           components: { navigationRoute: "SettingsTab" },
         });
+        expect(identityCaptureTimestamp).toBe(123);
       } finally {
         resetObserveCacheStore();
       }

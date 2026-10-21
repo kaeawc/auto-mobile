@@ -71,6 +71,7 @@ unset.
 | `AUTOMOBILE_DAEMON_LOCK_FILE_PATH`, `AUTO_MOBILE_DAEMON_LOCK_FILE_PATH`                                     | Daemon start lock; filesystem path.                                                                                                                                                                                                                                                                                                                                                                                                     | `/tmp/auto-mobile-daemon-<uid>.lock`            |
 | `AUTOMOBILE_DAEMON_TOKEN_FILE_PATH`                                                                         | Per-daemon HTTP ingress token file (mode 0600); filesystem path. Clients read it to authenticate.                                                                                                                                                                                                                                                                                                                                       | `/tmp/auto-mobile-daemon-<uid>.token`           |
 | `AUTOMOBILE_DAEMON_HTTP_TOKEN`                                                                              | Client-side override: the daemon HTTP ingress bearer token to send, instead of reading the token file.                                                                                                                                                                                                                                                                                                                                  | unset                                           |
+| `AUTOMOBILE_DAEMON_LAUNCH_NONCE`                                                                            | Internal. Set by the daemon launcher on the spawned daemon so readiness can match the daemon that answers to this launch; inherited stale values are stripped. Do not set it by hand.                                                                                                                                                                                                                                                   | unset                                           |
 | `AUTOMOBILE_AUX_SOCKET_DIR`                                                                                 | Directory for auxiliary stream/push sockets; filesystem path. When set, the daemon control socket, PID and lock files also move to `/tmp/auto-mobile-daemon-<uid>-<hash of dir>.*` so a private daemon never touches the resident daemon's files (an explicit `AUTOMOBILE_DAEMON_*_PATH` still wins). The JUnit runner, desktop app and XCTestRunner apply the same rule, so exporting the var to them reaches the same private daemon. | `~/.auto-mobile`                                |
 | `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`, `AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH`                             | Override WebRTC stream socket; filesystem path.                                                                                                                                                                                                                                                                                                                                                                                         | auxiliary socket directory `webrtc-stream.sock` |
 | `AUTOMOBILE_DAEMON_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_TIMEOUT_MS`                                             | Connection/request timeout; positive base-10 integer milliseconds.                                                                                                                                                                                                                                                                                                                                                                      | `120000` ms                                     |
@@ -879,6 +880,18 @@ message lists them and `externalDevices` carries their serials:
   "externalDevices": ["emulator-5554"]
 }
 ```
+
+For iOS `capacity_exhausted` refusals, `externalDevices` lists occupying simulator
+UDIDs with no known AutoMobile owner. `heldDevices` separately lists occupying
+UDIDs owned by AutoMobile admissions, live sessions or persisted broker bindings
+and journals, including after a daemon restart. Each field is an array of strings
+and is omitted when empty. Both groups count toward the same limit. A held device
+is not a stray simulator to shut down; release its session or binding first. Warm
+simulator hints exclude live-session and broker-held devices. An unreadable broker
+registry only affects labels and hints: boots below the limit still proceed, and
+capacity refusals use retained or in-memory ownership, mark unclassifiable devices
+external and state that ownership could not be read. See
+[device ownership](device-ownership.md) for the reader's coverage and fallback.
 
 Adopting an emulator or simulator that is already running or starting is never
 refused. An admitted boot holds its slot until adb lists the new emulator (or the

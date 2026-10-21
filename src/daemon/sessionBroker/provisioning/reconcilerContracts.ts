@@ -195,6 +195,7 @@ export type BindingCapacityCheck =
       retryAfterMs: number;
       /** Counted devices AutoMobile did not start; present only when there are any (#11390). */
       externalDevices?: string[];
+      heldDevices?: string[];
     }
   /** The booted count could not be established; never read as free capacity. */
   | { kind: "unknown"; message: string };
@@ -216,7 +217,7 @@ export interface BindingBootCapacity {
   ): Promise<BindingBootReservation>;
   check(
     platform: BindingPlatform,
-    options: { signal?: AbortSignal },
+    options: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<BindingCapacityCheck>;
 }
 

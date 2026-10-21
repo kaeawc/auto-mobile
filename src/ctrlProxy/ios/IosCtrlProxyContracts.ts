@@ -27,6 +27,8 @@ export const DIRECT_RUNNER_DISCOVERY_DEADLINE_MS = 5_000;
 
 export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
 
+export const IOS_CTRL_PROXY_HEALTH_POLL_INTERVAL_MS = 500;
+
 // ProcessLifecycle and DaemonManager force-exit after ten seconds. This stage
 // shares that budget with capture cleanup, so an unresponsive proxy must not
 // consume it all before the remaining owners receive their stop attempt.
@@ -58,6 +60,14 @@ export const FORCE_RESTART_DRAIN_POLL_INTERVAL_MS = 50;
  */
 export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   buildResult?: CtrlProxyIosBuildResult;
+  /**
+   * Only runner exit during startup or an exhausted launch window permits setup retry.
+   * ensureIosReady passes the remaining setup budget as minimumHealthPollDurationMs;
+   * refreshHealthPollDeadline takes max(default deadline, now + that duration).
+   * Its launch timeout therefore occurs at/after the setup phase deadline, leaving
+   * no budget for a launch-timeout retry on that path. Other callers may retry it.
+   */
+  retryableStartupFailure?: boolean;
   /** Startup was cancelled while another recovery path may still be active. */
   recoveryInterrupted?: boolean;
 }

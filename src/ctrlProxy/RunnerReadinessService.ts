@@ -1,3 +1,4 @@
+import { runIosRunnerSetup } from "./runIosRunnerSetup";
 import {
   READINESS_RETRY_DELAY_MS,
   CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS,
@@ -235,7 +236,9 @@ export class RunnerReadinessService {
     // A prior readiness request may have exhausted its health budget while the
     // daemon stays alive. Reopen the manager's one-attempt setup gate before
     // this independent request tries to recover a reinstalled or disabled runner.
-    manager.resetSetupState();
+    // Preserve the caches populated milliseconds earlier in this same attempt;
+    // setup mutations and failed-attempt retries still invalidate them.
+    manager.reopenSetupGate();
     await this.setupAndroidRunner(context, manager);
     await this.waitForResponsiveClient(context, client, manager);
     await this.anrRecovery.recoverIfPresent(context, client);
@@ -499,19 +502,7 @@ export class RunnerReadinessService {
     // matching the Android path (see :265) and the connected branch above
     // (:613) — otherwise setup() can report "already running" against a
     // runner that died without a local child-exit event (#6416).
-    manager.resetSetupState();
-    const setup = await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
-      manager.setup(
-        false,
-        context.perf,
-        signal,
-        this.phases.remainingForPhase(context, "runner-setup"),
-      ),
-    );
-    context.onRunnerSetup?.();
-    if (!setup.success) {
-      this.phases.fail(context, "runner-setup", 1, setup.error ?? setup.message);
-    }
+    await runIosRunnerSetup(context, manager, this.phases, this.dependencies.iosSetupMaxAttempts);
     // Setup can reallocate a busy port or adopt the runner's actual listener.
     // Resolve the client after launch, just as the force-restart path does.
     client = this.dependencies.getIosClient(context.device, manager.getServicePort());

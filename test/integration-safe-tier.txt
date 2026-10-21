@@ -55,6 +55,7 @@ test/daemon/mcpForwardByteParity.integration.test.ts | safe | tmpdir socket L185
 test/daemon/sessionBroker/brokerRestartHandoff.integration.test.ts | safe | :memory: binding registry and createTestDatabase in-memory DB, FakeNativePort and FakeTimer, no processes or host tooling
 test/daemon/sessionBroker/exports.integration.test.ts | safe | file-backed registry in tracked harness temp directory with FakeNativePort and FakeTimer
 test/daemon/sessionBroker/provisioning/bindingRegistryAbsence.integration.test.ts | safe | temp-dir SQLite via bindFileBackedDbHarness L18, FakeTimer
+test/daemon/sessionBroker/provisioning/simctlCatalog.integration.test.ts | safe | real resolver and SimCtlClient over injected exec seam and FakeTimer; no host commands
 test/daemon/sessionBroker/registry/bindingJournal.integration.test.ts | unsafe | Bun.spawn of a crash child process L93
 test/daemon/sessionBroker/registry/bindingRegistryBusyBound.integration.test.ts | safe | real SQLite handles on useScratchRoot temp files and a file-backed harness, explicit dbPath, no host tooling
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.integration.test.ts | unsafe | Bun.spawn of a registry child process L134
@@ -229,6 +230,7 @@ test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of 
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
 test/server/mcpSessionAutolockRouting.integration.test.ts | safe | FakeDeviceUtils pool, FakeDeviceSessionPersistence L170/L186
 test/server/observeAppResource.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L129
+test/server/outputSchema.sdk.integration.test.ts | safe | hermetic server fixture; in-memory McpTestFixture; in-test stub tool L7
 test/server/performanceResources.integration.test.ts | safe | createTestDatabase in-memory L53
 test/server/plainReadToolSessionActivity.integration.test.ts | safe | hermetic fixture; FakeDeviceUtils pool L36
 test/server/planExecutionOrchestrator.integration.test.ts | unsafe | DevicePool built without deviceManager (default real one) L298

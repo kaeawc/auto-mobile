@@ -4,7 +4,10 @@ import {
   DefaultManagedSpecResolver,
   type BindingReconcileRequest,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
-import { GateBindingBootCapacity } from "../../../../src/daemon/sessionBroker/provisioning/GateBindingBootCapacity";
+import {
+  BOOT_CAPACITY_CHECK_TIMEOUT_MS,
+  GateBindingBootCapacity,
+} from "../../../../src/daemon/sessionBroker/provisioning/GateBindingBootCapacity";
 import { AndroidBootAdmissionGate } from "../../../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import {
   IosSimCapacityGate,
@@ -340,7 +343,7 @@ test("Android runtime lookup is bounded before deletion and ignores a late seria
     return value;
   });
   await drainUntil(() => lookupStarted, { description: "runtime lookup" });
-  h.timer.advanceTime(5_000);
+  h.timer.advanceTime(BOOT_CAPACITY_CHECK_TIMEOUT_MS);
   await drainMicrotasks(200);
   expect(result).toMatchObject({ outcome: "failed", failure: { code: "discovery_incomplete" } });
   expect(lookupSignal?.aborted).toBe(true);

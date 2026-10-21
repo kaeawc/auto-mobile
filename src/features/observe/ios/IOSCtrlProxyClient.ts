@@ -1,3 +1,7 @@
+import {
+  sdkCapabilityQueryOptions,
+  type SdkCapabilityQueryOptions,
+} from "./CtrlProxySdkCapabilities";
 import { retireIosServiceEndpoint } from "./iosServiceEndpointChange";
 import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry";
 import { CtrlProxyBuildContext } from "./CtrlProxyBuildContext";
@@ -418,8 +422,10 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     isCommandSupported: (type) => this.isCommandSupported(type),
     createDelegateContext: () => this.createDelegateContext(),
   });
-  public syncNetworkMockRulesIfAvailable(): Promise<IosMockRuleSyncResult> {
-    return this.networkSync.syncNetworkMockRulesIfAvailable();
+  public syncNetworkMockRulesIfAvailable(
+    options?: SdkCapabilityQueryOptions,
+  ): Promise<IosMockRuleSyncResult> {
+    return this.networkSync.syncNetworkMockRulesIfAvailable(options);
   }
   async setNetworkErrorSimulation(
     config: IosNetworkErrorSimulationConfig,
@@ -453,9 +459,16 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     resolveWebSocketHost: () => this.resolveWebSocketHost(),
     pollSdkEvents: () => this.pollSdkEvents(),
     getSdkScreenIdentity: (appId) => this.getSdkScreenIdentity(appId),
+    getSdkAvailability: (appId) =>
+      appId && appId === this.lastForegroundBundleId
+        ? this.sdkCapability.getSdkAvailability(appId)
+        : undefined,
   });
-  public refreshSdkScreenIdentity(appId?: string): Promise<ScreenIdentity | undefined> {
-    return this.sdkEvents.refreshSdkScreenIdentity(appId);
+  public refreshSdkScreenIdentity(
+    appId?: string,
+    capturedAt?: number,
+  ): Promise<ScreenIdentity | undefined> {
+    return this.sdkEvents.refreshSdkScreenIdentity(appId, capturedAt);
   }
   public pollSdkEvents(): Promise<SdkEventPollResult> {
     return this.sdkEvents.pollSdkEvents();
@@ -588,9 +601,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     );
   }
 
-  /**
-   * Get singleton instance for a device
-   */
+  /** Get singleton instance for a device */
   public static getInstance(device: BootedDevice, port?: number): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.getInstance");
     const key = device.deviceId;
@@ -737,10 +748,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     return client;
   }
 
-  /**
-   * Diagnostic accessor for doctor: reports the host port this client will use
-   * for the runner WebSocket without opening any additional connection.
-   */
+  /** Doctor diagnostic: the runner WebSocket host port, without opening a connection. */
   public getConnectionPortForDiagnostics(): number {
     return this.port;
   }
@@ -763,18 +771,14 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     return this.getBoundSessionId();
   }
 
-  /**
-   * Get the NavigationGraphManager for the bound session, or the global singleton.
-   */
+  /** Get the NavigationGraphManager for the bound session, or the global singleton. */
   private getNavigationGraphManager(): NavGraph {
     return this.boundSessionId
       ? NavigationGraphManager.getInstanceForSession(this.boundSessionId)
       : NavigationGraphManager.getInstance();
   }
 
-  /**
-   * Create instance for testing with injected dependencies
-   */
+  /** Create instance for testing with injected dependencies */
   public static createForTesting(
     device: BootedDevice,
     port: number,
@@ -789,9 +793,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     );
   }
 
-  /**
-   * Reset all instances (for testing)
-   */
+  /** Reset all instances (for testing) */
   public static resetInstances(): void {
     for (const instance of IOSCtrlProxyClient.registry.closeAll()) {
       void instance.close();
@@ -861,10 +863,15 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   }
 
   protected handleMessage(data: WebSocket.Data): void {
-    // Inbound frames indicate an active app; reset the SDK-event poll backoff.
-    this.sdkEvents.noteSdkEventPollWsActivity();
     try {
       const message = JSON.parse(data.toString()) as WebSocketMessage;
+      // Only app activity resets backoff; runner metrics and handshakes do not.
+      if (
+        message.type === "hierarchy_update" ||
+        (message.requestId && message.type !== "performance_update" && message.type !== "connected")
+      ) {
+        this.sdkEvents.noteSdkEventPollWsActivity();
+      }
       this.processMessage(message);
     } catch (error) {
       logger.warn(`[IOSCtrlProxyClient] Failed to parse message: ${error}`);
@@ -876,9 +883,17 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
    * Used after a session release clears the store (issue #10061); the
    * reconnect path runs the same two syncs.
    */
-  public async syncNetworkStateFromHost(): Promise<void> {
-    await this.syncNetworkMockRulesIfAvailable();
-    this.networkSync.syncNetworkErrorSimulationToDevice();
+  public async syncNetworkStateFromHost(
+    options: SdkCapabilityQueryOptions = sdkCapabilityQueryOptions(this.timer),
+  ): Promise<void> {
+    try {
+      await this.syncNetworkMockRulesIfAvailable(options);
+    } catch (error) {
+      // Release cleanup is best effort; a failed mock sync must not retain error simulation.
+      logger.warn("[IOSCtrlProxyClient] Failed to sync network mock rules during cleanup", error);
+    } finally {
+      this.networkSync.syncNetworkErrorSimulationToDevice();
+    }
   }
 
   private syncHierarchyCadenceToDevice(): void {

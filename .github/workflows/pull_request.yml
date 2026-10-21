@@ -2181,12 +2181,10 @@ jobs:
   # =============================================================================
 
   # Reports the required "Node TypeScript Build and Test (ubuntu-latest)" check.
-  # It is the one Linux unit-suite execution per PR (#10893): it used to run the
-  # suite under coverage while a separate Node Unit Tests (ubuntu-latest) leg ran
-  # it again for the 100ms timing budget. The plain unit lane and the timing
-  # budget now run here, so a unit failure still blocks merge through this
-  # required check; coverage and the README badge come from merge.yml's
-  # ts-code-coverage job on every push to main.
+  # It is the one Linux unit-suite execution per PR (#10893), with the 100ms
+  # budget in this required check. On Merge's ts-code-coverage job is the Ubuntu
+  # unit gate and produces the README badge on every push to main (#13569);
+  # its coverage samples select uninstrumented isolated timing rechecks.
   ts-build-and-test:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
     # Job-level permissions replace the workflow's. This job only checks out,
@@ -3022,6 +3020,9 @@ jobs:
           SECONDS=0
           swift build -c release 2>&1
           echo "build took ${SECONDS}s"
+
+      - name: "Build AutoMobilePrototype library and embed consumer"
+        run: bash scripts/ios/prototype-library-build.sh
 
       # #11580: removing the isolated home removes only the cache symlink;
       # $RUNNER_TEMP/automobile-swiftpm-cache survives for the cache post-step save.

@@ -1,7 +1,11 @@
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it, spyOn, afterEach, mock } from "bun:test";
 import { Database } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import { BEGIN_TRANSACTION_SQL, BunSqliteDialect } from "../../src/db/bunSqliteDialect";
+
+afterEach(() => {
+  mock.restore();
+});
 
 /**
  * Issue #10042: a deferred `BEGIN` lets a read-then-write transaction fail with

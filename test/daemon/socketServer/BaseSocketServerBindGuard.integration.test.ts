@@ -1,6 +1,16 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server as NetServer, type Socket } from "node:net";
-import { mkdtempSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+  existsSync,
+  readFileSync,
+} from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +18,8 @@ import {
   BaseSocketServer,
 } from "../../../src/daemon/socketServer/BaseSocketServer";
 import type { DaemonSocketReachabilityLike } from "../../../src/daemon/daemonSocketReachability";
+import { AuxiliarySocketHeldError } from "../../../src/daemon/AuxiliarySocketHeldError";
+import { AuxiliarySocketOwner } from "../../../src/daemon/auxiliarySocketOwner";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../src/daemon/daemonFiles";
@@ -16,8 +28,12 @@ import { testOverrides } from "../../../src/utils/testOverrides";
 const isWindows = platform() === "win32";
 
 class TestServer extends BaseSocketServer {
-  constructor(socketPath: string, reachability?: DaemonSocketReachabilityLike) {
-    super(socketPath, new FakeTimer(), "BindGuardTest", 0, reachability);
+  constructor(
+    socketPath: string,
+    reachability?: DaemonSocketReachabilityLike,
+    owner?: AuxiliarySocketOwner,
+  ) {
+    super(socketPath, new FakeTimer(), "BindGuardTest", 0, reachability, owner);
   }
 
   protected async processLine(_socket: Socket, _line: string): Promise<void> {
@@ -82,15 +98,89 @@ describe("BaseSocketServer bind guard", () => {
     server = new TestServer(contestedPath, { isReachable: async () => true });
 
     const start = server.start();
-    await expect(start).rejects.toBeInstanceOf(ActionableError);
+    await expect(start).rejects.toBeInstanceOf(AuxiliarySocketHeldError);
     await expect(start).rejects.toThrow("BindGuardTest");
     await expect(start).rejects.toThrow(peerSocketPath);
-    await expect(start).rejects.toThrow("--daemon restart");
+    await expect(start).rejects.toThrow("unknown holder");
 
     const current = statSync(peerSocketPath);
     expect({ dev: current.dev, ino: current.ino }).toEqual(peerIdentity);
     expect(peer.listening).toBe(true);
   });
+
+  (isWindows ? test.skip : test)(
+    "names the verified holder and preserves the peer listener",
+    async () => {
+      const processes = {
+        isProcessRunning: (pid: number) => pid === 741,
+        readProcessGenerationToken: () => "linux:holder",
+      };
+      const owner = new AuxiliarySocketOwner(
+        {
+          read: () =>
+            JSON.stringify({
+              pid: 741,
+              version: "0.0.old",
+              socketName: "BindGuardTest",
+              socketPath: peerSocketPath,
+              ...peerIdentity,
+              processGenerationToken: "linux:holder",
+            }),
+          stat: () => peerIdentity,
+          lstat: () => ({ isFile: () => true, size: 100 }),
+          write: () => {
+            throw new Error("conflict must not write");
+          },
+          remove: () => {
+            throw new Error("conflict must not remove");
+          },
+        },
+        processes,
+      );
+      server = new TestServer(peerSocketPath, { isReachable: async () => true }, owner);
+      const start = server.start();
+      await expect(start).rejects.toBeInstanceOf(AuxiliarySocketHeldError);
+      await expect(start).rejects.toThrow("daemon pid 741 (version 0.0.old; verified)");
+      await expect(start).rejects.toThrow("kill 741");
+      expect(peer.listening).toBe(true);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "keeps listening when advisory owner publication throws",
+    async () => {
+      directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));
+      const socketPath = join(directory, "stream.sock");
+      const owner = new AuxiliarySocketOwner({
+        read: () => {
+          throw new Error("ENOENT");
+        },
+        lstat: () => ({ isFile: () => true, size: 0 }),
+        stat: statSync,
+        remove: unlinkSync,
+        write: () => {
+          throw new Error("ENOSPC");
+        },
+      });
+      server = new TestServer(socketPath, undefined, owner);
+      await expect(server.start()).resolves.toBeUndefined();
+      expect(server.isListening()).toBe(true);
+      expect(server.hasActiveSocketPath()).toBe(true);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "keeps listening with a directory at the owner sidecar path",
+    async () => {
+      directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));
+      const socketPath = join(directory, "stream.sock");
+      mkdirSync(`${socketPath}.owner.json`);
+      server = new TestServer(socketPath);
+      await expect(server.start()).resolves.toBeUndefined();
+      expect(server.isListening()).toBe(true);
+      expect(server.hasActiveSocketPath()).toBe(true);
+    },
+  );
 
   (isWindows ? test.skip : test)("reclaims an unreachable path and binds", async () => {
     directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));
@@ -110,6 +200,15 @@ describe("BaseSocketServer bind guard", () => {
     expect(probes).toEqual([{ socketPath, timeoutMs: AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS }]);
     expect(statSync(socketPath).isSocket()).toBe(true);
     expect(server.hasActiveSocketPath()).toBe(true);
+    const ownerPath = `${socketPath}.owner.json`;
+    expect(JSON.parse(readFileSync(ownerPath, "utf8"))).toMatchObject({
+      pid: process.pid,
+      socketPath,
+      socketName: "BindGuardTest",
+    });
+    expect(statSync(ownerPath).mode & 0o777).toBe(0o600);
+    await server.close();
+    expect(existsSync(ownerPath)).toBe(false);
   });
 
   (isWindows ? test.skip : test)(

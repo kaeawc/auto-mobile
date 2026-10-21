@@ -88,7 +88,7 @@ describe("selectAdmission ordering and hard caps", () => {
     });
   });
 
-  test("an over-cap pool converges before reuse or creation", () => {
+  test("an over-cap pool reuses before evicting an incompatible idle device", () => {
     const snapshot = {
       activeOrAcquiringSessions: 0,
       resources: [
@@ -98,9 +98,50 @@ describe("selectAdmission ordering and hard caps", () => {
       ],
     };
     expect(selectAdmission(snapshot, { totalDeviceCap: 2 })).toEqual({
-      kind: "evict",
-      resourceId: "oldest",
+      kind: "reuse",
+      resourceId: "compatible",
     });
+  });
+
+  test("over cap reuses the only compatible idle even when it is oldest", () => {
+    expect(
+      selectAdmission(
+        {
+          activeOrAcquiringSessions: 0,
+          resources: [resource("warm", "idle", 1, true), resource("wrong", "idle", 2)],
+        },
+        { totalDeviceCap: 1 },
+      ),
+    ).toEqual({ kind: "reuse", resourceId: "warm" });
+  });
+
+  test("over cap with only compatible idle devices reuses the newest", () => {
+    expect(
+      selectAdmission(
+        {
+          activeOrAcquiringSessions: 0,
+          resources: [resource("old", "idle", 1, true), resource("new", "idle", 2, true)],
+        },
+        { totalDeviceCap: 1 },
+      ),
+    ).toEqual({ kind: "reuse", resourceId: "new" });
+  });
+
+  test("over cap without reusable devices evicts the oldest incompatible idle", () => {
+    expect(
+      selectAdmission(
+        {
+          activeOrAcquiringSessions: 0,
+          resources: [
+            resource("compatible-busy", "active", 0, true),
+            resource("new-wrong", "idle", 3),
+            resource("z-old-wrong", "idle", 1),
+            resource("a-old-wrong", "idle", 1),
+          ],
+        },
+        { totalDeviceCap: 2 },
+      ),
+    ).toEqual({ kind: "evict", resourceId: "a-old-wrong" });
   });
 
   test("an over-cap pool without idle resources refuses", () => {
@@ -351,7 +392,7 @@ describe("admission bounded properties", () => {
     );
   });
 
-  test("over-cap snapshots only evict idle resources or refuse", () => {
+  test("over-cap snapshots reuse compatible idle, evict idle, or refuse", () => {
     fc.assert(
       fc.property(resourcesArbitrary, fc.integer({ min: 0, max: 20 }), (resources, cap) => {
         fc.pre(resources.length > cap);
@@ -361,6 +402,10 @@ describe("admission bounded properties", () => {
         );
         if (decision.kind === "refuse") {
           return decision.reason === "total-device-cap-exceeded";
+        }
+        if (decision.kind === "reuse") {
+          const selected = resources.find((candidate) => candidate.id === decision.resourceId);
+          return selected?.state === "idle" && selected.compatible;
         }
         return (
           decision.kind === "evict" &&

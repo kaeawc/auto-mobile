@@ -87,3 +87,8 @@ export interface PerformanceSamplingCoordinator {
  * Function type for getting the performance push server.
  */
 export type ServerGetter = () => PerformanceDataPusher | null;
+
+/** A live consumer of sampled device/package performance data. */
+export interface PerformanceDemandProbe {
+  hasDemand(deviceId: string, packageName: string, platform: "android" | "ios"): boolean;
+}

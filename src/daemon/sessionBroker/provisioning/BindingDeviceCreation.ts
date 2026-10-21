@@ -1,10 +1,14 @@
 import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
+import { withVerifiedBootCapacity } from "../../../devices/bootAdmission/VerifiedBootCapacity";
 import {
   BindingJournalRemovalRegistryTimeout,
   type BindingJournal,
 } from "../registry/bindingJournal";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
-import type { ResolvedExactDeviceSpecification } from "../../../devices/exactDeviceProvisioning";
+import {
+  ProvisionDeviceError,
+  type ResolvedExactDeviceSpecification,
+} from "../../../devices/exactDeviceProvisioning";
 import { budgetRefusal, type BindingResourceAdmission } from "./resourceBudget";
 import type { DeviceInfo } from "../../../models/index";
 import { OCCUPYING_SIMULATOR_STATES } from "../../../features/iosSimFleet/FleetCostCollector";
@@ -121,12 +125,14 @@ export class BindingDeviceCreation {
     options: { bootReservation?: BootSlotReservation } = {},
   ): Promise<ReadyResult> {
     const { request } = context;
+    let capacityVerifiedAtMs: number | undefined;
     if (replacing === undefined) {
       try {
         this.host.checkBudget(request);
         await this.assertCreatable(context);
         if (!options.bootReservation) {
-          await this.assertBootCapacity(request);
+          // Fail before journal/resource admission; only this create may reuse the fresh verdict.
+          capacityVerifiedAtMs = await this.assertBootCapacity(request);
         }
       } catch (error) {
         // No provisioning or journal entry exists yet; preserve the original refusal unchanged.
@@ -138,7 +144,7 @@ export class BindingDeviceCreation {
       // A replacement holds its boot admission across deletion. The provision-path gate consumes
       // that same reservation, so neither this probe nor the boot can refuse its held slot.
       if (!options.bootReservation) {
-        await this.assertBootCapacity(request);
+        capacityVerifiedAtMs = await this.assertBootCapacity(request);
       }
     }
     const name = bindingDeviceName(
@@ -157,7 +163,7 @@ export class BindingDeviceCreation {
       }
       let provisioned: BindingProvisionedDevice;
       try {
-        const provision = () =>
+        const provisionDevice = () =>
           this.deps.provisioner.provision({
             platform: request.platform,
             name,
@@ -170,23 +176,37 @@ export class BindingDeviceCreation {
             deadlineMs: request.deadlineMs,
             signal: request.signal,
           });
+        const provision = () =>
+          withVerifiedBootCapacity(
+            {
+              platform: request.platform,
+              name,
+              spec: {
+                runtime: request.requestedSpec.runtime,
+                deviceType: context.resolvedSpec.deviceType,
+              },
+            },
+            capacityVerifiedAtMs,
+            this.deps.timer,
+            provisionDevice,
+          );
         provisioned = options.bootReservation
           ? await options.bootReservation.run(provision)
           : await provision();
       } catch (error) {
-        // The provision path rolls back its own partial creation; settle the entry on proof of
-        // absence, or leave it open for redrive when a leftover may exist.
-        const settled = await this.settleFailedCreate(context, entry);
-        if (replacing === undefined) {
-          await this.removeFailedUnboundBinding(context, assignment, settled);
-        }
-        throw new ReconcileAbort(provisionFailure(error));
+        return await this.failedCreate(context, assignment, entry, replacing === undefined, error);
       }
       return await this.host.readyOrReleaseOnBusy(provisioned, async (release) => {
         if (provisioned.created && !this.host.isAutomationReady(provisioned)) {
           this.deps.journal.markRemovalIntended(entry);
         }
-        entry = await this.recordCreated(context, entry, provisioned, release);
+        entry = await this.recordCreated(
+          context,
+          entry,
+          provisioned.device,
+          release,
+          provisioned.created && !this.host.isAutomationReady(provisioned),
+        );
         if (!this.host.isAutomationReady(provisioned)) {
           return await this.discardUncommitted(
             context,
@@ -289,32 +309,73 @@ export class BindingDeviceCreation {
     return advanced.entry;
   }
 
+  private async failedCreate(
+    context: ReconcileContext,
+    assignment: BindingAssignmentRecord,
+    entry: BindingJournalEntry,
+    fresh: boolean,
+    error: unknown,
+  ): Promise<never> {
+    const { request } = context;
+    if (
+      error instanceof ProvisionDeviceError &&
+      error.retryable &&
+      error.code === "timeout" &&
+      error.diagnostics.retainedDevice &&
+      error.diagnostics.retainedDevice.name === entry.target.newName &&
+      error.diagnostics.retainedDevice.platform === "ios" &&
+      request.platform === "ios" &&
+      !request.signal?.aborted
+    ) {
+      // Redrive adopts the existing created phase as provisioning, then reuse readies it.
+      try {
+        await this.recordCreated(context, entry, error.diagnostics.retainedDevice);
+      } catch (journalError) {
+        // The creating entry still fences cleanup by name; preserve the original readiness error.
+        logger.warn(
+          `[Bindings] retaining created device failed: ${errorMessage(journalError)}`,
+          journalError,
+        );
+        throw new ReconcileAbort(provisionFailure(error));
+      }
+      throw new ReconcileAbort({
+        ...provisionFailure(error),
+        retainedDevice: error.diagnostics.retainedDevice,
+      });
+    }
+    // Other provision failures roll back; retain cleanup for redrive if absence is unproven.
+    const settled = await this.settleFailedCreate(context, entry);
+    if (fresh) {
+      await this.removeFailedUnboundBinding(context, assignment, settled);
+    }
+    throw new ReconcileAbort(provisionFailure(error));
+  }
+
   private async recordCreated(
     context: ReconcileContext,
     entry: BindingJournalEntry,
-    provisioned: BindingProvisionedDevice,
-    release: () => Promise<void>,
+    device: Pick<BindingProvisionedDevice["device"], "stableId" | "name">,
+    release?: () => Promise<void>,
+    removalRequested = false,
   ): Promise<BindingJournalEntry> {
     const recorded = await this.deps.journal
       .advance(entry, {
         expectedPhase: "creating",
         phase: "created",
         target: {
-          newStableId: provisioned.device.stableId,
-          newName: provisioned.device.name,
-          ...(provisioned.created && !this.host.isAutomationReady(provisioned)
-            ? { removalRequested: true }
-            : {}),
+          newStableId: device.stableId,
+          newName: device.name,
+          ...(removalRequested ? { removalRequested: true } : {}),
         },
       })
       .catch(async (error: unknown) => {
         logger.warn(`[Bindings] recording created device failed: ${errorMessage(error)}`, error);
-        await release();
+        await release?.();
         throw error;
       });
     if (recorded.kind !== "advanced") {
       // Another driver took the entry over and will settle the device by its recorded name.
-      await release();
+      await release?.();
       throw new ReconcileAbort(
         failure("concurrent_modification", "The binding's journal entry was taken over."),
       );
@@ -760,12 +821,17 @@ export class BindingDeviceCreation {
    * Booting a device that already exists is not checked
    * here: the provision path owns that decision and its own-target exemption.
    */
-  private async assertBootCapacity(request: BindingReconcileRequest): Promise<void> {
+  private async assertBootCapacity(request: BindingReconcileRequest): Promise<number | undefined> {
     if (!this.deps.capacity) {
       return;
     }
-    const check = await this.deps.capacity.check(request.platform, { signal: request.signal });
+    this.host.checkBudget(request);
+    const check = await this.deps.capacity.check(request.platform, {
+      signal: request.signal,
+      timeoutMs: Math.max(1, request.deadlineMs - this.deps.timer.now()),
+    });
     this.assertCapacityCheck(request, check);
+    return check.kind === "available" ? this.deps.timer.now() : undefined;
   }
 
   private assertCapacityCheck(request: BindingReconcileRequest, check: BindingCapacityCheck): void {
@@ -783,6 +849,7 @@ export class BindingDeviceCreation {
               booted: check.booted,
               retryAfterMs: check.retryAfterMs,
               ...externalDevicesField(check.externalDevices),
+              ...(check.heldDevices?.length ? { heldDevices: [...check.heldDevices] } : {}),
             },
           },
         ),

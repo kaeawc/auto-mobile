@@ -445,6 +445,19 @@ export class FakeSimctl implements SimCtl {
     return this.availableSimulators;
   }
 
+  async readSimulatorTarget(
+    udid: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<AppleDevice | undefined> {
+    this.recordCall("readSimulatorTarget", { udid, timeoutMs, signal });
+    signal?.throwIfAborted();
+    if (this.deviceInfoError) {
+      throw this.deviceInfoError;
+    }
+    return this.deviceInfoMap.get(udid) ?? undefined;
+  }
+
   async getBootedSimulators(): Promise<BootedDevice[]> {
     this.recordCall("getBootedSimulators", {});
     return this.bootedSimulatorsError ? [] : this.bootedSimulators;
@@ -557,7 +570,7 @@ export class FakeSimctl implements SimCtl {
   async installApp(
     appPath: string,
     deviceId?: string,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; signal?: AbortSignal },
   ): Promise<void> {
     this.recordCall("installApp", { appPath, deviceId, options });
   }

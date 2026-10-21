@@ -2,7 +2,7 @@ import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { flatHierarchyFromFixture } from "../../helpers/flatHierarchyFixture";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
-import { describe, expect, test, spyOn } from "bun:test";
+import { beforeEach, afterEach, describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
@@ -378,6 +378,13 @@ describe("TapOnElement extended selectors", () => {
   });
 
   describe("Android long press node selectors", () => {
+    let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+    beforeEach(() => {
+      clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+    });
+    afterEach(() => {
+      clientSpy.mockRestore();
+    });
     const testTagElement: Element = {
       ...makeElement(),
       "test-tag": "message_row_42",
@@ -388,7 +395,7 @@ describe("TapOnElement extended selectors", () => {
       const proxy = new FakeCtrlProxy();
       proxy.setHierarchyData({ updatedAt: 1, packageName: "com.android.systemui", hierarchy: {} });
       proxy.setViewHierarchyResult(notificationHierarchy);
-      const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy);
+      clientSpy.mockReturnValue(proxy);
       const adb = new FakeAdbClient();
       let tapOn: TapOnElement;
       try {

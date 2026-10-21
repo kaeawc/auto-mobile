@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "sdk_capability_query_failed",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "SDK capability query failed: invalid capability reply",
+    "code": "sdk_capability_query_failed",
+    "retryable": true
+  }
+}

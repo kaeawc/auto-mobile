@@ -1,5 +1,5 @@
 import { guardDirectoryEntries, readGuardFile } from "./astGuard";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 
 import path from "node:path";
 
@@ -40,12 +40,16 @@ describe("legacy AutoMobile path matcher", () => {
 });
 
 describe("shared AutoMobile directory path literals", () => {
-  test("does not use the legacy .automobile path component", () => {
-    const offenses = sourceFiles(SOURCE_DIR).flatMap((file) => {
+  let offenses: string[];
+
+  beforeAll(() => {
+    offenses = sourceFiles(SOURCE_DIR).flatMap((file) => {
       const source = readGuardFile(file);
       return findOffenseLines(source).map((line) => `${path.relative(SOURCE_DIR, file)}:${line}`);
     });
+  });
 
+  test("does not use the legacy .automobile path component", () => {
     expect(offenses).toEqual([]);
   });
 });

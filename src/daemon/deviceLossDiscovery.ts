@@ -1,6 +1,10 @@
-import { discoverySourceFor } from "../utils/discoverySource";
+import { didSourceSucceedForDevice, discoverySourceFor } from "../utils/discoverySource";
 import type { BootedDevice } from "../models";
-import type { BootedDeviceDiscovery, MultiPlatformDeviceManager } from "../devices/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+  MultiPlatformDeviceManager,
+} from "../devices/deviceUtils";
 import { transitionalHeldSimulators } from "./adbOfflineHeldDevices";
 import type { Session } from "./sessionManager";
 import {
@@ -61,31 +65,67 @@ export async function discoverAndReconcile(
   devicePool: DeviceLossDiscoveryPool,
   deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
   {
-    planActive,
+    isPlanDevice = () => false,
     platform = "either",
     bypassAndroidDeviceListCache = false,
     heldDevices = [],
   }: {
-    planActive: boolean;
+    isPlanDevice?: (deviceId: string) => boolean;
     heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
   },
 ) {
-  const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
+  const trackedDevices = [
+    ...devicePool.getAllDevices().map((device) => ({ platform: device.platform, id: device.id })),
+    ...heldDevices.map((device) => ({ platform: device.platform, id: device.assignedDevice })),
+  ];
+  const options = {
     bypassAndroidDeviceListCache,
     skipAndroidProfileEnrichment: true,
     // An unpooled held device still needs liveness evidence from its own source.
-    skipPhysicalIosDiscovery: ![
-      ...devicePool.getAllDevices().map((device) => ({ platform: device.platform, id: device.id })),
-      ...heldDevices.map((device) => ({ platform: device.platform, id: device.assignedDevice })),
-    ].some((device) => discoverySourceFor(device.platform, device.id) === "ios-physical"),
-  });
-  discovery.devices = await mapMonitorAndroidDiscovery(devicePool, discovery.devices);
-  // Reconciliation can quarantine identity and cancel in-flight work. During
-  // allocation, discovery supplies only presence evidence for miss counting.
-  if (!planActive) {
-    await devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor", {
+    skipPhysicalIosDiscovery: !trackedDevices.some(
+      (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
+    ),
+  };
+  const read = async (readOptions: BootedDeviceDiscoveryOptions) => {
+    const observation = await deviceManager.getBootedDevicesDetailed(platform, readOptions);
+    observation.devices = await mapMonitorAndroidDiscovery(devicePool, observation.devices);
+    return observation;
+  };
+  let discovery = await read(options);
+  const present = new Set(discovery.devices.map((device) => device.deviceId));
+  const missingDevices = trackedDevices.filter(
+    (device) => !isPlanDevice(device.id) && !present.has(device.id),
+  );
+  if (
+    missingDevices.some(
+      (device) =>
+        didSourceSucceedForDevice(discovery, device.platform, device.id) &&
+        (device.platform === "ios" || !bypassAndroidDeviceListCache),
+    )
+  ) {
+    // Plan-time misses are capped below confirmation; its own loss check already reads fresh.
+    // Otherwise only the fresh confirmation reaches reconciliation and miss counting. Healthy/
+    // idle sweeps keep the cheap cached path; a failed confirmation supplies no absence evidence.
+    discovery = await read({
+      ...options,
+      bypassAndroidDeviceListCache:
+        bypassAndroidDeviceListCache ||
+        missingDevices.some((device) => device.platform === "android"),
+      bypassIosDeviceListCache: missingDevices.some(
+        (device) => discoverySourceFor(device.platform, device.id) === "ios-simulator",
+      ),
+      bypassPhysicalIosDeviceListCache: missingDevices.some(
+        (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
+      ),
+    });
+  }
+  // Reconciliation can quarantine identity and cancel in-flight work. Only
+  // plan-owned observations stay presence-only during allocation/restarts.
+  const observations = discovery.devices.filter((device) => !isPlanDevice(device.deviceId));
+  if (observations.length > 0 || trackedDevices.some((device) => !isPlanDevice(device.id))) {
+    await devicePool.reconcileDiscoveryObservation(observations, "disconnect-monitor", {
       settleMembership: true,
     });
   }
@@ -332,10 +372,11 @@ export function collectDisconnectedRecordings<Device extends { id: string }>(
 export function logDisconnectMisses(
   deviceDisconnectMisses: Map<string, number>,
   disconnectResult: Pick<DisconnectMonitorEvaluation, "missed" | "transitional">,
-  planActive: boolean,
+  planDeviceIds: ReadonlySet<string>,
   bootedDeviceIds: Set<string>,
 ): void {
   for (const { deviceId, misses: evaluatedMisses, budgetExhausted } of disconnectResult.missed) {
+    const planActive = planDeviceIds.has(deviceId);
     const misses = planActive
       ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
       : evaluatedMisses;
@@ -343,7 +384,7 @@ export function logDisconnectMisses(
       // Also lower pre-plan misses so a plan-driven restart gets the same grace.
       deviceDisconnectMisses.set(deviceId, misses);
     }
-    const missState = budgetExhausted ? "transitional, budget exhausted" : "absent";
+    const missState = budgetExhausted ? "budget exhausted" : "absent";
     const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
     if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
       logger.debug(message);

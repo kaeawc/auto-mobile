@@ -1,3 +1,8 @@
+import { errorMessage } from "../../utils/describeUnknownError";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../../utils/deviceTimeouts";
+import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../utils/runnerReadinessConfig";
 import type { BrokerExecutionRelease } from "./provisioning/executionRelease";
 import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import type { BindingJournal } from "./registry/bindingJournal";
@@ -38,6 +43,7 @@ type DestructionProgress = "absent" | "pending";
 export interface ManagedDevicePortDependencies {
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
+  timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   brokerDeviceAcquisition: Pick<BrokerDeviceAcquisition, "acquire">;
   brokerExecutionRelease: Pick<BrokerExecutionRelease, "releaseExecution">;
   registry: ManagedDevicePortRegistry;
@@ -82,13 +88,99 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     }
     const profile = nativeProfile(resource);
     const requestedSpec = this.requestedSpec(profile);
-    const config = this.bindingConfig(resource, profile, requestedSpec, options);
-    const result = await this.dependencies.brokerDeviceAcquisition.acquire(config, {
-      livenessOwnerToken: options.livenessOwnerToken,
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
+    const timer = this.dependencies.timer ?? defaultTimer;
+    const deadlineMs =
+      timer.now() + (options.preparationTimeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    const acquire = (preparationTimeoutMs: number) => {
+      const config = this.bindingConfig(resource, profile, requestedSpec, {
+        ...options,
+        preparationTimeoutMs: Math.max(1, preparationTimeoutMs),
+      });
+      return this.dependencies.brokerDeviceAcquisition.acquire(config, {
+        livenessOwnerToken: options.livenessOwnerToken,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+    };
+    const remainingMs = deadlineMs - timer.now();
+    // Reserve one third (at most a runner provisioning window) for one warm iOS retry.
+    // The first acquisition passes this shorter deadline through to provisionDevice readiness,
+    // so a cold create can exhaust its entire attempt budget without exhausting prepare itself.
+    const retryReserveMs =
+      profile.platform === "ios"
+        ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)
+        : 0;
+    let result = await acquire(remainingMs - retryReserveMs);
+    if (
+      this.canRetryReadiness(result, resource, profile) &&
+      !this.preparationStopped(deadlineMs, options.signal)
+    ) {
+      // The created journal still owns this simulator. Keep the intermediate failure inside
+      // prepare so the broker does not destroy it before this single adoption retry.
+      await this.waitForRetry(Math.min(deadlineMs - timer.now(), 25), options.signal);
+      if (!this.preparationStopped(deadlineMs, options.signal)) {
+        result = await acquire(deadlineMs - timer.now());
+      }
+    }
     const sessionId = await this.readySessionId(result, resource, profile);
     return { sessionId, profile };
+  }
+
+  private preparationStopped(deadlineMs: number, signal?: AbortSignal): boolean {
+    return (
+      signal?.aborted === true || (this.dependencies.timer ?? defaultTimer).now() >= deadlineMs
+    );
+  }
+
+  private canRetryReadiness(
+    result: BrokerDeviceAcquisitionResult,
+    resource: BrokerResourceRecord,
+    profile: BrokerNativeProfile,
+  ): boolean {
+    const binding = result.bindings.find(
+      (entry) => entry.bindingIndex === resource.allocationIndex,
+    );
+    if (!binding?.failure) {
+      return false;
+    }
+    const retry = binding.failure;
+    const readinessFailure =
+      retry.code === "readiness_incomplete" ||
+      retry.code === "timeout" ||
+      (retry.code === "provision_failed" && retry.provision?.code === "timeout");
+    return [
+      profile.platform === "ios",
+      result.outcome === "failed",
+      result.scope.scopeKey === this.scopeKey,
+      result.bindings.length === 1,
+      binding.sessionUuid === null,
+      retry.retryable,
+      retry.retainedDevice?.platform === "ios",
+      readinessFailure,
+    ].every(Boolean);
+  }
+
+  private async waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+    const timer = this.dependencies.timer ?? defaultTimer;
+    let handle: NodeJS.Timeout | undefined;
+    try {
+      await raceWithDeadline(
+        () =>
+          new Promise<void>((resolve) => {
+            handle = timer.setTimeout(resolve, delayMs);
+          }),
+        { timer, signal, label: "Managed device readiness retry" },
+      );
+    } catch (error) {
+      throw new SessionBrokerFailureError({
+        code: signal?.aborted ? "cancelled" : "session_preparation_failed",
+        retryable: signal?.aborted === true,
+        message: signal?.aborted ? "The binding acquisition was cancelled." : errorMessage(error),
+      });
+    } finally {
+      if (handle !== undefined) {
+        timer.clearTimeout(handle);
+      }
+    }
   }
 
   private async readySessionId(
@@ -202,22 +294,29 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     return result;
   }
 
-  async destroy(resource: BrokerResourceRecord): Promise<DestructionProgress> {
+  async destroy(
+    resource: BrokerResourceRecord,
+    signal?: AbortSignal,
+  ): Promise<DestructionProgress> {
+    signal?.throwIfAborted();
     this.assertResource(resource, "destroying");
     const profile = nativeProfile(resource);
     const requestedSpec = this.requestedSpec(profile);
     const key = this.key(resource);
 
-    if ((await this.redriveOpenJournal(key)) === "pending") {
+    if ((await this.redriveOpenJournal(key, signal)) === "pending") {
       return "pending";
     }
 
+    signal?.throwIfAborted();
     const current = await this.destroyableAssignment(key, profile, requestedSpec);
     if (typeof current === "string") {
       return current;
     }
+    signal?.throwIfAborted();
     const drained = await this.drainAssignment(key, current, profile, requestedSpec);
-    return typeof drained === "string" ? drained : this.deleteAssignment(key, drained);
+    signal?.throwIfAborted();
+    return typeof drained === "string" ? drained : this.deleteAssignment(key, drained, signal);
   }
 
   private async destroyableAssignment(
@@ -266,11 +365,13 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   private async deleteAssignment(
     key: BindingKey,
     assignment: BindingAssignmentRecord,
+    signal?: AbortSignal,
   ): Promise<DestructionProgress> {
     if (assignment.stableDeviceId === null) {
       return this.confirmNoBinding(key);
     }
     const stableDeviceId = assignment.stableDeviceId;
+    signal?.throwIfAborted();
     const opened = await this.dependencies.registry.openBindingJournal(key, {
       kind: "replace",
       phase: "deleting",
@@ -296,7 +397,9 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (opened.kind !== "opened" && opened.kind !== "journal_open") {
       return "pending";
     }
-    const redriven = await this.dependencies.bindingJournal.redriveBinding(key);
+    signal?.throwIfAborted();
+    const redriven = await this.dependencies.bindingJournal.redriveBinding(key, { signal });
+    signal?.throwIfAborted();
     if (redriven.kind === "blocked" || (await this.hasOpenJournal(key))) {
       return "pending";
     }
@@ -419,11 +522,16 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     );
   }
 
-  private async redriveOpenJournal(key: BindingKey): Promise<"clear" | "pending"> {
+  private async redriveOpenJournal(
+    key: BindingKey,
+    signal?: AbortSignal,
+  ): Promise<"clear" | "pending"> {
     if (!(await this.hasOpenJournal(key))) {
       return "clear";
     }
-    const result = await this.dependencies.bindingJournal.redriveBinding(key);
+    signal?.throwIfAborted();
+    const result = await this.dependencies.bindingJournal.redriveBinding(key, { signal });
+    signal?.throwIfAborted();
     return result.kind === "clear" && !(await this.hasOpenJournal(key)) ? "clear" : "pending";
   }
 

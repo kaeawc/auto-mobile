@@ -202,7 +202,9 @@ describe("SimCtlClient runtime resolution", () => {
 
     const runtimeCall = calls.indexOf("xcrun simctl list runtimes iOS --json");
     expect(runtimeCall).toBeGreaterThanOrEqual(0);
-    expect(signals[runtimeCall]).toBe(controller.signal);
+    expect(signals[runtimeCall]?.aborted).toBe(false);
+    controller.abort();
+    expect(signals[runtimeCall]?.aborted).toBe(true);
   });
 
   test("fails actionably when no available runtime is within the requested range", async () => {

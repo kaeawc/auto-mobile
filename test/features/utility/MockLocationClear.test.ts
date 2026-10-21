@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { MockLocationClearRegistry } from "../../../src/features/utility/MockLocationClear";
 import { DeviceState } from "../../../src/features/utility/DeviceState";
@@ -23,9 +23,11 @@ const flush = async () => {
     await Promise.resolve();
   }
 };
-const warn = spyOn(logger, "warn").mockImplementation(() => {});
-afterEach(() => warn.mockClear());
-afterAll(() => warn.mockRestore());
+let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+beforeEach(() => {
+  warn = spyOn(logger, "warn").mockImplementation(() => {});
+});
+afterEach(() => warn.mockRestore());
 
 function harness(simctl = new FakeSimctl()) {
   const timer = new FakeTimer();

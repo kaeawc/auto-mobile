@@ -16,7 +16,7 @@ afterAll(cleanupTestDirectories);
 testOverrides.gitMetadataClient = { readVersion: () => null };
 
 /**
- * Match GitMetadataClient's three initial version probes, ignoring other test
+ * Match GitMetadataClient's version probes (including legacy argv), ignoring other test
  * files' git commands. Keep this local so importing production code cannot bind
  * spawnSync before the recording hooks are installed.
  */
@@ -26,6 +26,8 @@ export function isGitVersionProbe(argv: readonly string[]): boolean {
   }
   return (
     (argv.length === 3 && argv[1] === "rev-parse" && argv[2] === "--show-toplevel") ||
+    (argv.length === 3 && argv[1] === "rev-parse" && argv[2] === "HEAD") ||
+    (argv.length === 3 && argv[1] === "diff" && argv[2] === "HEAD") ||
     (argv.length === 4 &&
       argv[1] === "rev-parse" &&
       argv[2] === "--short=12" &&

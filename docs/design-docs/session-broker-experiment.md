@@ -32,6 +32,25 @@ Acknowledged or expired export rows prune with their eligible request receipts;
 pending resource cleanup and retained-receipt tombstone guards still apply.
 Clients omitting `export` retain the existing prepare contract.
 
+## Shutdown refusals and retry cadence
+
+Once restart handoff begins, new prepare and abandon calls return an RPC refusal:
+`success: false`, `code: "session_broker_stopping"`, `error: "Session broker is stopping"`,
+`retryable: true`, and `retryAfterMs: 5000`. Retry the same request identity against the
+successor daemon; the stopping refusal neither admits a request nor stores a terminal
+receipt. It stays outside preparation's `failureFor` mapping. Already-running
+preparations cancelled by shutdown retain the existing `session_preparation_failed`
+terminal receipt and cleanup behavior.
+
+Retryable `session_restart_handoff_pending` and configured-but-unavailable broker
+refusals use the same hint, shared with the service's five-second idle interval between
+recovery passes. This is a pacing hint, not a readiness deadline: recovery work can
+extend a pass. Stopping and handoff-pending refusals log at debug; non-retryable request
+owner and export identity mismatches remain warnings. A failed initial handoff snapshot
+warns and still joins preparations; close retries the snapshot after that join before
+finishing releases. A failed second snapshot still rejects close so the service keeps
+its host lock.
+
 ## Current qualification boundary
 
 The first native milestone deliberately uses zero pooling. Every relinquished
@@ -237,7 +256,15 @@ sessions, reset, uncertain state, and unfinished destruction count toward the
 total cap. Failed acquisition with unfinished native work retains session
 capacity too. A full pool must confirm eviction before reserving a replacement;
 there is no temporary burst. Pool selection prefers the most recently returned
-compatible device and evicts the least recently returned idle device.
+compatible device, even after a total-cap reduction, and evicts the least recently
+returned idle device when no compatible idle device is available. A pending
+eviction or transient destroy failure returns `eviction_pending` with
+`retryable: true` and `retryAfterMs: 1000`. Its destroying resource keeps capacity
+reserved for recovery. The failed request ID remains terminal; after cleanup
+frees capacity, retry with a new request ID. Permanent destroy errors remain
+non-retryable `session_preparation_failed` failures.
+Managed provisioning's `cleanup_pending` remains a separate failure: its retryability
+is suppressed while that request's resource cleanup is pending, with no retry delay injected.
 
 ## Consumer contract
 
@@ -271,8 +298,11 @@ The daemon protocol is:
 - `daemon/prepareSession`: `{config, livenessOwnerToken}`.
 - `daemon/sessionRequestStatus`: `{requestId, livenessOwnerToken}`.
 - `daemon/abandonSessionRequest`: `{requestId, livenessOwnerToken}`.
-- `daemon/releaseBrokerSession`: `{sessionId, livenessOwnerToken, reason?}`.
-  A client release omits `reason` and ends `released`. A proxy whose execution
+- `daemon/releaseBrokerSession`: `{sessionId, livenessOwnerToken, reason?, replyBudgetMs?}`.
+  A client release omits `reason` and ends `released` only after cleanup settles.
+  Its reply waits at most 30,000 ms by default after `beginRelease` commits durable
+  `releasing`/`resetting` ownership; slower cleanup returns `cleanup_pending`
+  (#13798). A proxy whose execution
   owner died sends `reason: "session_owner_exited"`: the daemon commits the
   terminal `failed`/`session_owner_exited` receipt, answers `cleanup_pending`,
   and finishes the drain and device destruction as tracked release work (#12791).
@@ -286,8 +316,43 @@ resolution fails; it never allocates a replacement session. A concurrent caller
 cannot replace a previously committed receipt with its own preparation failure.
 If receipt persistence fails, the RPC fails without claiming a terminal result.
 A new execution attempt needs a new request ID.
-Release reports either confirmed release or cleanup still pending. A later
-recovery pass owns pending cleanup independently of the client connection.
+Release reports either confirmed release or cleanup still pending. The reply
+budget is `SESSION_BROKER_RELEASE_REPLY_BUDGET_MS`, configurable through broker
+options with an injected `Timer`. The 30-second default gives native destruction
+time to return an honest `released`, well within the CLI's 240-second transport
+timeout. An optional per-call `replyBudgetMs` is clamped to [0, 30,000]; non-finite
+numbers and null are ignored. On each attempt the proxy requests its remaining
+budget minus 500 ms (with a 250 ms minimum), so retries request shorter waits and
+the daemon has time to answer before the proxy's own timeout.
+Database commitment is required before the reply budget starts; a failed
+commitment still rejects without acknowledging release ownership.
+
+An expired reply budget does not cancel or detach native work: the same tracked
+release continues through drain, baseline reset or destruction, and the final
+receipt read. Concurrent and later release calls share that work, each with a
+bounded wait. Startup recovers durable receipts before socket bind and starts native
+cleanup in the background afterward (#13948). Recovery cleanup slots await full
+tracked releases, preserving their abort signals and concurrency limit even when a
+pass stops waiting; they never use the RPC reply budget. `joinReleases()` and daemon
+shutdown join the full operation, never just the reply. Early failures still reject; failures after
+a pending reply are warned and the tracking entry is removed on settlement.
+Existing native-error recovery and durable cleanup ownership remain unchanged.
+
+`cleanup_pending` is acknowledgment of durable release ownership, not proof of
+native absence or a terminal `released` receipt. The CLI returns it without
+retrying, and proxy teardown drops its heartbeat hold without waiting for native
+cleanup. Consumers needing completion poll the original request receipt or retry
+release for the same session UUID; retries do not start duplicate cleanup. A later
+recovery pass owns unfinished durable cleanup independently of the client
+connection. Owner-exit release keeps its existing terminal-failure semantics and
+prompt reply.
+
+RPC abort propagation is separate work: a request signal could stop only the
+bounded caller wait after commitment, while the shared native operation must keep
+running for other callers and shutdown. The current `reportReleased` result with
+no remembered bindings still reports confirmed settlement. Changing that evidence
+contract requires separate binding-ownership and recovery tests; this reply-budget
+change does not alter it.
 
 Deterministic consumers can use the provider CLI instead of implementing its
 socket protocol:

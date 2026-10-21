@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
@@ -20,7 +20,10 @@ import {
 } from "../../../src/daemon/sessionBroker/service";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { SESSION_BROKER_RETRY_AFTER_MS } from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
+import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "../../../src/daemon/sessionBroker/timing";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
@@ -74,7 +77,7 @@ class ControlledBroker extends SessionBroker {
     });
   }
 
-  override async recover(): Promise<void> {
+  override async recoverCleanup(): Promise<void> {
     this.events.push("recover:start");
     this.recoveryStarted.resolve();
     if (this.blockRecovery) {
@@ -125,13 +128,37 @@ describe("session broker service lifecycle", () => {
     };
   }
 
+  test("startup passes the service timer to broker release replies", async () => {
+    const timer = new FakeTimer();
+    const service = await openSessionBrokerService(openOptions(timer, new RecordingLock()));
+    const timeout = spyOn(timer, "setTimeout");
+    try {
+      expect(await service.broker.release("missing-session")).toEqual({
+        sessionUuid: "missing-session",
+        outcome: "unknown_session",
+      });
+      expect(timeout).toHaveBeenCalledWith(expect.any(Function), 30_000);
+      // Startup recovers receipts only; the daemon starts the cleanup loop after socket bind.
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      timeout.mockRestore();
+      await service.close();
+    }
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("close wakes an idle loop, closes the broker, and releases the lock once", async () => {
     const timer = new FakeTimer();
     const lock = new RecordingLock();
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
     const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer);
     service.start();
-    expect(timer.getPendingTimeouts()).toEqual([5_000]);
+    await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+      description: "idle recovery loop",
+    });
+    expect(SESSION_BROKER_RETRY_AFTER_MS).toBe(5_000);
+    expect(SESSION_BROKER_RETRY_AFTER_MS).toBe(SESSION_BROKER_RECOVERY_INTERVAL_MS);
+    expect(timer.getPendingTimeouts()).toEqual([SESSION_BROKER_RETRY_AFTER_MS]);
 
     const first = service.close();
     const second = service.close();
@@ -139,7 +166,12 @@ describe("session broker service lifecycle", () => {
     expect(second).toBe(first);
     await first;
     expect(timer.getPendingTimeoutCount()).toBe(0);
-    expect(broker.events).toEqual(["broker:handoff", "broker:close"]);
+    expect(broker.events).toEqual([
+      "recover:start",
+      "recover:end",
+      "broker:handoff",
+      "broker:close",
+    ]);
     expect(lock.events).toEqual(["lock:release"]);
   });
 
@@ -150,7 +182,6 @@ describe("session broker service lifecycle", () => {
     broker.blockRecovery = true;
     const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer);
     service.start();
-    timer.advanceTime(5_000);
     await broker.recoveryStarted.promise;
 
     let closed = false;
@@ -171,6 +202,43 @@ describe("session broker service lifecycle", () => {
       "broker:close",
     ]);
     expect(lock.events).toEqual(["lock:release"]);
+  });
+
+  test("start recovers immediately and waits five seconds before the second pass", async () => {
+    const timer = new FakeTimer();
+    const lock = new RecordingLock();
+    const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
+    const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer);
+    try {
+      service.start();
+      service.start();
+      await drainUntil(() => broker.events.includes("recover:end"), {
+        description: "immediate first recovery pass",
+      });
+      expect(timer.now()).toBe(0);
+      expect(broker.events).toEqual(["recover:start", "recover:end"]);
+      await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+        description: "recovery cadence wait",
+      });
+      timer.advanceTime(4_999);
+      expect(broker.events).toEqual(["recover:start", "recover:end"]);
+      timer.advanceTime(1);
+      await drainUntil(
+        () => broker.events.filter((event) => event === "recover:end").length === 2,
+        {
+          description: "second recovery pass at five seconds",
+        },
+      );
+      expect(timer.now()).toBe(5_000);
+      expect(broker.events).toEqual([
+        "recover:start",
+        "recover:end",
+        "recover:start",
+        "recover:end",
+      ]);
+    } finally {
+      await service.close();
+    }
   });
 
   test("startup leaves foreign managed inventory untouched and never starts its loop", async () => {

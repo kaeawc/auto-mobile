@@ -1,3 +1,4 @@
+import type { SessionBrokerService } from "../sessionBroker/service";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
 import type {
   DaemonCoreServices,
@@ -161,6 +162,7 @@ export interface DaemonStartupHost extends Pick<
   initializeIosServices: DaemonStartup["initializeIosServices"];
   restoreIncumbentOwnerRecord: DaemonIdentity["restoreIncumbentOwnerRecord"];
   republishIdentity: DaemonIdentity["republishIdentity"];
+  recordControlSocketIdentity: DaemonIdentity["recordControlSocketIdentity"];
   startAuxiliarySocket: DaemonIdentity["startAuxiliarySocket"];
   configureDeviceDataStreamServer: DaemonStreams["configureDeviceDataStreamServer"];
   setupDeviceSessionRouting: DaemonStreams["setupDeviceSessionRouting"];
@@ -179,6 +181,7 @@ export interface DaemonStartupHost extends Pick<
 
 /** Sequences startup over replaceable host steps and initializes devices and persistence. */
 export class DaemonStartup {
+  private sessionBrokerRecovery: Pick<SessionBrokerService, "start"> | undefined;
   /** Exposed through Daemon.testHooks: the in-flight or settled startup provenance warm. */
   androidAvdProvenanceWarmPromise: Promise<unknown> | undefined;
   /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
@@ -451,7 +454,6 @@ export class DaemonStartup {
       this.host.services.sessionManager().assertDaemonCollaboratorsAttached();
       this.host.startHost().prepareHttpToken();
       await this.host.startHost().startHttpIngress();
-      this.host.startHost().publishHttpToken();
 
       // Initialize the device pool BEFORE the socket server so connecting clients see it.
       // Wait up to 5 seconds - emulators should already be running
@@ -474,7 +476,7 @@ export class DaemonStartup {
 
       // A session-only provider resolves prior ownership before exposing its socket or warming
       // runners for sessions that recovery will abandon.
-      await this.host.installSessionBroker();
+      this.sessionBrokerRecovery = await this.host.installSessionBroker();
 
       // Rehydrated sessions are now owned here and can safely warm their runners.
       await startupBenchmark.runPhase("iosServices", () => this.host.initializeIosServices());
@@ -491,6 +493,8 @@ export class DaemonStartup {
       // (the #6140 failure mode via a bypassed launch). This authorizes cleanup
       // of the control socket and PID file; each aux bind is tracked separately.
       this.host.identity.setSocketBindCommitted(true);
+      // Discovery publishes credentials only after authoritative control-socket ownership.
+      this.host.startHost().publishHttpToken();
       startupBenchmark.endPhase("socketServerStart");
     } catch (error) {
       // Restore the live incumbent's record on any pre-bind failure in the
@@ -578,6 +582,7 @@ export class DaemonStartup {
     logger.info("Starting Unix socket server...");
     startupBenchmark.startPhase("socketServerStart");
     await this.host.lifecycle.socketServer()!.start();
+    this.host.recordControlSocketIdentity();
     return this.host.lifecycle.socketServer()!;
   }
 
@@ -636,6 +641,8 @@ export class DaemonStartup {
   }
 
   async startAfterSocketBind(): Promise<void> {
+    // Native broker cleanup must never hold up the control socket becoming reachable.
+    this.sessionBrokerRecovery?.start();
     await this.host.startHost().startServicesAfterSocketBind();
     this.host.startHeartbeatMonitor();
     this.host.startHost().startMaintenanceMonitors();

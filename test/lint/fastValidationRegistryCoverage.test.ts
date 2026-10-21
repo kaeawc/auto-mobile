@@ -18,7 +18,8 @@ const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
   "ffmpeg-execution-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
   "sdkmanager-execution-boundary":
     "PR node-host-integration-tests: sdkManagerExecutionBoundary.integration.test.ts scans src/",
-  "archive-extraction-boundary": "PR node-unit-tests: archiveExtractionBoundary.test.ts scans src/",
+  "archive-extraction-boundary":
+    "PR ts-build-and-test: archiveExtractionBoundary.test.ts scans src/",
   "xcodebuild-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh (diff ratchet)",
   "daemon-launcher-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
   "process-safety": "PR ts-build-and-test: lint -> check-boundaries.sh",

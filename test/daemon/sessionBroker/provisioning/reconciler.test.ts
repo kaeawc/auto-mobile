@@ -234,6 +234,37 @@ describe("BindingReconciler", () => {
     return result.device.stableId;
   }
 
+  test.each([
+    { disposition: "adopted", provisionDeadlineMs: 60_000 },
+    { disposition: "created", provisionDeadlineMs: 40_000 },
+    { disposition: "reused", provisionDeadlineMs: 60_000 },
+  ] as const)(
+    "only the create path stops at the create deadline: $disposition (#14643)",
+    async ({ disposition, provisionDeadlineMs }) => {
+      if (disposition === "adopted") {
+        inventory.devices.push({
+          name: bindingDeviceName(key, 1, "leftover"),
+          platform: "ios",
+          deviceId: "UDID-LEFTOVER",
+          isRunning: false,
+          runtime: IOS_18,
+          deviceType: IPHONE_16,
+        });
+      } else if (disposition === "reused") {
+        await seedAssigned();
+      }
+
+      const result = expectReady(
+        await reconciler.reconcile(
+          request(SPEC_18, { deadlineMs: 60_000, createDeadlineMs: 40_000 }),
+        ),
+      );
+
+      expect(result.disposition).toBe(disposition);
+      expect(provisioner.calls.map((call) => call.deadlineMs)).toEqual([provisionDeadlineMs]);
+    },
+  );
+
   test.each(["ios", "android"] as const)(
     "upgrade adopts a legacy %s interrupted creation without creating a replacement",
     async (platform) => {

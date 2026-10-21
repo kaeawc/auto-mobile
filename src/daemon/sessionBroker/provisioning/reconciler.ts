@@ -43,6 +43,7 @@ import {
   expectationOf,
   failure,
   provisionFailure,
+  withCreateDeadline,
   type ReadyResult,
   type ReconcileContext,
 } from "./reconcilerSupport";
@@ -658,7 +659,7 @@ export class BindingReconciler {
     if (candidate) {
       return await this.adopt(context, assignment, candidate.device, candidate.source);
     }
-    return await this.createAndCommit(context, assignment, "created");
+    return await this.createAndCommit(withCreateDeadline(context), assignment, "created");
   }
 
   private async findAdoptionCandidate(

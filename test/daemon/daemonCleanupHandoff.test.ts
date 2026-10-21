@@ -45,6 +45,17 @@ class CleanupFiles implements DaemonCleanupFileSystem {
     }
   };
   unlink = async (path: string) => this.unlinkSync(path);
+  renameSync = (from: string, to: string) => {
+    const entry = this.stat(from);
+    this.paths.set(to, entry);
+    this.paths.delete(from);
+  };
+  linkSync = (from: string, to: string) => {
+    if (this.paths.has(to)) {
+      throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+    }
+    this.paths.set(to, this.stat(from));
+  };
 }
 
 const options = {

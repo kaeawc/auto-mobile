@@ -154,6 +154,17 @@ describe("device mutation reset contract", () => {
     });
   });
 
+  test("a known unobservable baseline short-circuits before native capture", async () => {
+    const incompleteScope = { ...SCOPE, incarnation: "unobservable" };
+    await journal.captureBaseline(incompleteScope, { ...BASELINE, unobservable: ["account"] });
+    expect(await revertDeviceMutations({ ...options, scope: incompleteScope })).toMatchObject({
+      status: "non_clean",
+      reason: "non_revertible",
+    });
+    expect(port.captureCount).toBe(0);
+    expect(port.reverted).toEqual([]);
+  });
+
   test("journaled mutations outside the observable baseline cannot falsely verify clean", async () => {
     port.snapshot.completeKinds = port.snapshot.completeKinds.filter((kind) => kind !== "keychain");
     await journal.record(SCOPE, { ...CLIPBOARD, kind: "keychain" });
@@ -289,6 +300,22 @@ describe("device mutation reset contract", () => {
     await captureFirstDeviceBaseline(journal, port, fresh);
     expect(port.captureCount).toBe(1);
     expect(await journal.getBaseline(fresh.scope)).toEqual(BASELINE);
+  });
+
+  test("an empty unobservable capture is never persisted as an immutable baseline", async () => {
+    const context = {
+      scope: { ...SCOPE, incarnation: "fresh" },
+      signal: new AbortController().signal,
+      assertOwned: async () => {},
+    };
+    port.snapshot = { completeKinds: [], observations: [], unobservable: ["installed-app"] };
+    await expect(captureFirstDeviceBaseline(journal, port, context)).rejects.toThrow(
+      "no observable inventory",
+    );
+    expect(await journal.getBaseline(context.scope)).toBeNull();
+    port.snapshot = structuredClone(BASELINE);
+    await captureFirstDeviceBaseline(journal, port, context);
+    expect(await journal.getBaseline(context.scope)).toEqual(BASELINE);
   });
 
   test("non-positive or overflowing reset budgets are rejected before device access", async () => {

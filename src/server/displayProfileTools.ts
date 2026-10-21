@@ -93,7 +93,7 @@ function profileInput(args: DisplayProfileArgs): DisplayProfileInput {
   );
 }
 
-function changedSettings(input: DisplayProfileInput): DeviceSettingKey[] {
+export function changedSettings(input: DisplayProfileInput): DeviceSettingKey[] {
   return [
     ...(input.fontScale !== undefined ? (["fontScale"] as const) : []),
     ...(input.density !== undefined ? (["density"] as const) : []),

@@ -8,7 +8,6 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.SettingsGetResult
 import dev.jasonpearson.automobile.protocol.SettingsListResult
 import dev.jasonpearson.automobile.protocol.SettingsPutResult
-import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.coroutines.CancellationException
 
 /** Settings.System/Secure/Global read, write and list, with platform and socket access supplied. */
@@ -16,16 +15,8 @@ internal class SettingsController(
   private val contentResolver: () -> ContentResolver,
   private val perfProvider: PerfProvider,
   private val timeProvider: TimeProvider,
-  private val resultBroadcaster: ResultBroadcaster,
-  private val responseSender: ResponseSender,
+  private val resultSender: ResultSender,
 ) {
-  /** Keeps the service's late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    fun isRunning(): Boolean
-
-    suspend fun broadcast(response: WebSocketResponse)
-  }
-
   companion object {
     private const val TAG = "CtrlProxy"
   }
@@ -289,54 +280,45 @@ internal class SettingsController(
   }
 
   private suspend fun broadcastSettingsGetResult(outcome: SettingsGetOutcome) {
-    if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(outcome.requestId, "settings_get_result") {
-      responseSender.broadcast(
-        SettingsGetResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = outcome.requestId,
-          success = outcome.success,
-          namespace = outcome.namespace,
-          key = outcome.key,
-          value = outcome.value,
-          found = outcome.found,
-          totalTimeMs = outcome.totalTimeMs,
-          error = outcome.error,
-        ),
+    resultSender.send(outcome.requestId, "settings_get_result", attachPerf = false) { _ ->
+      SettingsGetResult(
+        timestamp = timeProvider.currentTimeMillis(),
+        requestId = outcome.requestId,
+        success = outcome.success,
+        namespace = outcome.namespace,
+        key = outcome.key,
+        value = outcome.value,
+        found = outcome.found,
+        totalTimeMs = outcome.totalTimeMs,
+        error = outcome.error,
       )
     }
   }
 
   private suspend fun broadcastSettingsPutResult(outcome: SettingsPutOutcome) {
-    if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(outcome.requestId, "settings_put_result") {
-      responseSender.broadcast(
-        SettingsPutResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = outcome.requestId,
-          success = outcome.success,
-          namespace = outcome.namespace,
-          key = outcome.key,
-          totalTimeMs = outcome.totalTimeMs,
-          error = outcome.error,
-        ),
+    resultSender.send(outcome.requestId, "settings_put_result", attachPerf = false) { _ ->
+      SettingsPutResult(
+        timestamp = timeProvider.currentTimeMillis(),
+        requestId = outcome.requestId,
+        success = outcome.success,
+        namespace = outcome.namespace,
+        key = outcome.key,
+        totalTimeMs = outcome.totalTimeMs,
+        error = outcome.error,
       )
     }
   }
 
   private suspend fun broadcastSettingsListResult(outcome: SettingsListOutcome) {
-    if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(outcome.requestId, "settings_list_result") {
-      responseSender.broadcast(
-        SettingsListResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = outcome.requestId,
-          success = outcome.success,
-          namespace = outcome.namespace,
-          entries = outcome.entries,
-          totalTimeMs = outcome.totalTimeMs,
-          error = outcome.error,
-        ),
+    resultSender.send(outcome.requestId, "settings_list_result", attachPerf = false) { _ ->
+      SettingsListResult(
+        timestamp = timeProvider.currentTimeMillis(),
+        requestId = outcome.requestId,
+        success = outcome.success,
+        namespace = outcome.namespace,
+        entries = outcome.entries,
+        totalTimeMs = outcome.totalTimeMs,
+        error = outcome.error,
       )
     }
   }

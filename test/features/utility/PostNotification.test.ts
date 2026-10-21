@@ -527,6 +527,20 @@ describe("PostNotification", () => {
     });
   });
 
+  test("iOS-only category and payload are ignored on Android with a warning (#14097)", async () => {
+    configureBroadcastResult(1);
+    const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+      title: "Hello",
+      body: "World",
+      appId: "com.example.app",
+      category: "reply",
+      payload: { orderId: "A-1" },
+    });
+    expect(result.success).toBe(true);
+    expect(result.warning).toBe("category and payload are iOS-only and were ignored.");
+    expect(fakeAdb.wasCommandExecuted("orderId")).toBe(false);
+  });
+
   describe("imagePath without bigPicture (#10014)", () => {
     test("does not push or send image_path and warns that the image was ignored", async () => {
       configureBroadcastResult(1);

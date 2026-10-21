@@ -1,7 +1,8 @@
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { mock, describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
-import { DeviceLostError, rememberDeviceLossAbort } from "../../src/models/DeviceLostError";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { rememberDeviceLossAbort } from "../../src/utils/deviceLossAbortRegistry";
 import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 

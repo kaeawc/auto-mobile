@@ -817,7 +817,8 @@ export function assertHttpsAssetUrl(url: string, label: string, env: EnvLike = p
   if (parsed.protocol === "https:") {
     return;
   }
-  if (isInsecureAssetUrlAllowed(env)) {
+  // The opt-out permits plaintext http only; file:, ftp: and other schemes stay rejected.
+  if (parsed.protocol === "http:" && isInsecureAssetUrlAllowed(env)) {
     return;
   }
   throw new ActionableError(

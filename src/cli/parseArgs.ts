@@ -132,8 +132,8 @@ export function parseArgs(
   const noDaemon = hasFlag("no-daemon");
   const { daemonRequested, daemonCommand, daemonArgs } = parseDaemonCommand(args);
   const debugPerf =
-    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || readEnvBool(ENV.DEBUG_PERF);
-  const debug = hasFlag("debug") || readEnvBool(ENV.DEBUG);
+    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || readEnvBool(ENV.DEBUG_PERF, environment);
+  const debug = hasFlag("debug") || readEnvBool(ENV.DEBUG, environment);
   const strictPort = hasFlag("strict-port");
   const uiPerfMode = !hasFlag("no-ui-perf-mode");
   const memPerfAuditMode = hasFlag("mem-perf-audit");

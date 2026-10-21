@@ -2,7 +2,7 @@ import { OrphanRecorderActiveError } from "../daemon/orphanRecorderRefusal";
 import { toActionableError } from "../models/ActionableError";
 import { ActionableError, type VideoRecordingMetadata } from "../models";
 import { ownerVisibleInScope, type VideoRecordingRecord } from "../db/videoRecordingRepository";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   adoptOrphanCaptureArtifact,
   getVideoRecordingMetadata,
@@ -29,7 +29,7 @@ import { assertActiveRecordingOwner, type RecordingToolContext } from "./videoRe
  */
 function segmentedStopResponse(stopped: StoppedSegmentedSession) {
   const { sessionId, segments, manifestPath, highlights } = stopped;
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     action: "stop",
     count: segments.length,
     manifestPath,
@@ -179,7 +179,7 @@ async function finalizedStopResponse(
   if (!metadata) {
     return null;
   }
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     action: "stop",
     count: 1,
     recordings: [stopResultEntry(metadata)],
@@ -277,7 +277,7 @@ export async function stopRecordingById(
     requesterMcpSessionId,
   );
   if (stoppedOrphan) {
-    return createJSONToolResponse({ action: "stop", count: 1, recordings: [stoppedOrphan] });
+    return createStructuredToolResponse({ action: "stop", count: 1, recordings: [stoppedOrphan] });
   }
   const heldOwner = heldVideoRecordingOwner(recordingId);
   const activeRecords = await listActiveVideoRecordings();
@@ -323,7 +323,7 @@ export async function stopRecordingById(
     throw toActionableError(error, `Failed to stop video recording`);
   }
 
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     action: "stop",
     count: results.length,
     recordings: results,

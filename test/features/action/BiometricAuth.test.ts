@@ -9,6 +9,11 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import {
+  FakeDeviceTraits,
+  androidDeviceTraits,
+  physicalDeviceTraits,
+} from "../../fakes/FakeDeviceTraits";
 
 // Helper function to create mock ObserveResult
 let hierarchyCounter = 0;
@@ -33,9 +38,11 @@ describe("BiometricAuth", () => {
   let fakeAwaitIdle: FakeAwaitIdle;
   let fakeTimer: FakeTimer;
   let device: BootedDevice;
+  let deviceTraits: FakeDeviceTraits;
 
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
+    deviceTraits = new FakeDeviceTraits(androidDeviceTraits());
     fakeObserveScreen = new FakeObserveScreen();
     fakeWindow = new FakeWindow();
     fakeAwaitIdle = new FakeAwaitIdle();
@@ -55,8 +62,6 @@ describe("BiometricAuth", () => {
     });
     fakeObserveScreen.setObserveResult(() => createObserveResult());
 
-    // Emulator detection
-    fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
     fakeAdb.setCommandResponse(
       "emu help",
       createExecResult("finger - fingerprint commands\nhelp - show this help", ""),
@@ -72,6 +77,7 @@ describe("BiometricAuth", () => {
       observeScreen: fakeObserveScreen,
       window: fakeWindow,
       awaitIdle: fakeAwaitIdle,
+      deviceTraits,
     });
   });
 
@@ -361,7 +367,7 @@ describe("BiometricAuth", () => {
 
   describe("physical device support", () => {
     test("should return partial support on physical devices with SDK broadcast", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
+      deviceTraits.setTraits(physicalDeviceTraits());
 
       const result = await biometricAuth.execute({ action: "match" });
 
@@ -371,7 +377,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should send SDK broadcast to physical devices", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
+      deviceTraits.setTraits(physicalDeviceTraits());
 
       await biometricAuth.execute({ action: "match" });
 
@@ -380,7 +386,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should not send emu finger commands to physical devices", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
+      deviceTraits.setTraits(physicalDeviceTraits());
 
       await biometricAuth.execute({ action: "match" });
 
@@ -389,7 +395,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should return failure when broadcast fails on physical devices", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
+      deviceTraits.setTraits(physicalDeviceTraits());
       fakeAdb.setCommandError("BIOMETRIC_OVERRIDE", new Error("adb: device offline"));
 
       const result = await biometricAuth.execute({ action: "match" });
@@ -400,7 +406,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should support error action on physical devices via SDK broadcast", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
+      deviceTraits.setTraits(physicalDeviceTraits());
 
       const result = await biometricAuth.execute({ action: "error", errorCode: 7 });
 
@@ -424,7 +430,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should reject emulators without emu finger support", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      deviceTraits.setTraits(androidDeviceTraits());
       fakeAdb.setCommandResponse("emu help", createExecResult("help - show this help", ""));
 
       const result = await biometricAuth.execute({ action: "match" });
@@ -521,9 +527,9 @@ describe("BiometricAuth", () => {
     });
 
     test("should treat capability check failures as physical device (partial support)", async () => {
-      // When getprop fails, the device is treated as a physical device (non-emulator)
+      // When the traits read fails, the device is treated as a physical device (non-emulator)
       // which returns supported: "partial" with the SDK broadcast still sent.
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("", "Error"));
+      deviceTraits.setTraits(new Error("getprop failed"));
 
       const result = await biometricAuth.execute({ action: "match" });
 

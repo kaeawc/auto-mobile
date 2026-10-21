@@ -19,7 +19,7 @@ import { HeldSessionLosses } from "../proxy/HeldSessionLosses";
 import { ackDaemonInstance } from "../proxy/livenessErrorPredicates";
 import { rememberSessionDeviceId, sessionUuidFromArgs } from "../proxy/SessionBinding";
 import { routedSessionUuidFromResult } from "../routedSessionMeta";
-import { type SessionReleaseSnapshot } from "../sessionManager";
+import { type SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import {
   DEVICE_READ_ONLY_ARGS_META_KEY,
   DEVICE_READ_ONLY_META_KEY,

@@ -142,6 +142,7 @@ nav:
       - "Device resources": design-docs/device-resources.md
       - "Host toolchain resource": design-docs/host-toolchain-resource.md
       - "Session broker experiment": design-docs/session-broker-experiment.md
+      - "Session broker device mutation journal": design-docs/session-broker-device-mutation-journal.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md

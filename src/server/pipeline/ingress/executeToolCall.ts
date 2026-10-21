@@ -663,6 +663,7 @@ async function executeToolCallBody(
       parsedParams: validated.parsedParams,
       // The invoke and bind stages read `sessionId` only as the binding key.
       sessionId: routed.bindingKey,
+      bindingKey: routed.bindingKey,
       context,
       options: deps.options,
       sessionToolBinding: deps.sessionToolBinding,

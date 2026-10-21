@@ -559,7 +559,10 @@ When `observe` has verifiable geometry and a frame context, it returns
 screen coordinates to `tapAt` to bind the tap to that observation. References
 are process-local and expire within five minutes. A tap rejects a reference after
 device restart or reassignment, runner restart, or a change to the display panel,
-role, posture, rotation, screen size, native scale, or app id. Android also
+role, posture, rotation, screen size, native scale, or app id. A change to the
+tap-targeting layout (structure, bounds, class/role, clickable/enabled, visibility,
+actions, scrollability, resource id) also rejects a reference, while
+text/value/selection changes do not invalidate a reference. Android also
 compares a known activity name, window type, and focused window identity and
 bounds when both observations provide them. iOS does not provide Android
 activity names; its available app-window metadata (when present) describes the
@@ -568,8 +571,10 @@ runner frame-event counter advancing by itself does not invalidate the reference
 A rejected tap does not silently recapture or retarget.
 When a session `observe` cannot produce a reference, it returns
 `snapshotReferenceUnavailable`, a `string[]` naming the missing capture
-preconditions: `display`, `screenSize`, `rotation`, `nativeScale`, `frameContext`
-(in that order). This field is absent when a reference is returned and on
+preconditions: `display`, `screenSize`, `rotation`, `nativeScale`, `frameContext`,
+`completeHierarchy` (in that order). `completeHierarchy` means the hierarchy capture
+was truncated (or a host-capped tree arrived without its uncapped capture).
+This field is absent when a reference is returned and on
 `deviceId` reads, which never return a reference. On iOS, `observe.rotation` uses
 runner-reported interface orientation when known; otherwise the settled screen
 shape supplies 0 for portrait (`width < height`) or 1 for landscape (including

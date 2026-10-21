@@ -6,6 +6,7 @@ import {
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
 import { errorMessage } from "./describeUnknownError";
+import { defaultDeviceTraits, type DeviceTraits } from "./android-cmdline-tools/deviceTraits";
 
 export interface KeepScreenAwakeSettingsClient {
   requestSettingsGet(
@@ -78,6 +79,7 @@ export class KeepScreenAwakeManager {
     private readonly settingsClientProvider: (
       device: BootedDevice,
     ) => KeepScreenAwakeSettingsClient,
+    private readonly deviceTraits: DeviceTraits = defaultDeviceTraits,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -280,23 +282,21 @@ export class KeepScreenAwakeManager {
     }
 
     try {
-      const result = await this.adb.executeCommand("shell getprop ro.kernel.qemu", {
-        noRetry: true,
-      });
-      const trimmed = result.stdout.trim();
-      if (trimmed === "1") {
+      const { isEmulator } = await this.deviceTraits.read(this.adb, this.device.deviceId);
+      if (isEmulator === true) {
         return "emulator";
       }
-      if (trimmed === "0" || trimmed === "") {
+      if (isEmulator === false) {
         return "physical";
       }
       logger.warn(
-        `[KeepScreenAwake] Unexpected ro.kernel.qemu value "${trimmed}" on ${this.device.deviceId}`,
+        `[KeepScreenAwake] Unexpected emulator flag on ${this.device.deviceId}; device type unknown`,
       );
       return "unknown";
     } catch (error) {
       logger.warn(
-        `[KeepScreenAwake] Failed to read ro.kernel.qemu on ${this.device.deviceId}: ${error}`,
+        `[KeepScreenAwake] Failed to read device traits on ${this.device.deviceId}: ${errorMessage(error)}`,
+        error,
       );
       return "unknown";
     }

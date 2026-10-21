@@ -2,7 +2,7 @@ import { ActionableError } from "../../models";
 import type { RTCIceServer } from "werift";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { SIMULATOR_FPS_MAX, SIMULATOR_FPS_MIN } from "../screen-stream/IosScreenCaptureHelper";
-import { ENV, readEnvRaw } from "../../config/env";
+import { ENV, readEnvBool, readEnvRaw } from "../../config/env";
 
 /**
  * Safe range for the iOS Simulator WebRTC capture rate. These mirror the
@@ -190,14 +190,6 @@ export function parseSize(raw: string | undefined): { width: number; height: num
   return validateSize({ width: Number(match[1]), height: Number(match[2]) });
 }
 
-/** Parse a boolean env flag (`1/true/yes/on`, case-insensitive). */
-export function parseBooleanFlag(raw: string | undefined): boolean {
-  if (!raw) {
-    return false;
-  }
-  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
-}
-
 function parseBitrate(raw: string | undefined): number | undefined {
   if (!raw || !raw.trim()) {
     return undefined;
@@ -233,10 +225,8 @@ export function resolveWebRtcStreamingConfig(
     overrides,
     env,
   );
-  const trickleIce =
-    overrides.trickleIce ?? parseBooleanFlag(readEnvRaw(ENV.WEBRTC_TRICKLE_ICE, env));
-  const audioEnabled =
-    overrides.audioEnabled ?? parseBooleanFlag(readEnvRaw(ENV.WEBRTC_AUDIO, env));
+  const trickleIce = overrides.trickleIce ?? readEnvBool(ENV.WEBRTC_TRICKLE_ICE, env);
+  const audioEnabled = overrides.audioEnabled ?? readEnvBool(ENV.WEBRTC_AUDIO, env);
 
   return {
     whipEndpoint: validateWhipEndpoint(whipEndpoint, env),
@@ -357,7 +347,7 @@ export function isLoopbackWhipHost(hostname: string): boolean {
 
 /** Whether the plaintext/arbitrary-WHIP escape hatch (issue #4751) is enabled. */
 export function isInsecureWhipAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
-  return parseBooleanFlag(readEnvRaw(ENV.WEBRTC_ALLOW_INSECURE_WHIP, env));
+  return readEnvBool(ENV.WEBRTC_ALLOW_INSECURE_WHIP, env);
 }
 
 function whipUrlOrThrow(endpoint: string): URL {

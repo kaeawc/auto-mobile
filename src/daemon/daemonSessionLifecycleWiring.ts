@@ -25,6 +25,7 @@ import {
   registerNetworkStateSessionCleanup,
 } from "./networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
+import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
@@ -96,6 +97,7 @@ export function wireSessionLifecycle(
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
   registerNetworkStateSessionCleanup(sessionManager);
+  registerAppLinksSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
   registerEmulatorSensorSessionCleanup(sessionManager);
   registerDisplayProfileSessionCleanup(sessionManager);

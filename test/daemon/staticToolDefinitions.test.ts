@@ -148,6 +148,7 @@ describe("getStaticToolDefinitions", () => {
           absentArguments: [
             "reset",
             "fontScale",
+            "contentSize",
             "density",
             "theme",
             "increaseContrast",

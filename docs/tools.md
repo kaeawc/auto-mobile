@@ -20,11 +20,13 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
+`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `performanceTrace`,
+`phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
-`setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
+`setActiveDevice`, `setAppLinks`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`,
+`setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setSensor`, `setUIState`, `shake`, `snapshotOf`,
 `sqlQuery`,
 `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
@@ -1873,7 +1875,7 @@ subtree, or the whole active-window tree when owner-less.
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 🔏 <code>inspectPackageSigning</code>                                                            | Fresh read of an app's presence (`installed`, `absent`, `unknown`) and signing. Android: one user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and the embedded provisioning profile. Never cached.                                                                                                                                                                                                                                                                                                                               |
-| 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links. On Android 12+ it also returns `appLinks`: per-domain App Links verification state and user selection (see [App Links verification](#android-app-links-verification)).                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                           |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 📁 <code>stageSessionDownloads</code>                                                            | Deprecated session-bound alias of putAppFile target.domain user_files (Android Downloads); retains session ownership checks and remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1882,6 +1884,7 @@ subtree, or the whole active-window tree when owner-less.
 | 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ✅ <code>setAppLinks</code>                                                                      | Android 12+: approves, resets, or re-verifies an app's App Links domains, or changes a user's domain selection, so https links open the app without a chooser. Returns what changed and a restore receipt; a daemon session restores the original state on release.                                                                                                                                                                                                                                                                                                                                      |
 
 <details class="note" markdown="1">
 <summary>State-preserving app lifecycle contract</summary>
@@ -2358,6 +2361,59 @@ This rule also applies to <code>externalFiles</code>. iOS URIs have no user quer
 
 </details>
 
+### Android App Links verification
+
+On Android 12 (API 31) and newer, an https link opens an app directly only when
+the app is approved for the link's domain. Debug builds and CI emulators usually
+fail verification (no network path to `assetlinks.json`, debug signing keys), so
+`openLink` lands in the browser instead.
+
+`getDeepLinks` reports this state for Android apps as `appLinks`, read with
+`pm get-app-links --user <id> <appId>` for the current user (`appLinksUserId`).
+Each entry has `domain`, `state` (`none`, `verified`, `approved`, `denied`,
+`migrated`, `restored`, `legacy_failure`, `system_configured`, `pre_verified`, or
+a numeric verifier error code), `autoVerify`, `userSelected`, and
+`approvedForLinks`: whether the app may open the domain without a chooser (a
+verified-equivalent state or a user selection, with link handling allowed).
+`state` is absent for a domain declared without `android:autoVerify`.
+`appLinkHandlingAllowed: false` means the user turned off "Open supported links".
+On a pre-Android 12 device, or when the state cannot be read, `appLinks` is
+omitted and `appLinksUnavailable` gives the reason; the rest of the result is
+unchanged.
+
+`setAppLinks` changes that state for `appId`. `action` selects the change:
+
+| `action`        | Command                                                         | Arguments                                  |
+| --------------- | --------------------------------------------------------------- | ------------------------------------------ |
+| `approve`       | `pm set-app-links --package <appId> 2 <domains or all>`         | `domains` (optional, autoVerify domains)   |
+| `reset`         | `pm set-app-links --package <appId> 0 <domains or all>`         | `domains` (optional, autoVerify domains)   |
+| `reverify`      | `pm verify-app-links --re-verify <appId>`                       | none; the verifier answers asynchronously  |
+| `userSelection` | `pm set-app-links-user-selection --user <id> --package <appId>` | `enabled` (required), `domains` (optional) |
+| `restore`       | writes back the recorded original state                         | none                                       |
+
+`userId` selects the Android user for `userSelection` and for the read-back; it
+defaults to the current user. Verification states are per package, not per user.
+`domains` omitted means every declared domain. A domain the app does not declare
+is refused before any write; `approve` and `reset` accept only autoVerify domains
+(use `userSelection` for the others). `pm` reports no per-domain failure, so the
+result reads the state back: `changed` lists each domain whose state or selection
+changed (`before`/`after`), `unapplied` lists requested domains that did not take,
+and `appLinks` is the state after the call.
+
+The state before the first `setAppLinks` change is recorded once per device and
+package, and returned as `restore`: `verification` lists each domain's `original`
+state and the state it is restored as (`restoreAs`), and `userSelections` lists
+each changed user's originally enabled domains. Within a daemon session
+(`sessionUuid`), release or rebind writes it back before the device is handed on;
+otherwise `action: "restore"` does. The shell can set only `none`, `verified`,
+`approved` and `denied`, so a restore is not always exact (`exact: false`):
+`migrated`, `restored`, `system_configured` and `pre_verified` come back as
+`verified`, which opens links the same way but lets the verifier overwrite it, and
+`legacy_failure` or a numeric error code comes back as `none`. A `reverify` still
+in flight can overwrite a restored `none` or `verified` state. The record lives in
+daemon memory: a daemon restart loses it, and the device keeps the last state.
+iOS universal links are not covered; `setAppLinks` refuses iOS devices.
+
 ## Devices & system state
 
 Devicectl-only simulator features such as orientation, per-display screenshots, and Duo hinge/active-panel support are Planned (#8349, #8350, #8351) and will require CoreDevice >= 651. No current tool is gated on CoreDevice version. The lazy production probe checks boot state before devicectl and memoizes captured unsupported feature IDs; doctor and `automobile:host/toolchain` retain the bounded `devicectl --version` read and seed the injected probe, alongside simulator boot counts and observed capabilities. Capability state stays "not probed" until a real command runs; the downgrade guard is out of scope per the owner decision on 2026-10-02 and is not reported. The CoreDevice doctor result includes the summary in its optional `detail` string, which the console prints on an indented line below the version for every check status. JSON retains the existing fields and adds `detail`. See the [iOS simctl and devicectl boundary design](design-docs/plat/ios/simctl-devicectl-boundary.md).
@@ -2381,7 +2437,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 🔓 <code>wakeAndUnlock</code>                                                  | Wakes and unlocks the keyguard.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 🌍 <code>changeLocalization</code>                                             | Changes locale, time zone, text direction, time format, and calendar.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ⚙️ <code>getDeviceState</code> / ⚙️ <code>setDeviceState</code>                | Reads or changes Do Not Disturb, simulator biometric enrollment, network condition, and static geolocation. Set a point with `location: { mode: "static", latitude: 37.7749, longitude: -122.4194 }` on an Android emulator or iOS Simulator. Latitude must be within −90..90 and longitude within −180..180. The result echoes the applied coordinate; location read-back is unavailable, and physical devices return an unsupported error. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged. A sessionless fix written while a session marker remains on that device is cleared by that session's release; markers are per device and session, not per write. `getDeviceState` also reads back the Android connectivity toggles — `airplaneMode`, `wifiEnabled`, `bluetoothEnabled`, `locationEnabled` — in a single adb round-trip, so a toggle can be checked before it is flipped; a bare call returns `doNotDisturb` + `connectivity`, and `include` selects any subset. A connectivity field is `true`/`false`, or omitted when the device could not answer it (key absent on this API level, or an unparsable value) — omitted never means off. Connectivity is unsupported on iOS: Airplane mode, Wi-Fi, Bluetooth and Location have no simctl/devicectl read verb, and a simulator shares the host's network stack. Degraded profiles — including `offline` — are best-effort cellular shaping on an Android emulator (`adb emu network …`/`gsm data off` plus a best-effort Wi-Fi disable), reported `partial`: they may not affect Wi-Fi or app traffic. Only reset to `none` is fully verified. A session restores the network to a clean `none` state on release. Network shaping is unsupported on physical Android and all iOS. |
-| 🔠 <code>displayConfig</code>                                                  | Reads or sets font/text scale, effective display density, and light/dark theme for adaptive-layout and large-font accessibility testing. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme only: the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner (`XCUIDevice.appearance`). Also reads and sets the increaseContrast, reduceMotion and boldText accessibility preferences on Android and the iOS Simulator, with per-field `supported`. Android reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light. Omitted from discovery by default — select it with `setToolEnabled` (case-sensitive `displayConfig`) or `--enable-tool displayConfig`; direct calls by name remain available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 🔠 <code>displayConfig</code>                                                  | Reads or sets font/text scale, effective display density, and light/dark theme for adaptive-layout and large-font accessibility testing. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner (`XCUIDevice.appearance`)) and, on the Simulator only, font scale as a Dynamic Type category via `simctl ui content_size` (`fontScale` picks the nearest category, `contentSize` picks one exactly). Also reads and sets the increaseContrast, reduceMotion and boldText accessibility preferences on Android and the iOS Simulator, with per-field `supported`. Android reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light. Omitted from discovery by default — select it with `setToolEnabled` (case-sensitive `displayConfig`) or `--enable-tool displayConfig`; direct calls by name remain available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 📐 <code>displayProfile</code>                                                 | Android: applies or resets an OEM-style display persona (size, density, font scale, cutout and nav-mode overlays, force dark, posture) in one call; opt-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 🧬 <code>getIosSimulatorCapabilities</code>                                    | Discovers biometrics for a selected iOS Simulator device type and runtime.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🫆 <code>biometricAuth</code>                                                  | Simulates biometric authentication.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -2627,13 +2683,15 @@ original value. Without a recorded value, night mode is left unchanged. Android
 reset never forces light mode. The in-memory record survives feature instances,
 is cleared after a confirmed restore, and is lost when the process restarts.
 Failed restores keep the record for retry. The iOS Simulator reset continues to
-restore light appearance. Failed `displayConfig` results set MCP `isError: true`.
+restore light appearance, and restores the content size category `displayConfig`
+replaced before its first text-size write in this process, kept the same way.
+Failed `displayConfig` results set MCP `isError: true`.
 
 On physical iOS devices (#14092), `displayConfig` reads and sets the light/dark
 theme through the CtrlProxy runner's `request_appearance` command, which uses
 XCUITest's `XCUIDevice.appearance`. Apple documents it as settable from iOS 15 and
 Xcode 16.3 (XCUIAutomation); the runner targets iOS 17 and builds with Xcode 26.5.
-`fontScale` and `density` stay unsupported on every iOS target. `reset` restores
+`fontScale` and `density` stay unsupported on physical iOS devices (and `density` on the Simulator). `reset` restores
 the appearance `displayConfig` first replaced on that device in this process (light
 when none was recorded), and session release restores the recorded value through
 the same path. A runner that predates `request_appearance` returns a failure that
@@ -2677,6 +2735,29 @@ after a locale change.
 `displayConfig.fontScale` changes Android system text scale; `"default"` removes
 the explicit override and restores the inherited default. Omission leaves it
 unchanged. `shake.intensity` sets Android shake intensity (default 100).
+
+On the iOS Simulator, text size is a Dynamic Type category set with
+`simctl ui <udid> content_size` (#14087). A read reports `contentSize` and the
+`fontScale` derived from it. `fontScale` selects the category whose body text
+scale is nearest (a tie picks the larger one; `"default"` is `large`), and
+`contentSize` selects one exactly; send only one of them. `previous` carries
+`theme` and `contentSize`, never the derived scale, so it can be sent back as is.
+Android refuses `contentSize`.
+
+| `contentSize`                           | Body text | `fontScale` |
+| --------------------------------------- | --------- | ----------- |
+| `extra-small`                           | 14 pt     | 0.82        |
+| `small`                                 | 15 pt     | 0.88        |
+| `medium`                                | 16 pt     | 0.94        |
+| `large` (default)                       | 17 pt     | 1           |
+| `extra-large`                           | 19 pt     | 1.12        |
+| `extra-extra-large`                     | 21 pt     | 1.24        |
+| `extra-extra-extra-large`               | 23 pt     | 1.35        |
+| `accessibility-medium`                  | 28 pt     | 1.65        |
+| `accessibility-large`                   | 33 pt     | 1.94        |
+| `accessibility-extra-large`             | 40 pt     | 2.35        |
+| `accessibility-extra-extra-large`       | 47 pt     | 2.76        |
+| `accessibility-extra-extra-extra-large` | 53 pt     | 3.12        |
 
 #### displayConfig accessibility display preferences
 
@@ -2996,6 +3077,7 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 | ⏺️ <code>recordDeviceGestures</code>                           | Records on-device user input (not tool calls) for <code>exportPlan</code>.                |
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                                       |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                                   |
+| ⏱️ <code>performanceTrace</code>                               | Records a native trace (xctrace on iOS, Perfetto on Android) and returns a summary.       |
 
 ### Network options
 
@@ -3072,6 +3154,36 @@ or `adb shell input` are injected and are not recorded by design; use
 A stop or `exportPlan` with no captured input fails with
 `reason: "no_user_input_captured"` and the same explanation; touch-track or
 recorder-stop failures retain their own errors.
+
+### Performance traces
+
+`performanceTrace` is disabled by default; enable it with `setToolEnabled`.
+`action: "start"` takes a `template` (`appLaunch`, `hitches`, `hangs`,
+`timeProfiler`, or `allocations`), an optional `appId`, and an optional
+`timeLimitMs` (1000–300000, default 30000). The recorder stops itself at the
+time limit. `action: "stop"` takes the `traceId` that start returned and returns
+the `artifactPath` with a bounded `summary`: `durationMs`, plus `launch`,
+`hitches`, `hangs`, `topFunctions`, or `allocations` depending on the template.
+The summary never includes raw tables. Anything that limited the summary is
+reported in `warnings`.
+
+- **iOS** (Simulator and device) runs `xcrun xctrace record` with the matching
+  Instruments template (App Launch, Animation Hitches, Hangs, Time Profiler,
+  Allocations). `appLaunch` launches `appId` under the recorder. Other templates
+  attach to the running app, or record all processes when it is not running;
+  `allocations` requires it to be running. Stop sends SIGINT so xctrace
+  finalizes the `.trace`. The summary is read with `xctrace export`.
+- **Android** runs `perfetto --background` with a template-mapped config
+  (atrace categories, FrameTimeline, `linux.perf` sampling, or heapprofd), then
+  pulls the `.perfetto-trace` to the host. The summary needs Perfetto's
+  `trace_processor_shell` on the host `PATH` (or `AUTOMOBILE_TRACE_PROCESSOR`);
+  without it, only the artifact is returned, with a warning.
+
+Only one trace records per device at a time. Releasing the owning session (the
+call's `sessionUuid`), or losing the device (its `deviceId`, or the device chosen
+by `platform`), stops the recorder, so no `xctrace` or `perfetto` process
+outlives the session. Artifacts are stored under the AutoMobile data directory
+in `performance-traces/`, next to `video-archive/`.
 
 ### Video recording quality and limits
 

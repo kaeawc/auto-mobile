@@ -179,6 +179,7 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "planDeviceOwnership.ts#ownsDevice": 1,
   "planExecutionOrchestrator.ts#brokerGrantedLabelDevices": 1,
   "planExecutionOrchestrator.ts#buildDeviceMapping": 1,
+  "sessionAppLinks.ts#runSessionAppLinksMutation": 1,
   "sessionBiometricEnrollment.ts#runSessionBiometricMutation": 1,
   "sessionClock.ts#runSessionClockMutation": 1,
   "sessionLocation.ts#createSessionLocationAppliedCallback": 2,

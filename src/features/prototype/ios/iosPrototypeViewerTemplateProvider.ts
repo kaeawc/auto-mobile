@@ -14,7 +14,6 @@ import {
 import { type FileDownloader, DefaultFileDownloader } from "../../../utils/FileDownloader";
 import { type IdGenerator, defaultIdGenerator } from "../../../utils/IdGenerator";
 import { type Timer, defaultTimer } from "../../../utils/SystemTimer";
-import { isTruthyEnvValue } from "../../../utils/ctrlProxyDownloadControl";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { ensureSecureTempDirSync, getTempDir } from "../../../utils/tempDir";
@@ -29,7 +28,7 @@ import {
   PrototypeViewerOverrideError,
   PrototypeViewerUnsupportedVersionError,
 } from "./iosPrototypeInstallerErrors";
-import { ENV } from "../../../config/env";
+import { ENV, readEnvBool } from "../../../config/env";
 
 const CACHE_SUBDIR = "prototype-viewer";
 const APP_NAME = "PrototypeViewer.app";
@@ -118,7 +117,7 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
     if (await this.isCacheUsable(expected)) {
       return { path: this.cachePaths(expected).app, source: "cache" };
     }
-    if (isTruthyEnvValue(this.env[SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD_ENV])) {
+    if (readEnvBool(ENV.SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD, this.env)) {
       throw new PrototypeViewerDownloadDisabledError();
     }
     return { path: await this.download(expected), source: "download" };

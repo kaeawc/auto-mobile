@@ -5,6 +5,7 @@ import { AppLifecycle, type AppLifecycleExecutionOptions } from "../features/act
 import { AppPermissions, type SetAppPermissionsResult } from "../features/action/AppPermissions";
 import { CrashApp } from "../features/action/CrashApp";
 import {
+  type AndroidInstallRequest,
   InstallApp,
   type InstallAppCall,
   type InstallGuardOptions,
@@ -17,6 +18,7 @@ import {
   type UninstallGuardOptions,
 } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
+import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
 import {
   ActionableError,
@@ -28,7 +30,10 @@ import {
   type TerminateAppResult,
 } from "../models";
 import { toActionableError } from "../models/ActionableError";
-import type { PackageSigningInspection } from "../models/PackageSigningInspection";
+import type {
+  IosPackageSigningInspection,
+  PackageSigningInspection,
+} from "../models/PackageSigningInspection";
 import type { UninstallAppResult } from "../models/UninstallAppResult";
 import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import { logger } from "../utils/logger";
@@ -219,7 +224,7 @@ export interface InspectPackageSigningExecutor {
   execute(
     appId: string,
     options?: { userId?: number; signal?: AbortSignal },
-  ): Promise<PackageSigningInspection>;
+  ): Promise<PackageSigningInspection | IosPackageSigningInspection>;
 }
 
 export interface InspectPackageSigningToolDependencies {
@@ -227,7 +232,10 @@ export interface InspectPackageSigningToolDependencies {
 }
 
 const defaultInspectPackageSigningToolDependencies: InspectPackageSigningToolDependencies = {
-  createInspectPackageSigning: (device) => new InspectPackageSigning(device),
+  createInspectPackageSigning: (device) =>
+    device.platform === "ios"
+      ? new IosPackageSigningInspector(device)
+      : new InspectPackageSigning(device),
 };
 
 const defaultInstallAppToolDependencies: InstallAppToolDependencies = {
@@ -565,6 +573,13 @@ function installGuardFromArgs(args: InstallAppArgs): InstallGuardOptions | undef
   };
 }
 
+/** Android-only install inputs, passed only when requested so a plain call keeps its shape. */
+function androidInstallRequestFromArgs(args: InstallAppArgs): AndroidInstallRequest | undefined {
+  const { splits, bundle, grantAllPermissions, allowDowngrade } = args;
+  const request = { splits, bundle, grantAllPermissions, allowDowngrade };
+  return Object.values(request).some((value) => value !== undefined) ? request : undefined;
+}
+
 // Install app handler
 const createInstallAppHandler =
   (dependencies: InstallAppToolDependencies) =>
@@ -575,7 +590,12 @@ const createInstallAppHandler =
       const installApp = dependencies.createInstallApp(device);
       mutationMayHaveHappened = true;
       const guard = installGuardFromArgs(args);
-      const result = await installApp.execute(args.artifactPath, { signal, guard });
+      const android = androidInstallRequestFromArgs(args);
+      const result = await installApp.execute(args.artifactPath, {
+        signal,
+        guard,
+        ...(android ? { android } : {}),
+      });
       if (!result.success) {
         throw new ActionableError(
           result.error || `Failed to install app from ${args.artifactPath}`,
@@ -878,8 +898,9 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "inspectPackageSigning",
-    "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its " +
-      "SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "Fresh read of one app's presence (installed/absent/unknown) and signing. Android: a user's " +
+      "SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing " +
+      "identity, CDHash, entitlements and embedded provisioning profile (expiry, UUID). Never cached.",
     inspectPackageSigningSchema,
     inspectPackageSigningHandler,
     {

@@ -39,6 +39,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case resetPermissions(RequestResetPermissions)
     case rotate(RequestRotate)
     case setHingeAngle(RequestSetHingeAngle)
+    case appearance(RequestAppearance)
     case clipboard(RequestClipboard)
 
     case getCurrentFocus(RequestEnvelope)
@@ -99,7 +100,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .requestPressButton, .requestPressHome, .requestPressBack, .requestShake, .requestRecentApps:
             return try decodeNavigation(requestType, from: decoder)
         case .requestAction, .requestActivateAccessibilityLink, .requestLaunchApp, .requestResetPermissions,
-             .requestRotate, .setHingeAngle, .requestClipboard:
+             .requestRotate, .setHingeAngle, .requestAppearance, .requestClipboard:
             return try decodeAppAndDevice(requestType, from: decoder)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
              .setVoiceOverState, .requestAccessibilityAudit:
@@ -202,6 +203,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try .rotate(RequestRotate(from: decoder))
         case .setHingeAngle:
             return try .setHingeAngle(RequestSetHingeAngle(from: decoder))
+        case .requestAppearance:
+            return try .appearance(RequestAppearance(from: decoder))
         case .requestClipboard:
             return try .clipboard(RequestClipboard(from: decoder))
         default:
@@ -317,6 +320,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .resetPermissions: return .requestResetPermissions
         case .rotate: return .requestRotate
         case .setHingeAngle: return .setHingeAngle
+        case .appearance: return .requestAppearance
         case .clipboard: return .requestClipboard
         case .getCurrentFocus: return .getCurrentFocus
         case .getTraversalOrder: return .getTraversalOrder
@@ -373,6 +377,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case let .accessibilityAudit(payload): return payload
         case let .sdkTrigger(payload): return payload
         case let .setHingeAngle(payload): return payload
+        case let .appearance(payload): return payload
         case let .tapCoordinates(payload): return payload
         case let .swipe(payload): return payload
         case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):

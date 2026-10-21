@@ -14,6 +14,7 @@ import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { errorMessage } from "../utils/describeUnknownError";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import * as traitsProbe from "./bootedDeviceTraits";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import type {
   DeviceLockStateInfo,
@@ -199,7 +200,7 @@ export interface ServiceStatusDiagnostic {
 }
 
 // The resource keeps resource-specific metadata alongside the full canonical description.
-interface BootedDeviceInfo extends BootedDeviceDescription {
+interface BootedDeviceInfo extends BootedDeviceDescription, traitsProbe.WithTraits {
   recoveryEligibility?: DeviceRecoveryEligibility | null;
   /**
    * Set when the bounded service-status probe for this observation timed out or
@@ -345,7 +346,7 @@ export function setInFlightAndroidColdBootReader(
 let serviceStatusEnabled = true;
 
 // A fake factory opts resource tests into the same narrow probe without touching real adb.
-export interface BootedDeviceResourceDependencies {
+export interface BootedDeviceResourceDependencies extends traitsProbe.Dependencies {
   injectedBootCompletionAdbFactory?: AdbClientFactory | null;
   injectedOrientationReaderFactory?: OrientationReaderFactory | null;
 }
@@ -1628,11 +1629,13 @@ async function computeBootedDevicesForPlatforms(
       finishedPlatforms.add(platform);
     }
     pending.clear();
+    const target = (d: BootedDeviceInfo) => (isProbeableDevice(d) ? probeTarget(d) : null);
     const probes = [
       ["bootCompletion", () => enrichDeviceBootCompletion(devices, timer, deps)],
       ["serviceStatus", () => enrichDeviceServiceStatuses(devices, timer)],
       ["lock", () => enrichDeviceLockStates(devices, { timer, signal: controller.signal })],
       ["orientation", () => enrichDeviceOrientations(devices, timer, deps)],
+      ["traits", () => traitsProbe.enrich(devices, { target, timer, deps, serviceStatusEnabled })],
     ] as const;
     for (const [name] of probes) {
       pending.add(name);

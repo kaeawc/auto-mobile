@@ -1,4 +1,43 @@
 import Foundation
+#if canImport(XCTest) && os(iOS)
+    import XCTest
+#endif
+
+/// Reads and sets the system light/dark appearance (#14092). `@MainActor`: the default
+/// impl drives `XCUIDevice.shared.appearance`; the async `CommandHandler` `await`s it.
+protocol AppearanceControlling: Sendable {
+    /// "light", "dark", or "unspecified".
+    @MainActor
+    func appearance() throws -> String
+
+    @MainActor
+    func setAppearance(dark: Bool) throws
+}
+
+/// `XCUIDevice.appearance` (iOS 15+) works on simulators and physical devices. Stateless → `Sendable`.
+struct DefaultAppearanceControl: AppearanceControlling {
+    @MainActor
+    func appearance() throws -> String {
+        #if canImport(XCTest) && os(iOS)
+            switch XCUIDevice.shared.appearance {
+            case .light: return "light"
+            case .dark: return "dark"
+            default: return "unspecified"
+            }
+        #else
+            throw VerbatimLocalizedError(message: "Reading the system appearance requires an iOS runner.")
+        #endif
+    }
+
+    @MainActor
+    func setAppearance(dark: Bool) throws {
+        #if canImport(XCTest) && os(iOS)
+            XCUIDevice.shared.appearance = dark ? .dark : .light
+        #else
+            throw VerbatimLocalizedError(message: "Setting the system appearance requires an iOS runner.")
+        #endif
+    }
+}
 
 extension CommandHandler {
     // MARK: - Device Control
@@ -46,6 +85,24 @@ extension CommandHandler {
             value: result.value,
             rotationPerformed: result.rotationPerformed,
             error: result.error
+        )
+    }
+
+    // MARK: - Appearance
+
+    func handleAppearance(_ request: RequestAppearance, startTime: Date) async throws -> WebSocketResponse {
+        if let requested = request.appearance {
+            guard requested == "light" || requested == "dark" else {
+                throw CommandError.invalidParameter("appearance", requested)
+            }
+            try await appearanceControl.setAppearance(dark: requested == "dark")
+        }
+        let current = try await appearanceControl.appearance()
+        return WebSocketResponse.success(
+            type: ResponseType.appearanceResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime),
+            text: current
         )
     }
 

@@ -1,0 +1,143 @@
+export interface MutationToolTraits {
+  name: string;
+  requiresDevice?: boolean;
+  deviceReadOnly?: boolean | ((args: Record<string, unknown>) => boolean);
+}
+
+export interface PendingMutationAdapter {
+  status: "notJournaled" | "pending-adapter";
+  reason: string;
+}
+
+function pendingTools(
+  names: readonly string[],
+  reason: string,
+  status: PendingMutationAdapter["status"] = "pending-adapter",
+): Record<string, PendingMutationAdapter> {
+  return Object.fromEntries(names.map((name) => [name, { status, reason }]));
+}
+
+export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutationAdapter>> = {
+  ...pendingTools(
+    [
+      "accessibility",
+      "accessibilityAction",
+      "biometricAuth",
+      "changeLocalization",
+      "clipboard",
+      "displayConfig",
+      "displayProfile",
+      "installApp",
+      "keyboard",
+      "killProfile",
+      "network",
+      "openLink",
+      "postNotification",
+      "putAppFile",
+      "resetKeychain",
+      "rotate",
+      "setAppLinks",
+      "setSensor",
+      "windowMode",
+      "setAppPermissions",
+      "setDeviceState",
+      "setNotificationPolicy",
+      "setPosture",
+      "setUIState",
+      "uninstallApp",
+    ],
+    "Pending platform prior-value capture and broker tool-surface wiring (#14359); never evidence of a clean reset.",
+  ),
+  ...pendingTools(
+    [
+      "clearKeyValueFile",
+      "clearMockNetwork",
+      "deviceSnapshot",
+      "mockNetwork",
+      "phoneCall",
+      "removeKeyValue",
+      "resetAppLogs",
+      "sendSms",
+      "setKeyValue",
+      "setPreference",
+      "sqlQuery",
+      "stageSessionDownloads",
+    ],
+    "Pending data/provider-specific journal adapter (#14359); opaque persistent changes require fallback.",
+  ),
+  ...pendingTools(
+    [
+      "accessibilityFocus",
+      "appLifecycle",
+      "audit",
+      "crashApp",
+      "dragAndDrop",
+      "dragPath",
+      "highlight",
+      "homeScreen",
+      "launchApp",
+      "multiTouch",
+      "pinchOn",
+      "pressButton",
+      "recentApps",
+      "selectAllText",
+      "sendKeys",
+      "shake",
+      "swipeAt",
+      "swipeOn",
+      "systemTray",
+      "tapAny",
+      "tapAt",
+      "tapOn",
+      "terminateApp",
+      "wakeAndUnlock",
+    ],
+    "UI/process interaction can induce app-owned persistent changes; pending opaque-mutation tracking and qualified baseline fallback (#14359).",
+  ),
+  ...pendingTools(
+    [
+      "barrier",
+      "criticalSection",
+      "executePlan",
+      "explore",
+      "navigateTo",
+      "prototype",
+      "reconcileDeviceResources",
+      "recordDeviceGestures",
+      "setDeviceResources",
+      "videoRecording",
+    ],
+    "Composite/resource/recording operation: pending child mutation adapters and setup-side-effect coverage (#14359).",
+  ),
+  ...pendingTools(
+    ["deleteDevice", "getAndroid", "getApple", "killDevice", "provisionDevice", "startDevice"],
+    "Native lifecycle is owned by the binding journal; readiness side effects still need mutation adapters (#14359).",
+  ),
+  ...pendingTools(
+    ["audit"],
+    "Observes the screen and reads app metrics; accessibility baselines are stored on the host, so there is no persistent device setting to journal (#14359).",
+    "notJournaled",
+  ),
+  ...pendingTools(
+    ["exportPlan", "recordToolCalls", "setActiveDevice", "setToolEnabled"],
+    "Host routing/recording configuration has no direct persistent device setting; device-side child operations remain pending (#14359).",
+    "notJournaled",
+  ),
+};
+
+export function mutationToolCoverageViolations(
+  tools: readonly MutationToolTraits[],
+  coverage: Readonly<Record<string, PendingMutationAdapter>> = DEVICE_MUTATION_TOOL_COVERAGE,
+): string[] {
+  return tools
+    .filter((tool) => tool.deviceReadOnly !== true)
+    .filter((tool) => {
+      const adapter = Object.hasOwn(coverage, tool.name) ? coverage[tool.name] : undefined;
+      return (
+        !adapter ||
+        !["pending-adapter", "notJournaled"].includes(adapter.status) ||
+        !adapter.reason.trim()
+      );
+    })
+    .map((tool) => `${tool.name}: missing pending-adapter or explicit notJournaled justification`);
+}

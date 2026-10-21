@@ -52,7 +52,8 @@ SDUI spec.
 
 **Data and network (epic #12518)**: `/data` writes, storage, and `request` actions with
 `via: host|device` (Retrofit on Android, `URLSession` on iOS; the owner chose `URLSession` for
-#12518).
+#12518). That choice stands for MCP-direct flows; library prototypes need a pinned transport on
+iOS (section 6).
 
 **Missing today**: a library UI, a multi-prototype iOS viewer, import, export and share, a way to
 open a `.json` or URL, a physical iPhone path, an on-device list for Android saved prototypes.
@@ -81,9 +82,12 @@ declarative).
 
 A standalone app per platform reuses the existing renderer and saved-prototype code. Library
 prototypes never render inside CtrlProxy: it is an accessibility service, input method and overlay,
-and its renderer honours privileged window options. ProtoViewer declares only the `INTERNET`
-permission (no accessibility, input method, overlay, device-admin or camera), and the validator
-rejects `window.layer: "system"` and any other privileged window option for library prototypes.
+and its renderer honours privileged window options. ProtoViewer declares `INTERNET` and the
+runtime-granted `ACCESS_LOCAL_NETWORK` permission that Android 17 (API 37) requires for private LAN
+connections, and nothing else (no accessibility, input method, overlay, device-admin or camera).
+`ACCESS_LOCAL_NETWORK` is requested only when the user turns on "Allow network for imported
+prototypes" (section 6), never at install or first launch; if it is denied, LAN requests fail with
+the same typed error as a blocked host. The validator rejects `window.layer: "system"` and any other privileged window option for library prototypes.
 
 - **Android renderer extraction is one mechanical move.** The `ctrlproxy/prototype` package imports
   only a few symbols from the rest of CtrlProxy, so moving it to a `:prototype-render` module
@@ -133,7 +137,8 @@ Importing a prototype needs identical accept and reject behaviour on all three p
 - Import uses `fileImporter` and `onOpenURL` (document UTI `dev.jasonpearson.automobile.prototype`).
   Image decode has a pixel budget and a PNG/JPEG/WebP magic-byte allowlist before `UIImage(data:)`.
   Fonts are unregistered when switching prototypes.
-- Network: App Transport Security is relaxed only in the simulator and dev build; see section 6.
+- Network: requests go through a pin-capable transport, not `URLSession`; App Transport Security is
+  relaxed only in the simulator and dev build; see section 6.
 
 ## 4. Data model and formats
 
@@ -182,13 +187,20 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   the first release.
 - Importing a prototype whose `spec.id` already exists creates a new entry with its own library id
   and empty storage. Replace and keep-both are later work.
-- Not in the first release: URL schemes and universal links, compact `?spec=` links, QR.
+- Not in the first release: user-facing URL import, universal links, compact `?spec=` links, QR. The
+  one custom URL scheme in the first release is the internal launch scheme `automobile-proto://open`
+  (section 7): the iOS app registers it, and it only opens an entry that is already in the library.
+  It never fetches, imports or carries spec bytes.
 
 ## 5. Import validation flow
 
 1. Source-side caps before parsing: bare JSON at most 1 MiB, bundle within the compressed cap,
-   stream-limited reads. On Android only `ContentResolver` data from other authorities is accepted;
-   `file://` is rejected and the caller-supplied MIME type and filename are ignored.
+   stream-limited reads. The caller-supplied MIME type and filename are ignored. On Android the
+   exported `ImportActivity` accepts only `content://` data from other authorities and rejects
+   `file://` and ProtoViewer's own authority. The MCP route (section 7) never goes through that
+   exported entry point: it uses a separate, non-exported internal import path that reads only from
+   the app-scoped inbox directory (canonical-path check, regular files only, the inbox entry is
+   deleted after the import attempt) and runs the same steps 2 to 8.
 2. The strict zip reader (section 4) for bundles.
 3. Strict JSON parse: BOM strip, duplicate keys rejected, depth-limited.
 4. The full validator (TS and Kotlin full; Swift reject-only port): unknown keys rejected,
@@ -198,7 +210,13 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
 5. Capability check: `PROTOTYPE_SPEC_CAPABILITY_GATES` against the app's capability set, yielding
    "needs a newer ProtoViewer" rather than a partial render. `requires` in `bundle.json` is advisory
    and cross-checked.
-6. Asset checks: sha256, magic bytes, pixel budget and per-file caps.
+6. Asset checks: sha256, magic bytes, pixel budget and per-file caps. **Reference completeness is
+   checked on every platform**: every image and font ID referenced by `spec.json` must have a
+   `bundle.json` entry and a matching zip entry, and every `bundle.json` entry must have a zip entry.
+   A missing referenced asset rejects the whole import with the offending path; it is never
+   committed with a placeholder. iOS must not rely on the placeholder behaviour of
+   `PrototypeSavedLayout` for imports, and the corpus gains invalid fixtures for a missing image, a
+   missing font and a manifest entry without a zip entry (#13620).
 7. There is no static network scan, because URLs are templated. Network policy is applied at request
    time (section 6).
 8. Commit atomically; the app assigns `libraryId` and `source`.
@@ -215,8 +233,24 @@ consent is later work. MCP-direct `show` keeps today's behaviour. When on:
 
 - The egress check runs in the HTTP client on the resolved address, at every hop. It blocks
   loopback, link-local ranges, the emulator host alias `10.0.2.2`, and the AutoMobile daemon ports.
-  **Private LAN ranges (RFC1918) are allowed.** The client resolves once and connects to the checked
-  address, and normalizes alternate address spellings before checking.
+  **Private LAN ranges (RFC1918) are allowed.** The client resolves once, checks every returned
+  address, and connects to a checked address rather than resolving again, and it normalizes
+  alternate address spellings before checking. TLS still validates against the original host name.
+- **Transport requirement.** The guarantee above requires a client that can connect to a specific
+  resolved address. Android's HTTP client can (a custom DNS resolver that returns the checked
+  address). iOS `URLSession` cannot: it performs its own lookup, the answers are not pinned, and
+  its metrics only report a blocked connection after the request may have been sent, so
+  `URLSession` does not enforce this boundary for library prototypes. The iOS app therefore sends
+  library-prototype requests through a pin-capable transport built on Network.framework
+  (`NWConnection` to the checked `NWEndpoint.hostPort`, TLS with the original host name as the
+  server name for SNI and certificate validation, and a small HTTP/1.1 client with the existing
+  size, time and header limits). The checked address is the only one dialled. The path monitor and
+  connection state callbacks are used to refuse a connection whose remote endpoint differs from the
+  checked address. The transport is `PrototypePinnedHttpClient`, selected through
+  `PrototypeNetworkConfiguration.pinned`. The ProtoViewer network switch stays unavailable on iOS
+  until the app (#13619) wires it to that configuration; `URLSession` stays in use only for MCP-direct
+  `show` flows, which keep today's behaviour, and it is never described as enforcing this policy.
+  The egress check and resolver are an injected interface with a fake in tests.
 - Redirects are not followed automatically; each redirect is evaluated as a new request, and an
   https-to-http redirect is refused.
 - Forbidden request headers are enforced in both the validator and the runtime. Cleartext http is
@@ -225,8 +259,10 @@ consent is later work. MCP-direct `show` keeps today's behaviour. When on:
   sets up `adb reverse`.
 - A provenance indicator lives in an app-reserved region outside the spec's drawable bounds and
   stays visible while network is enabled.
-- Storage is keyed by library id; a new import starts empty. Android rejects a bundle whose declared
-  id differs from `spec.id`.
+- Storage is keyed by library id; a new import starts empty. The bundle carries no prototype id (its
+  identity is `specSha256` plus the `spec.id` inside `spec.json`), so there is no bundle-id
+  comparison; the only identity checks are `bundle.json.specSha256` against the inflated
+  `spec.json` and the app-assigned library id.
 - Imported-prototype content is marked as imported in `observe` and `awaitEvent`; `open` states
   when an entry is imported; host attach is off by default for imported prototypes.
 - Limits: 200 prototypes and 100 MiB per library, enforced at commit and on load, plus a render
@@ -238,10 +274,15 @@ The shared request-policy and storage work is tracked in #13622.
 ## 7. MCP integration (first release: save routing and open)
 
 - Android uses adb, the existing device channel: the host pushes the bundle into ProtoViewer's
-  app-scoped inbox and starts `ImportActivity` with a VIEW intent. The source is set by the app,
-  never by the caller or the bundle, so the entry is "imported" and the section 6 policy applies.
-  iOS (simulator and dev-signed devices) uses `simctl` or `devicectl` file copy plus
-  `automobile-proto://open`.
+  app-scoped inbox directory and starts a non-exported internal import action (a separate
+  component from the exported `ImportActivity`, see section 5 step 1) that names the inbox file. It
+  runs the full import flow and the source is set by the app, never by the caller or the bundle, so
+  the entry is "imported" and the section 6 policy applies. The exported `ImportActivity` keeps
+  rejecting `file://` and its own authority, so a third-party app cannot reach the inbox route.
+  iOS (simulator and dev-signed devices) uses `simctl` or `devicectl` file copy into the app's
+  inbox plus the internal launch scheme `automobile-proto://open`, which the iOS app registers in
+  the first release (section 4). Opening the scheme with an unknown id or an inbox name that does
+  not pass the same import checks shows an error and changes nothing.
 - `prototype save`: when ProtoViewer is installed and reachable, build a canonical bundle and route
   it as above; otherwise the CtrlProxy or template path is unchanged. The output gains `viewer`.
 - `prototype open` (new action) launches a library id.
@@ -279,9 +320,11 @@ Unit tests (fakes and FakeTimer, each under 100 ms): the strict zip reader (path
 duplicates, links, size and ratio limits, header-size mismatch, encryption, methods), `bundle.json`
 strictness, the library index (a corrupt entry is skipped), id isolation and empty storage on import,
 export rebuild (no storage, source or library fields) and the preflight scan, the egress check on
-resolved addresses with a fake resolver (loopback, `10.0.2.2`, link-local, IPv6, redirect
+resolved addresses with a fake resolver and fake pinned transport (a second DNS answer is never
+used; loopback, `10.0.2.2`, link-local, IPv6, redirect
 re-check, https to http), forbidden headers, privileged-window rejection, the network switch,
-import size gates, iOS pixel budget and magic bytes.
+import size gates, missing referenced image, font and manifest-entry bundles rejected, the MCP inbox
+route rejected from the exported entry point, iOS pixel budget and magic bytes.
 
 Corpus: the extended `test/fixtures/prototype-spec` run in TS, Kotlin and Swift, asserting accept or
 reject plus error path only.
@@ -309,7 +352,13 @@ request allowed with the switch on.
 | Network for imported specs | One global switch, default off; per-host consent in Phase 2; MCP-direct `show` keeps today's behaviour. |
 | Stores                     | GitHub releases only.                                                                                   |
 | LAN egress                 | RFC1918 LAN is allowed; loopback, link-local, `10.0.2.2` and the daemon ports stay blocked.             |
+| iOS egress transport       | Network.framework (NWConnection) pinned transport (owner, 2026-10-21, #14540).                          |
+| Missing referenced assets  | Recommended default, pending owner decision: reject the import on every platform.                       |
+| Android LAN permission     | Recommended default, pending owner decision: declare `ACCESS_LOCAL_NETWORK`, request on switch-on.      |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
+
+Rows marked "Recommended default, pending owner decision" are not yet owner-decided; they are the
+defaults this document assumes until the owner answers.
 
 ## Issues
 

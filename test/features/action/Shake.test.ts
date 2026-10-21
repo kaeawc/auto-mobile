@@ -188,6 +188,30 @@ describe("Shake", () => {
       }
     });
 
+    test.each([
+      { name: "a USB serial", deviceId: "R58M123ABC" },
+      { name: "a wireless transport address", deviceId: "192.168.1.20:5555" },
+    ])(
+      "should refuse a physical Android device ($name) without any emulator console command",
+      async ({ deviceId }) => {
+        const physicalAndroid: BootedDevice = { name: "Pixel 8", platform: "android", deviceId };
+        const physicalShake = new Shake(physicalAndroid, fakeAdb, fakeTimer, {
+          observeScreen: fakeObserveScreen,
+          awaitIdle: fakeAwaitIdle,
+          window: fakeWindow,
+        });
+
+        const result = await physicalShake.execute({ duration: 250, intensity: 77 });
+
+        expect(result.success).toBe(false);
+        expect(result.duration).toBe(250);
+        expect(result.intensity).toBe(77);
+        expect(result.error).toContain("not supported on physical Android devices");
+        expect(result.error).toContain("Android emulator");
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      },
+    );
+
     test("should map CtrlProxy shake failure to an unsuccessful result", async () => {
       const iosSimulator: BootedDevice = {
         name: "iPhone 16 Simulator",

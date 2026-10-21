@@ -29,6 +29,7 @@ public enum ResponseType: String, CaseIterable, Sendable {
     case resetPermissionsResult = "reset_permissions_result"
     case rotateResult = "rotate_result"
     case hingeAngleResult = "hinge_angle_result"
+    case appearanceResult = "appearance_result"
     case clipboardResult = "clipboard_result"
     case currentFocusResult = "current_focus_result"
     case traversalOrderResult = "traversal_order_result"

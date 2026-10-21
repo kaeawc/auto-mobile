@@ -16,7 +16,9 @@ object ValidTools {
       setOf(
         "accessibility",
         "accessibilityAudit",
+        "accessibilityAction",
         "accessibilityFocus",
+        "audit",
         "barrier",
         "biometricAuth",
         "changeLocalization",
@@ -44,6 +46,7 @@ object ValidTools {
         "installApp",
         "keyboard",
         "killDevice",
+        "killProfile",
         "launchApp",
         "listApps",
         "listDeviceImages",
@@ -66,6 +69,7 @@ object ValidTools {
         "selectAllText",
         "sendKeys",
         "setActiveDevice",
+        "setAppLinks",
         "setAppPermissions",
         "setDeviceState",
         "setKeyValue",
@@ -84,6 +88,7 @@ object ValidTools {
         "videoRecording",
         "appLifecycle",
         "displayConfig",
+        "displayProfile",
         "getAndroid",
         "getApple",
         "getDataStore",
@@ -100,12 +105,14 @@ object ValidTools {
         "setDeviceResources",
         "setPosture",
         "setPreference",
+        "setSensor",
         "setToolEnabled",
         "snapshotOf",
         "stageSessionDownloads",
         "tapAny",
         "tapAt",
         "wakeAndUnlock",
+        "windowMode",
       )
 
   val DEPRECATED_FIELDS = setOf("generated", "appId", "parameters", "description")

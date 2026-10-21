@@ -864,6 +864,7 @@ function isExplicitlyDecoded(rawValue: string): boolean {
 const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "accessibility_audit_result",
   "action_result",
+  "appearance_result",
   "append_text_result",
   "clear_preferences_result",
   "clear_text_result",
@@ -1099,6 +1100,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "keyboard_result", expected: true },
     { type: "rotate_result", expected: true },
     { type: "hinge_angle_result", expected: false },
+    { type: "appearance_result", expected: false },
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
     { type: "magic_tap_result", expected: false },

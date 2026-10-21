@@ -99,16 +99,22 @@ const EXCLUDED_TOOLS: Record<string, string> = {
 /** The hand-kept PLAN_RELEVANT_TOOLS list the `planRelevant` trait replaced (#11825). */
 const FORMER_PLAN_RELEVANT_TOOLS = [
   "accessibility",
+  // Added after the list was frozen: a semantic accessibility action replays as a plan step (#14077).
+  "accessibilityAction",
+  // Added after the list was frozen: an audit runs as a plan assertion step (#14075).
+  "audit",
   "appLifecycle",
   "biometricAuth",
   "changeLocalization",
   "clipboard",
   "crashApp",
   "displayConfig",
+  "displayProfile",
   "dragAndDrop",
   "dragPath",
   "homeScreen",
   "keyboard",
+  "killProfile",
   "launchApp",
   "multiTouch",
   "observe",
@@ -125,11 +131,13 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "selectAllText",
   "sendKeys",
   "sendSms",
+  "setAppLinks",
   "setAppPermissions",
   "setDeviceState",
   "setNotificationPolicy",
   "setPosture",
   "setPreference",
+  "setSensor",
   "setUIState",
   "shake",
   "stageSessionDownloads",
@@ -141,6 +149,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "tapOn",
   "terminateApp",
   "wakeAndUnlock",
+  "windowMode",
 ] as const;
 
 describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
@@ -231,10 +240,16 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "systemTray", { action: "tap", notification: { title: "Hi" } });
     recordPlanCall(recorder, "displayConfig", { theme: "dark" });
     recordPlanCall(recorder, "displayConfig", { reset: true });
+    recordPlanCall(recorder, "displayConfig", { increaseContrast: true });
+    recordPlanCall(recorder, "displayConfig", { reduceMotion: false });
+    recordPlanCall(recorder, "displayConfig", { boldText: true });
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "keyboard",
       "clipboard",
       "systemTray",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
       "displayConfig",
       "displayConfig",
     ]);
@@ -294,6 +309,18 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
   ["biometricAuth", { action: "error", errorCode: 7 }],
   ["phoneCall", { action: "call", phoneNumber: "5551234" }],
   ["sendSms", { phoneNumber: "5551234", message: "hello" }],
+  [
+    "windowMode",
+    {
+      appId: "com.example",
+      mode: { freeform: { bounds: { left: 0, top: 0, right: 800, bottom: 1200 } } },
+    },
+  ],
+  [
+    "windowMode",
+    { appId: "com.example", mode: { splitScreen: { with: "com.other", position: "secondary" } } },
+  ],
+  ["windowMode", { appId: "com.example", mode: "fullscreen" }],
   ["setNotificationPolicy", { appId: "com.example", policyAccess: true }],
   [
     "setPreference",
@@ -337,6 +364,7 @@ const RECORDED_TOOLS_9966 = [
   "biometricAuth",
   "phoneCall",
   "sendSms",
+  "windowMode",
   "setNotificationPolicy",
   "setPreference",
   "resetKeychain",

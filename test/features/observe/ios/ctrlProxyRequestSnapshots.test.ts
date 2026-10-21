@@ -470,6 +470,11 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     invoke: (h) => new CtrlProxyNavigation(h.context).requestSetHingeAngle(130),
   },
   {
+    name: "request_appearance",
+    builder: "CtrlProxyNavigation.requestAppearance",
+    invoke: (h) => new CtrlProxyNavigation(h.context).requestAppearance("dark"),
+  },
+  {
     name: "request_clipboard",
     builder: "CtrlProxyClipboard.requestClipboard",
     invoke: (h) => new CtrlProxyClipboard(h.context).requestClipboard("copy", "clipboard text"),

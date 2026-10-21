@@ -46,6 +46,7 @@ enum PrototypeAgentProtocol {
         refreshCapability,
         searchBarCapability,
         richTextCapability,
+        linkifyCapability,
         menusCapability,
         stackCapability,
         emitContextCapability,
@@ -134,6 +135,8 @@ enum PrototypeAgentProtocol {
     static let searchBarCapability = "prototype_search_bar_v1"
     /// Styled text runs with optional inline actions.
     static let richTextCapability = "prototype_rich_text_v1"
+    /// Text nodes turn mentions, hashtags and URLs into links that run `linkify.onTap` (#14233).
+    static let linkifyCapability = "prototype_linkify_v1"
     /// In-window menus and exposed select option lists.
     static let menusCapability = "prototype_menus_v1"
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands

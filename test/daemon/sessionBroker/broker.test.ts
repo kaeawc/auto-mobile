@@ -3,6 +3,7 @@ import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import { ResetFailureError } from "../../../src/daemon/sessionBroker/ResetFailureError";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { ClientRequestCancellation } from "../../../src/daemon/socketServerParts/ClientRequestCancellation";
 import * as brokerSupport from "../../../src/daemon/sessionBroker/brokerSupport";
@@ -309,7 +310,7 @@ describe("session-only broker lifecycle", () => {
   test("explicit owner release during restart handoff still destroys normally", async () => {
     options.sessionDisposition = () => "recoverable-handoff";
     const uuid = await ready("owner-release");
-    expect(await broker.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
+    expect(await broker.release(uuid)).toMatchObject({ sessionUuid: uuid, outcome: "released" });
     expect(devices.destroyed).toHaveLength(1);
   });
 
@@ -364,7 +365,7 @@ describe("session-only broker lifecycle", () => {
   test("zero pooling creates fresh sessions and confirms destruction on release", async () => {
     const first = await ready("first");
     expect(await broker.hasActiveSession(first)).toBe(true);
-    expect(await broker.release(first)).toEqual({ sessionUuid: first, outcome: "released" });
+    expect(await broker.release(first)).toMatchObject({ sessionUuid: first, outcome: "released" });
     expect(await broker.hasActiveSession(first)).toBe(false);
     const second = await ready("second");
     expect(second).not.toBe(first);
@@ -629,35 +630,51 @@ describe("session-only broker lifecycle", () => {
     await ready("next");
   });
 
-  test("reset capacity refusal returns cleanup_pending and preserves the device until recovery", async () => {
-    broker = new SessionBroker({ ...options, reuseCleanDevices: true });
-    const first = await ready("first");
-    const refusal = new BootCapacityExhaustedError(
-      { platform: "ios", limit: 1, booted: 1, retryAfterMs: 5_000 },
-      "iOS simulator capacity exhausted",
-    );
-    devices.resetError = refusal;
+  test.each([false, true])(
+    "reset capacity refusal (timing wrapper: %s) preserves the device until recovery",
+    async (wrapped) => {
+      broker = new SessionBroker({ ...options, reuseCleanDevices: true });
+      const first = await ready("first");
+      const refusal = new BootCapacityExhaustedError(
+        { platform: "ios", limit: 1, booted: 1, retryAfterMs: 5_000 },
+        "iOS simulator capacity exhausted",
+      );
+      devices.resetError = wrapped
+        ? new ResetFailureError(
+            "boot capacity exhausted",
+            {
+              outcome: "pending",
+              mode: "erase",
+              phases: { erase: 3, boot: 0 },
+            },
+            { cause: refusal },
+          )
+        : refusal;
 
-    expect(await broker.release(first)).toEqual({ sessionUuid: first, outcome: "cleanup_pending" });
-    expect((await options.store.getRequest("first"))?.state).toBe("releasing");
-    expect((await options.store.listResources())[0].state).toBe("resetting");
-    expect(devices.destroyed).toEqual([]);
-    expect(await broker.status("first")).toMatchObject({ cleanupPending: true });
-    await broker.recover();
-    expect(devices.resetResources).toHaveLength(2);
-    expect((await options.store.getRequest("first"))?.state).toBe("releasing");
-    expect((await options.store.listResources())[0].state).toBe("resetting");
-    expect(devices.destroyed).toEqual([]);
+      expect(await broker.release(first)).toMatchObject({
+        sessionUuid: first,
+        outcome: "cleanup_pending",
+      });
+      expect((await options.store.getRequest("first"))?.state).toBe("releasing");
+      expect((await options.store.listResources())[0].state).toBe("resetting");
+      expect(devices.destroyed).toEqual([]);
+      expect(await broker.status("first")).toMatchObject({ cleanupPending: true });
+      await broker.recover();
+      expect(devices.resetResources).toHaveLength(2);
+      expect((await options.store.getRequest("first"))?.state).toBe("releasing");
+      expect((await options.store.listResources())[0].state).toBe("resetting");
+      expect(devices.destroyed).toEqual([]);
 
-    devices.resetError = undefined;
-    await broker.recover();
-    expect(devices.resetResources).toHaveLength(3);
-    expect((await options.store.listResources())[0].state).toBe("idle");
-    expect(await broker.release(first)).toMatchObject({ outcome: "released" });
-    await ready("second");
-    expect(devices.prepared[1]).toBe(devices.prepared[0]);
-    expect(devices.destroyed).toEqual([]);
-  });
+      devices.resetError = undefined;
+      await broker.recover();
+      expect(devices.resetResources).toHaveLength(3);
+      expect((await options.store.listResources())[0].state).toBe("idle");
+      expect(await broker.release(first)).toMatchObject({ outcome: "released" });
+      await ready("second");
+      expect(devices.prepared[1]).toBe(devices.prepared[0]);
+      expect(devices.destroyed).toEqual([]);
+    },
+  );
 
   test("reset exception retires the device instead of reusing contaminated state", async () => {
     broker = new SessionBroker({ ...options, reuseCleanDevices: true });
@@ -947,7 +964,7 @@ describe("session-only broker lifecycle", () => {
           joined = true;
         });
         try {
-          expect(await replyAfterBudget(pending)).toEqual({
+          expect(await replyAfterBudget(pending)).toMatchObject({
             sessionUuid: uuid,
             outcome: "cleanup_pending",
           });
@@ -967,14 +984,17 @@ describe("session-only broker lifecycle", () => {
           outcome: "released",
           cleanupPending: false,
         });
-        expect(await broker.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
+        expect(await broker.release(uuid)).toMatchObject({
+          sessionUuid: uuid,
+          outcome: "released",
+        });
         expect(timer.getPendingTimeoutCount()).toBe(0);
       },
     );
 
     test("work completing within the reply budget returns released and clears its timer", async () => {
       const uuid = await ready("quick");
-      expect(await broker.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
+      expect(await broker.release(uuid)).toMatchObject({ sessionUuid: uuid, outcome: "released" });
       expect(timer.getPendingTimeoutCount()).toBe(0);
       expect(await broker.status("quick")).toMatchObject({ outcome: "released" });
     });
@@ -1450,7 +1470,7 @@ describe("session-only broker lifecycle", () => {
       expect(devices.released).toEqual([]);
       expect(devices.destroyed).toEqual([]);
       // The adopted session still ends through the consumer's ordinary release.
-      expect(await next.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
+      expect(await next.release(uuid)).toMatchObject({ sessionUuid: uuid, outcome: "released" });
       expect(devices.destroyed).toHaveLength(1);
       await next.close();
     });

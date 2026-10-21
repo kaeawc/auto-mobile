@@ -755,6 +755,8 @@ final class PrototypeNode: Decodable {
     let screens: [String: PrototypeNode]?
     let text: String?
     let spans: [PrototypeTextSpan]?
+    /// Mentions, hashtags and URLs in `text` as links (#14233).
+    let linkify: PrototypeLinkifyOptions?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
@@ -856,6 +858,7 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing, swipeActions
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
+             linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
              imeAction
@@ -933,6 +936,7 @@ final class PrototypeNode: Decodable {
         start = try container.decodeIfPresent(String.self, forKey: .start)
         screens = try container.decodeIfPresent([String: PrototypeNode].self, forKey: .screens)
         spans = try container.decodeIfPresent([PrototypeTextSpan].self, forKey: .spans)
+        linkify = try container.decodeIfPresent(PrototypeLinkifyOptions.self, forKey: .linkify)
         activeKey = try container.decodeIfPresent(String.self, forKey: .activeKey)
         trailingActions = try container.decodeIfPresent([PrototypeAppBarAction].self, forKey: .trailingActions)
         onSubmit = try container.decodeIfPresent([PrototypeAction].self, forKey: .onSubmit)

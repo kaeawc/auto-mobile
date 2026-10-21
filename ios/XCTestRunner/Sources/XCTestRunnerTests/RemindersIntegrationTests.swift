@@ -123,7 +123,7 @@ final class RemindersLaunchPlanTests: XCTestCase {
         XCTAssertEqual(result.platform, "ios")
         XCTAssertEqual(client.initializeTimeouts, [1])
         XCTAssertEqual(client.toolCalls.map(\.name), ["setToolEnabled", "executePlan"])
-        XCTAssertEqual(client.toolCalls.map(\.timeout), [1, 1])
+        XCTAssertEqual(client.toolCalls.map(\.timeout), [1, 600]) // executePlan uses the daemon 600 s floor
 
         let executePlanArguments = try XCTUnwrap(client.toolCalls.last?.arguments)
         XCTAssertEqual(executePlanArguments["platform"] as? String, "ios")

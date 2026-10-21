@@ -6,6 +6,7 @@ import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
+import { registerAppLinkTools } from "./appLinkTools";
 import { registerNavigationTools } from "./navigationTools";
 import { registerNotificationTools } from "./notificationTools";
 import { registerPlanTools } from "./planTools";
@@ -17,6 +18,7 @@ import { registerSnapshotTools } from "./snapshotTools";
 import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
+import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
 import {
@@ -34,6 +36,9 @@ import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
+import { registerKillProfileTools } from "./killProfileTools";
+import { registerSensorTools } from "./sensorTools";
+import { registerDisplayProfileTools } from "./displayProfileTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
 
 export interface RegisterAllToolsOptions {
@@ -63,6 +68,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerUtilityTools();
   registerDeviceTools();
   registerDeepLinkTools();
+  registerAppLinkTools();
   registerNavigationTools();
   registerNotificationTools();
   // Plan tools (executePlan, recordToolCalls, recordDeviceGestures, exportPlan)
@@ -83,6 +89,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSnapshotOfTools();
   registerBiometricTools();
   registerTelephonyTools();
+  registerWindowModeTools();
   registerHighlightTools();
   registerPrototypeTools({
     agentConnections: new CompositePrototypeAgentConnections(
@@ -100,6 +107,9 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerAccessibilityTools();
   registerAccessibilityFocusTools();
   registerNetworkTools();
+  registerKillProfileTools();
+  registerSensorTools();
+  registerDisplayProfileTools();
   if (options.includeToolSelection ?? true) {
     registerToolSelectionTools();
   }

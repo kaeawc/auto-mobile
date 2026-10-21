@@ -45,6 +45,8 @@ async function harness() {
       webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
+      // Per-client fake: never touch the module-global observation-stream notifier.
+      deviceConnectionLostNotifier: { onDeviceConnectionLost: () => {} },
     },
   );
   await Promise.resolve(); // FakeWebSocket opens on a microtask, without real timers.
@@ -56,7 +58,6 @@ async function harness() {
     streamPushes.push(data.hierarchy?.text ?? "");
   };
   client["startScreenshotBackoff"] = () => {};
-  client["deviceConnectionLostNotifier"].onDeviceConnectionLost = mock(() => {});
   const receive = (message: object) => client["handleWebSocketMessage"](JSON.stringify(message));
   const advertise = (commands: string[]) =>
     receive({ type: "connected", supportedCommands: commands });

@@ -567,6 +567,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     return this.navigation.requestSetHingeAngle(...args);
   }
 
+  async requestAppearance(
+    ...args: Parameters<CtrlProxyNavigation["requestAppearance"]>
+  ): ReturnType<CtrlProxyNavigation["requestAppearance"]> {
+    return this.navigation.requestAppearance(...args);
+  }
+
   async requestLaunchApp(
     bundleId: string,
     timeoutMs?: number,

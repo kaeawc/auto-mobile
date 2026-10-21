@@ -537,7 +537,13 @@ open class AutoMobileAgent(
       check(connected) { "MCP client not connected" }
       val response =
         try {
-          daemon.call(toolName, buildJsonParameters(parameters), TOOL_CALL_TIMEOUT_MS)
+          val timeoutMs =
+            when (toolName) {
+              "observe",
+              "launchApp" -> OBSERVE_LAUNCH_TIMEOUT_MS
+              else -> TOOL_CALL_TIMEOUT_MS
+            }
+          daemon.call(toolName, buildJsonParameters(parameters), timeoutMs)
         } catch (e: Exception) {
           throw IllegalStateException("Failed to call MCP tool $toolName: ${e.message}", e)
         }
@@ -585,6 +591,8 @@ open class AutoMobileAgent(
 
     private companion object {
       const val TOOL_CALL_TIMEOUT_MS = 30_000L
+      // keep in sync with the observe/openLink floor in src/daemon/mcpRequestTimeout.ts
+      const val OBSERVE_LAUNCH_TIMEOUT_MS = 90_000L
     }
   }
 

@@ -392,6 +392,15 @@
       }
     },
     {
+      "name": "request_appearance",
+      "builder": "CtrlProxyNavigation.requestAppearance",
+      "wire": {
+        "type": "request_appearance",
+        "requestId": "fixture-request-id",
+        "appearance": "dark"
+      }
+    },
+    {
       "name": "request_clipboard",
       "builder": "CtrlProxyClipboard.requestClipboard",
       "wire": {

@@ -216,7 +216,10 @@ class RetrofitPrototypeHttpClientDestinationPolicyTest {
           ),
         )
         val final = sent.last()
-        val changes = code in listOf(301, 302, 303) && method !in listOf("GET", "HEAD")
+        // Fetch redirect rule: POST becomes GET on 301/302; any method but HEAD becomes GET on 303.
+        val changes =
+          (code == 303 && method != "HEAD" && method != "GET") ||
+            ((code == 301 || code == 302) && method == "POST")
         assertEquals("$code $method", if (changes) "GET" else method, final.method)
         if (changes || method in listOf("GET", "HEAD")) assertNull(final.body)
         else {

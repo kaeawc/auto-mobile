@@ -6,6 +6,7 @@ import { captureAutolockPolicy } from "../../daemon/deviceAutolockPolicy";
 import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/internalToolCall";
 import { executionTracker } from "../../daemon/executionTracker";
 import { resolveTransportDeadlineMs } from "../transportDeadline";
+import { deviceConnectionIdFor } from "../deviceConnectionId";
 
 /** The mutable facts one normal target resolution accumulates as its steps run. */
 export interface TargetResolution {
@@ -16,6 +17,7 @@ export interface TargetResolution {
   readonly shouldResolveDevice: boolean;
   readonly baseSessionUuid: string | undefined;
   readonly mcpSessionId: string | undefined;
+  readonly deviceConnectionId: string | undefined;
   readonly execution: import("../../daemon/sessionManager").SessionExecutionMetadata | undefined;
   readonly keepScreenAwake: boolean | undefined;
   /**
@@ -61,6 +63,7 @@ export function createTargetResolution(
     shouldResolveDevice: options.shouldEnsureDevice ? options.shouldEnsureDevice(args) : true,
     baseSessionUuid: args.sessionUuid,
     mcpSessionId: typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined,
+    deviceConnectionId: deviceConnectionIdFor(args),
     execution: executionMetadataFromArgs(args),
     keepScreenAwake: typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined,
     internalCall: args[INTERNAL_NO_DIFF_PARAM] === true,

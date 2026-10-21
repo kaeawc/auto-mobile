@@ -427,6 +427,16 @@ describe("auxiliary stream degradation", () => {
           unlink(path);
         },
         unlinkSync: unlink,
+        renameSync: (from, to) => {
+          paths.delete(from);
+          paths.add(to);
+        },
+        linkSync: (from, to) => {
+          if (paths.has(to)) {
+            throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+          }
+          paths.add(to);
+        },
         readPid: () => ({
           pid: process.pid,
           socketPath: SOCKET_PATH,
@@ -437,7 +447,7 @@ describe("auxiliary stream degradation", () => {
         persistOwner: () => {},
       };
       await cleanupDaemonFiles({ ...options, pidFilePath: "/fake/daemon.pid" }, files);
-      expect(unlinked).toEqual([SOCKET_PATH, "/fake/daemon.pid"]);
+      expect(unlinked).toEqual([SOCKET_PATH, expect.stringContaining("/fake/daemon.pid.reap-")]);
       expect(options.socketFileIdentities.get(SOCKET_PATH)).toEqual(inode);
       expect(paths.size).toBe(0);
     } finally {

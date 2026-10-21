@@ -95,7 +95,9 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
     test(`a late ${lateReason} leaves B's route and sampling running`, async () => {
       const sessionA = await handOverToB();
 
-      await manager.releaseSessionIfOwned("A", sessionA, DEVICE, lateReason);
+      await manager.releaseSession("A", lateReason, {
+        expectedOwner: { session: sessionA, deviceId: DEVICE },
+      });
 
       expect(manager.getSessionForDevice(DEVICE)).toBe("B");
       expect(routes.isActive(DEVICE)).toBe(true);
@@ -106,7 +108,9 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
   test("the terminal reason is still persisted and announced, flagged as an upgrade", async () => {
     const sessionA = await handOverToB();
 
-    await manager.releaseSessionIfOwned("A", sessionA, DEVICE, "device-killed");
+    await manager.releaseSession("A", "device-killed", {
+      expectedOwner: { session: sessionA, deviceId: DEVICE },
+    });
 
     expect(notifications).toEqual(["A:cleanup-expired", "A:device-killed:upgrade"]);
     expect(manager.getTerminalReleaseSnapshot("A")).toMatchObject({
@@ -184,7 +188,9 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
       platform: "android",
     });
 
-    await sessions.releaseSessionIfOwned("A", sessionA, DEVICE, "device-killed");
+    await sessions.releaseSession("A", "device-killed", {
+      expectedOwner: { session: sessionA, deviceId: DEVICE },
+    });
 
     expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
     expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);

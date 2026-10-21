@@ -13,7 +13,7 @@ afterAll(cleanupTestDirectories);
 // Install before portAvailabilityPreload imports AndroidCtrlProxyClient ->
 // deviceDataStreamSocketServer -> daemonFiles -> constants (DAEMON_VERSION).
 // An env override would leak to child server/daemon processes in integration tests.
-testOverrides.gitMetadataClient = { readVersion: () => null };
+testOverrides.gitMetadataClient = { readVersion: () => null, readDirtyState: async () => null };
 
 /**
  * Match GitMetadataClient's version probes (including legacy argv), ignoring other test

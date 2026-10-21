@@ -127,6 +127,17 @@ export interface SessionReleaseRequestsHost {
   readonly timer: Timer;
 }
 
+/** Drop the request-only `expectedOwner` control so release listeners never see it. */
+function omitExpectedOwner(
+  request: Omit<ReleaseSessionRequest, "allowExpired" | "commitFence">,
+): SessionReleaseOptions {
+  const options: Omit<typeof request, "expectedOwner"> & { expectedOwner?: unknown } = {
+    ...request,
+  };
+  delete options.expectedOwner;
+  return options;
+}
+
 export class SessionReleaseRequests {
   constructor(private readonly host: SessionReleaseRequestsHost) {}
 
@@ -142,6 +153,16 @@ export class SessionReleaseRequests {
     request: ReleaseSessionRequest = {},
   ): Promise<string | null> {
     // Not async: a pass-through, so it adds no microtask to the release's settled budget.
+    if (request.expectedOwner) {
+      const { expectedOwner, ...rest } = request;
+      return this.releaseIfOwned(
+        sessionId,
+        expectedOwner.session,
+        expectedOwner.deviceId,
+        releaseReason,
+        rest,
+      );
+    }
     return this.releaseSessionForReason(sessionId, releaseReason, request);
   }
 
@@ -154,8 +175,8 @@ export class SessionReleaseRequests {
     releaseReason: string,
     request: ReleaseSessionRequest = {},
   ): Promise<string | null> {
-    const { allowExpired = false, commitFence, ...options } = request;
-    const releaseOptions: SessionReleaseOptions = options;
+    const { allowExpired = false, commitFence, ...withOwner } = request;
+    const releaseOptions = omitExpectedOwner(withOwner);
     const attempt = () =>
       this.releaseSessionAttempt(
         sessionId,
@@ -335,15 +356,16 @@ export class SessionReleaseRequests {
   }
 
   /** Release only the recorded session incarnation while it still owns the device. */
-  async releaseSessionIfOwned(
+  private async releaseIfOwned(
     sessionId: string,
     expectedSession: Session,
     expectedDeviceId: string,
     releaseReason: SessionReleaseReason = "explicit-release",
+    request: ReleaseSessionRequest = {},
   ): Promise<string | null> {
     const session = this.host.sessions.get(sessionId);
     if (session === expectedSession && session.assignedDevice === expectedDeviceId) {
-      return await this.host.releaseSession(sessionId, releaseReason);
+      return await this.host.releaseSession(sessionId, releaseReason, request);
     }
     if (session) {
       return null;
@@ -360,7 +382,7 @@ export class SessionReleaseRequests {
         inFlightRelease.session === expectedSession &&
         expectedSession.assignedDevice === expectedDeviceId
       ) {
-        return await this.host.releaseSession(sessionId, releaseReason);
+        return await this.host.releaseSession(sessionId, releaseReason, request);
       }
       return null;
     }

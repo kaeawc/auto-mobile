@@ -9,7 +9,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { writeSync } from "node:fs";
 import { republishOwnedIdentity } from "../identityRecovery";
 import { logger } from "../../utils/logger";
-import { SOCKET_PATH, DAEMON_LAUNCH_LOG_PATH_ENV, DAEMON_LAUNCH_NONCE_ENV } from "../constants";
+import { SOCKET_PATH } from "../constants";
+import { ENV, readEnvRaw } from "../../config/env";
 import { PidFileData, type AuxiliaryDaemonSocketName } from "../types";
 import { statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -110,7 +111,7 @@ export class DaemonIdentity {
       .supersededOwnerForEarlyRecord();
     const pidData: PidFileData = {
       pid: process.pid,
-      launchNonce: process.env[DAEMON_LAUNCH_NONCE_ENV],
+      launchNonce: readEnvRaw(ENV.DAEMON_LAUNCH_NONCE),
       daemonSessionId: this.host.identity.daemonSessionId(),
       socketPath: SOCKET_PATH,
       port: this.host.identity.port(),
@@ -137,7 +138,7 @@ export class DaemonIdentity {
     const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {
       pid: process.pid,
-      launchNonce: process.env[DAEMON_LAUNCH_NONCE_ENV],
+      launchNonce: readEnvRaw(ENV.DAEMON_LAUNCH_NONCE),
       daemonSessionId: this.host.identity.daemonSessionId(),
       socketPath: SOCKET_PATH,
       sockets: availableDaemonSockets(getDaemonSocketPathsByName()),
@@ -177,7 +178,7 @@ export class DaemonIdentity {
   }
 
   private launchLogPath(): string | null {
-    const logPath = process.env[DAEMON_LAUNCH_LOG_PATH_ENV];
+    const logPath = readEnvRaw(ENV.DAEMON_LAUNCH_LOG_PATH);
     return logPath && isAbsolute(logPath) ? logPath : null;
   }
 

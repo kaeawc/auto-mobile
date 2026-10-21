@@ -24,8 +24,8 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "../../../devices/virtualDeviceLifecycleCoordinator";
 import { SomePlatform } from "../../../models";
-import { getDeviceToolsDependencies, initializedDevicePool } from "./dependencies";
-import { type DeadlineBoundOperation, DEVICE_SHUTDOWN_TIMEOUT_MS } from "./deadlines";
+import { getDeviceToolsDependencies, initializedDevicePool } from "../core/dependencies";
+import { type DeadlineBoundOperation, DEVICE_SHUTDOWN_TIMEOUT_MS } from "../core/deadlines";
 
 /**
  * The live session holding `deviceId`, unless this request's own acquisition put it there: the

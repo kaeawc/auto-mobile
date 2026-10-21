@@ -21,6 +21,10 @@ import {
   resolveMcpRequestTimeoutMs,
   clampCallerMcpRequestTimeoutMs,
   MAX_SETTIMEOUT_DELAY_MS,
+  OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+  LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+  OBSERVE_MCP_TIMEOUT_ENV_VAR,
+  LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
 } from "../../src/daemon/mcpRequestTimeout";
 import {
   DEFAULT_START_DEVICE_TIMEOUT_MS,
@@ -47,14 +51,21 @@ function createBlackHoleSocket(): Duplex {
   });
 }
 
-function createConnectedClient(fakeTimer: FakeTimer, connectionTimeout = 1000): DaemonClient {
+function createConnectedClient(
+  fakeTimer: FakeTimer,
+  connectionTimeout = 1000,
+  env: NodeJS.ProcessEnv = {},
+  socket: Duplex = createBlackHoleSocket(),
+): DaemonClient {
   const client = new DaemonClient(
     "/fake/socket",
     connectionTimeout,
     fakeTimer,
     ISOLATED_DAEMON_RECOVERY,
+    null,
+    { env },
   );
-  client.testHooks.attachSocket(createBlackHoleSocket());
+  client.testHooks.attachSocket(socket);
   return client;
 }
 
@@ -262,6 +273,54 @@ describe("DaemonClient per-request timeout", () => {
     const { wireTimeoutMs, pendingTimeouts } = await sendToolAndCaptureTimeout(120_000, "tapOn");
     expect(wireTimeoutMs).toBe(120_000);
     expect(pendingTimeouts).toEqual([120_000 + DAEMON_RESPONSE_GRACE_MS]);
+  });
+
+  test.each([
+    ["openLink", OPEN_LINK_MCP_TIMEOUT_ENV_VAR],
+    ["openLink", LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR],
+    ["observe", OBSERVE_MCP_TIMEOUT_ENV_VAR],
+    ["observe", LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR],
+  ])("%s explicit 45000 override via %s bypasses connectionTimeout", async (tool, envVar) => {
+    const socket = new FakeSocket();
+    const client = createConnectedClient(fakeTimer, 120_000, { [envVar]: "45000" }, socket);
+    const result = client.callTool(tool, {}).catch((error: unknown) => error);
+    let settled = false;
+    void result.then(() => {
+      settled = true;
+    });
+    try {
+      expect(socket.getWrittenMessages(daemonRequestFrameSchema)[0]?.timeoutMs).toBe(45_000);
+      fakeTimer.advanceTime(45_000 + DAEMON_RESPONSE_GRACE_MS - 1);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      fakeTimer.advanceTime(1);
+      const error = await result;
+      expect(error).toBeInstanceOf(McpTimeoutError);
+      expect(error).toMatchObject({ toolName: tool, timeoutMs: 45_000 });
+      expect(fakeTimer.now()).toBe(45_000 + DAEMON_RESPONSE_GRACE_MS);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test.each([
+    ["openLink", OPEN_LINK_MCP_TIMEOUT_ENV_VAR],
+    ["observe", OBSERVE_MCP_TIMEOUT_ENV_VAR],
+  ])("%s retains connectionTimeout for unset or unusable %s", async (tool, envVar) => {
+    for (const value of [undefined, "", "abc", "0"]) {
+      const socket = new FakeSocket();
+      const env = value === undefined ? {} : { [envVar]: value };
+      const client = createConnectedClient(fakeTimer, 120_000, env, socket);
+      const result = client.callTool(tool, {}).catch((error: unknown) => error);
+      try {
+        expect(socket.getWrittenMessages(daemonRequestFrameSchema)[0]?.timeoutMs).toBe(120_000);
+        expect(fakeTimer.getPendingTimeouts()).toEqual([120_000 + DAEMON_RESPONSE_GRACE_MS]);
+      } finally {
+        await client.close();
+        await result;
+      }
+    }
   });
 
   test("sendRequest sends a per-tool floor that exceeds the client timeout", async () => {

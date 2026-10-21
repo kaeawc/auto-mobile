@@ -5,7 +5,7 @@ import type { CtrlProxyIosBuildResult, IosCtrlProxyBuilderSettings } from "./Ios
 import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { ENV, readEnvRaw } from "../config/env";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 import {
   IOS_CTRL_PROXY_APP_HASH,
   findReleaseByRunnerSha256,
@@ -214,7 +214,7 @@ export class IosRunnerArtifactVerifier {
     if (override !== null) {
       return override;
     }
-    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV]?.trim();
+    const environmentOverride = readEnvTrimmed(ENV.CTRL_PROXY_IOS_RUNNER_SHA256);
     if (environmentOverride) {
       if (!/^[a-f0-9]{64}$/i.test(environmentOverride)) {
         throw new ActionableError(
@@ -231,7 +231,7 @@ export class IosRunnerArtifactVerifier {
     if (override !== null) {
       return override;
     }
-    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV]?.trim();
+    const environmentOverride = readEnvTrimmed(ENV.CTRL_PROXY_IOS_RUNNER_SHA256_TARGET);
     if (environmentOverride === "runner" || environmentOverride === "xctest") {
       return environmentOverride;
     }
@@ -508,7 +508,7 @@ export class IosRunnerArtifactVerifier {
    * the release-pinned baseline, which local-build mode is designed to relax.
    */
   private hasExplicitRunnerShaOverride(): boolean {
-    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV]?.trim();
+    const environmentOverride = readEnvTrimmed(ENV.CTRL_PROXY_IOS_RUNNER_SHA256);
     return environmentOverride !== undefined && environmentOverride.length > 0;
   }
 
@@ -642,7 +642,7 @@ export class IosRunnerArtifactVerifier {
     if (this.hasExplicitRunnerShaOverride()) {
       return `${IOS_CTRL_PROXY_RUNNER_SHA256_ENV} pins a source-built runner`;
     }
-    if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
+    if (isTruthyEnvValue(readEnvRaw(ENV.SKIP_CTRL_PROXY_DOWNLOAD))) {
       return `${SKIP_CTRL_PROXY_DOWNLOAD_ENV} disables downloads`;
     }
     return null;
@@ -689,8 +689,8 @@ export class IosRunnerArtifactVerifier {
       return;
     }
 
-    const requireCodesign = isTruthyEnvValue(process.env[IOS_HELPER_REQUIRE_CODESIGN_ENV]);
-    const pinnedTeamId = process.env[IOS_HELPER_TEAM_ID_ENV]?.trim() || null;
+    const requireCodesign = isTruthyEnvValue(readEnvRaw(ENV.IOS_HELPER_REQUIRE_CODESIGN));
+    const pinnedTeamId = readEnvTrimmed(ENV.IOS_HELPER_TEAM_ID) ?? null;
 
     let outcome: CodesignVerificationOutcome;
     try {

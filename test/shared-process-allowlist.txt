@@ -22,6 +22,7 @@ test/cli/usageError.test.ts
 test/cli/versionFlag.test.ts
 test/config/alwaysLoadTools.test.ts
 test/config/env.test.ts
+test/config/processEnvironment.test.ts
 test/contracts/adbExecutor.test.ts
 test/contracts/androidCtrlProxy.test.ts
 test/contracts/daemonHttpTokenStore.test.ts
@@ -55,6 +56,7 @@ test/ctrlProxy/deviceInstanceRegistry.test.ts
 test/ctrlProxy/ios/IosAppBundleGuard.test.ts
 test/ctrlProxy/ios/IosCtrlProxyHealthClient.test.ts
 test/ctrlProxy/ios/IosCtrlProxyProcessClient.test.ts
+test/ctrlProxy/ios/IosCtrlProxyReadiness.test.ts
 test/ctrlProxy/runnerQueryTimeoutEnv.test.ts
 test/daemon/DeviceCriteriaMatcher.property.test.ts
 test/daemon/DeviceCriteriaMatcher.test.ts
@@ -242,6 +244,7 @@ test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/holderReleaseRemaining.test.ts
 test/daemon/hostInventoryForwardRoute.test.ts
+test/daemon/hostInventorySingleFlight.test.ts
 test/daemon/hostStarvationConnectedOwnerScenario.test.ts
 test/daemon/ideMutationAfterOwnerLeft.test.ts
 test/daemon/ideRouteModule.test.ts
@@ -292,6 +295,7 @@ test/daemon/passiveWorkPolicy.test.ts
 test/daemon/perSourceIosLiveness.test.ts
 test/daemon/performancePushSocketServerCharacterization.test.ts
 test/daemon/performanceStreamSocketServerCharacterization.test.ts
+test/daemon/planDeviceActivity.test.ts
 test/daemon/planDeviceLossMonitor.ios.test.ts
 test/daemon/planLabelRegistry.test.ts
 test/daemon/poolCapacityError.test.ts
@@ -871,6 +875,7 @@ test/features/debug/VisualHighlight.test.ts
 test/features/device/AndroidHingeAngleConsole.test.ts
 test/features/device/SetPostureKeyguardRestore.test.ts
 test/features/device/virtualDeviceCapabilities.test.ts
+test/features/deviceLifecycle/deviceLifecycleCoreExports.test.ts
 test/features/deviceLifecycle/deviceLifecycleServerHost.test.ts
 test/features/element-resolution/ConsumerAgreement.test.ts
 test/features/element-resolution/DeviceHierarchyCapture.test.ts
@@ -1389,7 +1394,6 @@ test/lint/deviceBindingSingleWriter.test.ts
 test/lint/deviceDiscoveryReconcileFunnel.test.ts
 test/lint/deviceToolsImportCycle.test.ts
 test/lint/deviceToolsKillDeviceImportCasing.test.ts
-test/lint/envRegistry.test.ts
 test/lint/errorHandlingConvention.test.ts
 test/lint/exclusiveLockGenerationProbe.test.ts
 test/lint/expensiveHookWork.test.ts
@@ -1568,6 +1572,7 @@ test/scripts/manualTestFrameWire.test.ts
 test/scripts/manualTestHostPreflight.test.ts
 test/scripts/manualTestHostSleep.test.ts
 test/scripts/manualTestNoLoggerImport.test.ts
+test/scripts/manualTestPreparationTimeoutSettled.test.ts
 test/scripts/manualTestPrivateDaemon.test.ts
 test/scripts/manualTestPrivateDaemonDevices.test.ts
 test/scripts/manualTestPrivateDaemonEnv.test.ts

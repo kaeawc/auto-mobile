@@ -39,7 +39,6 @@ import {
   readTerminalSessionRefusal,
   sessionOwnershipLostPayload,
 } from "../daemon/deviceSessionResult";
-import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
 import { ToolRegistry } from "./toolRegistry";
 import {
@@ -66,19 +65,16 @@ import {
   requestDeclaresTasks,
 } from "../daemon/tasks/mcpTasksExtension";
 import { toRelayedProtocolError, isRelayedJsonRpcError } from "../daemon/tasks/taskRelay";
-import { ENV } from "../config/env";
-
-const LIVE_ACCEPTANCE_ENV = ENV.ACCEPTANCE_LIVE.name;
-const ACCEPTANCE_DISCOVERY_ORDER_ENV = ENV.ACCEPTANCE_DISCOVERY_ORDER.name;
+import { ENV, readEnvRaw } from "../config/env";
 
 function acceptanceDiscoveryConfiguration():
   | { order: "forward" | "reverse"; capability: string }
   | undefined {
-  if (process.env[LIVE_ACCEPTANCE_ENV] !== "1") {
+  if (readEnvRaw(ENV.ACCEPTANCE_LIVE) !== "1") {
     return undefined;
   }
-  const order = process.env[ACCEPTANCE_DISCOVERY_ORDER_ENV];
-  const capability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+  const order = readEnvRaw(ENV.ACCEPTANCE_DISCOVERY_ORDER);
+  const capability = readEnvRaw(ENV.ACCEPTANCE_DISCOVERY_CAPABILITY);
   return (order === "forward" || order === "reverse") && capability
     ? { order, capability }
     : undefined;

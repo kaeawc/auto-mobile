@@ -312,12 +312,9 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
 
       const nonTerminal = manager.releaseSession("s1", first);
       await drainUntil(() => full.length > 0, { description: "the first release notification" });
-      const terminal = manager.releaseSessionIfOwned(
-        "s1",
-        session,
-        DEVICE.deviceId,
-        "device-killed",
-      );
+      const terminal = manager.releaseSession("s1", "device-killed", {
+        expectedOwner: { session: session, deviceId: DEVICE.deviceId },
+      });
       await Promise.all([nonTerminal, terminal]);
       manager.stopCleanupTimer();
 

@@ -27,7 +27,7 @@ import {
   MAX_PROTOTYPE_ASSET_COUNT,
 } from "../../src/features/prototype/prototypeAssets";
 import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../../src/daemon/observationResourceUris";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
   DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
@@ -60,6 +60,7 @@ import {
   MAX_EXECUTE_PLAN_BUDGET_STEPS,
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
 } from "../../src/daemon/mcpRequestTimeout";
+import { resolveExplicitToolTimeoutOverrideMs } from "../../src/daemon/clientMcpRequestTimeout";
 import {
   TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
   TAP_ANY_SEARCH_UNTIL_MAX_MS,
@@ -88,6 +89,63 @@ import {
 
 import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "../../src/features/action/InstallApp";
 
+describe("resolveExplicitToolTimeoutOverrideMs", () => {
+  test.each([
+    ["openLink", OPEN_LINK_MCP_TIMEOUT_ENV_VAR, LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR],
+    ["observe", OBSERVE_MCP_TIMEOUT_ENV_VAR, LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR],
+  ])("%s accepts valid primary and legacy overrides only", (tool, primary, legacy) => {
+    const request: DaemonRequest = {
+      id: "explicit-override",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: tool, arguments: {} },
+    };
+    for (const name of [primary, legacy]) {
+      const env = { [name]: "45000" };
+      expect(resolveExplicitToolTimeoutOverrideMs(request, env)).toBe(45_000);
+      expect(resolveMcpRequestTimeoutMs(request, env)).toBe(45_000);
+      for (const value of [undefined, "", "abc", "0"]) {
+        const invalidEnv = value === undefined ? {} : { [name]: value };
+        expect(resolveExplicitToolTimeoutOverrideMs(request, invalidEnv)).toBeUndefined();
+        expect(resolveMcpRequestTimeoutMs(request, invalidEnv)).toBe(90_000);
+      }
+    }
+    expect(
+      resolveExplicitToolTimeoutOverrideMs(request, {
+        [primary]: "45000",
+        [legacy]: "60000",
+      }),
+    ).toBe(45_000);
+    for (const value of ["", "abc", "0"]) {
+      const env = { [primary]: value, [legacy]: "45000" };
+      expect(resolveExplicitToolTimeoutOverrideMs(request, env)).toBeUndefined();
+      expect(resolveMcpRequestTimeoutMs(request, env)).toBe(90_000);
+    }
+  });
+
+  test.each([
+    ["tools/call", "tapOn"],
+    ["tools/call", undefined],
+    ["resources/read", "openLink"],
+    ["daemon/status", "observe"],
+  ])("ignores override for %s with tool %s", (method, name) => {
+    expect(
+      resolveExplicitToolTimeoutOverrideMs(
+        {
+          id: "unrelated-request",
+          type: "mcp_request",
+          method,
+          params: { name },
+        },
+        {
+          [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "45000",
+          [OBSERVE_MCP_TIMEOUT_ENV_VAR]: "45000",
+        },
+      ),
+    ).toBeUndefined();
+  });
+});
+
 describe("resolveMcpRequestTimeoutMs", () => {
   test("installApp floor covers the downgrade transfer chain plus headroom", () => {
     expect(MIN_INSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThanOrEqual(
@@ -97,31 +155,6 @@ describe("resolveMcpRequestTimeoutMs", () => {
       3 * ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
     );
   });
-  const timeoutEnvVars = [
-    OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-    LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-    OBSERVE_MCP_TIMEOUT_ENV_VAR,
-    LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
-  ];
-  const originalEnv = new Map(timeoutEnvVars.map((name) => [name, process.env[name]]));
-
-  beforeEach(() => {
-    for (const name of timeoutEnvVars) {
-      delete process.env[name];
-    }
-  });
-
-  afterEach(() => {
-    for (const name of timeoutEnvVars) {
-      const original = originalEnv.get(name);
-      if (original === undefined) {
-        delete process.env[name];
-      } else {
-        process.env[name] = original;
-      }
-    }
-  });
-
   // The floor resolution (src/daemon/mcpRequestTimeout.ts:96-107) is:
   //   base  = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT
   //   floor = method === "tools/call" ? toolFloor(params.name) : undefined
@@ -477,12 +510,6 @@ describe("resolveMcpRequestTimeoutMs", () => {
 
   for (const testCase of cases) {
     test(testCase.name, () => {
-      if (testCase.env) {
-        for (const [key, value] of Object.entries(testCase.env)) {
-          process.env[key] = value;
-        }
-      }
-
       const request: DaemonRequest = {
         id: "1",
         type: "mcp_request",
@@ -491,7 +518,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
         ...(testCase.timeoutMs === undefined ? {} : { timeoutMs: testCase.timeoutMs }),
       };
 
-      expect(resolveMcpRequestTimeoutMs(request)).toBe(testCase.expected);
+      expect(resolveMcpRequestTimeoutMs(request, testCase.env ?? {})).toBe(testCase.expected);
     });
   }
 
@@ -1479,13 +1506,16 @@ describe("argument budget deadline gaps", () => {
     });
   }
   test("observe uses nested timeout aliases for legacy and DSL waits", () => {
-    const resolve = (args: Record<string, unknown>) =>
-      resolveMcpRequestTimeoutMs({
-        id: "observe-alias",
-        type: "mcp_request",
-        method: "tools/call",
-        params: { name: "observe", arguments: args },
-      });
+    const resolve = (args: Record<string, unknown>, env: NodeJS.ProcessEnv = {}) =>
+      resolveMcpRequestTimeoutMs(
+        {
+          id: "observe-alias",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name: "observe", arguments: args },
+        },
+        env,
+      );
     for (const selector of [
       { elementId: "missing" },
       { for: "appear" },
@@ -1499,17 +1529,14 @@ describe("argument budget deadline gaps", () => {
     }
     expect(resolve({ timeoutMs: 600_000 })).toBe(DEFAULT_OBSERVE_MCP_TIMEOUT_MS);
     expect(resolve({ waitFor: { for: "stable" } })).toBe(DEFAULT_OBSERVE_MCP_TIMEOUT_MS);
-    const previousFloor = process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR];
-    process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR] = "700000";
-    try {
-      expect(resolve({ waitFor: { timeout: 600_000 } })).toBe(700_000);
-    } finally {
-      if (previousFloor === undefined) {
-        delete process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR];
-      } else {
-        process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR] = previousFloor;
-      }
-    }
+    expect(
+      resolve(
+        { waitFor: { timeout: 600_000 } },
+        {
+          [OBSERVE_MCP_TIMEOUT_ENV_VAR]: "700000",
+        },
+      ),
+    ).toBe(700_000);
   });
   describe("prototype awaitEvent", () => {
     const resolve = (args: unknown, timeoutMs?: number): number =>

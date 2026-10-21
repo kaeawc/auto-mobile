@@ -159,3 +159,20 @@ YAML
   [ "$(echo "$block" | grep -c 'continue-on-error: true')" -eq 2 ]
   [ "$(echo "$block" | grep -c 'uses: actions/upload-artifact@v[0-9]')" -eq 2 ]
 }
+
+@test "composite action uploads do not reuse a workflow upload-artifact name" {
+  # Uploads moved into .github/actions/ci-*/action.yml land in the caller's
+  # artifact namespace but are invisible to workflows() above, so a workflow job
+  # could silently reuse one of their names and fail at runtime.
+  action_names="$(grep -h -A8 'uses: actions/upload-artifact' .github/actions/*/action.yml \
+    | sed -n 's/^ *name: //p' | sort)"
+  [ -n "$action_names" ]
+  [ -z "$(echo "$action_names" | uniq -d)" ]
+  collisions=""
+  while read -r workflow; do
+    dupes="$(printf '%s\n%s\n' "$action_names" "$(upload_artifact_names "$workflow" | cut -f2)" \
+      | grep -v '^$' | sort | uniq -d)"
+    [ -z "$dupes" ] || collisions="$collisions$workflow: $dupes"$'\n'
+  done < <(workflows)
+  [ -z "$collisions" ] || { echo "Colliding artifact names: $collisions"; false; }
+}

@@ -1951,6 +1951,51 @@ describe("IosCtrlProxyBuilder", function () {
       );
     });
 
+    test.each([
+      ["1", true],
+      ["true", true],
+      ["TRUE", true],
+      ["yes", false],
+      ["0", false],
+      [undefined, false],
+    ] as const)("codesign require flag %s refuses launch=%s", async (value, required) => {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+      verifier.outcome = { verified: false, notarized: true, teamId: "REALTEAMID", detail: "" };
+      if (value !== undefined) {
+        process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = value;
+      }
+
+      if (required) {
+        await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+          "Refusing to launch",
+        );
+      } else {
+        await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      }
+      expect(verifier.verifiedPaths).toHaveLength(1);
+    });
+
+    test.each(["  REALTEAMID \t", " \t ", "", undefined])(
+      "codesign Team ID %j is trimmed and blank values leave it unpinned",
+      async (value) => {
+        if (process.platform !== "darwin") {
+          return;
+        }
+        const { builder, verifier } = await buildForCodesign();
+        verifier.outcome = { verified: true, notarized: true, teamId: "REALTEAMID", detail: "" };
+        process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+        if (value !== undefined) {
+          process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID = value;
+        }
+
+        await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+        expect(verifier.verifiedPaths).toHaveLength(1);
+      },
+    );
+
     test("Team-ID mismatch warns by default and refuses under the require flag (#4760)", async function () {
       if (process.platform !== "darwin") {
         return;

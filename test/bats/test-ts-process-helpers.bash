@@ -38,6 +38,17 @@ printf '%s %s\n' "$$" "$*" >> "$STUB_CALLS"
 printf '%s\n' "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" >> "$STUB_CALLS.test-timeout"
 if [[ "${STUB_KILL_PARENT:-}" == 1 ]]; then
   kill -TERM "$AUTOMOBILE_TEST_TS_PARENT_PID"
+  # The owner is an orphan, so init (or a subreaper) reaps it asynchronously.
+  # Until then it is a zombie and the helper's `kill -0` still succeeds, so
+  # return only once the owner is fully gone (bounded, ~10 s).
+  for ((reap_poll = 0; reap_poll < 200; reap_poll += 1)); do
+    kill -0 "$AUTOMOBILE_TEST_TS_PARENT_PID" 2>/dev/null || break
+    /bin/sleep 0.05
+  done
+  if kill -0 "$AUTOMOBILE_TEST_TS_PARENT_PID" 2>/dev/null; then
+    echo "stub bun: owner $AUTOMOBILE_TEST_TS_PARENT_PID was never reaped" >&2
+    exit 98
+  fi
 fi
 if [[ "${STUB_IGNORE_TERM:-}" == 1 ]]; then trap '' TERM; fi
 if [[ "${STUB_HOLD:-}" == 1 ]]; then sleep 60; fi

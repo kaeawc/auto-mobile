@@ -6,7 +6,15 @@ import {
 } from "./atomicJsonFile";
 export { writeJsonFileAtomicSync, type AtomicPidFileWriteSyncDependencies } from "./atomicJsonFile";
 import path from "node:path";
-import { existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  linkSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import {
@@ -28,6 +36,8 @@ import { isProcessRunning } from "../utils/processLiveness";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { sortedReaddirSync } from "../utils/io";
 import { ENV, readEnvRaw } from "../config/env";
+import type { IdGenerator } from "../utils/IdGenerator";
+import { removeOwnedFileSync } from "./ownedFileRemoval";
 
 export {
   compareProcessGenerationTokens,
@@ -150,6 +160,7 @@ export const AUXILIARY_SOCKET_CONFIGS_BY_NAME: Record<
 };
 
 export interface DaemonFileCleanupOptions {
+  idGenerator?: IdGenerator;
   pidFilePath?: string;
   socketPaths?: string[];
   /** Bound socket identities, used to avoid unlinking a successor's replacement path. */
@@ -329,6 +340,8 @@ export interface DaemonCleanupFileSystem {
   stat: (path: string) => { dev: number; ino: number };
   unlink: (path: string) => Promise<void>;
   unlinkSync: (path: string) => void;
+  renameSync: (from: string, to: string) => void;
+  linkSync: (from: string, to: string) => void;
   readPid: typeof readPidFileDataSync;
   persistOwner: typeof persistDaemonLaunchLogOwnerTombstoneSync;
 }
@@ -338,6 +351,8 @@ const cleanupFileSystem: DaemonCleanupFileSystem = {
   stat: statSync,
   unlink: (path) => unlink(path),
   unlinkSync: (path) => unlinkSync(path),
+  renameSync,
+  linkSync,
   readPid: readPidFileDataSync,
   persistOwner: persistDaemonLaunchLogOwnerTombstoneSync,
 };
@@ -435,13 +450,45 @@ function prepareOwnedPidUnlink(
   pidFilePath: string,
   expectedPid: number | undefined,
   files: DaemonCleanupFileSystem,
-): boolean {
+): PidFileData | null | false {
   const owner = files.readPid(pidFilePath);
   if (expectedPid !== undefined && owner?.pid !== expectedPid) {
     return false;
   }
   files.persistOwner(owner);
-  return shouldCleanupForExpectedPid(pidFilePath, expectedPid, files.readPid);
+  return shouldCleanupForExpectedPid(pidFilePath, expectedPid, files.readPid) ? owner : false;
+}
+
+function cleanupPidFile(
+  pidFilePath: string,
+  options: DaemonFileCleanupOptions,
+  files: DaemonCleanupFileSystem,
+): boolean {
+  if (!files.exists(pidFilePath)) {
+    return true;
+  }
+  try {
+    const owner = prepareOwnedPidUnlink(pidFilePath, options.expectedPid, files);
+    if (owner === false) {
+      return false;
+    }
+    // PID metadata is small and already read synchronously. Share the complete
+    // claim/verify/restore sequence between async shutdown and synchronous exit.
+    return removeOwnedFileSync(
+      pidFilePath,
+      (claimedPath) => JSON.stringify(files.readPid(claimedPath)) === JSON.stringify(owner),
+      {
+        rename: (from, to) => files.renameSync(from, to),
+        link: (from, to) => files.linkSync(from, to),
+        remove: (path) => files.unlinkSync(path),
+      },
+      options.idGenerator,
+    );
+  } catch (error) {
+    // Preserve the existing best-effort cleanup return contract on I/O failure.
+    logger.warn(`Could not remove daemon PID file ${pidFilePath}`, error);
+    return true;
+  }
 }
 
 export async function cleanupDaemonFiles(
@@ -464,18 +511,7 @@ export async function cleanupDaemonFiles(
   if (!controlRemoved) {
     return false;
   }
-  if (files.exists(pidFilePath)) {
-    try {
-      if (!prepareOwnedPidUnlink(pidFilePath, options.expectedPid, files)) {
-        return false;
-      }
-      await files.unlink(pidFilePath);
-    } catch (error) {
-      // Cleanup is best effort so an unreadable PID path cannot abort shutdown/startup.
-      logger.warn(`Could not remove daemon PID file ${pidFilePath}: ${error}`, error);
-    }
-  }
-  return true;
+  return cleanupPidFile(pidFilePath, options, files);
 }
 
 export function cleanupDaemonFilesSync(
@@ -498,18 +534,7 @@ export function cleanupDaemonFilesSync(
   if (!controlRemoved) {
     return false;
   }
-  if (files.exists(pidFilePath)) {
-    try {
-      if (!prepareOwnedPidUnlink(pidFilePath, options.expectedPid, files)) {
-        return false;
-      }
-      files.unlinkSync(pidFilePath);
-    } catch (error) {
-      // Cleanup is best effort so an unreadable PID path cannot abort shutdown/startup.
-      logger.warn(`Could not remove daemon PID file ${pidFilePath}: ${error}`, error);
-    }
-  }
-  return true;
+  return cleanupPidFile(pidFilePath, options, files);
 }
 
 /**

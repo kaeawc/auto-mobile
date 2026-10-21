@@ -538,9 +538,11 @@ describe("already-dead Android shutdown ownership", () => {
           foreignClaim,
         ),
     );
-    const release = sessions.releaseSessionIfOwned.bind(sessions);
-    const releaseSpy = spyOn(sessions, "releaseSessionIfOwned").mockImplementation((...args) => {
-      order.push(`release:${args[3]}`);
+    const release = sessions.releaseSession.bind(sessions);
+    const releaseSpy = spyOn(sessions, "releaseSession").mockImplementation((...args) => {
+      if (args[2]?.expectedOwner) {
+        order.push(`release:${args[1]}`);
+      }
       return release(...args);
     });
     const retirementSpy = spyOn(pool, "retireDeviceForShutdown");
@@ -561,7 +563,7 @@ describe("already-dead Android shutdown ownership", () => {
       });
       expect(h.order).toEqual(["holder-check", "kill-dead", "release:device-killed"]);
       expect(sessions?.getSession("holder")).toBeNull();
-      expect(h.releaseSpy).toHaveBeenCalledTimes(1);
+      expect(h.releaseSpy.mock.calls.filter((args) => args[2]?.expectedOwner)).toHaveLength(1);
       expect(h.pool.getDevice(device.deviceId)).toBeNull();
     } finally {
       h.reserveSpy.mockRestore();

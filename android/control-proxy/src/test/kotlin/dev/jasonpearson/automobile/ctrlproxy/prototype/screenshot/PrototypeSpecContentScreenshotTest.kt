@@ -189,7 +189,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "fullscreen_all_nodes",
       validPrototypeFixture("fullscreen-all-nodes"),
-      pending = true,
     )
 
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
@@ -197,7 +196,7 @@ class PrototypeSpecContentScreenshotTest {
   /** Tab bar, pager with a scrolled text page, text field and a closed bottom sheet. */
   @Test
   fun tabbedPagerWithTextField() =
-    prototypeScreenshotTest("doc_example_1", validPrototypeFixture("doc-example-1"), pending = true)
+    prototypeScreenshotTest("doc_example_1", validPrototypeFixture("doc-example-1"))
 
   /** Horizontal scroll row with an icon action above a bottom navigation bar. */
   @Test
@@ -240,7 +239,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "repeat_state_keys",
       validPrototypeFixture("repeat-state-keys"),
-      pending = true,
     )
 
   /** Radio group, list items, checkbox, switch and icon buttons. */
@@ -272,7 +270,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "text_style_role",
       validPrototypeFixture("text-style-role"),
-      pending = true,
     )
 
   /** Conditional styles resolved against the initial state. */
@@ -312,9 +309,7 @@ class PrototypeSpecContentScreenshotTest {
     )
 
   /** Dark mode with a seed colour scheme. */
-  @Test
-  fun themeSeed() =
-    prototypeScreenshotTest("theme_seed", validPrototypeFixture("theme-seed"), pending = true)
+  @Test fun themeSeed() = prototypeScreenshotTest("theme_seed", validPrototypeFixture("theme-seed"))
 
   /** Light mode with scaled serif typography and custom shapes. */
   @Test
@@ -322,7 +317,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_typography_shapes",
       validPrototypeFixture("theme-typography-shapes"),
-      pending = true,
     )
 
   /** A `system` theme on a light device. */
@@ -332,7 +326,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_device_light",
       validPrototypeFixture("theme-device"),
-      pending = true,
     )
 
   // Theme fixtures over component content (#11217): the shared
@@ -345,7 +338,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_seed_controls",
       validPrototypeFixture("material-controls", themeFrom = "theme-seed"),
-      pending = true,
     )
 
   /** Dark seed scheme on a slider, chips and a card. */
@@ -354,7 +346,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_seed_slider_chip_card",
       validPrototypeFixture("material-slider-chip-card", themeFrom = "theme-seed"),
-      pending = true,
     )
 
   /** Dark seed scheme on role-coloured boxes. */
@@ -363,7 +354,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_seed_color_roles",
       validPrototypeFixture("color-role-and-corner-tokens", themeFrom = "theme-seed"),
-      pending = true,
     )
 
   /** Scaled serif type and large corners on buttons, checkbox and switch. */
@@ -372,7 +362,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_typography_shapes_controls",
       validPrototypeFixture("material-controls", themeFrom = "theme-typography-shapes"),
-      pending = true,
     )
 
   /** Scaled serif type and large corners on a slider, chips and a card. */
@@ -381,7 +370,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_typography_shapes_slider_chip_card",
       validPrototypeFixture("material-slider-chip-card", themeFrom = "theme-typography-shapes"),
-      pending = true,
     )
 
   /** Device dynamic colour on components on a light device. */
@@ -391,7 +379,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_device_controls_light",
       validPrototypeFixture("material-controls", themeFrom = "theme-device"),
-      pending = true,
     )
 
   /** Device dynamic colour on components on a dark device. */
@@ -401,7 +388,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_device_controls_dark",
       validPrototypeFixture("material-controls", themeFrom = "theme-device"),
-      pending = true,
     )
 
   /** Flat role overrides with an explicit light mode. */
@@ -410,7 +396,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_role_overrides",
       validPrototypeFixture("theme-role-overrides"),
-      pending = true,
     )
 
   // Dark-mode gallery (#11217). The specs carry no theme, so the `+night` device decides; every
@@ -423,7 +408,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "fullscreen_all_nodes_dark",
       validPrototypeFixture("fullscreen-all-nodes"),
-      pending = true,
     )
 
   /** A bottom sheet opened over the dark gallery: scrim, surface and drag handle. */
@@ -433,7 +417,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "bottom_sheet_open_dark",
       validPrototypeFixture("fullscreen-all-nodes", stateOverrides = mapOf("open" to OPEN)),
-      pending = true,
     )
 
   /** The same open bottom sheet on a light device, for the scrim and handle contrast. */
@@ -443,7 +426,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "bottom_sheet_open_light",
       validPrototypeFixture("fullscreen-all-nodes", stateOverrides = mapOf("open" to OPEN)),
-      pending = true,
     )
 
   /** An alarm dialog opened over the dark gallery: scrim and dialog surface. */
@@ -456,7 +438,6 @@ class PrototypeSpecContentScreenshotTest {
         "material-app-bar-dialog-pickers",
         stateOverrides = mapOf("editing" to OPEN),
       ),
-      pending = true,
     )
 
   /** The app bar, dialog and pickers fixture with nothing open, on a dark device. */
@@ -466,7 +447,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "material_app_bar_dialog_pickers_dark",
       validPrototypeFixture("material-app-bar-dialog-pickers"),
-      pending = true,
     )
 
   /**
@@ -479,7 +459,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "style_when_inferred_dark",
       validPrototypeFixture("style-when"),
-      pending = true,
     )
 
   /** A `system` theme on a dark device. */
@@ -489,7 +468,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_device_dark",
       validPrototypeFixture("theme-device"),
-      pending = true,
     )
 
   // Per-mode colours (#11219): `{light, dark}` pairs in a style colour, border, shadow and gradient
@@ -503,7 +481,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_modes_colors_light",
       validPrototypeFixture("theme-modes-colors"),
-      pending = true,
     )
 
   /** The same fixture on a dark device: every pair draws its dark side. */
@@ -513,7 +490,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_modes_colors_dark",
       validPrototypeFixture("theme-modes-colors"),
-      pending = true,
     )
 
   /** Its sheets open on a light device: the `styleWhen` pair and the pair and role scrims. */
@@ -523,7 +499,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_modes_colors_open_light",
       validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
-      pending = true,
     )
 
   /** Its sheets open on a dark device. */
@@ -533,7 +508,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_modes_colors_open_dark",
       validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
-      pending = true,
     )
 
   /** Pending until the baseline workflow records the new menu and select surfaces. */

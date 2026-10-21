@@ -30,12 +30,8 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-desktop-core
         with:
-          gradle-tasks: ":desktop-core:build -x test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   # The full desktop-core suite stays off the merge path (consistently >1 minute, not required for
@@ -99,32 +95,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-ide-plugin
         with:
-          gradle-tasks: "build -x test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Build Plugin ZIP"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew buildPlugin --stacktrace --continue
-
-      - name: "Verify Plugin"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew verifyPlugin --stacktrace --continue
-
-      - name: "Upload IDE Plugin ZIP"
-        uses: actions/upload-artifact@v6
-        if: success()
-        with:
-          name: ide-plugin-zip
-          path: android/ide-plugin/build/distributions/*.zip
 
   ide-plugin-unit-tests:
     name: "Run IDE Plugin Unit Tests"
@@ -142,20 +115,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-ide-plugin-unit-tests
         with:
-          gradle-tasks: "test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: ide-plugin-test-results
-          path: android/ide-plugin/build/reports/tests/test/
 
   desktop-app-unit-tests:
     name: "Run Desktop App Unit Tests"
@@ -172,20 +134,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-desktop-app-unit-tests
         with:
-          gradle-tasks: ":desktop-app:test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: desktop-app-test-results
-          path: android/desktop-app/build/reports/tests/test/
 
   validate-xml:
     name: "Validate XML"
@@ -1481,41 +1432,3 @@ jobs:
             exit 1
           fi
           echo "::notice::MCP context baseline benchmark completed"
-
-  # =============================================================================
-  # Auto-update README Test Count Badges
-  # =============================================================================
-
-  update-readme-badges:
-    name: "Update README Test Count Badges"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    # Serialize badge pushes so two merges can't race to push a badge commit to
-    # main at once (issue #3590). cancel-in-progress:false lets a queued run wait
-    # rather than drop the update; the run recomputes counts from scratch anyway.
-    concurrency:
-      group: update-readme-badges
-      cancel-in-progress: false
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-          fetch-depth: 0 # Full history so the badge commit push to main isn't rejected as a shallow update
-          token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
-
-      - name: "Commit and push badge update to main"
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # AUTO_MOBILE_PR_TOKEN is an admin actor and bypasses the green-main
-          # ruleset, so the script pushes straight to main with no PR or status
-          # checks. It re-syncs to origin/main and regenerates the badge each
-          # attempt (exiting cleanly when counts are unchanged), so a concurrent
-          # push can never leave a conflicted rebase.
-          bash scripts/push-readme-badges.sh

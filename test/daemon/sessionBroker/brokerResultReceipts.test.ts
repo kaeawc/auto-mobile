@@ -82,6 +82,51 @@ describe("broker result receipts", () => {
     expect(await broker.prepare(config("late-capacity"), "owner-token")).toEqual(first);
   });
 
+  test.each([
+    ["client", "pre-admission"],
+    ["client", "post-admission"],
+    ["shutdown", "pre-admission"],
+    ["shutdown", "post-admission"],
+  ] as const)(
+    "%s cancellation %s requires a new request ID on the initial result and replay",
+    async (source, phase) => {
+      const controller = new AbortController();
+      const cancel = async (signal?: AbortSignal) => {
+        if (source === "client") {
+          controller.abort(new Error("Client RPC cancelled"));
+        } else {
+          await broker.markRestartHandoff();
+        }
+        signal?.throwIfAborted();
+      };
+      if (phase === "pre-admission") {
+        options.catalog = async (_platform, signal) => {
+          await cancel(signal);
+          return iosCatalog();
+        };
+      } else {
+        devices.prepareHook = async ({ signal }) => cancel(signal);
+      }
+
+      const request = config("cancelled-request");
+      const first = await broker.prepare(request, "owner-token", controller.signal);
+      if (source === "shutdown") {
+        await broker.close();
+        broker = new SessionBroker(options);
+      }
+      const replay = await broker.prepare(request, "owner-token");
+      const expected = {
+        outcome: "failed",
+        cleanupPending: false,
+        failure: { code: "cancelled", retryable: true, retryRequires: "new_request_id" },
+      };
+      expect(first).toMatchObject(expected);
+      expect(replay).toMatchObject(expected);
+      expect(replay).toEqual(first);
+      expect(devices.prepared).toHaveLength(phase === "pre-admission" ? 0 : 1);
+    },
+  );
+
   test.each([true, false])(
     "managed cleanup_pending replays without an eviction delay with confirmed cleanup=%s",
     async (cleanupConfirmed) => {

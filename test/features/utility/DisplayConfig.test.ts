@@ -171,8 +171,8 @@ describe("DisplayConfig getConfig", () => {
     const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
 
     expect(result.success).toBe(true);
-    expect(result.current).toEqual({ fontScale: 1.15, density: 480, theme: "dark" });
-    expect(result.supported).toEqual({ fontScale: true, density: true, theme: true });
+    expect(result.current).toMatchObject({ fontScale: 1.15, density: 480, theme: "dark" });
+    expect(result.supported).toMatchObject({ fontScale: true, density: true, theme: true });
     expect(result.previous).toBeUndefined();
     expect(result.applied).toBeUndefined();
   });
@@ -635,7 +635,14 @@ describe("DisplayConfig platform gating", () => {
 
     expect(result.success).toBe(false);
     expect(result.platform).toBe("ios");
-    expect(result.supported).toEqual({ fontScale: false, density: false, theme: false });
+    expect(result.supported).toEqual({
+      fontScale: false,
+      density: false,
+      theme: false,
+      increaseContrast: false,
+      reduceMotion: false,
+      boldText: false,
+    });
     expect(result.error).toContain("iOS");
     expect(simctlArgvCalls(simctl)).toEqual([]);
   });

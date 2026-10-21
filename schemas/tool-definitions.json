@@ -1369,7 +1369,7 @@
   },
   {
     "name": "displayConfig",
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance. The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1407,8 +1407,20 @@
           "type": "string",
           "enum": ["light", "dark", "system", "custom"]
         },
+        "increaseContrast": {
+          "description": "Increase Contrast. Android: high-contrast text (secure high_text_contrast_enabled). iOS Simulator: `simctl ui increase_contrast`. Omit to leave unchanged.",
+          "type": "boolean"
+        },
+        "reduceMotion": {
+          "description": "Reduce Motion. Android: Remove animations (all three animation scales 0; false restores the scales replaced earlier, else 1). iOS Simulator: partial, written to com.apple.Accessibility defaults; relaunch the app to observe. Omit to leave unchanged.",
+          "type": "boolean"
+        },
+        "boldText": {
+          "description": "Bold Text. Android API 31+: secure font_weight_adjustment 300. iOS Simulator: partial, written to com.apple.Accessibility defaults; relaunch the app to observe. Omit to leave unchanged.",
+          "type": "boolean"
+        },
         "reset": {
-          "description": "On Android, restore font scale and density to device defaults. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance.",
+          "description": "On Android, restore font scale and density to device defaults. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance. On both, restore each of increaseContrast, reduceMotion and boldText that displayConfig changed earlier in this process.",
           "type": "boolean"
         },
         "platform": {
@@ -1465,19 +1477,43 @@
             },
             "theme": {
               "type": "boolean"
+            },
+            "increaseContrast": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "reduceMotion": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "boldText": {
+              "$ref": "#/$defs/__schema0"
             }
           },
           "required": ["fontScale", "density", "theme"],
           "additionalProperties": {}
         },
+        "supportNotes": {
+          "type": "object",
+          "properties": {
+            "increaseContrast": {
+              "type": "string"
+            },
+            "reduceMotion": {
+              "type": "string"
+            },
+            "boldText": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {}
+        },
         "current": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/__schema1"
         },
         "applied": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/__schema1"
         },
         "previous": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/__schema1"
         },
         "error": {
           "type": "string"
@@ -1487,6 +1523,17 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "const": "partial"
+            }
+          ]
+        },
+        "__schema1": {
           "type": "object",
           "properties": {
             "fontScale": {
@@ -1514,6 +1561,15 @@
             "theme": {
               "type": "string",
               "enum": ["light", "dark", "system", "custom"]
+            },
+            "increaseContrast": {
+              "type": "boolean"
+            },
+            "reduceMotion": {
+              "type": "boolean"
+            },
+            "boldText": {
+              "type": "boolean"
             }
           },
           "additionalProperties": {}
@@ -1523,7 +1579,15 @@
     "_meta": {
       "automobile/deviceReadOnlyArgs": [
         {
-          "absentArguments": ["reset", "fontScale", "density", "theme"]
+          "absentArguments": [
+            "reset",
+            "fontScale",
+            "density",
+            "theme",
+            "increaseContrast",
+            "reduceMotion",
+            "boldText"
+          ]
         }
       ]
     }

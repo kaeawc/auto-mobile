@@ -55,7 +55,15 @@ const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
  * the TalkBack/VoiceOver state when neither toggle is given.
  */
 const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  displayConfig: ["fontScale", "density", "theme", "reset"],
+  displayConfig: [
+    "fontScale",
+    "density",
+    "theme",
+    "increaseContrast",
+    "reduceMotion",
+    "boldText",
+    "reset",
+  ],
   accessibility: ["talkback", "voiceover"],
 };
 

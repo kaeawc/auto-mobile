@@ -143,7 +143,19 @@ describe("getStaticToolDefinitions", () => {
       keyboard: [{ argument: "action", values: ["detect", "listImes", "listProfiles"] }],
       prototype: [{ argument: "action", values: ["status", "inspect", "listSaved"] }],
       accessibility: [{ absentArguments: ["talkback", "voiceover"] }],
-      displayConfig: [{ absentArguments: ["reset", "fontScale", "density", "theme"] }],
+      displayConfig: [
+        {
+          absentArguments: [
+            "reset",
+            "fontScale",
+            "density",
+            "theme",
+            "increaseContrast",
+            "reduceMotion",
+            "boldText",
+          ],
+        },
+      ],
     };
     for (const [name, expected] of Object.entries(shapes)) {
       const meta = getStaticToolDefinitions().find((tool) => tool.name === name)?._meta;

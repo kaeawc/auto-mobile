@@ -230,10 +230,16 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "systemTray", { action: "tap", notification: { title: "Hi" } });
     recordPlanCall(recorder, "displayConfig", { theme: "dark" });
     recordPlanCall(recorder, "displayConfig", { reset: true });
+    recordPlanCall(recorder, "displayConfig", { increaseContrast: true });
+    recordPlanCall(recorder, "displayConfig", { reduceMotion: false });
+    recordPlanCall(recorder, "displayConfig", { boldText: true });
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "keyboard",
       "clipboard",
       "systemTray",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
       "displayConfig",
       "displayConfig",
     ]);

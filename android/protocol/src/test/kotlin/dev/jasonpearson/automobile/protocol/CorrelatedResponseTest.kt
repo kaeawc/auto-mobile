@@ -12,8 +12,11 @@ import org.junit.jupiter.api.Test
  * carry for the same purpose (#11877).
  */
 class CorrelatedResponseTest {
-  private val responseTypes: List<Class<*>> =
-    WebSocketResponse::class.java.permittedSubclasses.orEmpty().toList()
+  /** Every concrete response type, walking through any sealed intermediate subclasses. */
+  private val responseTypes: List<Class<*>> = concreteSubclasses(WebSocketResponse::class.java)
+
+  private fun concreteSubclasses(type: Class<*>): List<Class<*>> =
+    type.permittedSubclasses?.flatMap(::concreteSubclasses) ?: listOf(type)
 
   private fun declaresRequestId(type: Class<*>): Boolean {
     val descriptor = serializer(type).descriptor

@@ -496,7 +496,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       });
       const releasing = manager.releaseSession(SESSION, "cli-idle-timeout");
       await settleMicrotasks();
-      const upgrading = manager.releaseSessionIfOwned(SESSION, session, DEVICE, reason);
+      const upgrading = manager.releaseSession(SESSION, reason, {
+        expectedOwner: { session: session, deviceId: DEVICE },
+      });
       await settleMicrotasks();
       store.park = undefined;
       land();
@@ -517,7 +519,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
           .then(() => {})
           .then(() => {})
           .then(() => {
-            upgraded = manager.releaseSessionIfOwned(SESSION, session, DEVICE, "device-killed");
+            upgraded = manager.releaseSession(SESSION, "device-killed", {
+              expectedOwner: { session: session, deviceId: DEVICE },
+            });
           });
       }
     });

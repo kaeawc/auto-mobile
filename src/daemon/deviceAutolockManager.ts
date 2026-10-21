@@ -403,7 +403,9 @@ export class DeviceAutolockManager {
       // Only this newly minted session may be compensated; never a replacement.
       await this.pool
         .getSessionManager()
-        .releaseSessionIfOwned(session.sessionId, session, device.id, "session-creation-cancelled");
+        .releaseSession(session.sessionId, "session-creation-cancelled", {
+          expectedOwner: { session: session, deviceId: device.id },
+        });
     };
     try {
       signal?.throwIfAborted();

@@ -270,12 +270,9 @@ export async function releaseShutdownSessionOwnership(
     deviceLossCancellationReason(device.deviceId),
     { excludeExecutionId: getShutdownInitiatingExecutionId() },
   );
-  const release = sessionManager.releaseSessionIfOwned(
-    sessionId,
-    expectedSession,
-    device.deviceId,
-    "device-killed",
-  );
+  const release = sessionManager.releaseSession(sessionId, "device-killed", {
+    expectedOwner: { session: expectedSession, deviceId: device.deviceId },
+  });
   try {
     await runWithinShutdownDeadline(
       device,

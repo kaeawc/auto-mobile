@@ -45,7 +45,7 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
   const cases: Array<[string, SessionReleaseReason]> = [
     // daemon.ts disconnect monitor: cancelAndReleaseSession(session, deviceLossCancellationReason(id))
     ["its device disconnected", deviceLossCancellationReason(deviceB.deviceId)],
-    // deviceToolsShutdown.ts releaseShutdownSessionOwnership: releaseSessionIfOwned(..., "device-killed")
+    // deviceToolsShutdown.ts releaseShutdownSessionOwnership: releaseSession(..., "device-killed", { expectedOwner })
     ["killDevice stopped its device", "device-killed"],
   ];
 

@@ -1966,7 +1966,52 @@ starts with `[activity_not_exported]`, `[activity_not_found]`, `[intent_unresolv
 `[am_start_failed]`, or `[invalid_intent]` for a request refused before `am start`
 runs. iOS refuses `intent`; use `launchArguments` there.
 
-`installApp.artifactPath` is the host path to an `.apk`, `.app`, or `.ipa`.
+`installApp.artifactPath` is the host path to an `.app` or `.ipa` on iOS. On Android it is one
+of:
+
+- an `.apk` (`adb install`); add `splits` (a list of split `.apk` paths) to install it as the
+  base APK with those splits through `adb install-multiple`.
+- a directory of split APKs, for example a base plus per-ABI and per-density splits. Every `.apk`
+  directly inside it is installed with `adb install-multiple`. `base.apk` or `base-master.apk`
+  is the base the package name is read from; without either, the first file by name is used.
+- an `.apks` APK set, installed with `bundletool install-apks`.
+- an `.aab` app bundle. `bundletool build-apks --connected-device` builds an APK set for the
+  target device in a private temp directory, then `bundletool install-apks` installs it. The
+  temp directory is removed afterwards.
+
+`bundle` holds the bundletool options. `bundle.modules` lists the dynamic feature modules to
+install (`["_ALL_"]` for every module; by default only install-time modules), for `.aab` and
+`.apks`. `bundle.localTesting` (`.aab` only) builds with `--local-testing`, so `install-apks`
+also pushes the on-demand module splits where Play Core's local testing reads them.
+`bundle.keystore` (`.aab` only) is `{path, alias, storePassword, keyPassword?}`; without it
+bundletool signs with the debug keystore (`~/.android/debug.keystore`), and `keyPassword`
+defaults to `storePassword`. The passwords are written to owner-only (0600) files in the private
+temp directory and handed to bundletool as `--ks-pass=file:` and `--key-pass=file:`, never as
+`pass:` arguments. They therefore never appear in process listings or in command-failure
+messages. They are replaced with `<redacted>` in request logs, telemetry, plan logs, recorded
+plans and bundletool error text. A password must be a single line.
+
+`grantAllPermissions` grants every requested runtime permission (`install -g`;
+`--grant-runtime-permissions` on the bundletool routes). `allowDowngrade` installs a lower
+`versionCode` over the installed one (`install -d`; `--allow-downgrade` on the bundletool
+routes); Android honors it only for debuggable apps, so a release-build downgrade still goes
+through the downgrade recovery described below. The result carries `installRoute`
+(`split-apks`, `apk-set` or `bundle`) for every route except a single APK.
+
+The bundletool routes need bundletool on the host. AutoMobile uses the jar named by
+`AUTOMOBILE_BUNDLETOOL_JAR` (run with `JAVA_HOME/bin/java`, else `java` on `PATH`), else a
+`bundletool` on `PATH` (for example `brew install bundletool`). It never downloads bundletool.
+The `bundletool` entry of the `automobile:host/toolchain` resource reports whether one was
+found. When none is found, `installApp` fails before touching the device with a
+`BundletoolNotFoundError` that lists these install steps. bundletool installs for every user,
+since it takes no `--user`, while the adb routes keep the resolved target user.
+
+Every route keeps the signing guard, the downgrade recovery and the installed-apps cache
+invalidation of the single-APK install. The package name the signing guard checks comes from the
+base APK, which is the base split for split installs and the base split extracted from the APK
+set for `.apks` and `.aab`. An APK set without a base split cannot name its package, so a guarded
+install of it refuses (`presence-unknown`). `splits`, `bundle`, `grantAllPermissions` and
+`allowDowngrade` are rejected on iOS.
 `uninstallApp.keepData` retains app data after uninstall on Android (default
 false; Android only).
 

@@ -1420,6 +1420,36 @@
       "required": ["lock", "steps", "deviceCount"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "lock": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "executedSteps": {
+          "type": "number"
+        },
+        "totalSteps": {
+          "type": "number"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["success", "lock", "deviceId", "executedSteps", "totalSteps"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/planOnly": true
     }
@@ -5196,14 +5226,79 @@
   },
   {
     "name": "installApp",
-    "description": "Install app on device (.apk, .app, or .ipa)",
+    "description": "Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "artifactPath": {
-          "description": "App artifact path (.apk, .app, or .ipa)",
+          "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
           "type": "string"
+        },
+        "splits": {
+          "description": "Android: split APKs installed with the base .apk artifactPath (install-multiple)",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "bundle": {
+          "description": "Android .aab/.apks options",
+          "type": "object",
+          "properties": {
+            "keystore": {
+              "description": ".aab: signing key for the built APKs (default ~/.android/debug.keystore)",
+              "type": "object",
+              "properties": {
+                "path": {
+                  "description": "Keystore file path",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "alias": {
+                  "description": "Key alias",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "storePassword": {
+                  "description": "Keystore password (redacted from logs)",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "keyPassword": {
+                  "description": "Key password (redacted from logs; default storePassword)",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["path", "alias", "storePassword"],
+              "additionalProperties": false
+            },
+            "modules": {
+              "description": "Dynamic feature modules to install, or ['_ALL_']",
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "localTesting": {
+              "description": ".aab: build with bundletool --local-testing for on-demand modules",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "grantAllPermissions": {
+          "description": "Android: grant all requested runtime permissions (install -g)",
+          "type": "boolean"
+        },
+        "allowDowngrade": {
+          "description": "Android: allow a lower versionCode (install -d; debuggable apps only)",
+          "type": "boolean"
         },
         "expectedSigningSha256": {
           "description": "Android: complete signer set (SHA-256 of every signing certificate) an already installed copy must have before it is replaced; any other signer set, or signers that cannot be read, refuses the install. See inspectPackageSigning.",
@@ -22425,6 +22520,149 @@
       },
       "required": ["resources"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "device": {
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            }
+          },
+          "required": ["deviceId", "platform"],
+          "additionalProperties": {}
+        },
+        "identity": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "requested": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "profileFingerprint": {
+          "type": "string"
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        "remainingDrift": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        "applied": {
+          "type": "object",
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "requested": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "resources": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "changed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "verification": {
+              "type": "string",
+              "const": "current_boot"
+            },
+            "observed": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            },
+            "observationContradictions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "services": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "restore": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            }
+          },
+          "required": ["success", "requested", "resources", "changed", "verification"],
+          "additionalProperties": {}
+        },
+        "observed": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "verification": {
+          "type": "string",
+          "const": "current_boot"
+        }
+      },
+      "required": [
+        "success",
+        "device",
+        "identity",
+        "requested",
+        "profileFingerprint",
+        "drift",
+        "remainingDrift",
+        "observed",
+        "verification"
+      ],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "__schema1": {
+          "type": "object",
+          "properties": {
+            "resource": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["missingRequested", "ownedExtra", "unsupported", "commandFailure"]
+            },
+            "expected": {},
+            "observed": {}
+          },
+          "required": ["resource", "kind", "expected", "observed"],
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {
@@ -25933,6 +26171,81 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "device": {
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            }
+          },
+          "required": ["deviceId", "platform"],
+          "additionalProperties": {}
+        },
+        "requested": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "resources": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verification": {
+          "type": "string",
+          "const": "current_boot"
+        },
+        "observed": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "observationContradictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "services": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "restore": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "device", "requested", "resources", "changed", "verification"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {

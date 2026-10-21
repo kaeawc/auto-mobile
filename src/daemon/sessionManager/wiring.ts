@@ -196,7 +196,7 @@ export class SessionManagerWiring {
       judgeOwnerLeaseForRelease: (...args) => this.leaseExpiry.judgeOwnerLeaseForRelease(...args),
       finishReleaseForcedBeforeStart: (...args) =>
         this.facade.finishReleaseForcedBeforeStart(...args),
-      releaseSessionInternal: (...args) => this.releaseCommit.releaseSessionInternal(...args),
+      releaseSessionInternal: (request) => this.releaseCommit.releaseSessionInternal(request),
       finishIdentityReplacedRelease: (...args) =>
         this.restoreHealth.finishIdentityReplacedRelease(...args),
       releaseFinalizedSession: (...args) => this.releaseCommit.releaseFinalizedSession(...args),

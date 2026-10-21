@@ -9,7 +9,7 @@ import { HeldSessionLosses } from "../proxy/HeldSessionLosses";
 import { isRecoverableHandoffOfOwnedSession } from "../proxy/notFoundDecision";
 import { DAEMON_STALLED_CODE } from "../proxyLivenessRecovery";
 import { isRecoverableDaemonHandoffReason, sessionReleaseReasonFamily } from "../releaseReasons";
-import { type SessionReleaseSnapshot } from "../sessionManager";
+import { type SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../sessionReleaseBroadcast";
 import { PROGRESS_NOTIFICATION_METHOD, type DaemonNotification } from "../types";
 import type { ProxyRuntime } from "./ProxyRuntime";

@@ -216,10 +216,159 @@ describe("session broker proxy acquisition", () => {
       expect(calls.filter(({ method }) => method === DAEMON_SESSION_REQUEST_STATUS_METHOD)).toEqual(
         [],
       );
-      expect(timer.getSleepHistory()).toEqual([delayMs]);
-      expect(timer.now()).toBeGreaterThanOrEqual(delayMs);
+      expect(timer.now()).toBe(delayMs);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
     },
   );
+
+  test("a stopping refusal reconnects after the retry wait before resending prepare", async () => {
+    const connections: number[] = [];
+    let prepares = 0;
+    const { ports, calls, timer } = rig((method) => {
+      if (method === "daemon/capabilities") {
+        return { capabilities: ["session-broker/v1"] };
+      }
+      if (method === DAEMON_PREPARE_SESSION_METHOD && ++prepares === 1) {
+        throw Object.assign(new Error("broker stopping"), {
+          code: "session_broker_stopping",
+          retryAfterMs: 5_000,
+        });
+      }
+      if (connections.length < 2) {
+        throw new Error("not connected");
+      }
+      return ready;
+    });
+    ports.ensureConnected = async () => {
+      connections.push(timer.now());
+    };
+
+    expect(await acquireSessionThroughDaemon(config, ports)).toEqual(ready);
+    expect(connections).toEqual([0, 5_000]);
+    expect(prepares).toBe(2);
+    expect(calls.filter(({ method }) => method === DAEMON_SESSION_REQUEST_STATUS_METHOD)).toEqual(
+      [],
+    );
+  });
+
+  test("a stopping retry reconnect failure returns daemon_unavailable without status recovery", async () => {
+    let connections = 0;
+    const { ports, calls } = rig((method) => {
+      if (method === "daemon/capabilities") {
+        return { capabilities: ["session-broker/v1"] };
+      }
+      throw Object.assign(new Error("broker stopping"), {
+        code: "session_broker_stopping",
+        retryAfterMs: 5_000,
+      });
+    });
+    ports.ensureConnected = async () => {
+      if (++connections === 2) {
+        throw new Error("socket unavailable");
+      }
+    };
+
+    expect(await acquireSessionThroughDaemon(config, ports)).toMatchObject({
+      outcome: "failed",
+      cleanupPending: false,
+      failure: {
+        code: "daemon_unavailable",
+        message:
+          "Session preparation could not reconnect to the daemon after a stopping refusal: socket unavailable",
+        retryable: true,
+      },
+    });
+    expect(connections).toBe(2);
+    expect(calls.filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)).toHaveLength(1);
+    expect(calls.filter(({ method }) => method === DAEMON_SESSION_REQUEST_STATUS_METHOD)).toEqual(
+      [],
+    );
+  });
+
+  test.each(["deadline", "abort"])(
+    "a stopping retry reconnect stops on %s without status recovery",
+    async (termination) => {
+      let connections = 0;
+      const { ports, calls, timer } = rig((method) => {
+        if (method === "daemon/capabilities") {
+          return { capabilities: ["session-broker/v1"] };
+        }
+        throw Object.assign(new Error("broker stopping"), {
+          code: "session_broker_stopping",
+          retryAfterMs: 5_000,
+        });
+      }, false);
+      ports.ensureConnected = async () => {
+        if (++connections === 2) {
+          await new Promise<void>(() => {});
+        }
+      };
+      const controller = new AbortController();
+      const acquisition = track(acquireSessionThroughDaemon(config, ports, controller.signal));
+      await drainMicrotasks(64);
+      timer.advanceTime(5_000);
+      await drainMicrotasks(64);
+      expect(connections).toBe(2);
+      expect(timer.getPendingTimeouts()).toEqual([10_000]);
+
+      if (termination === "abort") {
+        controller.abort(new Error("proxy shutdown"));
+      } else {
+        timer.advanceTime(9_999);
+        await drainMicrotasks(64);
+        expect(acquisition.result).toBeUndefined();
+        timer.advanceTime(1);
+      }
+      await drainMicrotasks(64);
+
+      expect(acquisition.result).toMatchObject({
+        outcome: termination === "abort" ? "pending" : "failed",
+        cleanupPending: termination === "abort",
+        failure: {
+          code: termination === "abort" ? "session_status_unresolved" : "session_broker_stopping",
+          retryable: true,
+        },
+      });
+      expect(calls.filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)).toHaveLength(
+        1,
+      );
+      expect(calls.filter(({ method }) => method === DAEMON_SESSION_REQUEST_STATUS_METHOD)).toEqual(
+        [],
+      );
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.getPendingSleepCount()).toBe(0);
+    },
+  );
+
+  test("a stopping retry recomputes the prepare budget after reconnecting", async () => {
+    let connections = 0;
+    let prepares = 0;
+    const { ports, callOptions, timer } = rig((method) => {
+      if (method === "daemon/capabilities") {
+        return { capabilities: ["session-broker/v1"] };
+      }
+      if (++prepares === 1) {
+        throw Object.assign(new Error("broker stopping"), {
+          code: "session_broker_stopping",
+          retryAfterMs: 5_000,
+        });
+      }
+      return ready;
+    });
+    ports.ensureConnected = async () => {
+      if (++connections === 2) {
+        await new Promise<void>((resolve) => timer.setTimeout(resolve, 2_000));
+      }
+    };
+
+    expect(await acquireSessionThroughDaemon(config, ports)).toEqual(ready);
+    expect(timer.now()).toBe(7_000);
+    expect(
+      callOptions
+        .filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)
+        .map(({ timeoutMs }) => timeoutMs),
+    ).toEqual([15_000, 8_000]);
+  });
 
   test.each([5_000, 50_000])(
     "stopping refusals with delay %s terminate within the deadline without polling or holding",
@@ -277,7 +426,7 @@ describe("session broker proxy acquisition", () => {
     expect(calls.filter(({ method }) => method === DAEMON_SESSION_REQUEST_STATUS_METHOD)).toEqual(
       [],
     );
-    expect(timer.getSleepHistory()).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(timer.now()).toBe(15_000);
     expect(held).toEqual([]);
   });
@@ -302,7 +451,8 @@ describe("session broker proxy acquisition", () => {
 
       expect(await acquireSessionThroughDaemon(config, ports)).toEqual(ready);
       expect(prepares).toBe(2);
-      expect(timer.getSleepHistory()).toEqual([SESSION_BROKER_RETRY_AFTER_MS]);
+      expect(timer.now()).toBe(SESSION_BROKER_RETRY_AFTER_MS);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
       expect(calls.filter(({ method }) => method === DAEMON_SESSION_REQUEST_STATUS_METHOD)).toEqual(
         [],
       );
@@ -323,10 +473,12 @@ describe("session broker proxy acquisition", () => {
     const controller = new AbortController();
     const acquisition = track(acquireSessionThroughDaemon(config, ports, controller.signal));
     await drainMicrotasks(32);
-    expect(timer.getPendingSleeps()).toEqual([5_000]);
+    expect(timer.getPendingTimeouts()).toEqual([5_000]);
 
     controller.abort();
     await drainMicrotasks(32);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingSleepCount()).toBe(0);
 
     expect(acquisition.result).toMatchObject({
       outcome: "pending",

@@ -44,6 +44,7 @@ import { isClientCancelled } from "../utils/AbortContext";
 import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
+import { deviceConnectionIdFor } from "./deviceConnectionId";
 
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -454,13 +455,14 @@ async function selectLegacyDevice(input: {
   transportAttempt: TransportAttempt;
 }): Promise<void> {
   const { args, resumeCtrlProxy, sessions, signal } = input;
-  const previousDevice = sessions.getExplicitDevicePin(args.__mcpSessionId);
+  const connectionId = deviceConnectionIdFor(args);
+  const previousDevice = sessions.getExplicitDevicePin(connectionId);
   const previousPlatform = previousDevice?.platform;
   // #5870: "either" lets deviceId disambiguate when platform is omitted.
   const readyDevice = await input.transportAttempt(() =>
     sessions.ensureDeviceReady(args.platform ?? "either", args.deviceId, {
       signal,
-      connectionId: args.__mcpSessionId,
+      connectionId,
     }),
   );
   // A session that acquired the device during readiness cancelled this call: never pin its device.
@@ -480,7 +482,7 @@ async function selectLegacyDevice(input: {
     );
     RealObserveScreen.clearCache(previousDevice.deviceId);
   }
-  sessions.setExplicitDevicePin(readyDevice, args.__mcpSessionId);
+  sessions.setExplicitDevicePin(readyDevice, connectionId);
 }
 
 function currentDisplayPinResult(

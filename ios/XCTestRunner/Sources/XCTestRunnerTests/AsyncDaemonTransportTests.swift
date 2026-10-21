@@ -48,8 +48,8 @@ final class AsyncDaemonTransportTests: XCTestCase {
         let (client, factory) = makeClient([connection, healthy], scheduler: scheduler)
         let task = Task { try await client.callTool(name: "observe", arguments: [:], timeout: 5) }
         try await connection.receives.wait(for: 1)
-        try await scheduler.registered.wait(for: 1)
-        scheduler.advance(by: 5)
+        try await scheduler.waitForPendingSleep()
+        scheduler.advance(by: 7)
         await assertTransportFailure(task, .requestFailed("Timed out waiting for daemon response"))
         XCTAssertTrue(connection.isClosed)
         XCTAssertFalse(connection.deliverLate(TransportFixtures.daemonReply(id: "1")))
@@ -150,14 +150,15 @@ final class AsyncDaemonTransportTests: XCTestCase {
         )
         let first = Task { try await client.callTool(name: "observe", arguments: [:], timeout: 5) }
         try await connection.receives.wait(for: 1)
-        try await scheduler.registered.wait(for: 1)
+        try await scheduler.waitForPendingSleep()
+        let requestDeadlineCount = scheduler.registered.count
         let cancelled = Task { try await client.callTool(name: "observe", arguments: [:], timeout: 5) }
         try await queued.wait(for: 1)
         let second = Task { try await client.callTool(name: "observe", arguments: [:], timeout: 5) }
         try await queued.wait(for: 2)
         let third = Task { try await client.callTool(name: "observe", arguments: [:], timeout: 5) }
         try await queued.wait(for: 3)
-        XCTAssertEqual(scheduler.registered.count, 1, "Queued operations have no deadline yet")
+        XCTAssertEqual(scheduler.registered.count, requestDeadlineCount, "Queued operations have no deadline yet")
         cancelled.cancel()
         await assertTransportCancellation(cancelled)
         connection.deliver(TransportFixtures.daemonReply(id: "999"))
@@ -254,8 +255,8 @@ final class AsyncDaemonTransportTests: XCTestCase {
             try await client.callTool(name: "observe", arguments: [:], timeout: 5)
         }
         try await connection.receives.wait(for: 1)
-        try await scheduler.registered.wait(for: 1)
-        scheduler.advance(by: 5)
+        try await scheduler.waitForPendingSleep()
+        scheduler.advance(by: 7)
         await assertTransportFailure(task, .requestFailed("Timed out waiting for daemon response"))
         XCTAssertTrue(connection.isClosed)
     }

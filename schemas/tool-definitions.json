@@ -34622,6 +34622,125 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "count": {
+          "type": "number"
+        },
+        "recordings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "recordingId": {
+                "type": "string"
+              },
+              "deviceId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "segmented": {
+                "type": "boolean",
+                "const": true
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["recordingId"],
+            "additionalProperties": {}
+          }
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "deviceId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["deviceId", "platform", "error"],
+            "additionalProperties": {}
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "deviceId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["deviceId", "platform", "code", "reason"],
+            "additionalProperties": {}
+          }
+        },
+        "segmented": {
+          "type": "boolean",
+          "const": true
+        },
+        "manifestPath": {
+          "type": "string"
+        },
+        "manifestPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "highlights": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {}
+          }
+        },
+        "evictedRecordingIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "alreadyStopped": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": ["action", "count", "recordings"],
+      "additionalProperties": {}
     }
   },
   {

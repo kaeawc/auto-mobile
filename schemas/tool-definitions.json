@@ -18675,6 +18675,101 @@
                     },
                     "type": {
                       "type": "string",
+                      "enum": ["chart"]
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["line", "area", "bar", "ring"]
+                    },
+                    "series": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                          },
+                          "x": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          },
+                          "y": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "color": {
+                            "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
+                          }
+                        },
+                        "required": ["path", "y", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 4
+                    },
+                    "yRange": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "number"
+                        },
+                        "max": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["min", "max"],
+                      "additionalProperties": false
+                    },
+                    "xLabels": {
+                      "type": "string",
+                      "enum": ["none", "ends", "all"]
+                    },
+                    "goal": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["type", "variant", "series"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
                       "enum": ["dialog"]
                     },
                     "openWhen": {
@@ -18716,7 +18811,7 @@
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -18766,7 +18861,7 @@
                       "enum": ["menu"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
                     },
                     "items": {
                       "type": "array",
@@ -18776,10 +18871,10 @@
                             "type": "object",
                             "properties": {
                               "label": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm/properties/label"
+                                "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm/properties/label"
                               },
                               "onTap": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm/properties/onTap"
+                                "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm/properties/onTap"
                               },
                               "icon": {
                                 "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
@@ -18856,14 +18951,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -19326,7 +19421,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/36/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/37/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -19383,7 +19478,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",

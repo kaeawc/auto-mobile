@@ -505,6 +505,26 @@ const progressBaseSchema = z
     max: z.number().finite().optional(),
   })
   .strict();
+const chartSeriesSchema = z
+  .object({
+    path: pointerSchema,
+    x: keySchema.optional(),
+    y: keySchema,
+    label: z.string(),
+    color: colorValueSchema.optional(),
+  })
+  .strict();
+const chartBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["chart"]),
+    variant: z.enum(["line", "area", "bar", "ring"]),
+    series: z.array(chartSeriesSchema).min(1).max(4),
+    yRange: z.object({ min: z.number().finite(), max: z.number().finite() }).strict().optional(),
+    xLabels: z.enum(["none", "ends", "all"]).optional(),
+    goal: z.number().finite().optional(),
+  })
+  .strict();
 const dialogBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -674,6 +694,7 @@ export type PrototypeNode =
   | z.infer<typeof dividerBaseSchema>
   | z.infer<typeof badgeBaseSchema>
   | z.infer<typeof progressBaseSchema>
+  | z.infer<typeof chartBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof menuBaseSchema>
   | z.infer<typeof snackbarBaseSchema>
@@ -750,6 +771,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       dividerBaseSchema,
       badgeBaseSchema,
       progressBaseSchema,
+      chartBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       menuBaseSchema,
       snackbarBaseSchema,
@@ -904,6 +926,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "divider",
   "badge",
   "progress",
+  "chart",
   "dialog",
   "menu",
   "snackbar",

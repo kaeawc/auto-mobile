@@ -67,13 +67,20 @@ async function rig(
   return { timer, journal, port, strategy, capture, reset };
 }
 
+const BASELINE_PACKAGE_OBSERVATION = {
+  kind: "installed-app",
+  key: "user:0:com.example.baseline",
+  value: { state: "present" as const, value: true },
+};
+
 describe("Android keep-booted strategy", () => {
   test("partial certification no longer suppresses baseline capture or cleaning", async () => {
     const timer = new FakeTimer();
     const journal = new FakeDeviceMutationJournal(timer);
     const port = new FakeAndroidKeepBootedResetPort({
       completeKinds: [],
-      observations: [],
+      // An empty capture is never persisted as a baseline, so keep one observation.
+      observations: [BASELINE_PACKAGE_OBSERVATION],
       unobservable: [...DEVICE_MUTATION_KINDS],
     });
     const strategy = new AndroidKeepBootedReset({ journal, port: () => port, timer });
@@ -780,7 +787,8 @@ describe("Android keep-booted strategy", () => {
     const timer = new FakeTimer();
     const port = new FakeAndroidKeepBootedResetPort({
       completeKinds: [],
-      observations: [],
+      // An empty capture is never persisted as a baseline, so keep one observation.
+      observations: [BASELINE_PACKAGE_OBSERVATION],
       unobservable: [],
     });
     host.strategy = new AndroidKeepBootedReset({

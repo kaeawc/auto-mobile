@@ -1,28 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ActionableError } from "../../models/ActionableError";
+import type { BootSlotReservation } from "../../models/IosBootInstrumentation";
 
-/** A slot held before destructive replacement; consumption transfers it to the boot lifecycle. */
-export interface BootSlotReservation {
-  run<T>(operation: () => Promise<T>): Promise<T>;
-  /**
-   * After verified deletion, rebind the local slot and best-effort clear the old peer identity.
-   * Registry-clear failures must not throw or abort replacement: retain the slot for boot.
-   * A stale peer record keeps the old id until hand-off and may undercount if its serial is reused.
-   */
-  markReplacedDeviceGone(): void;
-  /** Idempotent. Releases an unconsumed slot; the boot owns a consumed slot. */
-  release(): void;
-}
-
-export interface BootReservationOptions {
-  replacingDeviceId?: string;
-  timeoutMs: number;
-  signal?: AbortSignal;
-}
-
-export interface BootCapacityReserver {
-  reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation>;
-}
+export type {
+  BootAdmissionReason,
+  BootCapacityReserver,
+  BootReservationOptions,
+  BootSlotReservation,
+} from "../../models/IosBootInstrumentation";
 
 interface PendingBoot<T> {
   active: boolean;

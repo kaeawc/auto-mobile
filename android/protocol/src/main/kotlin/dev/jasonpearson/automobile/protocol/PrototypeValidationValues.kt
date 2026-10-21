@@ -50,9 +50,13 @@ internal object PrototypeValidationValues {
       (value.booleanOrNull != null || value.doubleOrNull?.isFinite() == true)
 
   fun insideVerticalScroll(context: Context, path: String): Boolean =
+    insideScroll(context, path, horizontal = false)
+
+  /** Whether a `scroll` on the given axis encloses the node at [path]. */
+  fun insideScroll(context: Context, path: String, horizontal: Boolean): Boolean =
     context.nodes.any { (ancestor, ancestorPath) ->
       ancestor.text("type") == "scroll" &&
-        ancestor.text("axis") != "horizontal" &&
+        (ancestor.text("axis") == "horizontal") == horizontal &&
         path.startsWith("$ancestorPath.")
     }
 }

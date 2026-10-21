@@ -1,0 +1,243 @@
+{
+  "spec": {
+    "id": "resolve",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "array": [],
+      "object": {},
+      "string": "",
+      "zero": 0,
+      "false": false,
+      "text": "x",
+      "items": [1],
+      "filled": {
+        "a": 1
+      },
+      "space": " "
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "/missing empty true",
+          "visibleWhen": {
+            "data": "/missing",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/array empty true",
+          "visibleWhen": {
+            "data": "/array",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/object empty true",
+          "visibleWhen": {
+            "data": "/object",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/string empty true",
+          "visibleWhen": {
+            "data": "/string",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/zero empty true",
+          "visibleWhen": {
+            "data": "/zero",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/false empty true",
+          "visibleWhen": {
+            "data": "/false",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/text empty true",
+          "visibleWhen": {
+            "data": "/text",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/items empty true",
+          "visibleWhen": {
+            "data": "/items",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/filled empty true",
+          "visibleWhen": {
+            "data": "/filled",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/space empty true",
+          "visibleWhen": {
+            "data": "/space",
+            "empty": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "/missing empty false",
+          "visibleWhen": {
+            "data": "/missing",
+            "empty": false
+          }
+        },
+        {
+          "type": "text",
+          "text": "/items empty false",
+          "visibleWhen": {
+            "data": "/items",
+            "empty": false
+          }
+        },
+        {
+          "type": "text",
+          "text": "/array empty false",
+          "visibleWhen": {
+            "data": "/array",
+            "empty": false
+          }
+        },
+        {
+          "type": "text",
+          "text": "/text empty false",
+          "visibleWhen": {
+            "data": "/text",
+            "empty": false
+          }
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "/missing empty true",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/array empty true",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/object empty true",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/string empty true",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/zero empty true",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/false empty true",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/text empty true",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/items empty true",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/filled empty true",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/space empty true",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/missing empty false",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/items empty false",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/array empty false",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "/text empty false",
+        "visibleWhen": {
+          "all": []
+        }
+      }
+    ]
+  }
+}

@@ -15,6 +15,7 @@ import {
   type PrototypeJson,
 } from "./prototypeJson";
 import { prototypeChartShape } from "./prototypeChartSchema";
+import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   anchorSchema,
@@ -25,7 +26,6 @@ import {
   hexColorSchema,
   iconNameSchema,
   iconVariantSchema,
-  imageAssetSchema,
   itemSchema,
   placementSchema,
   PROTOTYPE_COLOR_ROLES,
@@ -180,7 +180,7 @@ const commonNodeShape = {
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
-  transition: z.enum(["none", "fade", "expand", "slide"]).optional(),
+  ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
@@ -292,13 +292,7 @@ const textBaseSchema = z
   })
   .strict();
 const imageBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    ...gestureNodeShape,
-    type: z.enum(["image"]),
-    asset: imageAssetSchema,
-    contentScale: z.enum(["fit", "crop", "fill"]).optional(),
-  })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...prototypeImageShape })
   .strict();
 const iconBaseSchema = z
   .object({

@@ -22,7 +22,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { SessionToolSelectionService } from "../../features/toolSelection/SessionToolSelectionService";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError } from "../../utils/deviceLossOutcome";
-import { deviceLostErrorFromAbortSignal } from "../../models/DeviceLostError";
+import { deviceLostErrorFromAbortSignal } from "../../utils/deviceLossAbortRegistry";
 import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 

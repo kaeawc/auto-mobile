@@ -752,7 +752,14 @@ describe("MultiPlatformDeviceManager", () => {
     );
 
     expect(requests).toEqual([
-      { udid: "UDID-1", runtime: "rt", profile: resourceProfile, timeoutMs: 60_000 },
+      {
+        udid: "UDID-1",
+        runtime: "rt",
+        profile: resourceProfile,
+        timeoutMs: 60_000,
+        reason: "restart",
+        signal: undefined,
+      },
     ]);
     expect(started).toEqual([{ udid: "UDID-1", timeoutMs: 1234 }]);
   });

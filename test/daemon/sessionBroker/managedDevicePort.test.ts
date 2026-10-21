@@ -31,6 +31,8 @@ import type { BrokerProvisionRequest } from "../../../src/daemon/sessionBroker/p
 import type { BindingsResult } from "../../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
+import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 import {
   FakeClaims,
   FakeDeleter,
@@ -518,15 +520,209 @@ describe("ManagedDevicePort clean-reset ownership", () => {
   }
 
   test("qualified reset is bound to the private native identity and async ownership scope", async () => {
-    const rig = await resetRig(async (device, profile, assertOwned) => {
+    const rig = await resetRig(async (device, profile, assertOwned, _signal, context) => {
       expect(device.deviceId).toBe("UDID-1");
       expect(profile.runtimeId).toBe(IOS.profile.runtimeId);
       expect(currentBindingReconciler()).toEqual({ scopeKey: SCOPE_KEY, bindingIndex: 7 });
+      expect(context?.resource.requestId).toBe("request-1");
+      expect(context?.scope).toEqual({
+        deviceId: "UDID-1",
+        incarnation: JSON.stringify([SCOPE_KEY, 7, "UDID-1"]),
+      });
       await assertOwned();
       return "clean";
     });
     expect(await rig.port.reset(rig.resource)).toBe("clean");
   });
+
+  test("pool-entry baseline capture runs before exposing the owned execution session", async () => {
+    const rig = await destructionRig();
+    const assignment = await rig.registry.getAssignment(rig.key);
+    if (!assignment) {
+      throw new Error("Missing binding");
+    }
+    await rig.registry.claimExecution(rig.key, assignment, { ...OWNER, sessionUuid: "session-1" });
+    let captures = 0;
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      registry: rig.registry,
+      bindingJournal: rig.journal,
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      captureIosBaseline: async (context) => {
+        await context.assertOwned();
+        captures++;
+        expect(context.scope).toEqual({
+          deviceId: "UDID-1",
+          incarnation: JSON.stringify([SCOPE_KEY, 7, "UDID-1"]),
+          sessionUuid: "session-1",
+        });
+      },
+    });
+    expect(
+      (await port.prepare({ ...rig.resource, state: "reserved" }, { livenessOwnerToken: "token" }))
+        .sessionId,
+    ).toBe("session-1");
+    expect(captures).toBe(1);
+  });
+
+  test("a failed optional baseline capture does not release the acquired session", async () => {
+    const rig = await destructionRig();
+    const assignment = await rig.registry.getAssignment(rig.key);
+    if (!assignment) {
+      throw new Error("Missing binding");
+    }
+    await rig.registry.claimExecution(rig.key, assignment, { ...OWNER, sessionUuid: "session-1" });
+    let releases = 0;
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      registry: rig.registry,
+      bindingJournal: rig.journal,
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: {
+        releaseExecution: async (id) => {
+          releases++;
+          return releaseResult(id);
+        },
+      },
+      captureIosBaseline: async () => {
+        throw new DOMException("inventory timed out", "TimeoutError");
+      },
+    });
+    expect(
+      (
+        await port.prepare(
+          { ...rig.resource, state: "reserved" },
+          { livenessOwnerToken: "owner-token" },
+        )
+      ).sessionId,
+    ).toBe("session-1");
+    expect(releases).toBe(0);
+  });
+
+  test("the captured baseline survives a settling generation bump but not a replacement UDID", async () => {
+    const rig = await destructionRig();
+    const timer = new FakeTimer();
+    const journal = new FakeDeviceMutationJournal(timer);
+    const baseline = { completeKinds: ["installed-app"], observations: [], unobservable: [] };
+    const assignment = (await rig.registry.getAssignment(rig.key))!;
+    await rig.registry.claimExecution(rig.key, assignment, { ...OWNER, sessionUuid: "session-1" });
+    let capturedIncarnation: string | undefined;
+    let resets = 0;
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer,
+      registry: rig.registry,
+      bindingJournal: rig.journal,
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      captureIosBaseline: async (context) => {
+        await context.assertOwned();
+        capturedIncarnation = context.scope.incarnation;
+        await journal.captureBaseline(context.scope, baseline);
+      },
+      isCurrentReset: async () => true,
+      resetBaseline: {
+        ios: async (_device, _profile, assertOwned, _signal, context) => {
+          await assertOwned();
+          resets++;
+          expect(await journal.getBaseline(context!.scope)).toEqual(resets === 1 ? baseline : null);
+          expect(context!.scope.incarnation === capturedIncarnation).toBe(resets === 1);
+          return "clean";
+        },
+      },
+    });
+    await port.prepare({ ...rig.resource, state: "reserved" }, { livenessOwnerToken: "token" });
+    const fenced = await rig.registry.updateBindingState(rig.key, assignment, "settling", {
+      settler: OWNER,
+    });
+    expect(fenced.kind).toBe("updated");
+    if (fenced.kind !== "updated") {
+      throw new Error("Missing settling fence");
+    }
+    expect(fenced.assignment.generation).toBe(assignment.generation + 1);
+    await rig.registry.releaseExecution(rig.key, "session-1");
+    await rig.registry.updateBindingState(rig.key, fenced.assignment, "ready");
+    await port.reset({ ...rig.resource, state: "resetting" });
+    const current = (await rig.registry.getAssignment(rig.key))!;
+    await rig.registry.commitBinding(rig.key, current, {
+      stableDeviceId: "UDID-2",
+      deviceName: "iPhone broker 1",
+      resolvedSpec: current.resolvedSpec,
+      specFingerprint: current.specFingerprint,
+      state: "ready",
+    });
+    await port.reset({ ...rig.resource, state: "resetting" });
+    expect(resets).toBe(2);
+  });
+
+  test.each(["spent", "pending"] as const)(
+    "iOS baseline capture honors a %s preparation budget and fences late writes",
+    async (budget) => {
+      const rig = await destructionRig();
+      const timer = new FakeTimer();
+      const assignment = (await rig.registry.getAssignment(rig.key))!;
+      await rig.registry.claimExecution(rig.key, assignment, {
+        ...OWNER,
+        sessionUuid: "session-1",
+      });
+      const finishCapture = Promise.withResolvers<void>();
+      let captureSignal: AbortSignal | undefined;
+      let captures = 0;
+      let writes = 0;
+      const settled = Promise.withResolvers<void>();
+      const port = new ManagedDevicePort({
+        scope: SCOPE,
+        timer,
+        registry: rig.registry,
+        bindingJournal: rig.journal,
+        brokerDeviceAcquisition: acquisition(async (config) => {
+          timer.advanceTime(budget === "spent" ? 50 : 20);
+          return readyResult(config);
+        }),
+        brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+        captureIosBaseline: async (context) => {
+          captures++;
+          captureSignal = context.signal;
+          try {
+            await finishCapture.promise;
+            await context.assertOwned();
+            writes++;
+          } finally {
+            settled.resolve();
+          }
+        },
+      });
+      const operation = port
+        .prepare(
+          { ...rig.resource, state: "reserved" },
+          { livenessOwnerToken: "token", preparationTimeoutMs: 50 },
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      await drainUntilQuiescent(timer);
+      if (budget === "pending") {
+        expect(captures).toBe(1);
+        timer.advanceTime(29);
+        expect(captureSignal?.aborted).toBe(false);
+        timer.advanceTime(1);
+      }
+      expect(await operation).toMatchObject({
+        message: expect.stringContaining("exceeded preparation deadline"),
+      });
+      expect(captures).toBe(budget === "spent" ? 0 : 1);
+      if (budget === "pending") {
+        expect(captureSignal?.aborted).toBe(true);
+        finishCapture.resolve();
+        await settled.promise;
+      }
+      expect(writes).toBe(0);
+    },
+  );
 
   test("a stale durable reset cannot invoke native cleanup", async () => {
     let called = false;

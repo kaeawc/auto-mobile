@@ -1484,7 +1484,7 @@ export class LivenessScenario {
    * A refused call must not add to it: "refuse before readiness" (#10828).
    */
   get readinessTouches(): number {
-    return this.tools.deviceSessionManager.getEnsureDeviceReadyCalls();
+    return this.tools.deviceReadiness.getEnsureDeviceReadyCalls();
   }
 
   /** Devices the read-only watcher path resolved, and captured, without a session (#10830). */

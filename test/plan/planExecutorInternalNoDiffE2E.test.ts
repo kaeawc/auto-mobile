@@ -40,7 +40,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
-  >["deviceSessionManager"];
+  >["deviceReadiness"];
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let restorePipelineOverrides: () => void;
@@ -90,8 +90,8 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     planExecutor = createDefaultPlanExecutor();
     ToolRegistry.clearTools();
     fakeDeviceReadiness = new FakeDeviceReadiness();
-    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     // The default provider reads the device's displays over adb, and "emulator-5554" is a real
     // emulator on a developer's machine.
@@ -109,7 +109,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
 
   afterEach(() => {
     restorePipelineOverrides();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

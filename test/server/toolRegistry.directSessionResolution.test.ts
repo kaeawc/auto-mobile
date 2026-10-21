@@ -30,7 +30,7 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
   let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
-  >["deviceSessionManager"];
+  >["deviceReadiness"];
   let restorePipelineOverrides: (() => void) | undefined;
 
   beforeEach(() => {
@@ -39,8 +39,8 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
     fakeDeviceReadiness = new FakeDeviceReadiness();
-    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -49,7 +49,7 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
   });

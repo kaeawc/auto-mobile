@@ -69,14 +69,14 @@ let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
 let originalCollaborators: ToolRegistryCollaborators;
-let deviceSessionManager: FakeDeviceReadiness;
+let deviceReadiness: FakeDeviceReadiness;
 let restorePipelineOverrides: (() => void) | undefined;
 
 beforeEach(async () => {
   originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-  deviceSessionManager = new FakeDeviceReadiness();
-  deviceSessionManager.setConnectedDevices(devices);
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
+  deviceReadiness = new FakeDeviceReadiness();
+  deviceReadiness.setConnectedDevices(devices);
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceReadiness });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -453,8 +453,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, apple, "heartbeat-timeout");
     const receivedBeforeFence = received.length;
     const forwardedBeforeFence = client.callToolCalls.length;
-    const scansBeforeFence = deviceSessionManager.getDetectConnectedPlatformsCallCount();
-    const readinessBeforeFence = deviceSessionManager.getEnsureDeviceReadyCallCount();
+    const scansBeforeFence = deviceReadiness.getDetectConnectedPlatformsCallCount();
+    const readinessBeforeFence = deviceReadiness.getEnsureDeviceReadyCallCount();
     const refusedIos = await proxy
       .callTool("routingProbe", { platform: "ios", keepScreenAwake: false })
       .catch((error: unknown) => error);
@@ -462,8 +462,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     expect(refusedIos).toMatchObject({ reason: "heartbeat-timeout" });
     expect(received.length).toBe(receivedBeforeFence);
     expect(client.callToolCalls.length).toBe(forwardedBeforeFence);
-    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeFence);
-    expect(deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeFence);
+    expect(deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeFence);
+    expect(deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeFence);
     await expect(proxy.callTool("routingProbe", {})).rejects.toBeInstanceOf(
       DaemonConnectionSessionReleasedError,
     );
@@ -515,16 +515,16 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     // With the fence lifted and no held iOS session, platform falls through to ordinary
     // discovery without false ambiguity (#11167), and never reaches the Android default.
     const receivedBeforeIos = received.length;
-    const scansBeforeIos = deviceSessionManager.getDetectConnectedPlatformsCallCount();
-    const readinessBeforeIos = deviceSessionManager.getEnsureDeviceReadyCallCount();
+    const scansBeforeIos = deviceReadiness.getDetectConnectedPlatformsCallCount();
+    const readinessBeforeIos = deviceReadiness.getEnsureDeviceReadyCallCount();
     const discovered = await proxy.callTool("routingProbe", {
       platform: "ios",
       keepScreenAwake: false,
     });
     expect(discovered.isError).toBeFalsy();
-    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeIos + 1);
-    expect(deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeIos + 1);
-    expect(deviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("ios");
+    expect(deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeIos + 1);
+    expect(deviceReadiness.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeIos + 1);
+    expect(deviceReadiness.getLastEnsureDeviceReadyPlatform()).toBe("ios");
     expect(received.slice(receivedBeforeIos)).toEqual([devices[1].deviceId]);
     expect(received.slice(receivedBeforeIos)).not.toContain(devices[0].deviceId);
     const fakeDeviceManager = new FakeDeviceManager();

@@ -40,7 +40,7 @@ describe("PlanExecutor internal no-diff marker (#3053)", () => {
       { name: "Pixel A", deviceId: "emulator-5554", platform: "android" },
     ]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     planExecutor = createDefaultPlanExecutor();
     capturedArgs = [];
   });

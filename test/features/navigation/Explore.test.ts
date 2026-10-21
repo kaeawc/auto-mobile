@@ -2853,9 +2853,8 @@ describe("Explore", () => {
       } as BootedDevice;
       const sessions = new FakeDeviceReadiness();
       sessions.setConnectedDevices([iosA, iosB]);
-      const originalDeviceReadiness =
-        ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: sessions });
+      const originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+      ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: sessions });
       const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
         displayInventory: new FakeDisplayInventoryProvider(),
       });
@@ -2879,7 +2878,7 @@ describe("Explore", () => {
       } finally {
         restorePipelineOverrides();
         ToolRegistry.setCollaboratorsForTesting({
-          deviceSessionManager: originalDeviceReadiness,
+          deviceReadiness: originalDeviceReadiness,
         });
       }
     });

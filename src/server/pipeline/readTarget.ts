@@ -198,11 +198,7 @@ export async function ensureReadTargetOrWatch(
 > {
   if (options.intent !== "read") {
     return {
-      device: await input.deviceSessionManager.ensureDeviceReady(
-        platform,
-        providedDeviceId,
-        options,
-      ),
+      device: await input.deviceReadiness.ensureDeviceReady(platform, providedDeviceId, options),
     };
   }
   const readiness = new AbortController();
@@ -229,7 +225,7 @@ export async function ensureReadTargetOrWatch(
   const combinedSignal = combineAbortSignals(options.signal, readiness.signal);
   try {
     const device = await runWithAbortSignal(combinedSignal, () =>
-      input.deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
+      input.deviceReadiness.ensureDeviceReady(platform, providedDeviceId, {
         ...options,
         signal: combinedSignal,
         beforeReadBoot: providedDeviceId
@@ -299,7 +295,7 @@ export async function findExplicitReadTarget(
             (p) => listing.scanned[p] && (targetPlatform === "either" || targetPlatform === p),
           );
           for (const p of healthy) {
-            const image = await input.deviceSessionManager.findProvidedReadinessImage(
+            const image = await input.deviceReadiness.findProvidedReadinessImage(
               p,
               input.args.deviceId,
               listing,

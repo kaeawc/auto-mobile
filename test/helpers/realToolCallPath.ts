@@ -50,7 +50,7 @@ const SUCCESS = { content: [{ type: "text", text: JSON.stringify({ success: true
  * daemon's session manager and pool.
  */
 export class RealToolCallPath {
-  readonly deviceSessionManager = new FakeDeviceReadiness();
+  readonly deviceReadiness = new FakeDeviceReadiness();
   /** Tool bodies that reached the device boundary, in order. */
   readonly runs: DeviceToolRun[] = [];
   /**
@@ -78,7 +78,7 @@ export class RealToolCallPath {
   private readonly restorers: Array<() => void> = [];
 
   constructor(private readonly devices: BootedDevice[]) {
-    this.deviceSessionManager.setConnectedDevices(devices);
+    this.deviceReadiness.setConnectedDevices(devices);
   }
 
   install(registerDefaultTools = true): this {
@@ -107,7 +107,7 @@ export class RealToolCallPath {
     const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
     this.restorers.push(() => ToolRegistry.setCollaboratorsForTesting(originalCollaborators));
     ToolRegistry.setCollaboratorsForTesting({
-      deviceSessionManager: this.deviceSessionManager,
+      deviceReadiness: this.deviceReadiness,
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
       navigationToolCallRecorder: { record: () => undefined },
     });
@@ -179,7 +179,7 @@ export class RealToolCallPath {
       createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async () => undefined,
-        legacyDeviceSelection: () => this.deviceSessionManager,
+        legacyDeviceSelection: () => this.deviceReadiness,
       }),
       { defaultEnabled: true },
     );

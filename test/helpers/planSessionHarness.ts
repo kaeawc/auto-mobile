@@ -119,7 +119,7 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
   const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
   restores.push(() => ToolRegistry.setCollaboratorsForTesting(originalCollaborators));
   ToolRegistry.setCollaboratorsForTesting({
-    deviceSessionManager: connected,
+    deviceReadiness: connected,
     toolCallRepository: { async recordToolCall(): Promise<void> {} },
     navigationToolCallRecorder: { record: () => undefined },
   });

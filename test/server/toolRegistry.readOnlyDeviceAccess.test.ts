@@ -158,7 +158,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([held, free]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });

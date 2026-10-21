@@ -82,7 +82,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     ToolRegistry.clearTools();
     fakeDeviceReadiness = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       env,
       displayInventory: new FakeDisplayInventoryProvider(),

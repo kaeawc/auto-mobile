@@ -178,7 +178,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     });
     fakeDeviceReadiness = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: {
         async recordToolCall(): Promise<void> {},

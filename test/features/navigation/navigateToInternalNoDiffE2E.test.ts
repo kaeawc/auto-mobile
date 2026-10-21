@@ -51,7 +51,7 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
   let fakeDeviceReadiness: FakeDeviceReadiness;
   let originalDeviceReadiness: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
-  >["deviceSessionManager"];
+  >["deviceReadiness"];
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let restorePipelineOverrides: (() => void) | undefined;
@@ -93,8 +93,8 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceReadiness = new FakeDeviceReadiness();
-    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    originalDeviceReadiness = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -105,7 +105,7 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

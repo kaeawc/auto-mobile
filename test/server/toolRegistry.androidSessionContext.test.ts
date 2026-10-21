@@ -58,7 +58,7 @@ describe("ToolRegistry Android session context", () => {
     });
     fakeDeviceReadiness = new FakeDeviceReadiness();
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceReadiness });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDeviceReadiness });
   });
 
   afterEach(() => {

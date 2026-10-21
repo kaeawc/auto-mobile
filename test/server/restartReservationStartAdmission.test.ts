@@ -133,7 +133,7 @@ describe("start admission and owner resume for restart reservations", () => {
     const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
     const deviceSessions = new FakeDeviceReadiness();
     deviceSessions.setConnectedDevices([device]);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceSessions });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { recordToolCall: async () => {} },
     });

@@ -841,7 +841,7 @@ export class DaemonStartup {
     }
 
     logger.info(`[Daemon] Initializing CtrlProxy iOS for ${iosDevices.length} iOS device(s)...`);
-    const deviceSessionManager = this.host.services.iosDeviceVerifier()();
+    const deviceReadiness = this.host.services.iosDeviceVerifier()();
 
     await initializeIosCtrlProxyAtStartup(
       iosDevices.map((device) => device.id),
@@ -851,8 +851,7 @@ export class DaemonStartup {
         perDeviceTimeoutMs: 5000,
         pendingPrefetch: () => IosCtrlProxyBuilder.pendingPrefetch(),
         isShuttingDown: () => this.host.lifecycle.shutdownInProgress(),
-        verifyIosDevice: (deviceId, options) =>
-          deviceSessionManager.verifyIosDevice(deviceId, options),
+        verifyIosDevice: (deviceId, options) => deviceReadiness.verifyIosDevice(deviceId, options),
       },
     );
   }

@@ -496,8 +496,8 @@ describe("navigation tool session graph selection", () => {
     const fakeDevices = new FakeDeviceReadiness();
     fakeDevices.setConnectedDevices([device]);
     fakeDevices.setCurrentDevice(device, "ios");
-    const originalDevices = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDevices });
+    const originalDevices = ToolRegistry.getCollaboratorsForTesting().deviceReadiness;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: fakeDevices });
     const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -555,7 +555,7 @@ describe("navigation tool session graph selection", () => {
       expect(fakeDevices.getLastEnsureDeviceReadyPlatform()).toBe("android");
     } finally {
       restorePipelineOverrides();
-      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDevices });
+      ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDevices });
       exploreSpy.mockRestore();
     }
   });

@@ -56,7 +56,7 @@ let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
 let originalCollaborators: ToolRegistryCollaborators;
-let deviceSessionManager: FakeDeviceReadiness;
+let deviceReadiness: FakeDeviceReadiness;
 let restorePipelineOverrides: (() => void) | undefined;
 const fixtures = new Map<string, McpTestFixture>();
 const proxies: DaemonMcpProxy[] = [];
@@ -65,9 +65,9 @@ let restoreSpies: Array<() => void> = [];
 
 beforeEach(async () => {
   originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-  deviceSessionManager = new FakeDeviceReadiness();
-  deviceSessionManager.setConnectedDevices(devices);
-  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
+  deviceReadiness = new FakeDeviceReadiness();
+  deviceReadiness.setConnectedDevices(devices);
+  ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceReadiness });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -278,11 +278,9 @@ test("a read naming another connection's session watches it without binding the 
   expect(socket.testHooks.boundMcpClientFor("other")).toBeUndefined();
 
   // The other connection's next untargeted call must not be routed to the owner's device.
-  const scansBeforeUntargeted = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+  const scansBeforeUntargeted = deviceReadiness.getDetectConnectedPlatformsCallCount();
   const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
-  expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(
-    scansBeforeUntargeted + 1,
-  );
+  expect(deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeUntargeted + 1);
   expect(untargeted.isError).toBe(true);
   expect(JSON.stringify(untargeted.content)).toContain("Multiple Android devices detected");
   const reachedOwnerDevice = !untargeted.isError && received.at(-1) === devices[0].deviceId;
@@ -365,11 +363,9 @@ for (const autolock of ["1", "0"]) {
     expect(received).toEqual([]);
     expect(socket.testHooks.boundMcpClientFor("other")).toBeUndefined();
 
-    const scansBeforeUntargeted = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const scansBeforeUntargeted = deviceReadiness.getDetectConnectedPlatformsCallCount();
     const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
-    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(
-      scansBeforeUntargeted + 1,
-    );
+    expect(deviceReadiness.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeUntargeted + 1);
     expect(untargeted.isError).toBe(true);
     expect(JSON.stringify(untargeted.content)).toContain("Multiple Android devices detected");
     const reachedOwnerDevice = !untargeted.isError && received.at(-1) === devices[0].deviceId;

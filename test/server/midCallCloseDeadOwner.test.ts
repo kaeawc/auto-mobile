@@ -81,12 +81,12 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     restoreToolCallRepository = () =>
       ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: original });
     const previousDeviceReadiness = ToolRegistry.getDeviceReadiness();
-    const deviceSessionManager = new FakeDeviceReadiness();
-    deviceSessionManager.setConnectedDevices([DEVICE]);
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
+    const deviceReadiness = new FakeDeviceReadiness();
+    deviceReadiness.setConnectedDevices([DEVICE]);
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: deviceReadiness });
     restoreDeviceReadiness = () =>
       ToolRegistry.setCollaboratorsForTesting({
-        deviceSessionManager: previousDeviceReadiness,
+        deviceReadiness: previousDeviceReadiness,
       });
 
     timer = new FakeTimer();

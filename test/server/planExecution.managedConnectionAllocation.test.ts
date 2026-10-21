@@ -93,7 +93,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     const devices = new FakeDeviceReadiness();
     devices.setConnectedDevices([slotA, free]);
     originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
-    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: devices });
     ToolRegistry.setCollaboratorsForTesting({
       toolCallRepository: { async recordToolCall(): Promise<void> {} },
     });

@@ -937,8 +937,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 52 rawValues", () => {
-    expect(rawValues.length).toBe(52);
+  test("Swift ResponseType declares exactly 53 rawValues", () => {
+    expect(rawValues.length).toBe(53);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -951,9 +951,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 47 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 48 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(47);
+    expect(reshaped.length).toBe(48);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1180,7 +1180,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 47 explicitly-decoded types", () => {
+  test("the default table covers all 48 explicitly-decoded types", () => {
     expect(DEFAULT_WHEN_ABSENT.map((row) => row.type).sort()).toEqual(
       EXPECTED_RESHAPED_RESPONSE_TYPES,
     );
@@ -1221,8 +1221,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 46 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(46);
+  test("the passthrough set is the 47 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(47);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

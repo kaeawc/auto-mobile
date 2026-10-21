@@ -1,3 +1,4 @@
+import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { expect, spyOn, test } from "bun:test";
@@ -16,8 +17,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 interface DisconnectMonitorSurface {
   deviceDisconnectMonitor: SingleFlightInterval;
-  deviceDisconnectMisses: Map<string, number>;
-  confirmedDisconnectedDeviceIds: Set<string>;
+  deviceLoss: DeviceLossState;
   startDeviceDisconnectMonitor(
     manager: MissingDeviceManager,
     listRecordings: () => Promise<[]>,
@@ -105,13 +105,7 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
     devicePool: pool,
     sessionManager: sessions,
     deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map<string, number>(),
-    deviceDisconnectMissIncarnations: new Map(),
-    confirmedDisconnectedDeviceIds: new Set<string>(),
-    forceDisconnectedDeviceIds: new Set(),
-    forceDisconnectedDeviceGenerations: new Map(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
+    deviceLoss: new DeviceLossState(),
     deferredSessionRecoverySweeps: new Set(),
   }) as DisconnectMonitorSurface;
   const deviceExecution = tracker.startExecution("observe");
@@ -172,8 +166,8 @@ async function expectDeferred(h: Awaited<ReturnType<typeof monitorHarness>>) {
   expect(await h.incidents.list()).toEqual([]);
   expect(h.sessions.getSession("kill-session")).not.toBeNull();
   expect(h.pool.getDevice(h.device.id)).toBe(h.device);
-  expect(h.daemon.confirmedDisconnectedDeviceIds.has(h.device.id)).toBe(false);
-  expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(MISSING_DEVICE_MISS_THRESHOLD);
+  expect(h.daemon.deviceLoss.confirmedDisconnectedIds.has(h.device.id)).toBe(false);
+  expect(h.daemon.deviceLoss.misses.get(h.device.id)).toBe(MISSING_DEVICE_MISS_THRESHOLD);
   expect(
     h.warn.mock.calls.filter(([message]) =>
       message.includes("Retaining intentionally stopped device"),
@@ -186,8 +180,8 @@ async function expectCleanedUp(h: Awaited<ReturnType<typeof monitorHarness>>) {
   expect(h.cancel).toHaveBeenCalledTimes(1);
   expect(h.sessions.getSession("kill-session")).toBeNull();
   expect(h.pool.getDevice(h.device.id)).toBeNull();
-  expect(h.daemon.confirmedDisconnectedDeviceIds.has(h.device.id)).toBe(true);
-  expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
+  expect(h.daemon.deviceLoss.confirmedDisconnectedIds.has(h.device.id)).toBe(true);
+  expect(h.daemon.deviceLoss.misses.has(h.device.id)).toBe(false);
   const incidents = await h.incidents.list();
   if (h.device.platform === "android") {
     expect(incidents).toHaveLength(1);

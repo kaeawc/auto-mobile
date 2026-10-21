@@ -1,3 +1,4 @@
+import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { makePool } from "../helpers/makePool";
 import { concreteCtrlProxyClient } from "../helpers/concreteCtrlProxyClient";
 import { readFileSync } from "node:fs";
@@ -2464,13 +2465,7 @@ describe("killDevice handler", () => {
         devicePool: pool,
         sessionManager,
         deviceDisconnectMonitor: null,
-        deviceDisconnectMisses: new Map(),
-        deviceDisconnectMissIncarnations: new Map(),
-        confirmedDisconnectedDeviceIds: new Set(),
-        forceDisconnectedDeviceIds: new Set(),
-        forceDisconnectedDeviceGenerations: new Map(),
-        offlineRecoveryAttemptedDeviceIds: new Set(),
-        offlineRecoveryAttemptedIncarnations: new Map(),
+        deviceLoss: new DeviceLossState(),
         deferredSessionRecoverySweeps: new Set(),
       }) as {
         deviceDisconnectMonitor: SingleFlightInterval;

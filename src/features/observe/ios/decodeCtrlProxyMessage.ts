@@ -263,6 +263,14 @@ function decodeHingeAngleResult(message: WebSocketMessage): unknown {
   };
 }
 
+function decodeLocationResult(message: WebSocketMessage): unknown {
+  return {
+    success: message.success ?? false,
+    error: message.error,
+    totalTimeMs: message.totalTimeMs ?? 0,
+  };
+}
+
 function decodeImeActionResult(message: WebSocketMessage): unknown {
   return {
     success: message.success ?? (message.error === undefined || message.error === null),
@@ -521,6 +529,7 @@ const messageDecoders = new Map<
   ["keyboard_result", decodeKeyboardResult],
   ["rotate_result", decodeRotateResult],
   ["hinge_angle_result", decodeHingeAngleResult],
+  ["location_result", decodeLocationResult],
   ["ime_action_result", decodeImeActionResult],
   ["action_result", decodeImeActionResult],
   [

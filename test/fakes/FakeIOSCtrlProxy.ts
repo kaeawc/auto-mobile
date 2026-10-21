@@ -32,6 +32,8 @@ import type {
   CtrlProxySdkTriggerResult,
   CtrlProxyVoiceOverResult,
   CtrlProxyHingeAngleResult,
+  CtrlProxyLocationRequest,
+  CtrlProxyLocationResult,
   CtrlProxyActionResult,
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
@@ -1176,6 +1178,21 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     await this.applyDelay("setHingeAngle");
     this.checkFailure("setHingeAngle");
     return this.hingeAngleResult ?? { success: true, angle, totalTimeMs: 0 };
+  }
+
+  /** Location requests seen, and an optional scripted result (#14091). */
+  readonly locationHistory: CtrlProxyLocationRequest[] = [];
+  locationResult?: CtrlProxyLocationResult;
+
+  async requestLocation(
+    request: CtrlProxyLocationRequest,
+    _timeoutMs: number = 5000,
+    _signal?: AbortSignal,
+  ): Promise<CtrlProxyLocationResult> {
+    this.locationHistory.push(request);
+    await this.applyDelay("requestLocation");
+    this.checkFailure("requestLocation");
+    return this.locationResult ?? { success: true, totalTimeMs: 0 };
   }
 
   async requestLaunchApp(

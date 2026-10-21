@@ -41,6 +41,7 @@ const IOS_WIRE_DEADLINE_REQUEST_TYPES: ReadonlySet<string> = new Set([
   "request_launch_app",
   "request_reset_permissions",
   "request_rotate",
+  "request_location",
   "set_hinge_angle",
   "request_clipboard",
   "set_voiceover_state",

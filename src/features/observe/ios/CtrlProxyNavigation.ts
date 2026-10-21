@@ -17,6 +17,8 @@ import type {
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
   CtrlProxyHingeAngleResult,
+  CtrlProxyLocationRequest,
+  CtrlProxyLocationResult,
 } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
@@ -202,6 +204,38 @@ export class CtrlProxyNavigation {
         success: false,
         totalTimeMs: timeout,
         error: `Set hinge angle timed out after ${timeout}ms`,
+      }),
+    });
+  }
+
+  /**
+   * Set or clear the device's simulated location through `XCUIDevice.location` (#14091).
+   * Works on physical devices, where simctl has no location verb.
+   */
+  async requestLocation(
+    request: CtrlProxyLocationRequest,
+    timeoutMs: number = 5000,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyLocationResult> {
+    return sendCommand<CtrlProxyLocationResult>(this.context, {
+      idPrefix: "location",
+      responseType: "location",
+      messageType: "request_location",
+      params: { ...request },
+      timeoutMs,
+      abortSignal: signal,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, totalTimeMs: 0, error: "Not connected" }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        unsupported: true,
+        totalTimeMs: 0,
+        error,
+      }),
+      timeoutError: (timeout) => ({
+        success: false,
+        totalTimeMs: timeout,
+        error: `Location request timed out after ${timeout}ms`,
       }),
     });
   }

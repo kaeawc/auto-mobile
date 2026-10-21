@@ -38,6 +38,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case launchApp(RequestLaunchApp)
     case resetPermissions(RequestResetPermissions)
     case rotate(RequestRotate)
+    case location(RequestLocation)
     case setHingeAngle(RequestSetHingeAngle)
     case clipboard(RequestClipboard)
 
@@ -98,7 +99,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .requestPressButton, .requestPressHome, .requestPressBack, .requestShake, .requestRecentApps:
             return try decodeNavigation(requestType, from: decoder)
         case .requestAction, .requestActivateAccessibilityLink, .requestLaunchApp, .requestResetPermissions,
-             .requestRotate, .setHingeAngle, .requestClipboard:
+             .requestRotate, .requestLocation, .setHingeAngle, .requestClipboard:
             return try decodeAppAndDevice(requestType, from: decoder)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
              .setVoiceOverState:
@@ -199,6 +200,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try .resetPermissions(RequestResetPermissions(from: decoder))
         case .requestRotate:
             return try .rotate(RequestRotate(from: decoder))
+        case .requestLocation:
+            return try .location(RequestLocation(from: decoder))
         case .setHingeAngle:
             return try .setHingeAngle(RequestSetHingeAngle(from: decoder))
         case .requestClipboard:
@@ -313,6 +316,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .launchApp: return .requestLaunchApp
         case .resetPermissions: return .requestResetPermissions
         case .rotate: return .requestRotate
+        case .location: return .requestLocation
         case .setHingeAngle: return .setHingeAngle
         case .clipboard: return .requestClipboard
         case .getCurrentFocus: return .getCurrentFocus
@@ -387,6 +391,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case let .launchApp(payload): return payload
         case let .resetPermissions(payload): return payload
         case let .rotate(payload): return payload
+        case let .location(payload): return payload
         case let .clipboard(payload): return payload
         case let .addHighlight(payload): return payload
         case let .getPreferences(payload): return payload

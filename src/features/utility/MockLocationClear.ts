@@ -6,6 +6,8 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { IOSCtrlProxyClient } from "../observe/ios";
+import type { IosRunnerLocationClient } from "./device-state/LocationOperations";
 
 // Match the clock restore cadence in sessionManager.ts; simctl gets a 5s attempt budget.
 const MOCK_LOCATION_CLEAR_RETRY_DELAY_MS = 250;
@@ -29,19 +31,29 @@ interface LocationMarker {
 interface MockLocationClearOptions {
   timer?: Timer;
   simctlFactory?: (device: BootedDevice) => Pick<SimCtlClient, "executeCommandArgs">;
+  /** Physical iOS clear through the CtrlProxy runner (#14091). */
+  runnerLocationFactory?: (device: BootedDevice) => IosRunnerLocationClient;
   backoff?: BackoffPolicy;
 }
 
-/** In-memory session ownership only; Android's console has no location unset command. */
+/**
+ * In-memory session ownership only; Android's console has no location unset command. The
+ * Simulator clears with `simctl location clear`, a physical iOS device through the runner.
+ */
 export class MockLocationClearRegistry implements MockLocationClears {
   private readonly markers = new Map<string, LocationMarker>();
   private readonly timer: Timer;
   private readonly simctlFactory: NonNullable<MockLocationClearOptions["simctlFactory"]>;
+  private readonly runnerLocationFactory: NonNullable<
+    MockLocationClearOptions["runnerLocationFactory"]
+  >;
   private readonly backoff: BackoffPolicy;
 
   constructor(options: MockLocationClearOptions = {}) {
     this.timer = options.timer ?? defaultTimer;
     this.simctlFactory = options.simctlFactory ?? ((device) => new SimCtlClient(device));
+    this.runnerLocationFactory =
+      options.runnerLocationFactory ?? ((device) => IOSCtrlProxyClient.getInstance(device));
     this.backoff = options.backoff ?? fixedBackoff(MOCK_LOCATION_CLEAR_RETRY_DELAY_MS);
   }
 
@@ -56,7 +68,7 @@ export class MockLocationClearRegistry implements MockLocationClears {
   }
 
   private rememberSet(sessionId: string, device: BootedDevice): void {
-    if (device.platform !== "ios" || !isIosSimulatorDevice(device)) {
+    if (device.platform !== "ios") {
       return;
     }
     const previous = this.markers.get(device.deviceId);
@@ -138,22 +150,14 @@ export class MockLocationClearRegistry implements MockLocationClears {
     const attemptController = new AbortController();
     const signal = AbortSignal.any([marker.controller.signal, attemptController.signal]);
     try {
-      await raceWithDeadline(
-        () =>
-          this.simctlFactory(marker.device).executeCommandArgs(
-            ["location", marker.device.deviceId, "clear"],
-            MOCK_LOCATION_CLEAR_TIMEOUT_MS,
-            signal,
-          ),
-        {
-          timer: this.timer,
-          timeoutMs: MOCK_LOCATION_CLEAR_TIMEOUT_MS,
-          signal,
-          unref: true,
-          label: "Mock location clear",
-          onTimeout: () => attemptController.abort(),
-        },
-      );
+      await raceWithDeadline(() => this.clearCommand(marker.device, signal), {
+        timer: this.timer,
+        timeoutMs: MOCK_LOCATION_CLEAR_TIMEOUT_MS,
+        signal,
+        unref: true,
+        label: "Mock location clear",
+        onTimeout: () => attemptController.abort(),
+      });
       return true;
     } catch (error) {
       if (!this.isCurrent(marker)) {
@@ -168,6 +172,25 @@ export class MockLocationClearRegistry implements MockLocationClears {
         error,
       );
       return false;
+    }
+  }
+
+  private async clearCommand(device: BootedDevice, signal: AbortSignal): Promise<void> {
+    if (isIosSimulatorDevice(device)) {
+      await this.simctlFactory(device).executeCommandArgs(
+        ["location", device.deviceId, "clear"],
+        MOCK_LOCATION_CLEAR_TIMEOUT_MS,
+        signal,
+      );
+      return;
+    }
+    const result = await this.runnerLocationFactory(device).requestLocation(
+      { clear: true },
+      MOCK_LOCATION_CLEAR_TIMEOUT_MS,
+      signal,
+    );
+    if (!result.success) {
+      throw new Error(result.error ?? "CtrlProxy runner refused to clear the simulated location");
     }
   }
 

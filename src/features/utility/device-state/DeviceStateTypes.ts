@@ -1,3 +1,4 @@
+import type { IosRunnerLocationClient } from "./LocationOperations";
 import type { BootedDevice, ExecResult } from "../../../models";
 import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
 import { ActionableError } from "../../../models/ActionableError";
@@ -156,6 +157,8 @@ export interface DeviceStateDependencies {
   deviceTraits?: DeviceTraits;
   canWriteLocation?: () => boolean;
   /** Session attribution is supplied by the handler, never inferred from write admission. */
+  /** Physical iOS location seam (#14091); defaults to the device's CtrlProxy runner client. */
+  iosRunnerLocation?: IosRunnerLocationClient;
   onLocationApplied?: () => void;
   /** Renders `cameraPoster` QR payloads; defaults to the file-backed poster writer. */
   cameraPosterQrWriter?: QrPosterWriter;

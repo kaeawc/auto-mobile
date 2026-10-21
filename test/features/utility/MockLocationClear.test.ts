@@ -1,3 +1,4 @@
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { MockLocationClearRegistry } from "../../../src/features/utility/MockLocationClear";
@@ -29,10 +30,14 @@ beforeEach(() => {
 });
 afterEach(() => warn.mockRestore());
 
-function harness(simctl = new FakeSimctl()) {
+function harness(simctl = new FakeSimctl(), runner = new FakeIOSCtrlProxy()) {
   const timer = new FakeTimer();
   const registry = new LocationRouteRegistry(timer);
-  const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
+  const clears = new MockLocationClearRegistry({
+    timer,
+    simctlFactory: () => simctl,
+    runnerLocationFactory: () => runner,
+  });
   let release!: Parameters<SessionManager["onSessionRelease"]>[0];
   let unbound!: Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
   const pending: Array<{ deviceId: string; promise: Promise<unknown> }> = [];
@@ -259,10 +264,18 @@ describe("session mock location clear", () => {
     expect(h.simctl.getMethodCalls("executeCommandArgs")[1].args).toEqual(clearArgs(other));
   });
 
-  for (const device of [
-    { ...ios, platform: "android" as const },
-    { ...ios, deviceId: "00008110-0012345678901234" },
-  ]) {
+  test("a physical iOS fix is cleared through the runner on release, never simctl (#14091)", async () => {
+    const runner = new FakeIOSCtrlProxy();
+    const physical = { ...ios, deviceId: "00008110-0012345678901234" };
+    const h = harness(new FakeSimctl(), runner);
+    h.clears.markSet("s", physical);
+    h.release("s", physical.deviceId);
+    await h.pending[0].promise;
+    expect(runner.locationHistory).toEqual([{ clear: true }]);
+    expect(h.simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  for (const device of [{ ...ios, platform: "android" as const }]) {
     test(`never marks ${device.platform} ${device.deviceId}`, async () => {
       const h = harness();
       h.clears.markSet("s", device);

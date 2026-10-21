@@ -1,8 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import type { ResetResult } from "../../../src/daemon/sessionBroker/devicePort";
-import { BrokerResetRelease } from "../../../src/daemon/sessionBroker/resetRelease";
-import { BrokerTimingRecorder } from "../../../src/daemon/sessionBroker/timingRecorder";
 import { openExportHarness, exportConfig } from "./fixtures/exportHarness";
 import { drainUntil, drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
@@ -282,29 +280,33 @@ describe("broker reset readiness lifecycle", () => {
     await released;
   });
 
-  test("recovery shutdown does not pass an abort signal into an already-started native reset", async () => {
-    const ready = await broker.prepare(exportConfig("shutdown"), "token");
+  test("broker recovery shutdown leaves a completed native reset pending without destroying it", async () => {
+    const ready = await broker.prepare(exportConfig("recovery-shutdown"), "token");
     const request = (await harness.store.beginRelease(ready.sessionUuid!, harness.options.owner))!;
-    const resource = (await harness.store.getResource(request.resourceId!))!;
-    const controller = new AbortController();
+    const destroy = spyOn(harness.options.devices, "destroy");
+    const destruction = spyOn(harness.store, "releaseByDestruction");
     let nativeSignal: AbortSignal | undefined;
     let nativeCompleted = false;
+    harness.options.devices.managesResetBootSlots = true;
     harness.options.devices.reset = async (_resource, signal) => {
       nativeSignal = signal;
-      controller.abort(new Error("shutdown"));
+      await broker.markRestartHandoff();
       signal?.throwIfAborted();
       nativeCompleted = true;
       return "clean";
     };
-    const release = new BrokerResetRelease(
-      harness.options,
-      new BrokerTimingRecorder(harness.store, harness.timer),
-      () => harness.timer.now(),
-      async () => {},
-    );
-    await release.drainAndReset(request, resource, ready.sessionUuid!, controller.signal);
-    expect(nativeSignal).toBeUndefined();
-    expect(nativeCompleted).toBe(true);
-    expect((await harness.store.getResource(resource.resourceId))?.state).toBe("resetting");
+    try {
+      await broker.recover();
+      await broker.joinReleases();
+      expect(nativeSignal).toBeUndefined();
+      expect(nativeCompleted).toBe(true);
+      expect(destroy).not.toHaveBeenCalled();
+      expect(destruction).not.toHaveBeenCalled();
+      expect((await harness.store.getResource(request.resourceId!))?.state).toBe("resetting");
+      expect((await harness.store.getRequest(request.requestId))?.state).toBe("releasing");
+    } finally {
+      destroy.mockRestore();
+      destruction.mockRestore();
+    }
   });
 });

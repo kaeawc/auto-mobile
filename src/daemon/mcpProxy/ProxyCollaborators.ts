@@ -41,7 +41,7 @@ import {
   type VersionMismatchReason,
 } from "../proxy/daemonErrors";
 import { type LivenessHandover, runWithoutDaemonLifecycle } from "../proxyLivenessRecovery";
-import { type SessionReleaseSnapshot } from "../sessionManager";
+import { type SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import { type DaemonStatus } from "../types";
 import { isDeviceInventoryTool } from "./ProxyContracts";
 import type { ProxyRuntime } from "./ProxyRuntime";

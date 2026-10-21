@@ -3,6 +3,7 @@ import { Server } from "@modelcontextprotocol/server";
 import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
 import * as prototypeSuspended from "../../src/features/prototype/prototypeSuspended";
 import { isTypedToolRefusal } from "../../src/daemon/shapeToolCallError";
+import * as directSessionNotActive from "../../src/models/DirectSessionNotActiveError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
@@ -153,6 +154,7 @@ import {
  * within these modules; the AST inventory below guards newly introduced modules.
  */
 const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  "models/DirectSessionNotActiveError": directSessionNotActive,
   "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
   "server/downloadsFixtureService": downloadsRefusals,
   "server/StageSessionDownloadsRefusal": downloadsStageRefusal,
@@ -251,6 +253,8 @@ const INSTALLER_ERROR_EXEMPTION =
   "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.";
 
 const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/action/androidLaunchIntent":
+    "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
     INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,

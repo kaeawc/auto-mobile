@@ -52,6 +52,10 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         await endpointResolver?.noteForegroundBundle(bundleId)
     }
 
+    public func appLifecycleDidChange() async {
+        await endpointResolver?.noteAppLifecycleEvent()
+    }
+
     /// Fetch the latest cached hierarchy from the SDK (fast, no main-thread work in the target app).
     public func fetchHierarchy() async -> SdkViewHierarchy? {
         await optionalHierarchy(path: SdkRoute.cachedHierarchy.path)

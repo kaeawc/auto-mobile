@@ -91,6 +91,7 @@ export interface DaemonStartupHost extends Pick<
     | "iosDeviceVerifier"
     | "httpIngress"
     | "mcpDispatcher"
+    | "deviceReadiness"
     | "sessionManager"
     | "devicePool"
     | "deviceSessionRegistry"
@@ -567,6 +568,8 @@ export class DaemonStartup {
           liveAcceptanceStartupSecret: this.host.identity.liveAcceptanceStartupSecret(),
           acceptanceDiscoveryCapability: this.host.identity.acceptanceDiscoveryCapability(),
           mcpDispatcher: this.host.services.mcpDispatcher(),
+          clearConnectionDevicePin: (id) =>
+            this.host.services.deviceReadiness().clearConnectionDevicePin(id),
         },
         this.host.services.idGenerator(),
         // A hand-launched daemon (no startup lock) must refuse to unlink a live
@@ -589,9 +592,8 @@ export class DaemonStartup {
   async startServicesAfterSocketBind(): Promise<void> {
     startupBenchmark.startPhase("auxiliarySocketServerStart");
     await this.host.startAuxiliarySocket("video-recording", startVideoRecordingSocketServer);
-    await this.host.startAuxiliarySocket(
-      "device-gesture-recording",
-      startDeviceGestureRecordingSocketServer,
+    await this.host.startAuxiliarySocket("device-gesture-recording", () =>
+      startDeviceGestureRecordingSocketServer(this.host.services.deviceReadiness()),
     );
     await this.host.startAuxiliarySocket("device-snapshot", startDeviceSnapshotSocketServer);
     await this.host.startAuxiliarySocket("appearance", startAppearanceSocketServer);
@@ -608,7 +610,9 @@ export class DaemonStartup {
     await this.host.startAuxiliarySocket("telemetry-push", startTelemetryPushSocketServer);
     this.host.setupDeviceSessionRouting();
     await this.host.startAuxiliarySocket("webrtc-stream", startWebRtcStreamSocketServer);
-    await this.host.startAuxiliarySocket("video-stream", startVideoStreamSocketServer);
+    await this.host.startAuxiliarySocket("video-stream", () =>
+      startVideoStreamSocketServer(this.host.services.deviceReadiness()),
+    );
     startupBenchmark.endPhase("auxiliarySocketServerStart");
 
     startAppearanceSyncScheduler({

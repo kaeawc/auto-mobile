@@ -22,7 +22,7 @@ import type { AppearanceConfig, AppearanceSyncMode, BootedDevice } from "../../s
 const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} };
 const emptyDeviceSource: AppearanceDeviceSource = {
   getPooledDevices: () => [],
-  getCurrentDevice: () => undefined,
+  getSessionDevice: () => undefined,
   getSessionForDevice: () => null,
 };
 const initialConfig: AppearanceConfig = {
@@ -59,15 +59,16 @@ function sessionManager(): StreamAuthSessionManager {
 function ownedDeviceSource({
   manager,
   pooled,
-  current,
+  sessionDevice,
 }: {
   manager: StreamAuthSessionManager;
   pooled: string[];
-  current?: string;
+  sessionDevice?: string;
 }): AppearanceDeviceSource {
   return {
     getPooledDevices: () => pooled.map(device),
-    getCurrentDevice: () => (current ? device(current) : undefined),
+    getSessionDevice: (sessionUuid) =>
+      sessionUuid && sessionDevice ? device(sessionDevice) : undefined,
     getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId),
   };
 }
@@ -634,7 +635,7 @@ describe("AppearanceSocketServer", () => {
       const authServer = new TestableAppearanceSocketServer(
         timer,
         new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
-        ownedDeviceSource({ manager, pooled: ["own", "other", "unowned"], current: "own" }),
+        ownedDeviceSource({ manager, pooled: ["own", "other", "unowned"], sessionDevice: "own" }),
         dependencies,
       );
       await authServer.startFake();
@@ -668,7 +669,11 @@ describe("AppearanceSocketServer", () => {
       const authServer = new TestableAppearanceSocketServer(
         timer,
         new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
-        ownedDeviceSource({ manager, pooled: ["own", "unowned"], current: "unowned-current" }),
+        ownedDeviceSource({
+          manager,
+          pooled: ["own", "unowned"],
+          sessionDevice: "unowned-session-device",
+        }),
         dependencies,
       );
       await authServer.startFake();
@@ -728,20 +733,20 @@ describe("AppearanceSocketServer", () => {
     }
   });
 
-  it("never applies to an unowned current device when the caller owns a pooled device", async () => {
+  it("never applies to an unowned device returned by the session source when the caller owns a pooled device", async () => {
     const applied: string[] = [];
     const manager = ownershipManager();
     const authServer = new TestableAppearanceSocketServer(
       timer,
       new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
-      ownedDeviceSource({ manager, pooled: ["own"], current: "unowned-current" }),
+      ownedDeviceSource({ manager, pooled: ["own"], sessionDevice: "unowned-session-device" }),
       fakeDependencies(applied),
     );
     await authServer.startFake();
     await authServer.simulateLine(
       socket,
       JSON.stringify({
-        id: "current",
+        id: "sessionDevice",
         command: "set_appearance",
         sessionUuid: "live",
         mode: "dark",
@@ -797,9 +802,9 @@ describe("AppearanceSocketServer", () => {
       const source = ownedDeviceSource({
         manager,
         pooled: ["own", "other", "unowned"],
-        current: "unowned-current",
+        sessionDevice: "unowned-session-device",
       });
-      // Auth-off is intentionally the existing all-devices behavior, even with a supplied UUID.
+      // Auth-off includes all pooled devices and the supplied session device, without ownership filtering.
       source.getSessionForDevice = () => {
         throw new Error("auth-off must not look up ownership");
       };
@@ -821,7 +826,12 @@ describe("AppearanceSocketServer", () => {
           mode: "dark",
         }),
       );
-      expect(applied).toEqual(["own:dark", "other:dark", "unowned:dark", "unowned-current:dark"]);
+      expect(applied).toEqual([
+        "own:dark",
+        "other:dark",
+        "unowned:dark",
+        ...(sessionUuid ? ["unowned-session-device:dark"] : []),
+      ]);
       expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0]).toMatchObject({
         success: true,
         result: { appliedMode: "dark" },

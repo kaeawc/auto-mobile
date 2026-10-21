@@ -37,7 +37,7 @@ class RequestOnlyAppearanceServer extends AppearanceSocketServer {
       },
       {
         getPooledDevices: () => [device],
-        getCurrentDevice: () => undefined,
+        getSessionDevice: () => undefined,
         getSessionForDevice: () => null,
       },
       dependencies,

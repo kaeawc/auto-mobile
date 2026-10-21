@@ -132,13 +132,12 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
     expect(platformBackend.startCalls.length).toBe(0);
   });
 
-  // The opt-in check is case-sensitive: only "1" / "true" enable ffmpeg. An
-  // uppercase "TRUE" must fall through to the default platform backend.
-  test('does NOT treat an uppercase "TRUE" opt-in value as enabled', async function () {
+  // The opt-in follows the shared env flag rule, so "TRUE" enables ffmpeg like "true" (#11848).
+  test('treats an uppercase "TRUE" opt-in value as enabled', async function () {
     process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "TRUE";
     await backend.start(baseConfig);
-    expect(platformBackend.startCalls.length).toBe(1);
-    expect(ffmpegBackend.startCalls.length).toBe(0);
+    expect(ffmpegBackend.startCalls.length).toBe(1);
+    expect(platformBackend.startCalls.length).toBe(0);
   });
 
   test("treats an empty opt-in value as disabled and uses the platform backend", async function () {

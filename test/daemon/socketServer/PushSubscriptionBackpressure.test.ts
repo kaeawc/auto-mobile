@@ -357,12 +357,20 @@ describe("push backpressure", () => {
     expect(socket.responses.at(-1)?.value).toBe(20);
   });
 
-  it("reports cap overflow immediately when no drain is pending", () => {
+  it("does not serialize a dropped screenshot when no drain is pending", () => {
     const server = new Server();
     const socket = new FakePushSocket<Frame>();
     server.add(socket);
     socket.bufferedBytes = PUSH_SOCKET_WRITABLE_LIMIT_BYTES + 1;
-    server.push({ type: "screenshot_update", screenshotBase64: "omitted" });
+    let serializations = 0;
+    const data = {
+      value: 1,
+      toJSON() {
+        serializations++;
+        return { value: this.value };
+      },
+    };
+    server.push({ type: "screenshot_update", data });
     expect(socket.responses).toEqual([
       {
         type: "frames_dropped",
@@ -371,6 +379,60 @@ describe("push backpressure", () => {
         reason: "backpressure",
       },
     ]);
+    expect(serializations).toBe(0);
+  });
+
+  it("does not serialize a dropped screenshot when the drop was already reported", () => {
+    const server = new Server();
+    const socket = new FakePushSocket<Frame>();
+    server.add(socket);
+    socket.bufferedBytes = PUSH_SOCKET_WRITABLE_LIMIT_BYTES + 1;
+    let serializations = 0;
+    const data = {
+      value: 1,
+      toJSON() {
+        serializations++;
+        return { value: this.value };
+      },
+    };
+    server.push({ type: "screenshot_update", data });
+    server.push({ type: "screenshot_update", data });
+    expect(socket.responses).toEqual([
+      {
+        type: "frames_dropped",
+        subscriptionId: "sub",
+        droppedType: "screenshot_update",
+        reason: "backpressure",
+      },
+    ]);
+    expect(serializations).toBe(0);
+  });
+
+  it("does not serialize a dropped screenshot while drain is pending", () => {
+    const { server, socket } = rig();
+    server.push({ type: "ping" });
+    socket.bufferedBytes = PUSH_SOCKET_WRITABLE_LIMIT_BYTES + 1;
+    let serializations = 0;
+    const data = {
+      value: 1,
+      toJSON() {
+        serializations++;
+        return { value: this.value };
+      },
+    };
+    server.push({ type: "screenshot_update", data });
+    expect(socket.responses).toEqual([{ type: "ping", subscriptionId: "sub" }]);
+    socket.drain();
+    expect(socket.responses).toEqual([
+      { type: "ping", subscriptionId: "sub" },
+      {
+        type: "frames_dropped",
+        subscriptionId: "sub",
+        droppedType: "screenshot_update",
+        reason: "backpressure",
+      },
+    ]);
+    expect(serializations).toBe(0);
   });
 
   it("attributes drop markers to each device and its session", () => {

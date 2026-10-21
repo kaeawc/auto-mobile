@@ -35,7 +35,7 @@ import type { SocketServerRuntime } from "./SocketServerRuntime";
 import type { SocketServerOperations } from "./socketServerOperations";
 type State = Pick<
   SocketServerRuntime,
-  "clientSockets" | "daemonState" | "boundMcpClientKeysBySocketSession"
+  "clientSockets" | "daemonState" | "boundMcpClientKeysBySocketSession" | "clearConnectionDevicePin"
 >;
 type Callbacks = Pick<
   SocketServerOperations,
@@ -165,6 +165,9 @@ export class McpBindings {
     if (this.state.daemonState.isInitialized()) {
       this.state.daemonState.getDevicePool().releaseMcpSessionBindings?.(socketSessionId);
     }
+  }
+  clearConnectionDevicePin(socketSessionId: string): void {
+    this.state.clearConnectionDevicePin?.(socketSessionId);
   }
   recordBoundMcpClientKey(
     request: DaemonRequest,

@@ -19,10 +19,12 @@ import android.view.accessibility.AccessibilityWindowInfo
  * offset instead of following the keyboard's own slide animation; with motion unavailable there is
  * nothing for `motion: "none"` to switch off.
  */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeImeInset {
   fun liftPx(displayId: Int): Int
 }
 
+@InternalAutoMobilePrototypeApi
 object NoPrototypeImeInset : PrototypeImeInset {
   override fun liftPx(displayId: Int) = 0
 }

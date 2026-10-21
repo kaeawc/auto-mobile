@@ -2,6 +2,7 @@ import { type BootedDevice } from "../models";
 import type { AdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { logger } from "./logger";
 import { errorMessage } from "./describeUnknownError";
+import { readAndroidEmulatorFlag } from "./android-cmdline-tools/deviceTraits";
 
 /**
  * adb reserves the `emulator-<port>` serial shape for locally-running Android
@@ -122,8 +123,8 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
           await adb.execute(["shell", "getprop", name], { noRetry: true, timeoutMs: 2000 })
         ).stdout.trim();
       const serial = await property("ro.serialno");
-      const qemu = await property("ro.kernel.qemu");
-      if (qemu === "1") {
+      // Uncached: identity must come from this transport, not a serial-keyed cache.
+      if ((await readAndroidEmulatorFlag(property)) === true) {
         const avdName = await property("ro.boot.qemu.avd_name");
         const consoleSerial = isAndroidEmulatorSerial(device.deviceId)
           ? device.deviceId

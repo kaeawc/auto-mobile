@@ -4,8 +4,8 @@ import {
 } from "./SessionRequestOwnerMismatchError";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { z } from "zod";
+import { RECEIPT_RETENTION_MS, SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
 import { SessionExportIdentityMismatchError } from "./store";
-import { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
 import { parseSessionConfig } from "../../devices/sessionConfig";
 import { SESSION_OWNER_EXITED_CODE } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -332,6 +332,33 @@ function unavailable(state: DaemonStateAccess): DaemonMethodResult {
 
 /** Session-broker socket dispatch shares the initialized daemon context. */
 export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMethodHandler]> = [
+  [
+    "daemon/sessionBrokerStats",
+    async (request, state) => {
+      const service = state.getSessionBrokerService?.();
+      if (!service) {
+        return unavailable(state);
+      }
+      const parsed = z
+        .object({
+          windowMs: z.number().finite().min(0).max(RECEIPT_RETENTION_MS).optional(),
+          limit: z.number().int().min(1).max(10000).optional(),
+        })
+        .strict()
+        .safeParse(request.params ?? {});
+      if (!parsed.success) {
+        return {
+          success: false,
+          code: "session_config_invalid",
+          error: "Invalid broker stats window or limit",
+        };
+      }
+      return {
+        success: true,
+        result: { ...(await service.broker.stats(parsed.data.windowMs, parsed.data.limit)) },
+      };
+    },
+  ],
   [
     "daemon/prepareSession",
     (request, state, _executions, signal, context) =>

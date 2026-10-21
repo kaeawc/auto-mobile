@@ -167,7 +167,7 @@ describe("AppearanceSocketServer with per-session config", () => {
       authenticator,
       {
         getPooledDevices: () => pooled,
-        getCurrentDevice: () => undefined,
+        getSessionDevice: () => undefined,
         getSessionForDevice: (deviceId) => owners.get(deviceId) ?? null,
       },
       dependencies,

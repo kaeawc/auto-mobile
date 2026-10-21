@@ -35,6 +35,30 @@ afterEach(() => {
   expect(DaemonState.getInstance().isInitialized()).toBe(false);
 });
 
+test("legacy selection passes the connection id to readiness and records its pin", async () => {
+  const pins = new Map<string | undefined, BootedDevice>();
+  const connectionIds: Array<string | undefined> = [];
+  const legacy: LegacyDeviceSelection = {
+    getExplicitDevicePin: () => undefined,
+
+    ensureDeviceReady: async (_platform, _deviceId, options) => {
+      connectionIds.push(options?.connectionId);
+      return device;
+    },
+    setExplicitDevicePin: (selected, connectionId) => {
+      pins.set(connectionId, selected);
+    },
+  };
+  const select = createSetActiveDeviceHandler({
+    legacyDeviceSelection: () => legacy,
+    resumeCtrlProxy: async () => {},
+  });
+  await select({ deviceId: device.deviceId, __mcpSessionId: "conn-a" });
+  expect(connectionIds).toEqual(["conn-a"]);
+  expect(pins.get("conn-a")).toEqual(device);
+  expect(pins.has(undefined)).toBe(false);
+});
+
 function arrange(
   states: (string | undefined)[],
   failures: number,
@@ -47,8 +71,8 @@ function arrange(
   let probes = 0;
   let attempts = 0;
   const legacy: LegacyDeviceSelection = {
-    getCurrentDevice: () => undefined,
-    getCurrentPlatform: () => undefined,
+    getExplicitDevicePin: () => undefined,
+
     ensureDeviceReady: async () => {
       calls.push("ready");
       onAttempt?.();
@@ -114,8 +138,8 @@ for (const deadlineExhausted of [true, false]) {
     let attempts = 0;
     const probedStates: string[] = [];
     const legacy: LegacyDeviceSelection = {
-      getCurrentDevice: () => undefined,
-      getCurrentPlatform: () => undefined,
+      getExplicitDevicePin: () => undefined,
+
       ensureDeviceReady: async () => {
         attempts++;
         if (state === "offline") {
@@ -170,8 +194,8 @@ test("fresh readiness retries recover offline then absent then ready at 700ms", 
     timer.now() < 300 ? "offline" : timer.now() < 700 ? undefined : "device";
   let cached: { state: string | undefined; expires: number } | undefined;
   const legacy: LegacyDeviceSelection = {
-    getCurrentDevice: () => undefined,
-    getCurrentPlatform: () => undefined,
+    getExplicitDevicePin: () => undefined,
+
     ensureDeviceReady: async () => {
       order.push(`attempt:${timer.now()}`);
       if (!cached || timer.now() >= cached.expires) {

@@ -236,7 +236,7 @@ async function prepareExpectedGenerationRestart(
       throw deferredRestartError({
         ledger: host.takeoverDeferrals,
         incumbent: expected,
-        kind: "unavailable",
+        kind: error.refusalReason === "active_operations" ? "active_operations" : "unavailable",
         original: error,
         nowMs: host.now(),
         subject: "daemon",

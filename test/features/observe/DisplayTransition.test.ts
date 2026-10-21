@@ -7,7 +7,12 @@ import {
   DisplayTransitionTracker,
   createDisplayCacheInvalidator,
   displayTransitions,
+  invalidateDisplayCaches,
 } from "../../../src/features/observe/DisplayTransition";
+import {
+  type ActionClockSkewCache,
+  actionClockSkewCache,
+} from "../../../src/features/action/ActionClockSkewCache";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
 import { normalizeIosHierarchy } from "../../../src/features/observe/HierarchyNormalization";
@@ -52,6 +57,14 @@ class FakeObservationFrameInvalidator implements ObservationFrameInvalidator {
   }
 }
 
+class FakeActionClockSkewInvalidator implements Pick<ActionClockSkewCache, "invalidate"> {
+  readonly deviceIds: string[] = [];
+
+  invalidate(deviceId: string): void {
+    this.deviceIds.push(deviceId);
+  }
+}
+
 const deviceStateFixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
 
@@ -89,6 +102,44 @@ afterEach(() => {
 });
 
 describe("display transitions", () => {
+  test("device clock changes invalidate the injected skew cache only for the affected device", () => {
+    setObserveCacheStore(new FakeObserveCacheStore(new FakeTimer()));
+    const frames = new FakeObservationFrameInvalidator();
+    const skew = new FakeActionClockSkewInvalidator();
+
+    createDisplayCacheInvalidator(frames, skew)(device.deviceId, "Device clock changed");
+
+    expect(skew.deviceIds).toEqual([device.deviceId]);
+    expect(frames.deviceIds).toEqual([device.deviceId]);
+  });
+
+  test("device clock changes retire the shared production skew cache only for the affected device", async () => {
+    setObserveCacheStore(new FakeObserveCacheStore(new FakeTimer()));
+    const id = "display-clock-skew-test";
+    const otherId = "display-clock-skew-other-test";
+    let reads = 0;
+    const measure = async () => {
+      reads++;
+      return 1_000;
+    };
+    try {
+      await actionClockSkewCache.getSkewMs(id, measure);
+      await actionClockSkewCache.getSkewMs(otherId, measure);
+      await actionClockSkewCache.getSkewMs(id, measure);
+      expect(reads).toBe(2);
+
+      invalidateDisplayCaches(id, "Device clock changed");
+
+      await actionClockSkewCache.getSkewMs(id, measure);
+      expect(reads).toBe(3);
+      await actionClockSkewCache.getSkewMs(otherId, measure);
+      expect(reads).toBe(3);
+    } finally {
+      actionClockSkewCache.invalidate(id);
+      actionClockSkewCache.invalidate(otherId);
+    }
+  });
+
   test("display transition invokes the injected frame invalidator only for the affected device", () => {
     const frames = new FakeObservationFrameInvalidator();
     const tracker = new DisplayTransitionTracker(createDisplayCacheInvalidator(frames));

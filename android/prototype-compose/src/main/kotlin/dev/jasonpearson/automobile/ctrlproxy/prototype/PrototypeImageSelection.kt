@@ -14,7 +14,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTextNode
  * while it decodes the item shows [Loading]; when it cannot be drawn (unknown or unreadable asset)
  * the item falls back to its built-in `icon`, then to the visible [Placeholder].
  */
-sealed interface PrototypeNavigationVisual {
+internal sealed interface PrototypeNavigationVisual {
   data class Image(val image: PrototypeDecodedImage) : PrototypeNavigationVisual
 
   data class Icon(val name: String) : PrototypeNavigationVisual
@@ -25,7 +25,7 @@ sealed interface PrototypeNavigationVisual {
 }
 
 /** [imageState] is null exactly when the item names no image. */
-fun prototypeNavigationVisual(
+internal fun prototypeNavigationVisual(
   item: PrototypeItem,
   imageState: PrototypeImageState?,
 ): PrototypeNavigationVisual =
@@ -39,7 +39,7 @@ fun prototypeNavigationVisual(
   }
 
 /** `contentScale` names are closed by the protocol validator: fit, crop, fill. */
-fun prototypeContentScale(name: String): ContentScale =
+internal fun prototypeContentScale(name: String): ContentScale =
   when (name) {
     "crop" -> ContentScale.Crop
     "fill" -> ContentScale.FillBounds
@@ -61,6 +61,7 @@ private fun prototypeFontAssetReferences(node: PrototypeNode): List<String> =
  * pager page, because those can be revealed without another `show`. Font assets named by
  * `style.fontFamily: {asset}` (also inside `styleWhen`) are included.
  */
+@InternalAutoMobilePrototypeApi
 fun prototypeAssetReferences(root: PrototypeNode): List<String> {
   val ids = LinkedHashSet<String>()
   fun visit(node: PrototypeNode) {

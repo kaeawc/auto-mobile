@@ -6,6 +6,7 @@ import type { BootedDevice } from "../../../src/models";
 import {
   DisplayConfig,
   type DisplayConfigDependencies,
+  type IosRunnerAppearanceClient,
   parseFontScale,
   parseFontScaleSnapshot,
   parseNightMode,
@@ -13,6 +14,10 @@ import {
 } from "../../../src/features/utility/DisplayConfig";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import type {
+  CtrlProxyAppearance,
+  CtrlProxyAppearanceResult,
+} from "../../../src/features/observe/ios/types";
 import {
   getDeviceIncarnationListeners,
   notifyDeviceIdentityReplaced,
@@ -628,35 +633,102 @@ function simctlArgvCalls(simctl: FakeSimctl): string[][] {
   return simctl.getMethodCalls("executeCommandArgs").map((c) => c.args as string[]);
 }
 
-describe("DisplayConfig platform gating", () => {
-  test("reports physical iOS as fully unsupported for reads without issuing commands", async () => {
-    const simctl = new FakeSimctl();
-    const result = await createDisplayConfig(iosPhysical, { simctl }).getConfig();
+/** Fake runner `request_appearance` (#14092): records requests and holds the system appearance. */
+class FakeRunnerAppearance implements IosRunnerAppearanceClient {
+  readonly requests: Array<"light" | "dark" | undefined> = [];
+  constructor(
+    public appearance: CtrlProxyAppearance = "light",
+    private readonly failure?: string,
+  ) {}
 
-    expect(result.success).toBe(false);
-    expect(result.platform).toBe("ios");
+  async requestAppearance(appearance?: "light" | "dark"): Promise<CtrlProxyAppearanceResult> {
+    this.requests.push(appearance);
+    if (this.failure) {
+      return { success: false, error: this.failure, totalTimeMs: 0 };
+    }
+    if (appearance) {
+      this.appearance = appearance;
+    }
+    return { success: true, appearance: this.appearance, totalTimeMs: 0 };
+  }
+}
+
+describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
+  const physical = (runner: FakeRunnerAppearance, themeBaselines = new Map()) => {
+    const simctl = new FakeSimctl();
+    const config = new DisplayConfig(iosPhysical, {
+      simctl,
+      themeBaselines,
+      iosRunnerAppearance: runner,
+    });
+    return { simctl, config };
+  };
+
+  test("reads the appearance through the runner, never simctl", async () => {
+    const runner = new FakeRunnerAppearance("dark");
+    const { simctl, config } = physical(runner);
+
+    const result = await config.getConfig();
+
+    expect(result).toMatchObject({ success: true, current: { theme: "dark" } });
+    // Physical iOS has no path for the accessibility display preferences (#14088).
     expect(result.supported).toEqual({
       fontScale: false,
       density: false,
-      theme: false,
+      theme: true,
       increaseContrast: false,
       reduceMotion: false,
       boldText: false,
     });
-    expect(result.error).toContain("iOS");
+    expect(runner.requests).toEqual([undefined]);
     expect(simctlArgvCalls(simctl)).toEqual([]);
   });
 
-  test("reports physical iOS as fully unsupported for writes without issuing commands", async () => {
-    const simctl = new FakeSimctl();
-    const result = await createDisplayConfig(iosPhysical, { simctl }).setConfig({
-      fontScale: 2.0,
-    });
+  test("sets dark, reports the previous theme, and reset restores it", async () => {
+    const runner = new FakeRunnerAppearance("light");
+    const baselines = new Map();
+    const { config } = physical(runner, baselines);
 
+    const set = await config.setConfig({ theme: "dark" });
+    expect(set).toMatchObject({
+      success: true,
+      previous: { theme: "light" },
+      applied: { theme: "dark" },
+    });
+    expect(runner.appearance).toBe("dark");
+
+    const reset = await physical(runner, baselines).config.setConfig({ reset: true });
+    expect(reset).toMatchObject({ success: true, applied: { theme: "light" } });
+    expect(runner.appearance).toBe("light");
+    expect(baselines.size).toBe(0);
+  });
+
+  test("reset restores a dark baseline the user had chosen", async () => {
+    const runner = new FakeRunnerAppearance("dark");
+    const baselines = new Map();
+    await physical(runner, baselines).config.setConfig({ theme: "light" });
+    const reset = await physical(runner, baselines).config.setConfig({ reset: true });
+    expect(reset).toMatchObject({ success: true, applied: { theme: "dark" } });
+  });
+
+  test("a runner without request_appearance is a readable failure, not a crash", async () => {
+    const runner = new FakeRunnerAppearance("light", "Unknown command: request_appearance");
+    const result = await physical(runner).config.getConfig();
     expect(result.success).toBe(false);
-    expect(result.platform).toBe("ios");
-    expect(result.error).toContain("iOS");
-    expect(simctlArgvCalls(simctl)).toEqual([]);
+    expect(result.error).toContain("request_appearance");
+  });
+
+  test("font scale and density stay unsupported on a physical device", async () => {
+    const runner = new FakeRunnerAppearance();
+    const result = await physical(runner).config.setConfig({ fontScale: 2.0 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("fontScale is not supported on iOS");
+    expect(runner.requests).toEqual([]);
+  });
+
+  test("the restorable config records the device theme for session release", async () => {
+    const runner = new FakeRunnerAppearance("dark");
+    expect(await physical(runner).config.getRestorableConfig()).toEqual({ theme: "dark" });
   });
 });
 

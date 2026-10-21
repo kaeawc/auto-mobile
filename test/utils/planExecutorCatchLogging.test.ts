@@ -7,6 +7,7 @@ import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { FakeLogger } from "../fakes/FakeLogger";
+import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 
 afterEach(() => {
   mock.restore();
@@ -40,6 +41,10 @@ function registerStructuredFailureTool(name: string): void {
     }),
   );
 }
+
+// Runs with an empty registry and restores the exact pre-existing tools afterwards, so a shared
+// process never sees the registry emptied by this file's per-test clearTools().
+isolateEmptyToolRegistry();
 
 afterEach(() => {
   ToolRegistry.clearTools();

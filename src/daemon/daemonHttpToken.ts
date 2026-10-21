@@ -232,7 +232,7 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
         if (
           stat?.isDirectory() &&
           !stat.isSymbolicLink() &&
-          stat.uid === process.getuid?.() &&
+          stat.uid === (process.getuid?.() ?? 0) &&
           (stat.mode & 0o7777) === 0o700
         ) {
           this.cleanClaim(directory);

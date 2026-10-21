@@ -1031,7 +1031,8 @@ device (owner decision 2026-10-09, #11145):
   setting's current value as the device default. Later changes keep the first
   recorded value. Changes made with no session holding the device are not
   recorded.
-- The covered settings are font scale, display density, night mode, and the
+- The covered settings are font scale (the content size category on the iOS
+  Simulator), display density, night mode, and the
   increase contrast, reduce motion and bold text preferences
   (`displayConfig`), and the 24-hour format and calendar system
   (`changeLocalization`). The iOS Simulator device-wide locale is also covered.

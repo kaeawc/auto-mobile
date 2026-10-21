@@ -12,11 +12,17 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
   DisplayConfig,
+  type DisplayConfigDependencies,
+  type DisplayConfigValues,
   type DisplayTheme,
   type SetDisplayConfigInput,
   type ThemeBaselineStore,
 } from "./DisplayConfig";
 import { SystemConfigurationManager } from "./SystemConfigurationManager";
+import {
+  isIosContentSizeCategory,
+  unrecordedContentSizeBaselines,
+} from "./IosSimulatorDisplayConfig";
 import {
   ACCESSIBILITY_DISPLAY_FIELDS,
   type AccessibilityDisplayField,
@@ -24,7 +30,7 @@ import {
 } from "./AccessibilityDisplayPreferences";
 import type { DeviceSettingsAccess } from "./DeviceSettingDefaults";
 
-export const DISPLAY_KEYS = ["fontScale", "density", "nightMode"] as const;
+export const DISPLAY_KEYS = ["fontScale", "contentSize", "density", "nightMode"] as const;
 
 /** Keys read and written through DisplayConfig (display fields and accessibility preferences). */
 const DISPLAY_CONFIG_KEYS: readonly DeviceSettingKey[] = [
@@ -54,7 +60,23 @@ export const unrecordedThemeBaselines: ThemeBaselineStore = {
 
 /** Reads and writes settings through DisplayConfig and SystemConfigurationManager. */
 export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
-  constructor(private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory) {}
+  constructor(
+    private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    /** iOS Simulator seam; DisplayConfig's own SimCtlClient when omitted. */
+    private readonly simctlFor?: (device: BootedDevice) => DisplayConfigDependencies["simctl"],
+  ) {}
+
+  private displayConfig(
+    device: BootedDevice,
+    dependencies: DisplayConfigDependencies = {},
+  ): DisplayConfig {
+    const simctl = this.simctlFor?.(device);
+    return new DisplayConfig(device, {
+      adbFactory: this.adbFactory,
+      ...(simctl ? { simctl } : {}),
+      ...dependencies,
+    });
+  }
 
   async read(
     device: BootedDevice,
@@ -62,22 +84,16 @@ export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
   ): Promise<DeviceSettingValues> {
     const values: DeviceSettingValues = {};
     if (keys.some((key) => (DISPLAY_KEYS as readonly string[]).includes(key))) {
-      const display = await new DisplayConfig(device, {
-        adbFactory: this.adbFactory,
-      }).getRestorableConfig();
-      Object.assign(values, {
-        ...(display.fontScale !== undefined ? { fontScale: display.fontScale } : {}),
-        ...(display.density !== undefined ? { density: display.density } : {}),
-        ...(display.theme !== undefined ? { nightMode: display.theme } : {}),
-      });
+      Object.assign(
+        values,
+        displaySettingValues(await this.displayConfig(device).getRestorableConfig()),
+      );
     }
     const accessibility = accessibilityKeys(keys);
     if (accessibility.length > 0) {
       Object.assign(
         values,
-        await new DisplayConfig(device, { adbFactory: this.adbFactory })
-          .accessibility()
-          .readSnapshot(accessibility),
+        await this.displayConfig(device).accessibility().readSnapshot(accessibility),
       );
     }
     if (keys.some((key) => !DISPLAY_CONFIG_KEYS.includes(key))) {
@@ -102,9 +118,9 @@ export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
     const written: DeviceSettingKey[] = [];
     const display = displayInput(values);
     if (display.keys.length > 0) {
-      const result = await new DisplayConfig(device, {
-        adbFactory: this.adbFactory,
+      const result = await this.displayConfig(device, {
         themeBaselines: unrecordedThemeBaselines,
+        contentSizeBaselines: unrecordedContentSizeBaselines,
       }).setConfig(display.input);
       if (result.success) {
         written.push(...display.keys);
@@ -143,9 +159,7 @@ export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
     if (Object.keys(snapshot).length === 0) {
       return [];
     }
-    return new DisplayConfig(device, { adbFactory: this.adbFactory })
-      .accessibility()
-      .restoreSnapshot(snapshot);
+    return this.displayConfig(device).accessibility().restoreSnapshot(snapshot);
   }
 
   private collect(
@@ -194,6 +208,16 @@ export class DefaultDeviceSettingsAccess implements DeviceSettingsAccess {
   }
 }
 
+/** Restorable displayConfig values keyed as device settings (`theme` is recorded as `nightMode`). */
+function displaySettingValues(display: DisplayConfigValues): DeviceSettingValues {
+  return {
+    ...(display.fontScale !== undefined ? { fontScale: display.fontScale } : {}),
+    ...(display.density !== undefined ? { density: display.density } : {}),
+    ...(display.theme !== undefined ? { nightMode: display.theme } : {}),
+    ...(display.contentSize !== undefined ? { contentSize: display.contentSize } : {}),
+  };
+}
+
 export function displayInput(values: DeviceSettingValues): {
   input: SetDisplayConfigInput;
   keys: DeviceSettingKey[];
@@ -207,6 +231,10 @@ export function displayInput(values: DeviceSettingValues): {
   if (typeof values.density === "number" || values.density === "default") {
     input.density = values.density;
     keys.push("density");
+  }
+  if (isIosContentSizeCategory(values.contentSize)) {
+    input.contentSize = values.contentSize;
+    keys.push("contentSize");
   }
   if (typeof values.nightMode === "string") {
     input.theme = values.nightMode as DisplayTheme;

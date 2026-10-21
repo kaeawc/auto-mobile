@@ -41,6 +41,19 @@ describe("displayConfigSchema", () => {
     expect(parsed.success).toBe(false);
   });
 
+  test("rejects contentSize combined with fontScale or reset, and unknown categories", () => {
+    expect(displayConfigSchema.safeParse({ contentSize: "accessibility-large" }).success).toBe(
+      true,
+    );
+    expect(displayConfigSchema.safeParse({ contentSize: "huge" }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ contentSize: "large", fontScale: 1.2 }).success).toBe(
+      false,
+    );
+    expect(displayConfigSchema.safeParse({ contentSize: "large", reset: true }).success).toBe(
+      false,
+    );
+  });
+
   test("rejects reset combined with an accessibility display preference", () => {
     expect(displayConfigSchema.safeParse({ reset: true, boldText: true }).success).toBe(false);
     expect(displayConfigSchema.safeParse({ reset: true, reduceMotion: false }).success).toBe(false);
@@ -286,9 +299,9 @@ describe("device setting defaults are recorded before a change (#11145)", () => 
       await handler(device, { boldText: true });
       await handler(device, {});
       expect(events).toEqual([
-        "record:fontScale,nightMode",
+        "record:fontScale,contentSize,nightMode",
         "set",
-        "record:fontScale,density,nightMode,increaseContrast,reduceMotion,boldText",
+        "record:fontScale,contentSize,density,nightMode,increaseContrast,reduceMotion,boldText",
         "set",
         "record:boldText",
         "set",

@@ -1369,13 +1369,13 @@
   },
   {
     "name": "displayConfig",
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance. The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme (via `simctl ui appearance`) and font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process. The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "fontScale": {
-          "description": "System text scale, or 'default' to remove Android's explicit override and restore its inherited default. Android only. Omit to leave unchanged.",
+          "description": "System text scale, or 'default' to remove Android's explicit override and restore its inherited default. On the iOS Simulator, selects the nearest Dynamic Type category (1 = large; 'default' = large). Omit to leave unchanged.",
           "anyOf": [
             {
               "type": "number",
@@ -1386,6 +1386,24 @@
               "type": "string",
               "const": "default"
             }
+          ]
+        },
+        "contentSize": {
+          "description": "iOS Simulator only: an exact Dynamic Type category for `simctl ui content_size`, instead of the nearest one to fontScale. Cannot be combined with fontScale. Omit to leave unchanged.",
+          "type": "string",
+          "enum": [
+            "extra-small",
+            "small",
+            "medium",
+            "large",
+            "extra-large",
+            "extra-extra-large",
+            "extra-extra-extra-large",
+            "accessibility-medium",
+            "accessibility-large",
+            "accessibility-extra-large",
+            "accessibility-extra-extra-large",
+            "accessibility-extra-extra-extra-large"
           ]
         },
         "density": {
@@ -1562,6 +1580,9 @@
               "type": "string",
               "enum": ["light", "dark", "system", "custom"]
             },
+            "contentSize": {
+              "type": "string"
+            },
             "increaseContrast": {
               "type": "boolean"
             },
@@ -1582,6 +1603,7 @@
           "absentArguments": [
             "reset",
             "fontScale",
+            "contentSize",
             "density",
             "theme",
             "increaseContrast",

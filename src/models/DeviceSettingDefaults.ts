@@ -7,6 +7,8 @@ import type { Platform } from "./Platform";
  */
 export const DEVICE_SETTING_KEYS = [
   "fontScale",
+  // The iOS Simulator's Dynamic Type category (#14087); Android records fontScale instead.
+  "contentSize",
   "density",
   "nightMode",
   "locale",

@@ -4,13 +4,14 @@ import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedEr
 import type { IosBootInstrumentation } from "../../models/IosBootInstrumentation";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
 import type { BootedDevice, DeviceInfo } from "../../models/DeviceInfo";
-import type { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import type { AppleDevice, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { normalizeIosVersion } from "../../utils/ios-cmdline-tools/SimCtlSupport";
 import { compareIosVersions } from "../../utils/ios-cmdline-tools/iosVersion";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 
 type IosProfile = Extract<BrokerNativeProfile, { platform: "ios" }>;
-type ResetSimctl = Pick<SimCtlClient, "listSimulatorImages" | "eraseSimulator" | "bootSimulator">;
+type ResetSimctl = Pick<SimCtl, "readSimulatorTarget" | "eraseSimulator" | "bootSimulator">;
 type ExpectedState = "Booted" | "Shutdown";
 
 export class IosBaselineReset {
@@ -132,22 +133,37 @@ export class IosBaselineReset {
     expectedState: ExpectedState,
     action: string,
   ): Promise<void> {
-    let inventory: DeviceInfo[];
+    let target: AppleDevice | undefined;
     try {
-      inventory = await this.dependencies.simctl.listSimulatorImages(undefined, {
-        bypassCache: true,
-      });
+      target = await this.dependencies.simctl.readSimulatorTarget(udid);
     } catch (error) {
       throw toActionableError(error, `Cannot ${action}: fresh iOS simulator inventory failed`);
     }
 
-    const matches = inventory.filter((candidate) => candidate.deviceId === udid);
-    if (matches.length !== 1) {
+    if (!target || target.udid !== udid) {
       throw new ActionableError(
         `Cannot ${action}: fresh iOS simulator inventory did not prove one exact target '${udid}'`,
       );
     }
-    this.assertTarget(matches[0]!, profile, expectedState, action);
+    const iosVersion = normalizeIosVersion(target.runtime, target.os_version);
+    this.assertTarget(
+      {
+        name: target.name,
+        deviceId: target.udid,
+        platform: "ios",
+        isRunning: target.state === "Booted",
+        state: target.state,
+        isAvailable: target.isAvailable,
+        deviceType: target.deviceTypeIdentifier,
+        runtimeId: target.runtime,
+        runtime: target.runtime,
+        osVersion: iosVersion,
+        iosVersion,
+      },
+      profile,
+      expectedState,
+      action,
+    );
   }
 
   private assertTarget(

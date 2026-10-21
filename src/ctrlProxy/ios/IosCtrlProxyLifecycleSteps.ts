@@ -38,7 +38,7 @@ export interface IosCtrlProxyLifecycleSteps {
     delayMs: number,
     launchDeadlineMs?: number,
   ): Promise<boolean>;
-  /** Settles a startup whose health endpoint answered (WebSocket init, supervision). */
+  /** Completes supervision setup once the health endpoint answers. */
   completeHealthStartup(sharedStart: SharedCtrlProxyStart, perf: PerformanceTracker): Promise<void>;
   /** True when the tracked (or given) runner PID is alive and genuinely our runner. */
   isOwnRunnerProcessAlive(pid?: number | null): Promise<boolean>;

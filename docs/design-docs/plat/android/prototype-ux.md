@@ -492,6 +492,7 @@ layout room.
 | `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                            |
 | `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                             |
 | `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                                     |
+| `chart`           | Required `variant` (`line`, `area`, `bar`, `ring`) and 1 to 4 `series` `{path, x?, y, label, color?}` over a `/data` array; optional `yRange`, `xLabels`, `goal`. See Charts.                                                                          |
 | `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                                  |
 | `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                                      |
 | `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                                      |
@@ -2405,6 +2406,27 @@ pinned to the material3 supplied by `androidx-compose-bom` in
 `android/gradle/libs.versions.toml`. Results are ordinary rows inside the prototype
 window, not a SearchBar popup/dialog or lazy list that drops rows, so `observe`
 sees every result row.
+
+## Charts (#14209, not device-verified)
+
+A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series`. Each series
+reads the `/data` array at `path` (objects only, at most 500 like any data array), taking each
+point's numeric `y` member and optional `x` label member. A literal `path` must resolve to an array
+when the spec is shown, and every point must be an object with a numeric `y`. A repeat-bound path is
+bound per row. `yRange {min, max}` fixes the axis (max above min); otherwise it spans the values
+and the goal, and bars rise from zero. `xLabels` (`none`, `ends`, `all`) draws the first series'
+x labels below the plot. `goal` is a dashed reference line; a `ring` takes exactly one series and a
+positive goal and draws that series' latest value against it. The capability is
+`prototype_chart_v1`.
+
+Android draws it with Compose `Canvas` and no new dependency. The render mapper reads the points
+from the current `/data` on every mapping pass, so a data action, request or patch redraws it. Points
+a later write broke (a non-object, a non-numeric `y`) are skipped rather than failing the frame. The
+chart is one accessibility node labelled with its summary ("Line chart, Heart rate, 24 points, min
+58, max 141, latest 72"; "Ring chart, Steps today, 6500 of 10000"); an authored
+`contentDescription` replaces it, and `observe` reports it. The x labels are visual only. iOS
+rendering with Swift Charts and `AXChartDescriptor` is #14679; until then the iOS agent does not
+advertise the capability and the host refuses chart specs there.
 
 ## Rich text
 

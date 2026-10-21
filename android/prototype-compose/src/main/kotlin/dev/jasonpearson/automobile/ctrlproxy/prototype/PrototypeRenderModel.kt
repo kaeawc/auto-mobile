@@ -14,6 +14,7 @@ import dev.jasonpearson.automobile.protocol.*
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
@@ -75,6 +76,8 @@ data class PrototypeRenderNode(
   val spans: List<PrototypeRenderSpan>? = null,
   val enabled: Boolean = true,
   val errorMessage: String? = null,
+  /** A `chart`'s points and summary read against the current `/data`; null for other roles. */
+  val chart: PrototypeChartModel? = null,
 )
 
 @Immutable
@@ -137,6 +140,7 @@ fun mapPrototypeSpec(
           validity =
             prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
           shownErrors = shownErrors,
+          data = resolved.data,
         )
         .map(resolved.root, "root"),
     )
@@ -163,6 +167,7 @@ internal class PrototypeNodeMapping(
   private val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   private val validity: Map<String, Boolean> = emptyMap(),
   private val shownErrors: Set<String> = emptySet(),
+  private val data: JsonObject? = null,
 ) {
   val nodes = mutableMapOf<String, PrototypeRenderNode>()
 
@@ -189,7 +194,9 @@ internal class PrototypeNodeMapping(
         allEntries.filter { it.path == screenPath }
       } else allEntries
     val role = prototypeNodeRole(node)
-    val text = prototypeNodeText(node, state, localState, inPager)
+    val chart = (node as? PrototypeChartNode)?.let { PrototypeChart.model(it, data) }
+    // A chart's label is its summary, so `observe` reports what it draws (#14209).
+    val text = chart?.summary ?: prototypeNodeText(node, state, localState, inPager)
     val visibleEntries =
       if (
         node is PrototypeSearchBarNode &&
@@ -264,6 +271,7 @@ internal class PrototypeNodeMapping(
           node.contentDescription?.let { interpolatePrototypeText(it, localState, inPager) },
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
+        chart = chart,
       )
     val shared = intern(mapped, old)
     nodes[path] = shared
@@ -322,6 +330,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeDividerNode -> "divider"
     is PrototypeBadgeNode -> "badge"
     is PrototypeProgressNode -> "progress"
+    is PrototypeChartNode -> "chart"
     is PrototypeDialogNode -> "dialog"
     is PrototypeSnackbarNode -> "snackbar"
     is PrototypeTimePickerNode -> "timePicker"

@@ -91,6 +91,8 @@ export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1"
 export const PROTOTYPE_PLATFORM_CAPABILITY = "prototype_platform_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
+/** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
+export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */
 export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
 

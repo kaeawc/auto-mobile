@@ -344,6 +344,8 @@ class WebSocketServer(
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
+    // Line, area, bar and ring charts over /data arrays (#14209).
+    add("prototype_chart_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
     add("prototype_linkify_v1")
     // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).

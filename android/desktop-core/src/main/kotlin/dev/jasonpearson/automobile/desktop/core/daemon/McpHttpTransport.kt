@@ -22,7 +22,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
   private val retryPolicy = options.retryPolicy
   private val requestSender = options.requestSender
   private val mcpSessionKey = options.mcpSessionKey
-  private val httpClient = HttpClient.newBuilder().build()
+  private val httpClient by lazy { HttpClient.newBuilder().build() }
   private val decoder = McpHttpResponseDecoder(json)
   @Volatile private var sessionId: String? = null
   @Volatile private var protocolVersion: String? = null
@@ -172,6 +172,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
     includeSession: Boolean,
     deadline: StatusRequestDeadline?,
     retryAuthentication: Boolean = true,
+    startupRetries: Int = 5,
   ): HttpResponse<String> {
     val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
     // The MCP streamable-HTTP transport answers 406 unless Accept lists both forms.
@@ -181,6 +182,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
         .header("Accept", MCP_ACCEPT_HEADER)
         .header(MCP_SESSION_KEY_HEADER, mcpSessionKey)
 
+    options.requestHeaders.forEach { (name, value) -> builder.header(name, value) }
     if (includeSession) {
       sessionId?.let { builder.header(SESSION_HEADER, it) }
     }
@@ -200,8 +202,20 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
         sendAuthenticatedRequest(httpRequest)
       }
 
-    if (response.statusCode() == 401 && retryAuthentication) {
-      return exchange(request, includeSession, deadline, retryAuthentication = false)
+    if (waitForStartupRetry(response, httpRequest, deadline, startupRetries)) {
+      return exchange(request, includeSession, deadline, retryAuthentication, startupRetries - 1)
+    }
+
+    if (
+      response.statusCode() == 401 && retryAuthentication && usesDaemonAuthentication(httpRequest)
+    ) {
+      return exchange(
+        request,
+        includeSession,
+        deadline,
+        retryAuthentication = false,
+        startupRetries = startupRetries,
+      )
     }
     response.headers().firstValue(SESSION_HEADER).ifPresent { header ->
       if (header.isNotBlank()) {
@@ -209,6 +223,22 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
       }
     }
     return response
+  }
+
+  private fun waitForStartupRetry(
+    response: HttpResponse<String>,
+    request: HttpRequest,
+    deadline: StatusRequestDeadline?,
+    remainingRetries: Int,
+  ): Boolean {
+    if (remainingRetries <= 0 || !usesDaemonAuthentication(request)) return false
+    if (
+      response.statusCode() != 503 || response.headers().firstValue("Retry-After").orElse("") != "1"
+    )
+      return false
+    if (deadline != null && deadline.remainingTimeoutMs() <= 1000) return false
+    options.startupRetryDelay(1000)
+    return true
   }
 
   /**
@@ -245,12 +275,12 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
   }
 
   private fun sendAuthenticatedRequest(request: HttpRequest): HttpResponse<String> {
-    val builder =
-      HttpRequest.newBuilder(request) { name, _ ->
-        !name.equals("Authorization", ignoreCase = true)
-      }
-    options.tokenProvider.read()?.let { builder.header("Authorization", "Bearer $it") }
-    val authenticated = builder.build()
+    val authenticated =
+      if (usesDaemonAuthentication(request)) {
+        val builder = HttpRequest.newBuilder(request) { _, _ -> true }
+        options.tokenProvider.read()?.let { builder.header("Authorization", "Bearer $it") }
+        builder.build()
+      } else request
     return requestSender?.send(authenticated)
       ?: httpClient.send(authenticated, HttpResponse.BodyHandlers.ofString())
   }
@@ -270,3 +300,6 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
         (e is McpConnectionException && e.message?.contains("server error") == true)
   }
 }
+
+private fun usesDaemonAuthentication(request: HttpRequest): Boolean =
+  isDaemonHttpEndpoint(request.uri()) && request.headers().firstValue("Authorization").isEmpty

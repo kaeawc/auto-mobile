@@ -8,28 +8,31 @@ testing with automatic refresh when screen content changes.
 - **Automatic View Hierarchy Capture**: Automatically detects when screen content changes and marks
   hierarchy for refresh
 - **On-Demand Extraction**: Extracts fresh hierarchy only when requested after content changes
-- **Synchronous File Access**: Writes hierarchy to app-scoped storage accessible via ADB
+- **Optional Debug Dump**: Writes hierarchy to app-scoped storage accessible via ADB when enabled
 - **Broadcast Communication**: Alternative broadcast-based communication
 - **Single Command Interface**: Only exposes one operation - get latest view hierarchy
 
 ## Usage
 
-### Synchronous File Access (Recommended)
+### Optional Hierarchy Debug Dump
 
-The easiest way to get view hierarchy data synchronously is to trigger the sync action and then read
-the file:
+The dump is off by default. Enable it by creating a marker in the app's files directory:
 
 ```bash
-# Step 1: Trigger hierarchy extraction to file
-adb shell am broadcast -a dev.jasonpearson.automobile.GET_HIERARCHY_SYNC
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy touch files/dump_hierarchy
+```
 
-# Step 2: Read the result file
+Use the WebSocket `request_hierarchy` request or the daemon's `observe` to request a fresh
+hierarchy. After delivery completes, read the dump:
+
+```bash
 adb shell run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json
 ```
 
-**One-liner for convenience:**
+Disable further writes by removing the marker (the last dump remains on disk):
+
 ```bash
-adb shell "am broadcast -a dev.jasonpearson.automobile.GET_HIERARCHY_SYNC && sleep 0.5 && run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json"
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy rm files/dump_hierarchy
 ```
 
 **Debugging commands if the above doesn't work:**
@@ -47,13 +50,13 @@ adb shell run-as dev.jasonpearson.automobile.ctrlproxy ls -la files/
 # Check recent logs for both receiver and service
 adb logcat -s AccessibilityCommandReceiver CtrlProxy
 
-# Trigger broadcast and check logs in real-time
-adb shell am broadcast -a dev.jasonpearson.automobile.GET_HIERARCHY_SYNC && adb logcat -s AccessibilityCommandReceiver CtrlProxy
+# Request a hierarchy via WebSocket request_hierarchy or daemon observe, then inspect logs
+adb logcat -s CtrlProxy
 ```
 
 **Benefits:**
 
-- Synchronous response after brief delay
+- Inspect the latest delivered hierarchy after enabling the marker
 - Returns JSON directly to stdout
 - No broadcast receivers needed
 - Works with any shell scripting
@@ -114,8 +117,10 @@ For errors (via broadcasts):
 ### Shell Script
 ```bash
 #!/bin/bash
-# Get view hierarchy synchronously
-HIERARCHY=$(adb shell "am broadcast -a dev.jasonpearson.automobile.GET_HIERARCHY_SYNC && sleep 0.5 && run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json")
+# Enable the dump, then request a hierarchy via WebSocket request_hierarchy or daemon observe.
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy touch files/dump_hierarchy
+# After delivery completes:
+HIERARCHY=$(adb shell run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json)
 echo "Current screen hierarchy: $HIERARCHY"
 ```
 
@@ -123,16 +128,11 @@ echo "Current screen hierarchy: $HIERARCHY"
 ```python
 import subprocess
 import json
-import time
 
 def get_view_hierarchy():
-    # Trigger extraction
-    subprocess.run(['adb', 'shell', 'am', 'broadcast', '-a', 'dev.jasonpearson.automobile.GET_HIERARCHY_SYNC'])
-    
-    # Wait briefly for file write
-    time.sleep(0.5)
-    
-    # Read the result
+    # Enable files/dump_hierarchy first (see above), then request a hierarchy via
+    # WebSocket request_hierarchy or daemon observe and wait for delivery before calling.
+    # Read the latest debug dump.
     result = subprocess.run([
         'adb', 'shell', 'run-as', 'dev.jasonpearson.automobile.ctrlproxy', 
         'cat', 'files/latest_hierarchy.json'
@@ -169,7 +169,8 @@ context.registerReceiver(receiver, filter)
 ## App Package Information
 
 - **Package Name**: `dev.jasonpearson.automobile.ctrlproxy`
-- **Hierarchy File Location**: `files/latest_hierarchy.json` (within app's private directory)
+- **Hierarchy File Location**: `files/latest_hierarchy.json` (within app's private directory;
+  written only while `files/dump_hierarchy` exists)
 - **ADB Access**: Use `run-as dev.jasonpearson.automobile.ctrlproxy` to access app-scoped files
 
 ## How It Works
@@ -177,7 +178,8 @@ context.registerReceiver(receiver, filter)
 1. **Content Change Detection**: Service monitors for window state and content changes
 2. **Lazy Extraction**: Hierarchy is only extracted when requested after a content change
 3. **Memory Storage**: Latest hierarchy is cached in memory for fast repeated access
-4. **File Output**: Sync command writes to app-scoped storage accessible via ADB
+4. **File Output**: Changed pushes and `request_hierarchy` replies write to app-scoped storage only
+   while the `files/dump_hierarchy` marker exists
 
 ## Optimized Architecture
 
@@ -186,7 +188,7 @@ The service uses an optimized approach for minimal overhead:
 1. **Event-Driven Refresh**: Only marks hierarchy as needing refresh when content actually changes
 2. **Lazy Extraction**: Hierarchy extraction only happens on-demand after content changes
 3. **Memory Caching**: Repeated requests return cached data if no content changes occurred
-4. **Secure Storage**: Files written to app-scoped storage accessible via ADB
+4. **Secure Storage**: Optional debug dumps use app-scoped storage accessible via ADB
 
 This design minimizes CPU usage and battery impact while ensuring fresh data is always available.
 

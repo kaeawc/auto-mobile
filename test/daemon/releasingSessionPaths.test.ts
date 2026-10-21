@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   SessionScopedStreamAuthenticator,
   STREAM_SOCKET_AUTH_ENV,
@@ -20,6 +20,10 @@ import {
   releasingDeviceId as deviceId,
 } from "../helpers/releasingSessionHarness";
 import { bindDevice } from "../../src/daemon/deviceBinding";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const notFound = {
   success: false,

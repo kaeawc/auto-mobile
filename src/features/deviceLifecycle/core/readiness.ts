@@ -30,7 +30,7 @@ import {
 } from "./bootSettlement";
 import { type DeviceToolsDependencies, getDeviceToolsDependencies } from "./dependencies";
 import { DEVICE_SHUTDOWN_TIMEOUT_MS, runWithinShutdownDeadline } from "./deadlines";
-import { waitForDeviceShutdown } from "./shutdownDiscovery";
+import { waitForDeviceShutdown } from "../teardown/shutdownDiscovery";
 import { isUnknownAndroidRuntimeName } from "./androidIdentity";
 
 export async function ensureRunnerReadyWithSystemUiAnrRecovery(

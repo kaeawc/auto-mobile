@@ -20,6 +20,7 @@ interface SdkEventsHost {
   resolveWebSocketHost(): string;
   pollSdkEvents(): Promise<SdkEventPollResult>;
   getSdkScreenIdentity(appId?: string): ScreenIdentity | undefined;
+  getSdkAvailability(appId?: string): boolean | undefined;
 }
 /** Long-poll scheduling, backoff and generation-bound event ingestion. */
 export class CtrlProxySdkEvents {
@@ -40,8 +41,8 @@ export class CtrlProxySdkEvents {
   private static readonly SDK_EVENT_POLL_INTERVAL_MS = 2000;
 
   // After this many consecutive empty batches (e.g. an app with no SDK
-  // integrated) the poll backs off to the slower cadence below. Any inbound WS
-  // activity resets the counter and restores fast cadence (#5472, AC#2).
+  // integrated) the poll backs off to the slower cadence below. App activity on
+  // WS resets the counter and restores fast cadence (#5472, AC#2).
   private static readonly SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF = 5;
 
   private static readonly SDK_EVENT_POLL_BACKOFF_INTERVAL_MS = 30_000;
@@ -59,14 +60,24 @@ export class CtrlProxySdkEvents {
    */
   public async refreshSdkScreenIdentity(
     applicationId?: string,
+    capturedAt?: number,
   ): Promise<ScreenIdentity | undefined> {
+    const available = this.host.getSdkAvailability(applicationId);
+    if (available === false) {
+      return this.host.getSdkScreenIdentity(applicationId);
+    }
+    // #4463: a newer capture may precede its navigation event in /sdk-events.
+    // Missing capability/freshness evidence keeps the conservative 100 ms retry.
+    const needsRetry =
+      available !== true ||
+      !this.host.screenIdentity.hasSdkScreenIdentityForCapture(applicationId, capturedAt);
     const deadline = this.host.timer.now() + CtrlProxySdkEvents.SDK_IDENTITY_REFRESH_TIMEOUT_MS;
     while (this.host.timer.now() < deadline) {
       const result = await this.pollSdkEventsUntil(deadline);
       const refreshed = applicationId
         ? result?.rememberedApplicationIds.has(applicationId)
         : result?.receivedEvents;
-      if (refreshed) {
+      if (refreshed || !needsRetry) {
         break;
       }
       const remaining = deadline - this.host.timer.now();
@@ -148,7 +159,7 @@ export class CtrlProxySdkEvents {
   }
 
   /**
-   * Any inbound WebSocket frame from the runner is a signal the app is active,
+   * A hierarchy update or request response signals app activity,
    * so reset the empty-batch backoff and — if we had already backed off — restore
    * fast cadence immediately rather than waiting out the long backoff timer.
    */

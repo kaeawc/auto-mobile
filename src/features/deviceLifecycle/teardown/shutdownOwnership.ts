@@ -15,7 +15,7 @@ import {
   DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS,
   shutdownRecheckDeadlineMs,
 } from "./shutdownDiscovery";
-import { DEVICE_SHUTDOWN_TIMEOUT_MS, runWithinShutdownDeadline } from "./deadlines";
+import { DEVICE_SHUTDOWN_TIMEOUT_MS, runWithinShutdownDeadline } from "../core/deadlines";
 import {
   DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
   getShutdownInitiatingExecutionId,

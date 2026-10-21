@@ -105,6 +105,20 @@ export class CtrlProxySdkCapabilities {
     return CtrlProxySdkCapabilities.capabilitiesInclude(this.sdkCapabilities, capability, bundleId);
   }
 
+  /** Read the foreground generation's SDK presence without starting a capability probe. */
+  getSdkAvailability(bundleId: string): boolean | undefined {
+    if (!this.sdkCapabilitiesKnown) {
+      return undefined;
+    }
+    if (this.sdkCapabilities) {
+      return this.sdkCapabilities.bundleId === bundleId ? true : undefined;
+    }
+    return this.host.timer.now() - this.sdkCapabilitiesKnownAt <
+      CtrlProxySdkCapabilities.SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS
+      ? false
+      : undefined;
+  }
+
   private static capabilitiesInclude(
     capabilities: IosSdkCapabilities | null,
     capability: IosSdkCapability,

@@ -60,6 +60,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "phoneCall",
       "removeKeyValue",
       "resetAppLogs",
+      "sendBroadcast",
       "sendSms",
       "setKeyValue",
       "setPreference",

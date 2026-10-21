@@ -31,6 +31,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setSensor`, `setUIState`, `shake`, `snapshotOf`,
 `sqlQuery`, `statusBar`,
+`resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendBroadcast`, `sendKeys`, `sendSms`,
 `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`, `windowMode`.
 
@@ -1918,6 +1919,7 @@ subtree, or the whole active-window tree when owner-less.
 | ✅ <code>setAppLinks</code>                                                                      | Android 12+: approves, resets, or re-verifies an app's App Links domains, or changes a user's domain selection, so https links open the app without a chooser. Returns what changed and a restore receipt; a daemon session restores the original state on release.                                                                                                                                                                                                                                                                                                                                      |
 | ⏱️ <code>measureStartup</code>                                                                   | Android: launches an app N times cold, warm or hot and reports time-to-initial-display (TTID) and, when the app calls `reportFullyDrawn`, time-to-full-display (TTFD) percentiles. Stored in `automobile:performance-results`.                                                                                                                                                                                                                                                                                                                                                                           |
 | 📜 <code>getLogs</code>                                                                          | Reads filtered device logs: Android logcat for every process of an app (crashes survive process death), with tag, priority, regex and buffer filters, since the last action or session start; iOS Simulator unified log by app subsystem.                                                                                                                                                                                                                                                                                                                                                                |
+| 📡 <code>sendBroadcast</code>                                                                    | Android: sends an explicit broadcast with a typed intent to the app under test and reports the ordered-broadcast result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 <details class="note" markdown="1">
 <summary>Measuring startup with measureStartup</summary>
@@ -2007,6 +2009,30 @@ result lists the `pids` seen. On the iOS Simulator, `getLogs` needs `appId`. It
 reads the unified log for the app's subsystem (`minPriority` `V`/`D` maps to
 debug, `I` to info), applies `grep`, and warns that the Android-only filters are
 ignored. iOS lines carry only `timestamp` and `message`.
+
+### sendBroadcast
+
+`sendBroadcast` reaches an app's broadcast receivers, such as the debug receivers
+that toggle feature flags, seed data, reset state or fire a push-like event (#14081).
+It is Android-only; iOS returns `status: "unsupported"`.
+
+- `appId` is required. The broadcast is always explicit: `-p <appId>`, or
+  `-n <appId>/<receiver>` when `intent.component` names a receiver (`.DebugReceiver`,
+  `com.app.DebugReceiver`, or `com.app/.DebugReceiver`). A component in another
+  package is refused. Implicit system-wide broadcasts are out of scope.
+- `intent` takes `action` (required), plus optional `data`, `mimeType`, `categories`
+  and typed `extras`: `{ key, type, value }` with `type` one of `string`, `int`,
+  `long`, `float`, `boolean`, `stringArray` and `uri`. Every value is shell-quoted,
+  so shell metacharacters arrive literally. A comma inside a `stringArray` element
+  is escaped for `--esa`.
+- `userId` delivers to another Android user (`--user`).
+- `waitForResult` (default `true`) reports the ordered-broadcast `resultCode` and
+  `resultData` that `am broadcast` prints (`Broadcast completed: result=…`). With
+  `false` they are left out; `am` still waits for delivery.
+- A protected system broadcast (for example `BOOT_COMPLETED`), which the shell may
+  not send, fails with `errorCode: "protected_broadcast"`. Other refusals report
+  `permission_denied`, and output with no completion line reports
+  `broadcast_failed`.
 
 ### App launch, installation, links, and storage options
 

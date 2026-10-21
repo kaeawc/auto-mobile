@@ -43,6 +43,7 @@ const IOS_WIRE_DEADLINE_REQUEST_TYPES: ReadonlySet<string> = new Set([
   "request_rotate",
   "request_location",
   "set_hinge_angle",
+  "request_appearance",
   "request_clipboard",
   "set_voiceover_state",
   // Mutating storage commands (#10500); preference reads and SQL stay without a deadline.

@@ -1,4 +1,5 @@
 import type { BootDurationSample } from "./types";
+import type { BootAdmissionReason } from "../../devices/bootAdmission/BootSlotReservation";
 
 const DEFAULT_MAX_SAMPLES = 200;
 
@@ -8,7 +9,11 @@ export interface BootDurationHistory {
   /** Most recent sample for a simulator, if one was recorded. */
   latestFor(udid: string): BootDurationSample | undefined;
   /** Most recent samples for a profile, newest first. */
-  recentForProfile(profileId: string, limit?: number): BootDurationSample[];
+  recentForProfile(
+    profileId: string,
+    limit?: number,
+    reason?: BootAdmissionReason,
+  ): BootDurationSample[];
 }
 
 /** Bounded process-local history; the oldest samples are dropped first. */
@@ -28,9 +33,17 @@ export class InMemoryBootDurationHistory implements BootDurationHistory {
     return this.samples.findLast((sample) => sample.udid === udid);
   }
 
-  recentForProfile(profileId: string, limit: number = 10): BootDurationSample[] {
+  recentForProfile(
+    profileId: string,
+    limit: number = 10,
+    reason?: BootAdmissionReason,
+  ): BootDurationSample[] {
     return this.samples
-      .filter((sample) => sample.profileId === profileId)
+      .filter(
+        (sample) =>
+          sample.profileId === profileId &&
+          (reason === undefined || (sample.reason ?? "create") === reason),
+      )
       .slice(-limit)
       .reverse();
   }

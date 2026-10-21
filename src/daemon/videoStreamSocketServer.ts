@@ -1030,5 +1030,4 @@ export {
   validateCaptureHints,
   type DeviceOwnershipChanges,
   type VideoStreamSocketServerDependencies,
-  type CaptureSourceFactory,
 } from "./videoStreamSocketDefaults";

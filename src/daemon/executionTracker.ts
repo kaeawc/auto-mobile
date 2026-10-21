@@ -33,9 +33,7 @@ import {
 export {
   type ActiveExecution,
   sessionExecutionMetadataOf,
-  type SessionExecutionEnd,
   type SessionExecutionEndListener,
-  type ExecutionScope,
   type ExecutionScopeOptions,
   type ExecutionCancellationOptions,
   type ExecutionCancellationReason,

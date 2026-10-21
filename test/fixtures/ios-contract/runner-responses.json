@@ -616,6 +616,35 @@
       }
     },
     {
+      "name" : "accessibility_audit_result",
+      "wire" : {
+        "engine" : "xcuitest",
+        "issues" : [
+          {
+            "bounds" : {
+              "bottom" : 4,
+              "left" : 1,
+              "right" : 3,
+              "top" : 2
+            },
+            "check" : "contrast",
+            "detail" : "fixture detail",
+            "elementId" : "fixture-element",
+            "label" : "Fixture",
+            "summary" : "fixture issue"
+          }
+        ],
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "accessibility_audit_result",
+        "unsupportedChecks" : [
+          "fixture-check"
+        ]
+      }
+    },
+    {
       "name" : "magic_tap_result",
       "wire" : {
         "available" : true,
@@ -951,6 +980,27 @@
       }
     },
     {
+      "name" : "appearance_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "text" : "dark",
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "appearance_result"
+      }
+    },
+    {
       "name" : "location_result",
       "wire" : {
         "perfTiming" : {
@@ -1221,7 +1271,9 @@
     }
   ],
   "responseTypes" : [
+    "accessibility_audit_result",
     "action_result",
+    "appearance_result",
     "append_text_result",
     "clear_preferences_result",
     "clear_text_result",

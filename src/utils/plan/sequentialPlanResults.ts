@@ -10,6 +10,7 @@ import type { StepExecutionResult } from "./PlanStepExecutor";
 import { StepToolResultCollector } from "./stepToolResults";
 import { logger } from "../logger";
 import { throwIfAborted } from "../toolUtils";
+import { redactToolSecrets } from "../redactToolSecrets";
 
 export interface SequentialExecutionRecords {
   executedSteps: number;
@@ -63,7 +64,7 @@ export function recordSequentialStep(options: {
       step: `Execute step ${stepNumber}: ${step.tool}`,
       status: "skipped",
       durationMs,
-      details: { params: step.params, error, optional: true },
+      details: { params: redactToolSecrets(step.tool, step.params), error, optional: true },
     });
     return;
   }

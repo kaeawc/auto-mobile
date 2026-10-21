@@ -75,18 +75,22 @@ isolateToolRegistry();
 const readArgs: Record<string, Record<string, unknown>> = {
   keyboard: { action: "detect" },
   clipboard: { action: "get" },
+  mediaSession: { action: "get" },
   sqlQuery: { query: "SELECT 1" },
   prototype: { action: "inspect" },
+  statusBar: { action: "get" },
 };
 // All handler bodies are stubbed, so even platform-specific reads can exercise resolution.
 const EXPECTED = [
   "accessibility",
   "clipboard",
+  "compareScreenshot",
   "displayConfig",
   "getAppPermissions",
   "getDataStore",
   "getDeepLinks",
   "getDeviceState",
+  "getLogs",
   "getNavigationGraph",
   "getNetworkGraph",
   "getNotificationPolicy",
@@ -97,10 +101,12 @@ const EXPECTED = [
   "keyboard",
   "listApps",
   "listDataStores",
+  "mediaSession",
   "observe",
   "prototype",
   "snapshotOf",
   "sqlQuery",
+  "statusBar",
 ];
 const deviceFor = (platform: Platform): BootedDevice => ({
   platform,
@@ -436,11 +442,13 @@ const READS_THAT_READY_UNHELD = {
   android: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -452,15 +460,18 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
   ios: [
     "accessibility",
     "clipboard",
+    "compareScreenshot",
     "displayConfig",
     "getAppPermissions",
     "getDataStore",
     "getDeepLinks",
     "getDeviceState",
+    "getLogs",
     "getNavigationGraph",
     "getNetworkGraph",
     "getNotificationPolicy",
@@ -472,17 +483,20 @@ const READS_THAT_READY_UNHELD = {
     "prototype",
     "snapshotOf",
     "sqlQuery",
+    "statusBar",
   ],
 };
 const READS_WITHOUT_UNHELD_READINESS = {
   android: [
     "inspectPackageSigning", // Declares booted readiness; no CtrlProxy setup.
     "listApps", // Declares booted readiness; no CtrlProxy setup.
+    "mediaSession", // Declares booted readiness; plain adb only.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
   ios: [
     "inspectPackageSigning", // Declares booted readiness; no runner setup.
     "listApps", // Declares booted readiness; no runner setup.
+    "mediaSession", // Declares booted readiness; no runner setup.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
 };
@@ -511,7 +525,7 @@ test("documented unheld registry readiness matches literal classifications", () 
   }
 });
 
-test("unheld readiness literal lists partition all 21 production reads", () => {
+test("unheld readiness literal lists partition all 22 production reads", () => {
   for (const platform of ["android", "ios"] as const) {
     const classified = [
       ...READS_THAT_READY_UNHELD[platform],

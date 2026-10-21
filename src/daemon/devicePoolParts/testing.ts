@@ -9,7 +9,6 @@ import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 import type { DevicePoolOverrides } from "./createParts";
 
-export interface TestingOperations {}
 type TestingState = Pick<
   DevicePoolState,
   | "assignmentMutex"

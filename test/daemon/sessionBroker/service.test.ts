@@ -22,8 +22,14 @@ import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { SESSION_BROKER_RETRY_AFTER_MS } from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "../../../src/daemon/sessionBroker/timing";
-import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import {
+  androidDefaults,
+  iosCatalog,
+  iosDefaults,
+} from "../../devices/sessionRequirements/fixtures";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
+import { boundAndroidResetInventory } from "../../../src/daemon/sessionBroker/service";
+import type { BootedDevice } from "../../../src/models/DeviceInfo";
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
@@ -144,6 +150,91 @@ describe("session broker service lifecycle", () => {
       timeout.mockRestore();
       await service.close();
     }
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("Android reset requires readiness ports and releases the lock on rejection", async () => {
+    const timer = new FakeTimer();
+    const lock = new RecordingLock();
+    const options = openOptions(timer, lock);
+    options.config = parseSessionBrokerHostConfig({
+      contractVersion: 1,
+      limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 0 },
+      defaults: { android: androidDefaults() },
+      reuseAndroidCleanDevices: true,
+    });
+
+    await expect(openSessionBrokerService(options)).rejects.toThrow(
+      "Android baseline reset requires the daemon readiness ports",
+    );
+
+    expect(lock.events).toEqual(["lock:acquire", "lock:release"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("Android reset inventory honors its timeout and abort signal", async () => {
+    const timer = new FakeTimer();
+    const inventoryOptions: Array<{ signal?: AbortSignal; timeoutMs?: number }> = [];
+    const inventory = boundAndroidResetInventory((inventoryOption) => {
+      inventoryOptions.push(inventoryOption ?? {});
+      return new Promise<BootedDevice[]>(() => {});
+    }, timer);
+    const controller = new AbortController();
+    const pending = inventory({ signal: controller.signal, timeoutMs: 317 });
+
+    expect(inventoryOptions).toEqual([{ signal: expect.any(AbortSignal), timeoutMs: 317 }]);
+    expect(inventoryOptions[0]!.signal).not.toBe(controller.signal);
+    expect(timer.getPendingTimeouts()).toEqual([317]);
+    timer.advanceTime(316);
+    controller.abort(new Error("cancelled"));
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(inventoryOptions[0]!.signal?.aborted).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+
+    const timeoutPending = inventory({ timeoutMs: 91 });
+    expect(timer.getPendingTimeouts()).toEqual([91]);
+    timer.advanceTime(91);
+    await expect(timeoutPending).rejects.toThrow("timed out after 91ms");
+    expect(inventoryOptions[1]!.signal?.aborted).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+
+    const defaultTimeoutPending = inventory();
+    expect(timer.getPendingTimeouts()).toEqual([2000]);
+    timer.advanceTime(2000);
+    await expect(defaultTimeoutPending).rejects.toThrow("timed out after 2000ms");
+    expect(inventoryOptions[2]!.signal?.aborted).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("Android inventory timeout aborts the inner call without aborting its caller", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    let innerAborted = false;
+    const inventory = boundAndroidResetInventory(
+      (options) =>
+        new Promise<BootedDevice[]>((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) {
+            throw new Error("Missing inventory abort signal");
+          }
+          signal.addEventListener(
+            "abort",
+            () => {
+              innerAborted = true;
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        }),
+      timer,
+    );
+    const pending = inventory({ signal: controller.signal, timeoutMs: 91 });
+
+    expect(innerAborted).toBe(false);
+    timer.advanceTime(91);
+    await expect(pending).rejects.toThrow("timed out after 91ms");
+    expect(innerAborted).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 

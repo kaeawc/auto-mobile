@@ -23,6 +23,7 @@ import type { DoNotDisturbState } from "./device-state/DoNotDisturbState";
 import { BiometricOperations } from "./device-state/BiometricOperations";
 import type { BiometricEnrollment, BiometricEnrollmentState } from "./device-state/BiometricState";
 import { ClockOperations } from "./device-state/ClockOperations";
+import { createScreenLockOperations } from "./screenLock/ScreenLockOperations";
 import {
   DEFAULT_DEVICE_STATE_FIELDS,
   EMPTY_STATE_SELECTION_ERROR,
@@ -51,6 +52,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../models";
 import { writeDeviceCameraPoster } from "./DeviceCameraPoster";
+import { AdbEmulatorSensorConsole, readEmulatorSensors } from "./EmulatorSensors";
 import type { QrPosterWriter } from "../../utils/qr/QrPosterWriter";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultLocationRouteRegistry, LocationRouteRegistry } from "./LocationRoutePlayer";
@@ -168,8 +170,15 @@ export class DeviceState {
     simctl: () => this.simctl,
   });
 
+  private readonly screenLock: ReturnType<typeof createScreenLockOperations>;
+
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
+    this.screenLock = createScreenLockOperations(
+      () => this.device,
+      () => this.adbFactory,
+      dependencies.screenLock,
+    );
     this.clock = new ClockOperations(
       {
         device: () => this.device,
@@ -254,6 +263,15 @@ export class DeviceState {
       ...(include.includes("networkCondition")
         ? { networkCondition: await this.readNetworkCondition() }
         : {}),
+      ...(include.includes("sensors")
+        ? {
+            sensors: await readEmulatorSensors(
+              this.device,
+              () => new AdbEmulatorSensorConsole(this.adbFactory.create(this.device)),
+            ),
+          }
+        : {}),
+      ...(include.includes("screenLock") ? { screenLock: await this.screenLock.read() } : {}),
     };
   }
 
@@ -343,6 +361,7 @@ export class DeviceState {
             }),
           }
         : {}),
+      ...(input.screenLock ? { screenLock: await this.screenLock.write(input.screenLock) } : {}),
     };
   }
 

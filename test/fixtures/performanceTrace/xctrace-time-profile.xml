@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<trace-query-result>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[3]'>
+<schema name="time-profile"><col><mnemonic>time</mnemonic></col><col><mnemonic>stack</mnemonic></col></schema>
+<row><sample-time id="1" fmt="00:00.001">1000000</sample-time><backtrace id="2"><frame id="3" name="-[ListCell layoutSubviews]" addr="0x1"/><frame id="4" name="main" addr="0x2"/></backtrace></row>
+<row><sample-time id="5" fmt="00:00.002">2000000</sample-time><backtrace ref="2"/></row>
+<row><sample-time id="6" fmt="00:00.003">3000000</sample-time><backtrace id="7"><frame ref="3"/><frame ref="4"/></backtrace></row>
+<row><sample-time id="8" fmt="00:00.004">4000000</sample-time><backtrace id="9"><frame id="10" name="objc_msgSend" addr="0x3"/><frame ref="4"/></backtrace></row>
+</node></trace-query-result>

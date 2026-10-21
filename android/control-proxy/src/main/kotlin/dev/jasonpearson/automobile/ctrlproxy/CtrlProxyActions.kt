@@ -106,6 +106,7 @@ interface CtrlProxyActions {
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
+    arguments: NodeActionArguments = NodeActionArguments(),
   )
 
   suspend fun requestActivateAccessibilityLink(

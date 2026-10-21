@@ -31,6 +31,18 @@ export interface AndroidActivateAccessibilityLinkRequest {
   onDispatch?: () => void;
 }
 
+/** A semantic or custom accessibility action on the node with `resourceId` (#14077). */
+export interface AndroidAccessibilityActionRequest {
+  action: string;
+  resourceId: string;
+  /** For `custom`: the app-defined action's label. */
+  customAction?: string;
+  /** For `set_progress`: the progress value. */
+  progress?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 /** Client-backed accessors resolve live state on every use, including after awaits. */
 export interface AndroidActionDispatcherContext {
   readonly timer: Timer;
@@ -71,6 +83,28 @@ export class AndroidActionDispatcher {
       timeoutMs,
       perf,
       signal,
+    );
+  }
+
+  async requestAccessibilityAction(
+    request: AndroidAccessibilityActionRequest,
+  ): Promise<A11yActionResult> {
+    const { action, resourceId, customAction, progress } = request;
+    return this.dispatchActionRequest(
+      action,
+      (requestId) =>
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestAction({
+            requestId,
+            action,
+            resourceId,
+            customAction,
+            progress,
+          }),
+        ),
+      request.timeoutMs ?? 5000,
+      new NoOpPerformanceTracker(),
+      request.signal,
     );
   }
 

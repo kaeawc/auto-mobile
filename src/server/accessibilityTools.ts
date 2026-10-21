@@ -20,6 +20,8 @@ import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContex
 import type { ScreenReaderToggleOptions } from "../models/AccessibilityResult";
 import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
 import { runSessionScreenReaderMutation } from "./sessionScreenReader";
+import { createAccessibilityAuditTool } from "./accessibilityAuditTool";
+import { createAuditTool } from "./auditTool";
 
 // `defineDeviceTool` applies `.strict()` and device targeting; the handler args below
 // (including `sessionUuid`) are inferred from this schema.
@@ -243,4 +245,6 @@ export const accessibilitySchema = accessibilityTool.schema;
 
 export function registerAccessibilityTools() {
   accessibilityTool.register();
+  createAccessibilityAuditTool().register();
+  createAuditTool().register();
 }

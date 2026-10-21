@@ -164,6 +164,8 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     action: "required",
     resourceId: "optional",
     selector: "optional",
+    customAction: "optional",
+    progress: "optional",
   },
   request_activate_accessibility_link: {
     type: "required",

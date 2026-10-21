@@ -25,3 +25,8 @@ export const prototypeDataActionValueSchema = z.union([
   z.object({ value: prototypeJsonSchema }).strict(),
 ]);
 export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSchema>;
+/**
+ * `{match: "text" | "kind"}` (#14233): the tapped linkify match, valid only inside
+ * `linkify.onTap`, where the runtime replaces it with the match before the actions run.
+ */
+export const prototypeMatchBindingSchema = z.object({ match: z.enum(["text", "kind"]) }).strict();

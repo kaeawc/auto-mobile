@@ -79,6 +79,7 @@ import { registerToolCatalogResources } from "./toolCatalogResource";
 import { registerNetworkResources } from "./networkResources";
 import { registerEmulatorLossIncidentResources } from "./emulatorLossIncidentResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
+import { registerDeviceConditionFeatureFlags } from "./deviceConditionTool";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import {
   type SessionToolSelectionService,
@@ -335,6 +336,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const daemonMode = options.daemonMode ?? false;
   const toolSelectionProfileRegistry =
     options.toolSelectionProfileRegistry ?? defaultToolSelectionProfileRegistry;
+  registerDeviceConditionFeatureFlags(FeatureFlagService.getInstance());
   void FeatureFlagService.getInstance()
     .initialize()
     .catch((error) => {

@@ -26,6 +26,12 @@ import * as path from "path";
 import * as os from "os";
 import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import {
+  clearMockNetworkResultSchema,
+  getNetworkGraphResultSchema,
+  mockNetworkResultSchema,
+  networkResultSchema,
+} from "../../src/server/networkToolOutputSchemas";
 
 isolateToolRegistry();
 
@@ -1182,5 +1188,49 @@ describe("network tool schema", () => {
       },
     });
     expect(iosMockRuleSyncCalls).toBe(3);
+  });
+
+  describe("output schemas (#11830)", () => {
+    const structured = (response: unknown): unknown =>
+      (response as { structuredContent?: unknown }).structuredContent;
+
+    test.each([
+      ["network", networkResultSchema],
+      ["mockNetwork", mockNetworkResultSchema],
+      ["clearMockNetwork", clearMockNetworkResultSchema],
+      ["getNetworkGraph", getNetworkGraphResultSchema],
+    ] as const)("%s declares its outputSchema", (name, schema) => {
+      expect(ToolRegistry.getTool(name)?.outputSchema).toBe(schema);
+    });
+
+    test("each tool's text payload equals structuredContent, which validates", async () => {
+      const call = (name: string, args: Record<string, unknown>) =>
+        ToolRegistry.getTool(name)!.deviceAwareHandler!(androidDevice, args);
+      const repositorySpy = spyOn(networkEventRepository, "getNetworkEvents").mockResolvedValue([]);
+      try {
+        const responses = [
+          [networkResultSchema, await call("network", { capture: true })],
+          [mockNetworkResultSchema, await call("mockNetwork", { host: "api", path: "/x" })],
+          [clearMockNetworkResultSchema, await call("clearMockNetwork", {})],
+          [getNetworkGraphResultSchema, await call("getNetworkGraph", {})],
+        ] as const;
+        for (const [schema, response] of responses) {
+          expect(parseToolJson(response)).toEqual(JSON.parse(JSON.stringify(structured(response))));
+          expect(schema.safeParse(structured(response)).success).toBe(true);
+        }
+      } finally {
+        repositorySpy.mockRestore();
+      }
+    });
+
+    test("a device that did not sync still validates", async () => {
+      androidSendResult = false;
+      const response = await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(
+        androidDevice,
+        { host: "api", path: "/x" },
+      );
+      expect(structured(response)).toMatchObject({ deviceSynced: false });
+      expect(mockNetworkResultSchema.safeParse(structured(response)).success).toBe(true);
+    });
   });
 });

@@ -65,11 +65,12 @@ import {
   looksLikeMissingIosDefault,
   isRetryableIosDefaultsError,
   iosDefaultsOperationTimeoutError,
+  iosPreferenceCommandTimeoutError,
+  isMissingIosAppError,
   preferenceWriteWarning,
-  unsupportedPhysicalIosUserDefaultsError,
+  physicalIosUserDefaultsRequireSdkError,
 } from "./preferenceValues";
 export {
-  type PreferenceScope,
   type PreferenceValueType,
   type PreferenceResultType,
   type PreferenceValue,
@@ -324,7 +325,7 @@ export class AppPreferences {
     write = false,
   ): Promise<T> {
     if (!isIosSimulatorDevice(this.device)) {
-      throw unsupportedPhysicalIosUserDefaultsError();
+      return this.withPhysicalIosSdkPreferenceStore(input, operation);
     }
     const domain = sanitizeIosDefaultsDomain(iosDefaultsDomain(input));
     if (!input.appId) {
@@ -347,6 +348,42 @@ export class AppPreferences {
     return operation(
       await this.resolveIosContainerPreferenceStore(input, store, domain, deadlineMs, write),
     );
+  }
+
+  /**
+   * Physical iOS (#14093): the app's own embedded SDK is the only route to its UserDefaults. There
+   * is no container plist or `defaults` fallback on hardware, so an SDK failure is final and a write
+   * is attempted at most once.
+   */
+  private async withPhysicalIosSdkPreferenceStore<T>(
+    input: GetPreferenceInput,
+    operation: (store: IosPreferenceStore) => Promise<T>,
+  ): Promise<T> {
+    if (!input.appId) {
+      throw physicalIosUserDefaultsRequireSdkError("appId is required on physical devices.");
+    }
+    const domain = sanitizeIosDefaultsDomain(iosDefaultsDomain(input));
+    sanitizeIosDefaultsDomain(input.appId);
+    const client = this.iosKeyValueClientProvider();
+    if (!client?.isConnected()) {
+      throw physicalIosUserDefaultsRequireSdkError(
+        `No embedded AutoMobile SDK connection is open for '${input.appId}'.`,
+      );
+    }
+    try {
+      return await operation({
+        kind: "sdk",
+        store: isStandardIosStore(input) ? "standard" : domain,
+        client,
+      });
+    } catch (error) {
+      if (errorMessage(error).includes("mutation_not_authorized")) {
+        throw new ActionableError(
+          `iOS key-value storage mutation is not authorized: ${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT}`,
+        );
+      }
+      throw toActionableError(error, "Failed to access iOS app UserDefaults through the SDK");
+    }
   }
 
   /** Throws unless the SDK failure may be retried through the container plist. */
@@ -418,29 +455,21 @@ export class AppPreferences {
     }
     let container: string;
     try {
-      const result = await this.iosPreferenceCommand(
-        (timeoutMs) =>
-          this.getSimctl().executeCommandArgs(
-            ["get_app_container", this.device.deviceId, input.appId!, "data"],
-            timeoutMs,
-          ),
-        deadlineMs,
-      );
-      container = result.stdout.trim();
+      container = (await this.lookupIosDataContainer(input.appId!, deadlineMs)).trim();
       if (!container) {
         throw new ActionableError("simctl returned an empty data container path.");
       }
     } catch (error) {
       const detail = errorMessage(error);
-      if (
-        /Application not found|No such file or directory|NSPOSIXErrorDomain, code=2/i.test(detail)
-      ) {
+      if (isMissingIosAppError(detail)) {
         throw new ActionableError(
           `App '${input.appId}' is not installed on this simulator: ${detail}. Install the app and retry.`,
         );
       }
+      // The container is resolved before `defaults write` runs, so a failed write here wrote nothing.
+      const unwritten = write ? " Nothing was written, so the write can be retried safely." : "";
       throw new ActionableError(
-        `Failed to resolve the data container for '${input.appId}': ${detail}. Check simulator availability and retry.`,
+        `Failed to resolve the data container for '${input.appId}': ${detail}.${unwritten} Check simulator availability and retry.`,
         { cause: error },
       );
     }
@@ -449,6 +478,46 @@ export class AppPreferences {
       store,
       domain: join(container, "Library", "Preferences", domain),
     };
+  }
+
+  /**
+   * `get_app_container` is a read-only, idempotent lookup, so it gets the `defaults` commands' bounded
+   * retry (#14683): one more attempt on a timeout or a transient CoreSimulator error while the
+   * operation budget lasts. A missing app is never retried.
+   */
+  private async lookupIosDataContainer(
+    appId: string,
+    deadlineMs: number | undefined,
+  ): Promise<string> {
+    const lookup = async () =>
+      (
+        await this.iosPreferenceCommand(
+          (timeoutMs) =>
+            this.getSimctl().executeCommandArgs(
+              ["get_app_container", this.device.deviceId, appId, "data"],
+              timeoutMs,
+            ),
+          deadlineMs,
+          IOS_DEFAULTS_COMMAND_TIMEOUT_MS,
+          "get_app_container",
+        )
+      ).stdout;
+    for (let attempt = 1; attempt < PREFERENCE_READ_ATTEMPTS; attempt += 1) {
+      try {
+        return await lookup();
+      } catch (error) {
+        const budgetLeft = deadlineMs === undefined || this.timer.now() < deadlineMs;
+        const retryable = isRetryableIosDefaultsError(error);
+        if (!budgetLeft || !retryable || isMissingIosAppError(errorMessage(error))) {
+          throw error;
+        }
+        logger.warn(
+          `Retrying get_app_container after transient failure: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return lookup();
   }
 
   private async readIosPreferenceStore(
@@ -498,6 +567,8 @@ export class AppPreferences {
       xml = await this.iosPreferenceCommand(
         (timeoutMs) => reader.readXmlFile(`${domain}.plist`, { timeoutMs }),
         deadlineMs,
+        IOS_DEFAULTS_COMMAND_TIMEOUT_MS,
+        "UserDefaults plist read",
       );
     } catch (error) {
       if (/No such file|file doesn[’']t exist|file does not exist/i.test(errorMessage(error))) {
@@ -586,20 +657,15 @@ export class AppPreferences {
     operation: (timeoutMs: number) => Promise<T>,
     deadlineMs?: number,
     commandTimeoutMs = IOS_DEFAULTS_COMMAND_TIMEOUT_MS,
+    command = "UserDefaults request",
   ): Promise<T> {
-    const remainingMs = Math.min(
-      commandTimeoutMs,
-      deadlineMs === undefined ? commandTimeoutMs : deadlineMs - this.timer.now(),
-    );
+    const budgetMs = deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
+    const remainingMs = Math.min(commandTimeoutMs, budgetMs ?? commandTimeoutMs);
     if (remainingMs <= 0) {
       throw iosDefaultsOperationTimeoutError();
     }
     const operationDeadlineMs = this.timer.now() + remainingMs;
-    const timeoutError =
-      deadlineMs === undefined || commandTimeoutMs === IOS_PREFERENCE_SDK_TIMEOUT_MS
-        ? () =>
-            new ActionableError(`iOS UserDefaults request timed out after ${commandTimeoutMs}ms.`)
-        : iosDefaultsOperationTimeoutError;
+    const timeoutError = iosPreferenceCommandTimeoutError(command, commandTimeoutMs, budgetMs);
     const value = await raceWithDeadline(
       () => operation(Math.min(IOS_DEFAULTS_COMMAND_TIMEOUT_MS, remainingMs)),
       { timer: this.timer, timeoutMs: remainingMs, label: "iOS UserDefaults", timeoutError },

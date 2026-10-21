@@ -67,6 +67,8 @@ final class CommandHandler: CommandHandling {
     let voiceOverToggle: any VoiceOverToggling
     let locationSimulator: any LocationSimulating
     let hingeAngleSetter: any HingeAngleSetting
+    let accessibilityAuditor: any AccessibilityAuditing
+    let appearanceControl: any AppearanceControlling
     let frameContext: FrameContext
     let rotationTimer: any ProxyTimer
     let hierarchyPairRecorder: (any HierarchyPairRecording)?
@@ -84,6 +86,8 @@ final class CommandHandler: CommandHandling {
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         locationSimulator: any LocationSimulating = DefaultLocationSimulator(),
         hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
+        accessibilityAuditor: any AccessibilityAuditing = DefaultAccessibilityAuditor(),
+        appearanceControl: any AppearanceControlling = DefaultAppearanceControl(),
         frameContext: FrameContext = FrameContext(),
         rotationTimer: any ProxyTimer = SystemTimer(),
         hierarchyPairRecorder: (any HierarchyPairRecording)? = nil
@@ -100,6 +104,8 @@ final class CommandHandler: CommandHandling {
         self.voiceOverToggle = voiceOverToggle
         self.locationSimulator = locationSimulator
         self.hingeAngleSetter = hingeAngleSetter
+        self.accessibilityAuditor = accessibilityAuditor
+        self.appearanceControl = appearanceControl
         self.frameContext = frameContext
         self.rotationTimer = rotationTimer
         self.hierarchyPairRecorder = hierarchyPairRecorder
@@ -168,10 +174,10 @@ final class CommandHandler: CommandHandling {
         case .pressButton, .pressHome, .pressBack, .shake, .recentApps:
             return try await dispatchNavigation(request, startTime: startTime)
         case .action, .activateAccessibilityLink, .launchApp, .resetPermissions, .rotate, .location, .setHingeAngle,
-             .clipboard:
+             .appearance, .clipboard:
             return try await dispatchAppAndDevice(request, startTime: startTime)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
-             .setVoiceOverState:
+             .setVoiceOverState, .accessibilityAudit:
             return try await dispatchAccessibility(request, startTime: startTime)
         case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
              .clearPreferences:
@@ -297,6 +303,8 @@ final class CommandHandler: CommandHandling {
             return try await handleLocation(payload, startTime: startTime)
         case let .setHingeAngle(payload):
             return await handleSetHingeAngle(payload, startTime: startTime)
+        case let .appearance(payload):
+            return try await handleAppearance(payload, startTime: startTime)
         case let .clipboard(payload):
             return try await handleClipboard(payload, startTime: startTime)
         default:
@@ -324,6 +332,8 @@ final class CommandHandler: CommandHandling {
             return await handleGetVoiceOverState(payload, startTime: startTime)
         case let .setVoiceOverState(payload):
             return await handleSetVoiceOverState(payload, startTime: startTime)
+        case let .accessibilityAudit(payload):
+            return await handleAccessibilityAudit(payload, startTime: startTime)
         default:
             throw CommandError.unknownCommand(request.typeString)
         }

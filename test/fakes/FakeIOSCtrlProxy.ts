@@ -34,6 +34,8 @@ import type {
   CtrlProxyHingeAngleResult,
   CtrlProxyLocationRequest,
   CtrlProxyLocationResult,
+  CtrlProxyAppearance,
+  CtrlProxyAppearanceResult,
   CtrlProxyActionResult,
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
@@ -1193,6 +1195,27 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     await this.applyDelay("requestLocation");
     this.checkFailure("requestLocation");
     return this.locationResult ?? { success: true, totalTimeMs: 0 };
+  }
+
+  /** Appearance requests seen (`undefined` = read only) and the simulated system appearance. */
+  readonly appearanceHistory: Array<"light" | "dark" | undefined> = [];
+  appearance: CtrlProxyAppearance = "light";
+  appearanceResult?: CtrlProxyAppearanceResult;
+
+  async requestAppearance(
+    appearance?: "light" | "dark",
+    _timeoutMs: number = 5000,
+  ): Promise<CtrlProxyAppearanceResult> {
+    this.appearanceHistory.push(appearance);
+    await this.applyDelay("requestAppearance");
+    this.checkFailure("requestAppearance");
+    if (this.appearanceResult) {
+      return this.appearanceResult;
+    }
+    if (appearance) {
+      this.appearance = appearance;
+    }
+    return { success: true, appearance: this.appearance, totalTimeMs: 0 };
   }
 
   async requestLaunchApp(

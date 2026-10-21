@@ -40,6 +40,7 @@ import type {
   CtrlProxyHingeAngleResult,
   CtrlProxyLocationRequest,
   CtrlProxyLocationResult,
+  CtrlProxyAppearanceResult,
   CtrlProxyImeActionResult,
   CtrlProxyKeyboardResult,
   CtrlProxyLaunchAppResult,
@@ -306,6 +307,11 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<CtrlProxyLocationResult>;
+
+  requestAppearance(
+    appearance?: "light" | "dark",
+    timeoutMs?: number,
+  ): Promise<CtrlProxyAppearanceResult>;
 
   requestLaunchApp(
     bundleId: string,

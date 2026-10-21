@@ -5,6 +5,7 @@ import {
   keySchema,
   pointerSchema,
   prototypeDataActionValueSchema,
+  prototypeMatchBindingSchema,
   stateKeySchema,
   type PrototypeDataActionValue,
 } from "./prototypeActionValues";
@@ -13,6 +14,8 @@ import {
   prototypeJsonSchema,
   type PrototypeJson,
 } from "./prototypeJson";
+import { prototypeChartShape } from "./prototypeChartSchema";
+import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   anchorSchema,
@@ -23,7 +26,6 @@ import {
   hexColorSchema,
   iconNameSchema,
   iconVariantSchema,
-  imageAssetSchema,
   itemSchema,
   placementSchema,
   PROTOTYPE_COLOR_ROLES,
@@ -33,17 +35,19 @@ import {
   styleSchema,
   styleWhenEntrySchema,
 } from "./prototypePresentationSchemas";
+import {
+  bindPrototypePlatformFollowUps,
+  platformActionSchema,
+  prototypePlatformHandlersSchema,
+  prototypeRequiresSchema,
+} from "./prototypePlatformSchema";
 import { bindPrototypeRequestFollowUps, requestActionSchema } from "./prototypeRequestSchema";
 import { prototypeStorageSchema } from "./prototypeStorageSchema";
 import { record } from "./prototypeTemplate";
 export {
-  anchorSchema,
-  placementSchema,
   PROTOTYPE_COLOR_ROLES,
   type PrototypeAnchor,
-  type PrototypeCondition,
   type PrototypeData,
-  type PrototypeDataValue,
 } from "./prototypePresentationSchemas";
 export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
 export const {
@@ -65,6 +69,7 @@ export { prototypeJsonObjectSchema, prototypeJsonSchema, type PrototypeJson };
 export const prototypeEmitContextBindingSchema = z.union([
   ...prototypeDataActionValueSchema.options,
   z.object({ page: z.string().min(1) }).strict(),
+  prototypeMatchBindingSchema,
 ]);
 export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
 // A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
@@ -72,7 +77,10 @@ const dataActionPathSchema = z
   .string()
   .min(1)
   .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
-const dataActionFields = { path: dataActionPathSchema, value: prototypeDataActionValueSchema };
+const dataActionFields = {
+  path: dataActionPathSchema,
+  value: z.union([...prototypeDataActionValueSchema.options, prototypeMatchBindingSchema]),
+};
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
 export const prototypeEmitContextSchema = z
   .record(z.string().min(1), prototypeEmitContextBindingSchema)
@@ -99,7 +107,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.enum(["setState"]),
       key: stateKeySchema,
-      value: z.union([z.string(), z.number().finite(), z.boolean()]),
+      value: z.union([z.string(), z.number().finite(), z.boolean(), prototypeMatchBindingSchema]),
     })
     .strict(),
   z
@@ -127,35 +135,35 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
   requestActionSchema,
+  platformActionSchema,
   z
     .object({ type: z.enum(["push"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
   z.object({ type: z.enum(["pop"]), stack: z.string().min(1) }).strict(),
   z.object({ type: z.enum(["popToRoot"]), stack: z.string().min(1) }).strict(),
   z
+    .object({
+      type: z.enum(["scrollTo"]),
+      scroll: z.string().min(1),
+      to: z.union([
+        z.enum(["start", "end"]),
+        z.object({ key: z.union([z.string(), z.number().finite(), z.boolean()]) }).strict(),
+      ]),
+      animated: z.boolean().optional(),
+    })
+    .strict(),
+  z
     .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
 ]);
 bindPrototypeRequestFollowUps(() => actionSchema);
+bindPrototypePlatformFollowUps(() => actionSchema);
 const gestureNodeShape = {
   onLongPress: z.array(actionSchema).min(1).max(32).optional(),
   onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
 };
-export const prototypeCheckSchema = z.union([
-  z.object({ message: z.string().min(1), required: z.literal(true) }).strict(),
-  z.object({ message: z.string().min(1), minLength: z.number().finite().int().min(0) }).strict(),
-  z.object({ message: z.string().min(1), maxLength: z.number().finite().int().min(0) }).strict(),
-  z.object({ message: z.string().min(1), min: z.number().finite() }).strict(),
-  z.object({ message: z.string().min(1), max: z.number().finite() }).strict(),
-  z
-    .object({
-      message: z.string().min(1),
-      format: z.enum(["email", "phone", "digits", "decimal", "url"]),
-    })
-    .strict(),
-  z.object({ message: z.string().min(1), pattern: z.string().max(128) }).strict(),
-]);
-export type PrototypeCheck = z.infer<typeof prototypeCheckSchema>;
+export { prototypeCheckSchema, type PrototypeCheck } from "./prototypeCheckSchema";
+import { prototypeCheckSchema } from "./prototypeCheckSchema";
 const enabledShape = { enabledWhen: conditionSchema.optional() };
 const checksShape = {
   ...enabledShape,
@@ -172,7 +180,7 @@ const commonNodeShape = {
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
-  transition: z.enum(["none", "fade", "expand", "slide"]).optional(),
+  ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
@@ -262,6 +270,17 @@ const textSpanSchema = z
     onTap: commonNodeShape.onTap,
   })
   .strict();
+// `linkify` (#14233): mentions, hashtags and URLs in `text` become links running `onTap`.
+const linkifySchema = z
+  .object({
+    kinds: z
+      .array(z.enum(["mention", "hashtag", "url"]))
+      .min(1)
+      .max(3),
+    style: textSpanSchema.shape.style,
+    onTap: z.array(actionSchema).min(1).max(32),
+  })
+  .strict();
 const textBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -269,16 +288,11 @@ const textBaseSchema = z
     type: z.enum(["text"]),
     text: z.string().optional(),
     spans: z.array(textSpanSchema).min(1).max(MAX_PROTOTYPE_TEXT_SPANS).optional(),
+    linkify: linkifySchema.optional(),
   })
   .strict();
 const imageBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    ...gestureNodeShape,
-    type: z.enum(["image"]),
-    asset: imageAssetSchema,
-    contentScale: z.enum(["fit", "crop", "fill"]).optional(),
-  })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...prototypeImageShape })
   .strict();
 const iconBaseSchema = z
   .object({
@@ -505,6 +519,7 @@ const progressBaseSchema = z
     max: z.number().finite().optional(),
   })
   .strict();
+const chartBaseSchema = z.object({ ...commonNodeShape, ...prototypeChartShape }).strict();
 const dialogBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -572,6 +587,11 @@ const scrollBaseSchema = z
     type: z.enum(["scroll"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
     refresh: scrollRefreshSchema.optional(),
+    // Chat lists (#14232): anchored at the end, following new rows, reporting the end position.
+    reverse: z.boolean().optional(),
+    stickToEnd: z.boolean().optional(),
+    atEndKey: stateKeySchema.optional(),
+    onStartReached: z.array(actionSchema).min(1).max(32).optional(),
   })
   .strict();
 // Pager distances share the contract's 10000 dp dimension ceiling.
@@ -674,6 +694,7 @@ export type PrototypeNode =
   | z.infer<typeof dividerBaseSchema>
   | z.infer<typeof badgeBaseSchema>
   | z.infer<typeof progressBaseSchema>
+  | z.infer<typeof chartBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof menuBaseSchema>
   | z.infer<typeof snackbarBaseSchema>
@@ -750,6 +771,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       dividerBaseSchema,
       badgeBaseSchema,
       progressBaseSchema,
+      chartBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       menuBaseSchema,
       snackbarBaseSchema,
@@ -870,6 +892,8 @@ const specSchema = z
       .optional(),
     motion: z.enum(["none", "standard"]).optional(),
     storage: prototypeStorageSchema.optional(),
+    requires: prototypeRequiresSchema.optional(),
+    platform: prototypePlatformHandlersSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();
@@ -904,6 +928,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "divider",
   "badge",
   "progress",
+  "chart",
   "dialog",
   "menu",
   "snackbar",
@@ -932,6 +957,8 @@ export const PROTOTYPE_ACTION_TYPES = [
   "appendData",
   "removeData",
   "request",
+  "platform",
+  "scrollTo",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

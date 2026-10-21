@@ -84,7 +84,7 @@ export const androidIntentSchema = z
       .min(1)
       .optional()
       .describe(
-        'Activity of the launched app: ".DebugActivity", a fully qualified class, or "<appId>/<class>"; default: launcher activity. Other packages are refused',
+        'Activity of the launched app: ".DebugActivity", a fully qualified class, or "<appId>/<class>". Omitted: Android resolves action/data within the app (one of them is required). Other packages are refused',
       ),
     action: z.string().min(1).optional().describe("Intent action, e.g. android.intent.action.VIEW"),
     data: z.string().min(1).optional().describe("Data URI"),

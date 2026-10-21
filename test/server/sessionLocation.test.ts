@@ -14,6 +14,8 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { DeviceState } from "../../src/features/utility/DeviceState";
+import type { DeviceTraits } from "../../src/utils/android-cmdline-tools/deviceTraits";
+import { FakeDeviceTraits, androidDeviceTraits } from "../fakes/FakeDeviceTraits";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeEmulatorConsoleClient } from "../fakes/FakeEmulatorConsoleClient";
@@ -494,7 +496,6 @@ describe("session route cleanup", () => {
       const targetId = platform === "android" ? deviceId : "12345678-1234-1234-1234-123456789ABC";
       const finished = Promise.withResolvers<void>();
       const adb = new FakeAdbClient();
-      adb.setCommandResult("shell getprop ro.kernel.qemu", "1\n");
       const consoleClient = new FakeEmulatorConsoleClient();
       const simctl = new FakeSimctl();
       let outcome: Promise<unknown> | undefined;
@@ -511,6 +512,7 @@ describe("session route cleanup", () => {
             timer,
             routeRegistry: registry,
             adbFactory: new FakeAdbClientFactory(adb),
+            deviceTraits: new FakeDeviceTraits(androidDeviceTraits()),
             consoleFactory: () => consoleClient,
             simctl,
             canWriteLocation: createSessionLocationWriteAdmission({
@@ -558,15 +560,15 @@ describe("session route cleanup", () => {
     const { timer, manager, registry } = harness();
     const probeFinished = Promise.withResolvers<void>();
     const probeStarted = Promise.withResolvers<void>();
-    class DelayedAdb extends FakeAdbClient {
-      override async executeCommand(command: string) {
+    // The emulator probe stays in flight until the test releases it.
+    const deviceTraits: DeviceTraits = {
+      async read() {
         probeStarted.resolve();
         await probeFinished.promise;
-        return super.executeCommand(command);
-      }
-    }
-    const adb = new DelayedAdb();
-    adb.setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+        return androidDeviceTraits();
+      },
+    };
+    const adb = new FakeAdbClient();
     const consoleClient = new FakeEmulatorConsoleClient();
     let mutation: Promise<unknown> | undefined;
     try {
@@ -579,6 +581,7 @@ describe("session route cleanup", () => {
           timer,
           routeRegistry: registry,
           adbFactory: new FakeAdbClientFactory(adb),
+          deviceTraits,
           consoleFactory: () => consoleClient,
           canWriteLocation: createSessionLocationWriteAdmission({
             sessionManager: manager,

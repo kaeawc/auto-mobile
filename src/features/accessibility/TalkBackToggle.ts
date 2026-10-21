@@ -240,7 +240,7 @@ export class TalkBackToggle {
    * specifically is the active service. Used both for the pre-apply idempotency
    * check and the post-apply confirmation so the two never drift.
    */
-  private async detectTalkBackEnabled(): Promise<boolean | null> {
+  async detectTalkBackEnabled(): Promise<boolean | null> {
     this.detector.invalidateCache(this.device.deviceId);
     const state = await this.detector.resolveState(this.device.deviceId, this.adb);
     return state === null ? null : state.service === "talkback";

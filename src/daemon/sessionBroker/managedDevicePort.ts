@@ -2,6 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { combineAbortSignals } from "../../utils/AbortContext";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../../utils/deviceTimeouts";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../utils/runnerReadinessConfig";
 import type { BrokerExecutionRelease } from "./provisioning/executionRelease";
@@ -9,6 +10,8 @@ import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import type { BindingJournal } from "./registry/bindingJournal";
 import { defaultBindingExecOwnerLiveness } from "./registry/ownerLiveness";
 import { runAsBindingReconciler } from "./provisioning/exclusion";
+import { brokerMutationIncarnation } from "./mutations/recorder";
+import type { DeviceMutationScope } from "./mutations/types";
 import {
   computeBindingScopeKey,
   journalOwnersEqual,
@@ -20,7 +23,9 @@ import {
   type BindingExecOwnerLiveness,
 } from "./registry/bindingRegistry";
 import { type BrokerProvisionRequest } from "./provisioning/provisionRequest";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
+import type { DeviceIncarnationScope } from "./mutations/types";
+import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import {
@@ -29,6 +34,7 @@ import {
   type SessionDevicePreparationOptions,
   type ResetResult,
   type ResetOutcome,
+  type ResetBootRunner,
   type SessionPreparationTiming,
 } from "./devicePort";
 import { nativeProfile, type BrokerNativeProfile } from "./profile";
@@ -47,6 +53,7 @@ type BrokerDeviceAcquisitionEntry = BrokerDeviceAcquisitionResult["bindings"][nu
 type DestructionProgress = "absent" | "pending";
 
 export interface ManagedDevicePortDependencies {
+  bindMutationRecorder?: (scope: DeviceMutationScope) => void;
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
@@ -62,9 +69,16 @@ export interface ManagedDevicePortDependencies {
       device: BootedDevice,
       profile: Extract<BrokerNativeProfile, { platform: "ios" }>,
       assertOwned: () => Promise<void>,
+      signal?: AbortSignal,
+      context?: {
+        resource: BrokerResourceRecord;
+        scope: DeviceIncarnationScope;
+        runResetBoot?: ResetBootRunner;
+      },
     ) => Promise<"clean" | ResetOutcome>;
     android?: Pick<AndroidBaselineReset, "canCapture" | "capture" | "reset" | "forget">;
   };
+  captureIosBaseline?: (context: DeviceMutationResetContext) => Promise<void>;
   /** Durable request/revision fence; a stale reset must not act on a later session's resource. */
   isCurrentReset?: (resource: BrokerResourceRecord) => Promise<boolean>;
 }
@@ -77,6 +91,7 @@ export interface ManagedDevicePortDependencies {
  * allocator, journal, pool, process, or background work.
  */
 export class ManagedDevicePort implements SessionBrokerDevicePort {
+  readonly managesResetBootSlots = true;
   private readonly androidDevices = new Map<
     string,
     {
@@ -162,6 +177,12 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       signal: options.signal,
       deadlineMs,
     });
+    if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
+      await this.capturePoolEntryBaseline(resource, sessionId, {
+        signal: options.signal,
+        deadlineMs,
+      });
+    }
     const binding = result.bindings.find(
       (entry) => entry.bindingIndex === resource.allocationIndex,
     );
@@ -179,7 +200,6 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (profile.platform !== "android" || !android || !android.canCapture) {
       return;
     }
-    android.forget(resource.resourceId);
     this.androidDevices.delete(resource.resourceId);
     try {
       const entry = result.bindings[0];
@@ -199,32 +219,132 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       });
       await runAsBindingReconciler(this.key(resource), () =>
         android.capture(resource.resourceId, device, profile, sessionId, {
+          fresh: entry.disposition === "created" || entry.disposition === "replaced",
           signal: options.signal,
           timeoutMs: Math.max(
             0,
             options.deadlineMs - (this.dependencies.timer ?? defaultTimer).now(),
           ),
           timer: this.dependencies.timer ?? defaultTimer,
+          incarnation: JSON.stringify([resource.resourceId, binding.stableId]),
+          assertOwned: async () => {
+            options.signal?.throwIfAborted();
+            const current = await this.dependencies.registry.getAssignment(this.key(resource));
+            if (
+              !current ||
+              !sameBinding(current, {
+                generation: entry.assignmentGeneration!,
+                stableDeviceId: binding.stableId,
+              }) ||
+              current.state !== "ready" ||
+              current.deviceName !== device.name ||
+              current.execOwner?.sessionUuid !== sessionId ||
+              current.settler !== null ||
+              (await this.hasOpenJournal(this.key(resource)))
+            ) {
+              throw new ActionableError(
+                "Android baseline capture lost exclusive binding ownership",
+              );
+            }
+          },
         }),
       );
     } catch (error) {
-      this.handleAndroidBaselineCaptureFailure(resource.resourceId, android, options, error);
+      await this.handleAndroidBaselineCaptureFailure(resource.resourceId, android, options, error);
     }
   }
 
-  private handleAndroidBaselineCaptureFailure(
+  private async handleAndroidBaselineCaptureFailure(
     resourceId: string,
     android: Pick<AndroidBaselineReset, "forget">,
     options: { signal?: AbortSignal; deadlineMs: number },
     error: unknown,
-  ): void {
-    android.forget(resourceId);
+  ): Promise<void> {
+    await android.forget(resourceId);
     this.androidDevices.delete(resourceId);
     options.signal?.throwIfAborted();
     if (this.preparationStopped(options.deadlineMs, options.signal)) {
       throw new ActionableError("Android reset baseline capture exceeded preparation deadline");
     }
     logger.warn("Android reset baseline unavailable; device will be destroyed on release", error);
+  }
+
+  private async capturePoolEntryBaseline(
+    resource: BrokerResourceRecord,
+    sessionId: string,
+    options: { signal?: AbortSignal; deadlineMs: number },
+  ): Promise<void> {
+    const timer = this.dependencies.timer ?? defaultTimer;
+    const controller = new AbortController();
+    const signal = combineAbortSignals(controller.signal, options.signal) ?? controller.signal;
+    let assertCaptureOwned: (() => Promise<void>) | undefined;
+    try {
+      signal.throwIfAborted();
+      if (this.preparationStopped(options.deadlineMs, signal)) {
+        throw new ActionableError("iOS reset baseline capture exceeded preparation deadline");
+      }
+      const key = this.key(resource);
+      const assignment = await this.dependencies.registry.getAssignment(key);
+      if (!assignment?.stableDeviceId || assignment.execOwner?.sessionUuid !== sessionId) {
+        throw new ActionableError("iOS baseline capture requires the acquired execution binding");
+      }
+      const assertOwned = async () => {
+        signal.throwIfAborted();
+        if (this.preparationStopped(options.deadlineMs, signal)) {
+          throw new ActionableError("iOS reset baseline capture exceeded preparation deadline");
+        }
+        const current = await this.dependencies.registry.getAssignment(key);
+        if (
+          !current ||
+          !sameBinding(current, assignment) ||
+          current.state !== "ready" ||
+          current.execOwner?.sessionUuid !== sessionId ||
+          current.settler !== null ||
+          (await this.hasOpenJournal(key))
+        ) {
+          throw new ActionableError("iOS baseline capture lost execution binding ownership");
+        }
+      };
+      assertCaptureOwned = assertOwned;
+      await raceWithDeadline(
+        () =>
+          this.dependencies.captureIosBaseline!({
+            scope: { ...this.mutationScope(resource, assignment), sessionUuid: sessionId },
+            assertOwned,
+            signal,
+          }),
+        {
+          timer,
+          signal,
+          timeoutMs: Math.max(0, options.deadlineMs - timer.now()),
+          label: "iOS pool-entry baseline capture",
+          timeoutError: () =>
+            new DOMException(
+              "iOS reset baseline capture exceeded preparation deadline",
+              "TimeoutError",
+            ),
+          onTimeout: () =>
+            controller.abort(new DOMException("iOS baseline preparation deadline", "TimeoutError")),
+        },
+      );
+      await assertOwned();
+    } catch (error) {
+      logger.warn(
+        `Skipping iOS pool-entry baseline; release erases if app baseline is unavailable: ${errorMessage(error)}`,
+        error,
+      );
+      options.signal?.throwIfAborted();
+      if (this.preparationStopped(options.deadlineMs, options.signal)) {
+        throw toActionableError(error, "iOS reset baseline capture exceeded preparation deadline");
+      }
+      if (!assertCaptureOwned) {
+        throw toActionableError(
+          error,
+          "Cannot capture iOS pool-entry baseline after ownership loss",
+        );
+      }
+      await assertCaptureOwned();
+    }
   }
 
   private preparationStopped(deadlineMs: number, signal?: AbortSignal): boolean {
@@ -299,6 +419,23 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       result.bindings.length === 1,
     ].every(Boolean);
     if (resultReady && this.isReadyBinding(binding, profile)) {
+      if (this.dependencies.bindMutationRecorder) {
+        try {
+          this.dependencies.bindMutationRecorder({
+            sessionUuid: binding.sessionUuid,
+            deviceId: binding.device!.transportId ?? binding.device!.stableId,
+            incarnation: brokerMutationIncarnation(
+              resource.resourceId,
+              binding.assignmentGeneration,
+            ),
+          });
+        } catch (error) {
+          logger.warn(
+            "Failed to bind broker device mutation recorder; acquiring without recording",
+            error,
+          );
+        }
+      }
       return binding.sessionUuid;
     }
     const sessionId = binding === undefined ? null : binding.sessionUuid;
@@ -346,7 +483,11 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     };
   }
 
-  async reset(resource: BrokerResourceRecord): Promise<ResetResult> {
+  async reset(
+    resource: BrokerResourceRecord,
+    signal?: AbortSignal,
+    runResetBoot?: ResetBootRunner,
+  ): Promise<ResetResult> {
     this.assertResource(resource, "resetting");
     const profile = nativeProfile(resource);
     const ios = this.dependencies.resetBaseline?.ios;
@@ -366,6 +507,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       stableDeviceId: assignment.stableDeviceId,
     };
     const assertOwned = async () => {
+      signal?.throwIfAborted();
       if (!(await isCurrent(resource))) {
         throw new ActionableError("Clean reset no longer owns its durable resource revision");
       }
@@ -389,6 +531,8 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
           { platform: "ios", deviceId: expected.stableDeviceId, name },
           profile,
           assertOwned,
+          signal,
+          { resource, scope: this.mutationScope(resource, assignment), runResetBoot },
         );
       }
       const acquired = this.androidDevices.get(resource.resourceId);
@@ -396,7 +540,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       if (
         !device ||
         !acquired ||
-        !sameBinding(assignment, acquired) ||
+        !this.sameReleasedBinding(assignment, acquired) ||
         device.name !== name ||
         expected.stableDeviceId !== name ||
         !android ||
@@ -410,18 +554,34 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     return result;
   }
 
+  private mutationScope(
+    resource: BrokerResourceRecord,
+    assignment: BindingAssignmentRecord,
+  ): DeviceIncarnationScope {
+    if (!assignment.stableDeviceId) {
+      throw new ActionableError("iOS mutation scope requires an exact bound device");
+    }
+    return {
+      deviceId: assignment.stableDeviceId,
+      incarnation: JSON.stringify([
+        resource.scopeKey,
+        resource.allocationIndex,
+        assignment.stableDeviceId,
+      ]),
+    };
+  }
+
   async destroy(
     resource: BrokerResourceRecord,
     signal?: AbortSignal,
   ): Promise<DestructionProgress> {
     signal?.throwIfAborted();
     this.assertResource(resource, "destroying");
-    const androidDevice = this.androidDevices.get(resource.resourceId);
-    if (androidDevice) {
-      this.dependencies.resetBaseline?.android?.forget(resource.resourceId);
+    const profile = nativeProfile(resource);
+    if (profile.platform === "android") {
+      await this.dependencies.resetBaseline?.android?.forget(resource.resourceId);
       this.androidDevices.delete(resource.resourceId);
     }
-    const profile = nativeProfile(resource);
     const requestedSpec = this.requestedSpec(profile);
     const key = this.key(resource);
 
@@ -473,14 +633,23 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       return this.confirmNoBinding(key);
     }
     const unchanged = [
-      sameBinding(after, {
-        generation: assignment.generation,
-        stableDeviceId: assignment.stableDeviceId,
-      }),
+      this.sameReleasedBinding(after, assignment),
+      after.state === "ready",
+      after.settler === null,
       after.execOwner === null,
       this.belongsToResource(after, profile, requestedSpec),
     ].every(Boolean);
     return unchanged ? after : "pending";
+  }
+
+  private sameReleasedBinding(
+    assignment: BindingAssignmentRecord,
+    acquired: { generation: number; stableDeviceId: string | null },
+  ): boolean {
+    return (
+      sameBinding(assignment, acquired) ||
+      sameBinding(assignment, { ...acquired, generation: acquired.generation + 1 })
+    );
   }
 
   private async deleteAssignment(

@@ -102,6 +102,11 @@ describe("durable device mutation journal", () => {
     }
   });
 
+  test("unobservable prior values persist without becoming absent", async () => {
+    await journal.record(SCOPE, { ...MUTATION, priorValue: { state: "unobservable" } });
+    expect(await journal.list(SCOPE)).toMatchObject([{ priorValue: { state: "unobservable" } }]);
+  });
+
   test("a replacement incarnation and another device or session never inherit entries", async () => {
     await journal.record(SCOPE, MUTATION);
     await journal.captureBaseline(SCOPE, BASELINE);
@@ -161,5 +166,35 @@ describe("durable device mutation journal", () => {
     expect(await journal.list(SCOPE)).toEqual([]);
     expect(await journal.list(other)).toHaveLength(1);
     expect(await journal.getBaseline(SCOPE)).toEqual(BASELINE);
+  });
+
+  test("resource retirement deletes every session and baseline for the resource", async () => {
+    const otherSession = { ...SCOPE, sessionUuid: "session-b" };
+    const replacement = { ...SCOPE, incarnation: "replacement" };
+    for (const scope of [SCOPE, otherSession, replacement]) {
+      await journal.record(scope, MUTATION);
+      await journal.captureBaseline(scope, BASELINE);
+    }
+    await journal.deleteResource(SCOPE.incarnation);
+    expect(await journal.getBaseline(SCOPE)).toBeNull();
+    expect(await journal.list(SCOPE)).toEqual([]);
+    expect(await journal.list(otherSession)).toEqual([]);
+    expect(await journal.getBaseline(replacement)).toEqual(BASELINE);
+    expect(await journal.list(replacement)).toHaveLength(1);
+  });
+
+  test("resource retirement prunes persisted generations without an in-memory reset receipt", async () => {
+    const scope = { ...SCOPE, incarnation: JSON.stringify(["resource-a", "native-id", 3]) };
+    const replacement = { ...SCOPE, incarnation: JSON.stringify(["resource-b", "native-id", 4]) };
+    for (const identity of [scope, replacement]) {
+      await journal.record(identity, MUTATION);
+      await journal.captureBaseline(identity, BASELINE);
+    }
+    const restarted = new SqliteDeviceMutationJournal(db, timer);
+    await restarted.deleteResource("resource-a");
+    expect(await restarted.getBaseline(scope)).toBeNull();
+    expect(await restarted.list(scope)).toEqual([]);
+    expect(await restarted.getBaseline(replacement)).toEqual(BASELINE);
+    expect(await restarted.list(replacement)).toHaveLength(1);
   });
 });

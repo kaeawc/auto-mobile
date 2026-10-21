@@ -1,0 +1,5 @@
+--------- beginning of main
+--------- beginning of system
+  1729500000.120  1234  1290 I ActivityTaskManager: Displayed dev.jasonpearson.automobile.playground/.MainActivity for user 0: +1s342ms
+  1729500000.900  1234  1290 I ActivityTaskManager: Fully drawn dev.jasonpearson.automobile.playground/.MainActivity: +2s118ms
+  1729500001.000  1234  1290 I ActivityTaskManager: Fully drawn com.example.other/.Main: +500ms

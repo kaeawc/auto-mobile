@@ -92,9 +92,21 @@ internal object PrototypeDataValues {
       condition.containsKey("notEquals") -> !equal(value, condition["notEquals"])
       condition.containsKey("gt") -> compare(value, condition["gt"]) { left, right -> left > right }
       condition.containsKey("lt") -> compare(value, condition["lt"]) { left, right -> left < right }
+      condition.containsKey("empty") ->
+        isEmpty(value) == (condition["empty"] as? JsonPrimitive)?.booleanOrNull
       else -> false
     }
   }
+
+  /** A missing value, `null`, `[]`, `{}` or `""` is empty (#14207); every other value is not. */
+  fun isEmpty(value: JsonElement?): Boolean =
+    when (value) {
+      null,
+      JsonNull -> true
+      is JsonArray -> value.isEmpty()
+      is JsonObject -> value.isEmpty()
+      is JsonPrimitive -> value.isString && value.content.isEmpty()
+    }
 
   private fun compare(
     value: JsonElement?,

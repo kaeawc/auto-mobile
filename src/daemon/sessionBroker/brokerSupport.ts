@@ -7,6 +7,25 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import { SessionBrokerFailureError } from "./devicePort";
+import type { BrokerRequestRecord } from "./store";
+
+export function storedBrokerFailure(
+  request: BrokerRequestRecord,
+  cleanupPending: boolean,
+): SessionBrokerFailure {
+  const retryable =
+    request.retryable && (request.errorCode === "eviction_pending" || !cleanupPending);
+  return {
+    code: request.errorCode ?? "session_preparation_failed",
+    message: request.error ?? "",
+    retryable,
+    ...(retryable && request.errorCode === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
+    ...(retryable &&
+    ["capacity_exhausted", "cancelled", "eviction_pending"].includes(request.errorCode ?? "")
+      ? { retryRequires: "new_request_id" as const }
+      : {}),
+  };
+}
 
 export function unwrap<T>(result: RequirementResult<T>): T {
   if (!result.ok) {

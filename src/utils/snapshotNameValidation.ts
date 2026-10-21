@@ -80,4 +80,15 @@ export function assertSafePathSegment(kind: string, value: string): void {
  */
 export function assertSafeSnapshotName(snapshotName: string): void {
   assertSafePathSegment("snapshot name", snapshotName);
+  if (isBrokerBaselineSnapshot(snapshotName)) {
+    throw new ActionableError(
+      "Broker baseline snapshots are reserved and cannot be accessed by deviceSnapshot tools",
+    );
+  }
+}
+
+export const ANDROID_BROKER_BASELINE_SNAPSHOT = "automobile-broker-baseline-v1";
+
+export function isBrokerBaselineSnapshot(snapshotName: string): boolean {
+  return snapshotName.toLowerCase().startsWith("automobile-broker-baseline-");
 }

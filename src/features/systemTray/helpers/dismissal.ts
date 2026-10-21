@@ -451,6 +451,14 @@ const waitForReadableClearAllMatch = async (
   }
 };
 
+/** A clearAll drain's counts; Android also returns the last shade observation it read. */
+export interface ClearAllDrainResult {
+  swipeCount: number;
+  dismissedCount: number;
+  stalled: boolean;
+  observation?: ObserveResult;
+}
+
 /** Android drain: confirm each dismissal, bounded by inventory or the safety cap. */
 export const clearMatchingSystemTrayNotifications = async (
   device: BootedDevice,
@@ -458,7 +466,7 @@ export const clearMatchingSystemTrayNotifications = async (
   appMatchTexts: string[],
   awaitTimeoutMs: number,
   options: { maxSwipes?: number; progress?: ProgressCallback; signal?: AbortSignal } = {},
-): Promise<{ swipeCount: number; dismissedCount: number; stalled: boolean }> => {
+): Promise<ClearAllDrainResult> => {
   const { signal, progress } = options;
   if (options.maxSwipes === 0) {
     return { swipeCount: 0, dismissedCount: 0, stalled: false };
@@ -514,7 +522,7 @@ export const clearMatchingSystemTrayNotifications = async (
       { observation: expanded.observation, reexpandState, signal },
     );
     if (!verified.dismissed) {
-      return { swipeCount, dismissedCount, stalled: true };
+      return { swipeCount, dismissedCount, stalled: true, observation: verified.observation };
     }
     dismissedCount++;
     deadlineMs = timer.now() + awaitTimeoutMs;
@@ -527,7 +535,61 @@ export const clearMatchingSystemTrayNotifications = async (
       ),
     };
   }
-  return { swipeCount, dismissedCount, stalled: Boolean(current.match) };
+  return {
+    swipeCount,
+    dismissedCount,
+    stalled: Boolean(current.match),
+    observation: current.observation,
+  };
+};
+
+/**
+ * The observation a clearAll reports (#14531). A stalled drain may mean the observer itself hangs,
+ * so that read is bounded by the clear's own timeout, falling back to the drain's last observation.
+ */
+export const readClearAllTerminalObservation = async (
+  device: BootedDevice,
+  drained: ClearAllDrainResult,
+  awaitTimeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ObserveResult> => {
+  const { timer, observeScreenFactory } = getSystemTrayDependencies();
+  const observeScreen = observeScreenFactory(device);
+  throwIfAborted(signal);
+  const read = (readSignal?: AbortSignal) =>
+    observeScreen.execute({
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
+      skipPerformanceAudit: true,
+      signal: readSignal,
+    });
+  const fallback = drained.stalled ? drained.observation : undefined;
+  if (!fallback) {
+    return awaitWhileRequestIsLive(read(signal), signal);
+  }
+  const controller = new AbortController();
+  const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const timeoutError = new ActionableError("clearAll terminal observation timed out.");
+  try {
+    return await raceWithDeadline(() => read(readSignal), {
+      timer,
+      signal: readSignal,
+      timeoutMs: awaitTimeoutMs,
+      label: "clearAll terminal observation",
+      timeoutError: () => timeoutError,
+      onTimeout: () => controller.abort(),
+    });
+  } catch (error) {
+    if (error !== timeoutError) {
+      throw error;
+    }
+    throwIfAborted(signal);
+    logger.warn(
+      "[systemTray] Terminal observation after a stalled clearAll timed out; reporting the last shade read.",
+      error,
+    );
+    return fallback;
+  }
 };
 
 /** Preserve the existing iOS clearAll gesture loop. */
@@ -536,7 +598,7 @@ export const clearIosSystemTrayNotifications = async (
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   options: { progress?: ProgressCallback; signal?: AbortSignal },
-): Promise<{ swipeCount: number; dismissedCount: number; stalled: boolean }> => {
+): Promise<ClearAllDrainResult> => {
   let swipeCount = 0;
   for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
     const { match } = await waitForNotificationMatch(

@@ -8,7 +8,7 @@ const timestamp = z.number().finite();
 const timing: z.ZodType<SessionBrokerTiming> = z.object({
   acquisition: z
     .object({
-      admission: z.enum(["reuse", "create", "evict-then-create"]),
+      admission: z.enum(["reuse", "create", "evict-then-create", "wait"]),
       reuseCount: duration.int(),
       outcome: z.enum(["pending", "ready", "failed"]),
       startedAtMs: timestamp,

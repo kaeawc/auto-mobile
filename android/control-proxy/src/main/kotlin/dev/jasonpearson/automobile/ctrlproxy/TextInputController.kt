@@ -13,13 +13,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 /** Encoding and delivery for text-input result frames. */
 internal data class TextInputResponseDependencies(
-  val resultBroadcaster: ResultBroadcaster,
   val jsonCompact: Json,
-  val responseSender: TextInputController.ResponseSender,
+  val resultSender: ResultSender,
 )
 
 /** Platform version and timing seams for text-input fallbacks and caret retention. */
@@ -33,7 +31,7 @@ internal data class TextInputConfig(
  * Accessibility-driven text input: set text, insert text at the caret, IME actions and select all,
  * plus the remembered-caret state that lets consecutive inserts into a Compose field continue where
  * the previous insert left off. Everything that needs the live accessibility service or the
- * late-bound WebSocket server comes through [Host] and [ResponseSender].
+ * late-bound WebSocket server comes through [Host] and [ResultSender].
  *
  * The IME commitText path (rich-text autoformat, chunking, cancellation) stays in [CtrlProxy]; it
  * only reaches this controller to [forgetRememberedInsert].
@@ -46,9 +44,8 @@ internal class TextInputController(
   responses: TextInputResponseDependencies,
   config: TextInputConfig = TextInputConfig(),
 ) {
-  private val resultBroadcaster = responses.resultBroadcaster
   private val jsonCompact = responses.jsonCompact
-  private val responseSender = responses.responseSender
+  private val resultSender = responses.resultSender
   private val uptimeMillis = config.uptimeMillis
   private val pause = config.pause
   private val sdkInt = config.sdkInt
@@ -78,17 +75,6 @@ internal class TextInputController(
     suspend fun publishSettledHierarchy()
   }
 
-  /** Keeps the service's frame encoder and late-bound WebSocket server behind one seam. */
-  interface ResponseSender {
-    fun isRunning(): Boolean
-
-    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
-
-    suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String)
-
-    fun connectionCount(): Int
-  }
-
   companion object {
     private const val TAG = "CtrlProxy"
     private const val REMEMBER_TTL_MS = 5_000L
@@ -112,10 +98,6 @@ internal class TextInputController(
   fun handleInsertTextState(requestId: String?) {
     // The host awaits this reply BEFORE dispatching ADB key events. No baseline is stored globally.
     host.launchRequestScope(requestId) {
-      if (!responseSender.isRunning()) {
-        Log.d(TAG, "WebSocket server not running, skipping insert text state result broadcast")
-        return@launchRequestScope
-      }
       val node = findFocusedEditableNode(host.activeWindowRoot())
       val state =
         try {
@@ -132,10 +114,8 @@ internal class TextInputController(
         } finally {
           node?.recycle()
         }
-      resultBroadcaster.guard(requestId, "insert_text_state_result") {
-        responseSender.broadcastWithPerfSync { perfTiming ->
-          insertTextStateResultFrame(requestId, state, perfTiming)
-        }
+      resultSender.sendFrame(requestId, "insert_text_state_result") { perfTiming ->
+        insertTextStateResultFrame(requestId, state, perfTiming)
       }
     }
   }
@@ -1110,45 +1090,22 @@ internal class TextInputController(
     error: String?,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping set text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_text_result") {
-      responseSender.broadcastWithPerfSync { perfTiming ->
-        setTextResultFrame(requestId, success, error, totalTimeMs, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted set text result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "set_text_result") { perfTiming ->
+      setTextResultFrame(requestId, success, error, totalTimeMs, perfTiming)
     }
   }
 
   /** Broadcast insert text result to WebSocket clients. */
   private suspend fun broadcastInsertTextResult(outcome: InsertTextFrameResult) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping insert text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(outcome.requestId, "insert_text_result") {
-      responseSender.broadcastWithPerfSync { perfTiming ->
-        insertTextResultFrame(outcome, perfTiming)
-      }
+    resultSender.sendFrame(outcome.requestId, "insert_text_result") { perfTiming ->
+      insertTextResultFrame(outcome, perfTiming)
     }
   }
 
   /** Broadcast IME action result to WebSocket clients */
   suspend fun broadcastImeActionResult(outcome: ImeActionFrameResult) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping IME action result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(outcome.requestId, "ime_action_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        imeActionResultFrame(outcome, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted IME action result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(outcome.requestId, "ime_action_result") { perfTiming ->
+      imeActionResultFrame(outcome, perfTiming)
     }
   }
 
@@ -1159,16 +1116,8 @@ internal class TextInputController(
     error: String?,
     totalTimeMs: Long,
   ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping select all result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "select_all_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        selectAllResultFrame(requestId, success, error, totalTimeMs, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted select all result to ${responseSender.connectionCount()} clients")
+    resultSender.sendFrame(requestId, "select_all_result") { perfTiming ->
+      selectAllResultFrame(requestId, success, error, totalTimeMs, perfTiming)
     }
   }
 }

@@ -4,6 +4,8 @@ import { nativeProfile } from "./profile";
 import { drainFailureOutcome } from "./brokerSupport";
 import { ResetFailureError } from "./ResetFailureError";
 import type { BrokerTimingRecorder } from "./timingRecorder";
+import { ResetBootQueue } from "./resetBootQueue";
+import type { ResetBootRunner } from "./devicePort";
 import type { BrokerRequestRecord, BrokerResourceRecord, DestructionTicket } from "./store";
 import type {
   SessionBrokerResetTiming,
@@ -11,6 +13,7 @@ import type {
 } from "../../devices/sessionBrokerResult";
 
 export class BrokerResetRelease {
+  private readonly resetBoots: ResetBootQueue;
   async releaseStatus(
     request: BrokerRequestRecord,
     sessionUuid: string,
@@ -33,12 +36,22 @@ export class BrokerResetRelease {
   constructor(
     private readonly options: Pick<
       SessionBrokerOptions,
-      "store" | "devices" | "owner" | "limits" | "reuseCleanDevices" | "reuseAndroidCleanDevices"
+      | "store"
+      | "devices"
+      | "owner"
+      | "limits"
+      | "reuseCleanDevices"
+      | "reuseAndroidCleanDevices"
+      | "timer"
     >,
     private readonly timing: BrokerTimingRecorder,
     private readonly now: () => number,
     private readonly tryCleanup: (ticket: DestructionTicket, signal?: AbortSignal) => Promise<void>,
-  ) {}
+    private readonly notifyReady: (resourceId: string) => void = () => {},
+    private readonly setResetActive: (resourceId: string, active: boolean) => void = () => {},
+  ) {
+    this.resetBoots = new ResetBootQueue(options.limits.maxConcurrentResetBoots, options.timer);
+  }
 
   async drainAndReset(
     request: BrokerRequestRecord,
@@ -68,7 +81,28 @@ export class BrokerResetRelease {
         return "destroy";
       }
       const resetStarted = this.now();
-      const reset = await this.options.devices.reset(resource);
+      const resetDevice = async () => {
+        this.setResetActive(resource.resourceId, true);
+        try {
+          // Shutdown cancels queued erase work, not a started native reset.
+          const runResetBoot: ResetBootRunner | undefined = this.options.devices
+            .managesResetBootSlots
+            ? async <Result>(operation: () => Promise<Result>) => {
+                this.setResetActive(resource.resourceId, false);
+                return this.resetBoots.run(async () => {
+                  this.setResetActive(resource.resourceId, true);
+                  return operation();
+                }, signal);
+              }
+            : undefined;
+          return await this.options.devices.reset!(resource, undefined, runResetBoot);
+        } finally {
+          this.setResetActive(resource.resourceId, false);
+        }
+      };
+      const reset = await (this.needsResetBootSlot(resource)
+        ? this.resetBoots.run(resetDevice, signal)
+        : resetDevice());
       timing.phases.reset = this.now() - resetStarted;
       timing = this.timing.mergeResetTiming(timing, reset);
       if (
@@ -99,6 +133,12 @@ export class BrokerResetRelease {
     }
   }
 
+  private needsResetBootSlot(resource: BrokerResourceRecord): boolean {
+    return (
+      nativeProfile(resource).platform === "ios" && !this.options.devices.managesResetBootSlots
+    );
+  }
+
   private async completeCleanReset(
     request: BrokerRequestRecord,
     resource: BrokerResourceRecord,
@@ -110,6 +150,7 @@ export class BrokerResetRelease {
       this.options.owner,
       this.options.limits,
     );
+    this.notifyReady(resource.resourceId);
     if (tickets.some((ticket) => ticket.resourceId === resource.resourceId)) {
       timing.outcome = "pending";
       timing.retired = true;

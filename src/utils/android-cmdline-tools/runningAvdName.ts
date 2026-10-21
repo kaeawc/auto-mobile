@@ -37,11 +37,12 @@ export async function resolveRunningAvdNameOnce(
   device: BootedDevice,
   infoTimeoutMs: number,
   signal?: AbortSignal,
+  consoleExclusiveOwner = false,
 ): Promise<RunningAvdNameResult> {
   const { consoleBusyRegistry, adbFactory, timer } = deps;
   const deviceId = device.deviceId;
   const busyBeforeDispatch = consoleBusyRegistry.isBusy(deviceId);
-  if (busyBeforeDispatch) {
+  if (busyBeforeDispatch && !consoleExclusiveOwner) {
     // `adb devices` has already established that the serial exists. During a
     // daemon-owned snapshot operation, both identity probes can transiently
     // lose the ADB transport; leave identity unresolved instead of creating
@@ -113,7 +114,7 @@ export async function resolveRunningAvdNameOnce(
       name: "",
       diagnostic: readinessDiagnostic("avd-name-resolution", error, deviceId),
       consoleBusyDuringProbe,
-      ...(timer.now() >= deadlineMs && { nameProbeTimedOut: true }),
+      nameProbeTimedOut: timer.now() >= deadlineMs,
     };
   }
 }

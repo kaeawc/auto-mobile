@@ -37,11 +37,15 @@ import { namesLiveSessionOfBoundPlan } from "./pipeline/ingress/namesLiveSession
 
 // Import the tool registry
 import { ToolRegistry } from "./toolRegistry";
+import { createRecording } from "./deviceMutationRecording";
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
 
 import { registerAllTools } from "./registerAllTools";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
@@ -189,7 +193,10 @@ export function registerMcpTools(daemonMode: boolean): void {
     lastToolRegistration?.daemonMode !== daemonMode ||
     lastToolRegistration.removalEpoch !== removalEpoch
   ) {
-    registerAllTools({ daemonMode });
+    registerAllTools({
+      daemonMode,
+      iosRunnerLocation: (device) => IOSCtrlProxyClient.getInstance(device),
+    });
     lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };
   }
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
@@ -313,6 +320,11 @@ function resolveBindingStore(options: McpServerOptions): {
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
+  ToolRegistry.setMutationRecording(
+    createRecording(defaultDaemonContext, {
+      keyboardProfilesFor: (device) => AndroidCtrlProxyClient.getInstance(device),
+    }),
+  );
   if (options.deviceReadiness) {
     ToolRegistry.setDeviceReadiness(options.deviceReadiness);
   }

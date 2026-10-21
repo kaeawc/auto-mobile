@@ -40,6 +40,7 @@ import {
 } from "../foreignOwnedSessionRefusal";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { executionTracker } from "../../daemon/executionTracker";
+import { deviceActionClock } from "./deviceActionClock";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,
@@ -51,6 +52,23 @@ import type {
 import type { ExecutionTargetContext } from "./executionTarget";
 import type { AuditRunner } from "./audit";
 import type { NavigationToolCallRecorder } from "./navigationRecording";
+import type { DeviceMutationRecording } from "../deviceMutationRecording";
+
+export function journaledDeviceHandler(
+  name: string,
+  handler: DeviceAwareToolHandler,
+  recording: DeviceMutationRecording,
+): DeviceAwareToolHandler {
+  return async (device, args, progress, signal) => {
+    const sessionUuid =
+      typeof args.sessionUuid === "string"
+        ? args.sessionUuid
+        : getToolSelectionContext()?.routingSessionUuid;
+    await recording.beforeToolCall(name, args, device, sessionUuid, signal);
+    signal?.throwIfAborted();
+    return handler(device, args, progress, signal);
+  };
+}
 
 /**
  * Tell the tracker what kind of device call runs under `executionId`. A read is not use of the
@@ -63,6 +81,7 @@ export function markDeviceCallKind(executionId: string, toolName: string, readOn
     executionTracker.markDeviceReadCall(executionId, toolName);
   } else {
     executionTracker.markDeviceControlCall(executionId);
+    deviceActionClock.markControl(executionId);
   }
 }
 
@@ -565,6 +584,7 @@ export async function invokeResolvedDeviceHandler(input: {
   signal?: AbortSignal;
   auditRunner: AuditRunner;
   navigationRecorder: NavigationToolCallRecorder;
+  mutationRecording: DeviceMutationRecording;
   traits?: ToolTraits;
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
@@ -574,6 +594,11 @@ export async function invokeResolvedDeviceHandler(input: {
     // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
+  deviceActionClock.recordDispatch(
+    args.__executionId,
+    args.__executionStartTime,
+    target.device.deviceId,
+  );
   const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);
   const onAbort = () => withdraw?.();
   signal?.addEventListener("abort", onAbort, { once: true });
@@ -581,6 +606,14 @@ export async function invokeResolvedDeviceHandler(input: {
   try {
     // The dispatch boundary: a call cancelled since admission (for instance because another
     // session acquired its device, #10829) never reaches the device. `finally` withdraws it.
+    signal?.throwIfAborted();
+    await input.mutationRecording.beforeToolCall(
+      name,
+      args,
+      target.device,
+      target.sessionUuid,
+      signal,
+    );
     signal?.throwIfAborted();
     // The action reports when its gesture goes out, so a tool that waited for its target
     // is attributed from the dispatch, not from the start (#10196).

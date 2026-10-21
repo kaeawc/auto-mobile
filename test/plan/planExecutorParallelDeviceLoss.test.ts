@@ -1,7 +1,8 @@
 import { buildObserveResult } from "../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { DeviceLostError, deviceLostErrorFromAbortSignal } from "../../src/models/DeviceLostError";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { deviceLostErrorFromAbortSignal } from "../../src/utils/deviceLossAbortRegistry";
 import type { AbortStrategy, Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";

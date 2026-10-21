@@ -6,6 +6,7 @@ import { computePercentile } from "../../utils/percentile";
 import type { BrokerTimingSample } from "./store";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import { ActionableError } from "../../models/ActionableError";
+import { RECEIPT_RETENTION_MS } from "./retention";
 
 export async function readBrokerTimingStats(
   store: Pick<SqliteSessionBrokerStore, "timingSamples">,
@@ -16,13 +17,13 @@ export async function readBrokerTimingStats(
   if (
     !Number.isFinite(windowMs) ||
     windowMs < 0 ||
-    windowMs > 30 * 24 * 60 * 60 * 1000 ||
+    windowMs > RECEIPT_RETENTION_MS ||
     !Number.isInteger(limit) ||
     limit < 1 ||
     limit > 10000
   ) {
     throw new ActionableError(
-      "Broker stats needs a window of 0 to 30 days and a limit of 1 to 10000",
+      `Broker stats needs a window of 0 to ${RECEIPT_RETENTION_MS / 86_400_000} days and a limit of 1 to 10000`,
     );
   }
   const untilMs = now();

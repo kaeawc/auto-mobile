@@ -343,12 +343,14 @@ private fun executeNodeAction(
   val decision =
     decideNodeAction(
       action,
-      targetNode.isAccessibilityFocused,
-      actions?.map { it.id },
+      NodeActionState(
+        targetNode.isAccessibilityFocused,
+        actions?.map { it.id },
+        actions?.mapNotNull { entry -> entry.label?.toString()?.let { entry.id to it } }?.toMap()
+          ?: emptyMap(),
+      ),
       Build.VERSION.SDK_INT,
       arguments,
-      actions?.mapNotNull { entry -> entry.label?.toString()?.let { entry.id to it } }?.toMap()
-        ?: emptyMap(),
     )
   val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
   val actionError = (decision as? NodeActionDecision.Refused)?.message

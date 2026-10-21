@@ -13,7 +13,7 @@ class NodeActionDecisionTest {
   fun `focus on an already focused node is already satisfied even though only clear is advertised`() {
     assertEquals(
       NodeActionDecision.AlreadySatisfied,
-      decideNodeAction("focus", isAccessibilityFocused = true, availableActionIds = focusedActions),
+      decideNodeAction("focus", NodeActionState(true, focusedActions)),
     )
   }
 
@@ -21,7 +21,7 @@ class NodeActionDecisionTest {
   fun `focus on an already focused node is already satisfied when the action list is unknown`() {
     assertEquals(
       NodeActionDecision.AlreadySatisfied,
-      decideNodeAction("focus", isAccessibilityFocused = true, availableActionIds = null),
+      decideNodeAction("focus", NodeActionState(true, null)),
     )
   }
 
@@ -29,11 +29,7 @@ class NodeActionDecisionTest {
   fun `clear_focus on an unfocused node is already satisfied even though only focus is advertised`() {
     assertEquals(
       NodeActionDecision.AlreadySatisfied,
-      decideNodeAction(
-        "clear_focus",
-        isAccessibilityFocused = false,
-        availableActionIds = unfocusedActions,
-      ),
+      decideNodeAction("clear_focus", NodeActionState(false, unfocusedActions)),
     )
   }
 
@@ -41,11 +37,7 @@ class NodeActionDecisionTest {
   fun `focus on an unfocused node that advertises focus is performed`() {
     assertEquals(
       NodeActionDecision.Perform(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS),
-      decideNodeAction(
-        "focus",
-        isAccessibilityFocused = false,
-        availableActionIds = unfocusedActions,
-      ),
+      decideNodeAction("focus", NodeActionState(false, unfocusedActions)),
     )
   }
 
@@ -53,11 +45,7 @@ class NodeActionDecisionTest {
   fun `clear_focus on a focused node that advertises clear is performed`() {
     assertEquals(
       NodeActionDecision.Perform(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS),
-      decideNodeAction(
-        "clear_focus",
-        isAccessibilityFocused = true,
-        availableActionIds = focusedActions,
-      ),
+      decideNodeAction("clear_focus", NodeActionState(true, focusedActions)),
     )
   }
 
@@ -67,8 +55,7 @@ class NodeActionDecisionTest {
       NodeActionDecision.Refused("Accessibility action is unavailable: focus (available: click)"),
       decideNodeAction(
         "focus",
-        isAccessibilityFocused = false,
-        availableActionIds = listOf(AccessibilityNodeInfo.ACTION_CLICK),
+        NodeActionState(false, listOf(AccessibilityNodeInfo.ACTION_CLICK)),
       ),
     )
   }
@@ -81,8 +68,7 @@ class NodeActionDecisionTest {
       ),
       decideNodeAction(
         "clear_focus",
-        isAccessibilityFocused = true,
-        availableActionIds = listOf(AccessibilityNodeInfo.ACTION_CLICK),
+        NodeActionState(true, listOf(AccessibilityNodeInfo.ACTION_CLICK)),
       ),
     )
   }
@@ -91,7 +77,7 @@ class NodeActionDecisionTest {
   fun `focus on an unfocused node with an unknown action list is performed`() {
     assertEquals(
       NodeActionDecision.Perform(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS),
-      decideNodeAction("focus", isAccessibilityFocused = false, availableActionIds = null),
+      decideNodeAction("focus", NodeActionState(false, null)),
     )
   }
 
@@ -102,11 +88,7 @@ class NodeActionDecisionTest {
         NodeActionDecision.Refused(
           "Accessibility action is unavailable: click (available: clear_focus)",
         ),
-        decideNodeAction(
-          "click",
-          isAccessibilityFocused = focused,
-          availableActionIds = focusedActions,
-        ),
+        decideNodeAction("click", NodeActionState(focused, focusedActions)),
       )
     }
   }
@@ -117,8 +99,7 @@ class NodeActionDecisionTest {
       NodeActionDecision.Perform(AccessibilityNodeInfo.ACTION_CLICK),
       decideNodeAction(
         "click",
-        isAccessibilityFocused = false,
-        availableActionIds = listOf(AccessibilityNodeInfo.ACTION_CLICK),
+        NodeActionState(false, listOf(AccessibilityNodeInfo.ACTION_CLICK)),
       ),
     )
   }
@@ -127,7 +108,7 @@ class NodeActionDecisionTest {
   fun `unsupported actions are refused`() {
     assertEquals(
       NodeActionDecision.Refused("Unsupported accessibility action: activate"),
-      decideNodeAction("activate", isAccessibilityFocused = true, availableActionIds = null),
+      decideNodeAction("activate", NodeActionState(true, null)),
     )
   }
 
@@ -136,14 +117,13 @@ class NodeActionDecisionTest {
     val expand = listOf(AccessibilityNodeInfo.ACTION_EXPAND, AccessibilityNodeInfo.ACTION_COLLAPSE)
     assertEquals(
       NodeActionDecision.Perform(AccessibilityNodeInfo.ACTION_EXPAND),
-      decideNodeAction("expand", false, expand, sdkInt = 34),
+      decideNodeAction("expand", NodeActionState(false, expand), sdkInt = 34),
     )
     assertEquals(
       NodeActionDecision.Perform(android.R.id.accessibilityActionScrollLeft),
       decideNodeAction(
         "scroll_left",
-        false,
-        listOf(android.R.id.accessibilityActionScrollLeft),
+        NodeActionState(false, listOf(android.R.id.accessibilityActionScrollLeft)),
         sdkInt = 34,
       ),
     )
@@ -156,11 +136,11 @@ class NodeActionDecisionTest {
       NodeActionDecision.Refused(
         "Accessibility action page_up needs Android API 29 (device is API 28)",
       ),
-      decideNodeAction("page_up", false, pageUp, sdkInt = 28),
+      decideNodeAction("page_up", NodeActionState(false, pageUp), sdkInt = 28),
     )
     assertEquals(
       NodeActionDecision.Perform(android.R.id.accessibilityActionPageUp),
-      decideNodeAction("page_up", false, pageUp, sdkInt = 29),
+      decideNodeAction("page_up", NodeActionState(false, pageUp), sdkInt = 29),
     )
     assertEquals(null, nodeActionId("press_and_hold", sdkInt = 29))
     assertEquals(android.R.id.accessibilityActionPressAndHold, nodeActionId("press_and_hold", 30))
@@ -173,15 +153,14 @@ class NodeActionDecisionTest {
       NodeActionDecision.Perform(android.R.id.accessibilityActionSetProgress, progress = 0.5f),
       decideNodeAction(
         "set_progress",
-        false,
-        slider,
+        NodeActionState(false, slider),
         sdkInt = 34,
         arguments = NodeActionArguments(progress = 0.5f),
       ),
     )
     assertEquals(
       NodeActionDecision.Refused("set_progress requires a finite progress value"),
-      decideNodeAction("set_progress", false, slider, sdkInt = 34),
+      decideNodeAction("set_progress", NodeActionState(false, slider), sdkInt = 34),
     )
   }
 
@@ -194,11 +173,9 @@ class NodeActionDecisionTest {
       NodeActionDecision.Perform(archiveId),
       decideNodeAction(
         "custom",
-        false,
-        ids,
+        NodeActionState(false, ids, labels),
         sdkInt = 34,
         arguments = NodeActionArguments(customAction = "archive"),
-        actionLabels = labels,
       ),
     )
     assertEquals(
@@ -207,16 +184,14 @@ class NodeActionDecisionTest {
       ),
       decideNodeAction(
         "custom",
-        false,
-        ids,
+        NodeActionState(false, ids, labels),
         sdkInt = 34,
         arguments = NodeActionArguments(customAction = "Delete"),
-        actionLabels = labels,
       ),
     )
     assertEquals(
       NodeActionDecision.Refused("custom requires the label of the action to perform"),
-      decideNodeAction("custom", false, ids, sdkInt = 34, actionLabels = labels),
+      decideNodeAction("custom", NodeActionState(false, ids, labels), sdkInt = 34),
     )
   }
 
@@ -227,7 +202,7 @@ class NodeActionDecisionTest {
       NodeActionDecision.Refused(
         "Accessibility action is unavailable: dismiss (available: click, expand, custom:Star)",
       ),
-      decideNodeAction("dismiss", false, ids, sdkInt = 34, actionLabels = mapOf(99 to "Star")),
+      decideNodeAction("dismiss", NodeActionState(false, ids, mapOf(99 to "Star")), sdkInt = 34),
     )
   }
 }

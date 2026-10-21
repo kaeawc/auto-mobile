@@ -288,6 +288,15 @@ data class NodeActionArguments(
   val progress: Float? = null,
 )
 
+/** What the target node reports about itself, for [decideNodeAction]. */
+internal data class NodeActionState(
+  val isAccessibilityFocused: Boolean,
+  /** The ids of the actions the node offers, or null when its action list is unknown. */
+  val availableActionIds: Collection<Int>?,
+  /** Labels of the node's actions by id, which name its app-defined (custom) actions. */
+  val actionLabels: Map<Int, String> = emptyMap(),
+)
+
 private data class StandardNodeAction(val id: Int, val minSdk: Int = 0)
 
 /**
@@ -387,12 +396,11 @@ internal sealed interface NodeActionDecision {
  */
 internal fun decideNodeAction(
   action: String,
-  isAccessibilityFocused: Boolean,
-  availableActionIds: Collection<Int>?,
+  state: NodeActionState,
   sdkInt: Int = Build.VERSION.SDK_INT,
   arguments: NodeActionArguments = NodeActionArguments(),
-  actionLabels: Map<Int, String> = emptyMap(),
 ): NodeActionDecision {
+  val (isAccessibilityFocused, availableActionIds, actionLabels) = state
   if (action == "focus" && isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
   if (action == "clear_focus" && !isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
   if (action == CUSTOM_NODE_ACTION) {

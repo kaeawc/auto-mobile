@@ -20,14 +20,20 @@ actor SdkEndpointResolver {
     nonisolated let simulatorUdid: String?
     private let healthTransport: any HTTPRequesting
     private let legacyPort: UInt16
+    private let now: @Sendable () -> TimeInterval
+    private let negativeTTL: TimeInterval
     private let warning: @Sendable (String) -> Void
     private var cachedURL: URL?
+    private var negativeUntil: TimeInterval?
+    private var lastForegroundBundle: String?
     private var warnedAboutLegacy = false
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         healthTransport: any HTTPRequesting,
         legacyPort: UInt16 = 8766,
+        now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        negativeTTL: TimeInterval = 3,
         warning: @escaping @Sendable (String) -> Void = {
             Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkEndpointResolver")
                 .warning("\($0, privacy: .public)")
@@ -36,6 +42,8 @@ actor SdkEndpointResolver {
         simulatorUdid = environment["SIMULATOR_UDID"]
         self.healthTransport = healthTransport
         self.legacyPort = legacyPort
+        self.now = now
+        self.negativeTTL = negativeTTL
         self.warning = warning
     }
 
@@ -53,6 +61,10 @@ actor SdkEndpointResolver {
     func resolve() async throws -> URL {
         guard let udid = simulatorUdid else { return loopbackBaseURL(port: legacyPort) }
         if let cachedURL { return cachedURL }
+        let unavailableMessage = "AutoMobile SDK unavailable on simulator \(udid)"
+        if let negativeUntil, now() < negativeUntil {
+            throw SdkEndpointError.unavailableCached(unavailableMessage)
+        }
         for attempt in 0 ..< SdkSimulatorPort.probeCount {
             let url = loopbackBaseURL(port: SdkSimulatorPort.simulatorPort(udid: udid, attempt: attempt))
             // A collision, refused connection, or old SDK on a derived port is expected.
@@ -61,12 +73,14 @@ actor SdkEndpointResolver {
                actual.lowercased() == udid.lowercased()
             {
                 cachedURL = url
+                negativeUntil = nil
                 return url
             }
         }
         let url = loopbackBaseURL(port: legacyPort)
         guard let info = try await health(at: url) else {
-            throw SdkEndpointError.unavailable("AutoMobile SDK unavailable on simulator \(udid)")
+            negativeUntil = now() + negativeTTL
+            throw SdkEndpointError.unavailable(unavailableMessage)
         }
         if let actual = info.simulatorUdid {
             guard actual.lowercased() == udid.lowercased() else {
@@ -80,7 +94,15 @@ actor SdkEndpointResolver {
             )
         }
         cachedURL = url
+        negativeUntil = nil
         return url
+    }
+
+    /// A newly foregrounded app may expose an SDK even during a negative window.
+    func noteForegroundBundle(_ bundleId: String?) {
+        guard bundleId != lastForegroundBundle else { return }
+        lastForegroundBundle = bundleId
+        negativeUntil = nil
     }
 
     /// One request path supplies the identity header and rejects wrong-simulator
@@ -169,11 +191,13 @@ actor SdkEndpointResolver {
 
 enum SdkEndpointError: LocalizedError, Sendable {
     case unavailable(String)
+    /// Discovery already failed in this window; callers should not repeat its warning.
+    case unavailableCached(String)
     case wrongSimulator(expectedUdid: String, actualUdid: String)
 
     var errorDescription: String? {
         switch self {
-        case let .unavailable(message):
+        case let .unavailable(message), let .unavailableCached(message):
             return message
         case let .wrongSimulator(expected, actual):
             return Self.wrongSimulatorMessage(expectedUdid: expected, actualUdid: actual)

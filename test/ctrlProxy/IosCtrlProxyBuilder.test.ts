@@ -1994,8 +1994,11 @@ describe("IosCtrlProxyBuilder", function () {
       ["1", true],
       ["true", true],
       ["TRUE", true],
-      ["yes", false],
+      // readEnvBool's shared truthiness rule (#14354) accepts yes/on too (#14686).
+      ["yes", true],
+      ["on", true],
       ["0", false],
+      ["no", false],
       [undefined, false],
     ] as const)("codesign require flag %s refuses launch=%s", async (value, required) => {
       if (process.platform !== "darwin") {

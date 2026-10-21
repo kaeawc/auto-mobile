@@ -6781,6 +6781,26 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions": [
+      {
+        "name": "kinds",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeTextSpanStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeOffset": [
       {
         "name": "x",
@@ -10435,6 +10455,12 @@
       {
         "name": "spans",
         "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "linkify",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions",
         "nullable": true,
         "hasDefault": true
       }

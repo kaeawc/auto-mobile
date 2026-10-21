@@ -576,6 +576,18 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "customAction",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "progress",
+          "type": "double",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },

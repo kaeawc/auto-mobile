@@ -90,6 +90,99 @@
     }
   },
   {
+    "name": "accessibilityAction",
+    "description": "Perform an Android accessibility action on an element, the way TalkBack or Switch Access does: expand, collapse, dismiss, select, clear_selection, show_on_screen, scroll in a direction, page (API 29+), press_and_hold (API 30+), set_progress on a slider, or custom to run an app-defined action (e.g. a Compose customActions label) by its label. Target the element by resourceId, text or contentDesc; it needs a unique resource-id. An action the element does not offer is refused, and the error lists the actions it does offer (custom ones as custom:<label>).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Accessibility action. page_* needs API 29+, press_and_hold API 30+; set_progress takes progress; custom runs the app-defined action labeled customAction",
+          "type": "string",
+          "enum": [
+            "expand",
+            "collapse",
+            "dismiss",
+            "select",
+            "clear_selection",
+            "show_on_screen",
+            "scroll_forward",
+            "scroll_backward",
+            "scroll_up",
+            "scroll_down",
+            "scroll_left",
+            "scroll_right",
+            "page_up",
+            "page_down",
+            "page_left",
+            "page_right",
+            "press_and_hold",
+            "set_progress",
+            "custom"
+          ]
+        },
+        "resourceId": {
+          "description": "Target resource ID",
+          "type": "string"
+        },
+        "text": {
+          "description": "Target text",
+          "type": "string"
+        },
+        "contentDesc": {
+          "description": "Exact content-desc or accessible label; distinct from visible text",
+          "type": "string"
+        },
+        "customAction": {
+          "description": "Label of the app-defined action, for action custom",
+          "type": "string",
+          "minLength": 1
+        },
+        "progress": {
+          "description": "Value in the control's own range, for action set_progress",
+          "type": "number"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string"
+        },
+        "resourceId": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "resourceId"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "accessibilityFocus",
     "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
     "inputSchema": {
@@ -2561,6 +2654,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "biometricAuth",
@@ -2691,6 +2785,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "biometricAuth",
@@ -20512,6 +20607,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "biometricAuth",
@@ -26800,6 +26896,7 @@
           "minLength": 1,
           "enum": [
             "accessibility",
+            "accessibilityAction",
             "accessibilityFocus",
             "appLifecycle",
             "biometricAuth",
@@ -26896,6 +26993,7 @@
             "minLength": 1,
             "enum": [
               "accessibility",
+              "accessibilityAction",
               "accessibilityFocus",
               "appLifecycle",
               "biometricAuth",

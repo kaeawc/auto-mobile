@@ -64,7 +64,7 @@ class NodeActionDecisionTest {
   @Test
   fun `focus on an unfocused node that cannot take accessibility focus is refused`() {
     assertEquals(
-      NodeActionDecision.Refused("Accessibility action is unavailable: focus"),
+      NodeActionDecision.Refused("Accessibility action is unavailable: focus (available: click)"),
       decideNodeAction(
         "focus",
         isAccessibilityFocused = false,
@@ -76,7 +76,9 @@ class NodeActionDecisionTest {
   @Test
   fun `clear_focus on a focused node that does not advertise clear is refused`() {
     assertEquals(
-      NodeActionDecision.Refused("Accessibility action is unavailable: clear_focus"),
+      NodeActionDecision.Refused(
+        "Accessibility action is unavailable: clear_focus (available: click)",
+      ),
       decideNodeAction(
         "clear_focus",
         isAccessibilityFocused = true,
@@ -97,7 +99,9 @@ class NodeActionDecisionTest {
   fun `click without ACTION_CLICK is still refused regardless of focus`() {
     for (focused in listOf(true, false)) {
       assertEquals(
-        NodeActionDecision.Refused("Accessibility action is unavailable: click"),
+        NodeActionDecision.Refused(
+          "Accessibility action is unavailable: click (available: clear_focus)",
+        ),
         decideNodeAction(
           "click",
           isAccessibilityFocused = focused,
@@ -124,6 +128,106 @@ class NodeActionDecisionTest {
     assertEquals(
       NodeActionDecision.Refused("Unsupported accessibility action: activate"),
       decideNodeAction("activate", isAccessibilityFocused = true, availableActionIds = null),
+    )
+  }
+
+  @Test
+  fun `semantic actions map to their platform ids`() {
+    val expand = listOf(AccessibilityNodeInfo.ACTION_EXPAND, AccessibilityNodeInfo.ACTION_COLLAPSE)
+    assertEquals(
+      NodeActionDecision.Perform(AccessibilityNodeInfo.ACTION_EXPAND),
+      decideNodeAction("expand", false, expand, sdkInt = 34),
+    )
+    assertEquals(
+      NodeActionDecision.Perform(android.R.id.accessibilityActionScrollLeft),
+      decideNodeAction(
+        "scroll_left",
+        false,
+        listOf(android.R.id.accessibilityActionScrollLeft),
+        sdkInt = 34,
+      ),
+    )
+  }
+
+  @Test
+  fun `api gated actions are refused below their api level`() {
+    val pageUp = listOf(android.R.id.accessibilityActionPageUp)
+    assertEquals(
+      NodeActionDecision.Refused(
+        "Accessibility action page_up needs Android API 29 (device is API 28)",
+      ),
+      decideNodeAction("page_up", false, pageUp, sdkInt = 28),
+    )
+    assertEquals(
+      NodeActionDecision.Perform(android.R.id.accessibilityActionPageUp),
+      decideNodeAction("page_up", false, pageUp, sdkInt = 29),
+    )
+    assertEquals(null, nodeActionId("press_and_hold", sdkInt = 29))
+    assertEquals(android.R.id.accessibilityActionPressAndHold, nodeActionId("press_and_hold", 30))
+  }
+
+  @Test
+  fun `set_progress carries the progress value and requires one`() {
+    val slider = listOf(android.R.id.accessibilityActionSetProgress)
+    assertEquals(
+      NodeActionDecision.Perform(android.R.id.accessibilityActionSetProgress, progress = 0.5f),
+      decideNodeAction(
+        "set_progress",
+        false,
+        slider,
+        sdkInt = 34,
+        arguments = NodeActionArguments(progress = 0.5f),
+      ),
+    )
+    assertEquals(
+      NodeActionDecision.Refused("set_progress requires a finite progress value"),
+      decideNodeAction("set_progress", false, slider, sdkInt = 34),
+    )
+  }
+
+  @Test
+  fun `custom actions match the app-defined label exactly and then ignoring case`() {
+    val archiveId = 0x7f0a0042
+    val labels = mapOf(archiveId to "Archive", AccessibilityNodeInfo.ACTION_CLICK to "Open")
+    val ids = listOf(AccessibilityNodeInfo.ACTION_CLICK, archiveId)
+    assertEquals(
+      NodeActionDecision.Perform(archiveId),
+      decideNodeAction(
+        "custom",
+        false,
+        ids,
+        sdkInt = 34,
+        arguments = NodeActionArguments(customAction = "archive"),
+        actionLabels = labels,
+      ),
+    )
+    assertEquals(
+      NodeActionDecision.Refused(
+        "Custom accessibility action is unavailable: Delete (available: click, custom:Archive)",
+      ),
+      decideNodeAction(
+        "custom",
+        false,
+        ids,
+        sdkInt = 34,
+        arguments = NodeActionArguments(customAction = "Delete"),
+        actionLabels = labels,
+      ),
+    )
+    assertEquals(
+      NodeActionDecision.Refused("custom requires the label of the action to perform"),
+      decideNodeAction("custom", false, ids, sdkInt = 34, actionLabels = labels),
+    )
+  }
+
+  @Test
+  fun `a refusal lists the actions the node offers`() {
+    val ids = listOf(AccessibilityNodeInfo.ACTION_CLICK, AccessibilityNodeInfo.ACTION_EXPAND, 99)
+    assertEquals(
+      NodeActionDecision.Refused(
+        "Accessibility action is unavailable: dismiss (available: click, expand, custom:Star)",
+      ),
+      decideNodeAction("dismiss", false, ids, sdkInt = 34, actionLabels = mapOf(99 to "Star")),
     )
   }
 }

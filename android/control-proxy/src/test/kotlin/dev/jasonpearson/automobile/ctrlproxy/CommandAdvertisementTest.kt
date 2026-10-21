@@ -67,6 +67,7 @@ class CommandAdvertisementTest {
       "prototype_window_metadata_v1",
       "screenshot_hide_prototype_v1",
       "prototype_menus_v1",
+      "semantic_node_actions_v1",
       "full_command_set_v1",
       "request_id_echo_v1",
     )

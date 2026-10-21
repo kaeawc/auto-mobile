@@ -84,6 +84,7 @@ const CLASSIFICATION: Classification = {
     },
   },
   control: [
+    "accessibilityAction",
     "accessibilityFocus",
     "appLifecycle",
     "barrier",

@@ -510,6 +510,16 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
     )
 
+  // Pending: #14207 skeleton rows with shimmer, static under the screenshot's motion off; no
+  // Linux baseline recorded yet.
+  @Test
+  fun loadingStatesSkeleton() =
+    prototypeScreenshotTest(
+      "loading_states_skeleton",
+      validPrototypeFixture("loading-states"),
+      pending = true,
+    )
+
   // Pending: #14208 scale, rotation and colour applied by styleWhen, settled (no motion in
   // screenshots); no Linux baseline recorded yet.
   @Test

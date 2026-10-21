@@ -98,7 +98,7 @@ describe("PostNotification - iOS Simulator", () => {
     expect(pushCalls()).toHaveLength(0);
   });
 
-  test("bigPicture/imagePath are ignored with a warning (still succeeds)", async () => {
+  test("an image is forwarded for the app's service extension with a warning (#14097)", async () => {
     const result = await make(SIM_UDID).execute({
       title: "t",
       body: "b",
@@ -107,8 +107,38 @@ describe("PostNotification - iOS Simulator", () => {
       imagePath: "/fake-host/images/x.png",
     });
     expect(result.success).toBe(true);
-    expect(result.warning).toContain("bigPicture");
+    expect(result.warning).toContain("Notification Service Extension");
     expect(pushCalls()).toHaveLength(1);
+    const payload = JSON.parse(String(pushCalls()[0].payloadJson));
+    expect(payload.aps["mutable-content"]).toBe(1);
+    expect(payload["automobile-image-url"]).toBe("file:///fake-host/images/x.png");
+  });
+
+  test("category and a raw payload reach simctl push (#14097)", async () => {
+    const result = await make(SIM_UDID).execute({
+      title: "t",
+      body: "b",
+      appId: "com.x",
+      category: "reply",
+      payload: { orderId: "A-1", aps: { "thread-id": "orders" } },
+    });
+    expect(result.success).toBe(true);
+    const payload = JSON.parse(String(pushCalls()[0].payloadJson));
+    expect(payload.orderId).toBe("A-1");
+    expect(payload.aps.category).toBe("reply");
+    expect(payload.aps["thread-id"]).toBe("orders");
+  });
+
+  test("an invalid raw payload is refused before invoking simctl", async () => {
+    const result = await make(SIM_UDID).execute({
+      title: "t",
+      body: "b",
+      appId: "com.x",
+      payload: { aps: [] },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("payload.aps");
+    expect(pushCalls()).toHaveLength(0);
   });
 
   test("action buttons are ignored with a warning", async () => {

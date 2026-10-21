@@ -5,7 +5,8 @@ import {
   findDeviceTransportUnavailable,
 } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { onAdbMissingDevice } from "../../../src/utils/android-cmdline-tools/AdbDeviceHealth";
-import { DeviceLostError, rememberDeviceLossAbort } from "../../../src/models/DeviceLostError";
+import { DeviceLostError } from "../../../src/models/DeviceLostError";
+import { rememberDeviceLossAbort } from "../../../src/utils/deviceLossAbortRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { fixedBackoff } from "../../../src/utils/Backoff";

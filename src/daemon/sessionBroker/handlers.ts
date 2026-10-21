@@ -4,7 +4,8 @@ import {
 } from "./SessionRequestOwnerMismatchError";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { z } from "zod";
-import { RECEIPT_RETENTION_MS, SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
+import { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
+import { RECEIPT_RETENTION_MS } from "./retention";
 import { SessionExportIdentityMismatchError } from "./store";
 import { parseSessionConfig } from "../../devices/sessionConfig";
 import { SESSION_OWNER_EXITED_CODE } from "../../devices/sessionBrokerResult";

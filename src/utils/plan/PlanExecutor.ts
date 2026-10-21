@@ -43,11 +43,8 @@ import { computeSafeBarrierResumeStep } from "./BarrierResumeGuard";
 import { ParticipantFailureTracker } from "./ParticipantFailureTracker";
 import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
-import {
-  type DeviceLostError,
-  isDeviceLostError,
-  rememberDeviceLossAbort,
-} from "../../models/DeviceLostError";
+import { type DeviceLostError, isDeviceLostError } from "../../models/DeviceLostError";
+import { rememberDeviceLossAbort } from "../deviceLossAbortRegistry";
 import {
   DefaultPlanStepExecutor,
   type PlanStepTool,

@@ -82,6 +82,16 @@ const androidDefaults = z
   })
   .strict();
 const cap = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const iosReuse = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("off") }).strict(),
+  z
+    .object({
+      mode: z.enum(["erase", "keep-booted"]),
+      maxUses: cap.positive().default(20),
+      fallback: z.literal("erase").default("erase"),
+    })
+    .strict(),
+]);
 
 const hostConfig = z
   .object({
@@ -91,6 +101,7 @@ const hostConfig = z
         totalDeviceCap: cap.optional(),
         sessionCap: cap.optional(),
         idlePoolCap: cap.optional(),
+        maxConcurrentResetBoots: cap.positive().optional(),
       })
       .strict(),
     defaults: z
@@ -110,13 +121,35 @@ const hostConfig = z
       .default([]),
     reuseCleanDevices: z.boolean().default(false),
     reuseAndroidCleanDevices: z.boolean().default(false),
+    reuse: z.object({ ios: iosReuse }).strict().optional(),
   })
   .strict()
   .refine((config) => config.defaults.ios !== undefined || config.defaults.android !== undefined, {
     message: "At least one platform must have an explicit default policy",
-  });
+  })
+  .refine(
+    (config) => !config.reuseCleanDevices || !config.reuse || config.reuse.ios.mode === "erase",
+    {
+      message: "reuseCleanDevices: true selects iOS erase; remove it to select keep-booted or off",
+    },
+  )
+  .refine(
+    (config) =>
+      config.defaults.ios !== undefined || !config.reuse || config.reuse.ios.mode === "off",
+    { message: "iOS reuse requires an explicit defaults.ios policy" },
+  );
 
 export type SessionBrokerHostConfig = z.infer<typeof hostConfig>;
+
+export function iosReusePolicy(config: SessionBrokerHostConfig): z.infer<typeof iosReuse> {
+  if (!config.defaults.ios) {
+    return { mode: "off" };
+  }
+  return (
+    config.reuse?.ios ??
+    (config.reuseCleanDevices ? { mode: "erase", maxUses: 20, fallback: "erase" } : { mode: "off" })
+  );
+}
 
 export function parseSessionBrokerHostConfig(value: unknown): SessionBrokerHostConfig {
   const parsed = hostConfig.safeParse(value);

@@ -29,8 +29,12 @@ import {
 import { computeBindingScopeKey, type BindingProcessIdentity } from "./registry/bindingRegistry";
 import { RECEIPT_PRUNE_BATCH, SessionBroker, type SessionBrokerOptions } from "./broker";
 import { ManagedDevicePort } from "./managedDevicePort";
-import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig";
+import { SESSION_BROKER_SCOPE, iosReusePolicy, type SessionBrokerHostConfig } from "./hostConfig";
 import { IosBaselineReset } from "./iosBaselineReset";
+import { IosKeepBootedReset } from "./iosKeepBootedReset";
+import { nativeIosMutationResetPort, nativeIosResetHealth } from "./iosResetNativePorts";
+import { captureFirstDeviceBaseline } from "./mutations/reset";
+import type { ManagedDevicePortDependencies } from "./managedDevicePort";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import type { BrokerResourceRecord } from "./store";
 import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "./timing";
@@ -135,7 +139,49 @@ export async function openSessionBrokerService(
       );
     }
     const store = options.registry.sessionBrokerStore(scopeKey);
+    const reuse = iosReusePolicy(options.config);
     const reset = nativeBaselineReset(options.config, options.androidReset, options.timer);
+    const iosReset = reset?.ios;
+    let resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] =
+      iosReset
+        ? (device, profile, assertOwned, signal, context) => {
+            const operation = () => iosReset.resetWithTiming(device, profile, assertOwned, signal);
+            return context?.runResetBoot ? context.runResetBoot(operation) : operation();
+          }
+        : undefined;
+    let captureIosBaseline: ManagedDevicePortDependencies["captureIosBaseline"];
+    if (reuse.mode === "keep-booted" && iosReset) {
+      const journal = options.registry.deviceMutationJournal();
+      const mutations = nativeIosMutationResetPort(new SimCtlClient(null), options.timer);
+      const fast = new IosKeepBootedReset({
+        journal,
+        mutations,
+        simctl: new SimCtlClient(null),
+        timer: options.timer,
+        health: nativeIosResetHealth(options.timer),
+        erase: iosReset,
+        maxUses: reuse.maxUses,
+      });
+      captureIosBaseline = (context) => captureFirstDeviceBaseline(journal, mutations, context);
+      resetIosBaseline = async (device, profile, assertOwned, signal, context) => {
+        const request = context?.resource.requestId
+          ? await store.getRequest(context.resource.requestId)
+          : undefined;
+        if (!context || !request?.sessionId) {
+          throw new ActionableError(
+            "iOS keep-booted reset requires its durable released session identity",
+          );
+        }
+        return fast.resetWithTiming(
+          device,
+          profile,
+          assertOwned,
+          { ...context.scope, sessionUuid: request.sessionId },
+          context.resource.reuseCount ?? 0,
+          { signal, runResetBoot: context.runResetBoot },
+        );
+      };
+    }
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
@@ -146,9 +192,10 @@ export async function openSessionBrokerService(
       ...(reset
         ? {
             resetBaseline: {
-              ios: reset.ios?.resetWithTiming.bind(reset.ios),
+              ios: resetIosBaseline,
               android: reset.android,
             },
+            captureIosBaseline,
             isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
           }
         : {}),
@@ -170,7 +217,7 @@ export async function openSessionBrokerService(
         return defaults;
       },
       sessionDisposition: options.sessionDisposition,
-      reuseCleanDevices: options.config.reuseCleanDevices,
+      reuseCleanDevices: reuse.mode !== "off",
       reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,
     });
     await broker.recoverReceipts();
@@ -193,9 +240,10 @@ function nativeBaselineReset(
   if (config.reuseAndroidCleanDevices && config.defaults.android && !androidReset) {
     throw new ActionableError("Android baseline reset requires the daemon readiness ports");
   }
-  return config.reuseCleanDevices || config.reuseAndroidCleanDevices
+  const reuseIos = iosReusePolicy(config).mode !== "off";
+  return reuseIos || config.reuseAndroidCleanDevices
     ? {
-        ios: config.reuseCleanDevices ? nativeIosBaselineReset() : undefined,
+        ios: reuseIos ? nativeIosBaselineReset() : undefined,
         android:
           config.reuseAndroidCleanDevices && config.defaults.android
             ? nativeAndroidBaselineReset(androidReset!, timer)

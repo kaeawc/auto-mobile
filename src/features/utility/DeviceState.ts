@@ -1,3 +1,4 @@
+import type { IosRunnerLocationClient } from "./device-state/LocationOperations";
 import {
   defaultDeviceTraits,
   type DeviceTraits,
@@ -126,6 +127,7 @@ export class DeviceState {
   private deviceTraits: DeviceTraits;
   private readonly canWriteLocation: () => boolean;
   private readonly onLocationApplied?: () => void;
+  private readonly iosRunnerLocation?: IosRunnerLocationClient;
   private readonly cameraPosterQrWriter?: QrPosterWriter;
   private readonly cameraPosterFileExists?: (path: string) => boolean;
   private injectedNetworkFilterBridge?: NetworkFilterBridge;
@@ -148,6 +150,7 @@ export class DeviceState {
     deviceTraits: () => this.deviceTraits,
     canWriteLocation: () => this.canWriteLocation(),
     onLocationApplied: () => this.onLocationApplied,
+    runnerLocation: () => this.iosRunnerLocation,
   });
 
   private readonly connectivity = new ConnectivityOperations({
@@ -197,6 +200,7 @@ export class DeviceState {
     this.deviceTraits = dependencies.deviceTraits ?? defaultDeviceTraits;
     this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
     this.onLocationApplied = dependencies.onLocationApplied;
+    this.iosRunnerLocation = dependencies.iosRunnerLocation;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
     this.iosAppNetworkRule = dependencies.iosAppNetworkRule;
   }

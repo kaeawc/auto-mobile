@@ -109,6 +109,12 @@ export interface BrokerReceiptTables {
 }
 
 export interface BrokerAdmissionInput {
+  resetReadiness?: {
+    thresholdMs: number;
+    expectedReadyMs: ReadonlyMap<string, number>;
+    canWait?: (resourceId: string) => boolean;
+    reserveWait?: (requestId: string, resourceId: string) => void;
+  };
   timingStartedAtMs?: number;
   export?: BrokerExportIdentity;
   requestId: string;
@@ -125,6 +131,7 @@ export interface BrokerAdmissionInput {
 
 export type BrokerAdmission =
   | { kind: "existing"; request: BrokerRequestRecord }
+  | { kind: "wait"; request: BrokerRequestRecord; resourceId: string; waitMs: number }
   | {
       kind: "create" | "reuse" | "evict";
       request: BrokerRequestRecord;

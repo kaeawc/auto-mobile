@@ -29,7 +29,7 @@ enum PrototypePagerOptions {
     static let maxPagerDp = 10000.0
 
     static func validate(_ root: JSONValue) throws {
-        try visit(root, path: "root", verticalScrollAncestor: false)
+        try visit(root, path: "root", verticalScrollAncestor: false, horizontalScrollAncestor: false)
     }
 
     private static func violation(_ path: String, _ message: String) -> DecodingError {
@@ -75,23 +75,48 @@ enum PrototypePagerOptions {
         }
     }
 
-    private static func visit(_ value: JSONValue, path: String, verticalScrollAncestor: Bool) throws {
+    /// A horizontal `scroll` measures its child with an infinite width, which the lazy horizontal
+    /// pager and carousel layouts cannot take (#14165).
+    private static func validateHorizontalLazy(_ node: [String: JSONValue], path: String) throws {
+        if node["type"] == .string("carousel") {
+            throw violation(path, "A carousel cannot appear inside a horizontal scroll")
+        }
+        if node["type"] == .string("pager"), node["axis"] != .string("vertical") {
+            throw violation(path, "A horizontal pager cannot appear inside a horizontal scroll")
+        }
+    }
+
+    private static func visit(
+        _ value: JSONValue,
+        path: String,
+        verticalScrollAncestor: Bool,
+        horizontalScrollAncestor: Bool
+    ) throws {
         guard case let .object(node) = value else { return }
+        if horizontalScrollAncestor { try validateHorizontalLazy(node, path: path) }
         if node["type"] == .string("pager") {
             try validatePager(node, path: path, verticalScrollAncestor: verticalScrollAncestor)
         }
-        let insideVerticalScroll = verticalScrollAncestor ||
-            (node["type"] == .string("scroll") && node["axis"] != .string("horizontal"))
+        let isScroll = node["type"] == .string("scroll")
+        let horizontal = node["axis"] == .string("horizontal")
+        let insideVertical = verticalScrollAncestor || (isScroll && !horizontal)
+        let insideHorizontal = horizontalScrollAncestor || (isScroll && horizontal)
+        func descend(_ child: JSONValue, _ childPath: String) throws {
+            try visit(
+                child,
+                path: childPath,
+                verticalScrollAncestor: insideVertical,
+                horizontalScrollAncestor: insideHorizontal
+            )
+        }
         if case let .array(children)? = node["children"] {
             for (index, child) in children.enumerated() {
-                try visit(child, path: "\(path).children[\(index)]", verticalScrollAncestor: insideVerticalScroll)
+                try descend(child, "\(path).children[\(index)]")
             }
         }
-        if let child = node["child"] {
-            try visit(child, path: "\(path).child", verticalScrollAncestor: insideVerticalScroll)
-        }
+        if let child = node["child"] { try descend(child, "\(path).child") }
         for (screen, screenPath) in PrototypeStacks.screenChildren(in: node, path: path) {
-            try visit(screen, path: screenPath, verticalScrollAncestor: insideVerticalScroll)
+            try descend(screen, screenPath)
         }
     }
 }

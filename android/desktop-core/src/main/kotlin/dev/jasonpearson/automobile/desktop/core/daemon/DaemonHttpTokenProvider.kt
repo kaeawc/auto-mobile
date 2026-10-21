@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import java.net.URI
 import java.nio.channels.Channels
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -76,3 +77,8 @@ internal object NioDaemonHttpTokenFiles : DaemonHttpTokenFiles {
     return attributes
   }
 }
+
+/** Exact loopback names only; other 127/8 and IPv4-mapped IPv6 addresses are excluded. */
+internal fun isDaemonHttpEndpoint(endpoint: URI): Boolean =
+  endpoint.scheme?.lowercase() in setOf("http", "https") &&
+    endpoint.host?.lowercase() in setOf("localhost", "127.0.0.1", "::1", "[::1]")

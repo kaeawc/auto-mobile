@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
@@ -127,6 +127,25 @@ describe("session broker service lifecycle", () => {
       catalog: async () => iosCatalog(),
     };
   }
+
+  test("startup passes the service timer to broker release replies", async () => {
+    const timer = new FakeTimer();
+    const service = await openSessionBrokerService(openOptions(timer, new RecordingLock()));
+    const timeout = spyOn(timer, "setTimeout");
+    try {
+      expect(await service.broker.release("missing-session")).toEqual({
+        sessionUuid: "missing-session",
+        outcome: "unknown_session",
+      });
+      expect(timeout).toHaveBeenCalledWith(expect.any(Function), 30_000);
+      // Startup recovers receipts only; the daemon starts the cleanup loop after socket bind.
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      timeout.mockRestore();
+      await service.close();
+    }
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
 
   test("close wakes an idle loop, closes the broker, and releases the lock once", async () => {
     const timer = new FakeTimer();

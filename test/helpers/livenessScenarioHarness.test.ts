@@ -230,9 +230,9 @@ describe("the harness's daemon runs every host step of the start sequence", () =
         "openTerminalReleaseJournal",
         "prepareHttpToken",
         "startHttpIngress",
-        "publishHttpToken",
         "sweepStaleAppearanceConfigs",
         "bindControlSocket",
+        "publishHttpToken",
         "startServicesAfterSocketBind",
         "startMaintenanceMonitors",
       ];

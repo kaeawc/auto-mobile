@@ -27,6 +27,8 @@ export const DIRECT_RUNNER_DISCOVERY_DEADLINE_MS = 5_000;
 
 export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
 
+export const IOS_CTRL_PROXY_HEALTH_POLL_INTERVAL_MS = 500;
+
 // ProcessLifecycle and DaemonManager force-exit after ten seconds. This stage
 // shares that budget with capture cleanup, so an unresponsive proxy must not
 // consume it all before the remaining owners receive their stop attempt.

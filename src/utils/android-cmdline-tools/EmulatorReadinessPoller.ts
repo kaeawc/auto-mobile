@@ -195,7 +195,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     if (signal?.aborted) {
       polling.active = false;
       if (!deadlineReached) {
-        polling.failure = signal.reason;
+        polling.failure = { reason: signal.reason };
       }
       return undefined;
     }
@@ -220,6 +220,12 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     return this.timer.now() - startTime >= timeoutMs;
   }
 
+  private wakeReadinessWaiters(polling: ReadinessPollingState): void {
+    for (const wake of polling.wakeWaiters) {
+      wake();
+    }
+  }
+
   private waitForReadinessDelay(
     delayMs: number,
     signal: AbortSignal | undefined,
@@ -238,16 +244,19 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         if (aborted) {
           polling.active = false;
           if (!this.readinessDeadlineReached(startTime, timeoutMs)) {
-            polling.failure = signal?.reason;
+            polling.failure = { reason: signal?.reason };
           }
         }
         if (waitState.timeoutHandle) {
           this.timer.clearTimeout(waitState.timeoutHandle);
         }
         signal?.removeEventListener("abort", abort);
+        polling.wakeWaiters.delete(wake);
         resolve();
       };
       const abort = () => settle(true);
+      const wake = () => settle(false);
+      polling.wakeWaiters.add(wake);
       signal?.addEventListener("abort", abort, { once: true });
       waitState.timeoutHandle = this.timer.setTimeout(() => settle(false), delayMs);
       if (signal?.aborted) {
@@ -258,7 +267,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
 
   private throwPollingFailure(polling: ReadinessPollingState): void {
     if (polling.failure !== undefined) {
-      throw polling.failure;
+      throw polling.failure.reason;
     }
   }
 
@@ -305,13 +314,12 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     this.host.throwLaunchError(recordedLaunchError);
 
     // Monitor child process for early exit if provided
-    const polling: ReadinessPollingState = { active: true };
+    const polling: ReadinessPollingState = { active: true, wakeWaiters: new Set() };
     const state: EmulatorReadinessState = {
       processExitError: null,
       foundDeviceId: null,
       foundEmulatorName: avdName,
     };
-    const cleanupProcessListeners = this.monitorReadinessProcess(avdName, childProcess, state);
 
     // Start background polling immediately with configurable intervals
     const probedNameSerials = new Set<string>();
@@ -335,8 +343,9 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       unresolvedNameSerials,
       offlineTracker,
     };
+    const cleanupProcessListeners = this.monitorReadinessProcess(context);
     // Start background polling immediately
-    const pollingPromise = this.pollEmulatorReadiness(context);
+    const pollingPromise = this.startReadinessPolling(context);
 
     // Main timeout loop
     while (this.readinessWaitActive(polling, startTime, timeoutMs)) {
@@ -347,6 +356,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
           readinessFailure,
           async (finalizedReadinessFailure) => {
             polling.active = false;
+            this.wakeReadinessWaiters(polling);
             await pollingPromise;
             perf.endOperation("devicePolling");
             cleanupProcessListeners();
@@ -387,8 +397,9 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         return bootedDevice;
       }
 
-      // Check less frequently in main loop since background polling is doing the work
-      await this.waitForReadinessDelay(500, signal, polling, startTime, timeoutMs);
+      // Poller completion and process exits wake this bounded fallback delay immediately.
+      const delayMs = Math.min(500, timeoutMs - (this.timer.now() - startTime));
+      await this.waitForReadinessDelay(delayMs, signal, polling, startTime, timeoutMs);
     }
 
     // Stop background polling
@@ -624,6 +635,19 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     ]);
   }
 
+  private startReadinessPolling(context: EmulatorReadinessContext): Promise<void> {
+    const { polling } = context;
+    return this.pollEmulatorReadiness(context)
+      .catch((error: unknown) => {
+        logger.warn(`Emulator readiness poller failed: ${errorMessage(error)}`, error);
+        polling.failure = { reason: error };
+        polling.active = false;
+      })
+      .finally(() => {
+        this.wakeReadinessWaiters(polling);
+      });
+  }
+
   private async pollEmulatorReadiness(context: EmulatorReadinessContext): Promise<void> {
     const { signal, options, startTime, timeoutMs, polling, state } = context;
 
@@ -679,6 +703,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     } = context;
     this.recordLaunchError(childProcess, (error) => {
       state.processExitError = error;
+      this.wakeReadinessWaiters(polling);
     });
     logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
 
@@ -838,11 +863,8 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     return true;
   }
 
-  private monitorReadinessProcess(
-    avdName: string,
-    childProcess: ChildProcess | null | undefined,
-    state: EmulatorReadinessState,
-  ): () => void {
+  private monitorReadinessProcess(context: EmulatorReadinessContext): () => void {
+    const { avdName, childProcess, state, polling } = context;
     if (childProcess && childProcess.pid) {
       const processOutput: string[] = [];
       const stdoutDecoder = new StringDecoder("utf8");
@@ -880,6 +902,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         logger.error(
           `Emulator process exited during readiness wait: ${state.processExitError.message}`,
         );
+        this.wakeReadinessWaiters(polling);
       };
       const stdoutCapture = (data: Buffer | string) => captureOutput(stdoutDecoder, data);
       const stderrCapture = (data: Buffer | string) => captureOutput(stderrDecoder, data);

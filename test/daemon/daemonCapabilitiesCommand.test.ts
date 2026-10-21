@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DaemonClientLike, DaemonMethodCallOptions } from "../../src/daemon/client";
 import { DaemonUnavailableError } from "../../src/daemon/client";
 import {
@@ -14,6 +14,18 @@ import {
 } from "../../src/daemon/cli/runDaemonCommand";
 import { DAEMON_CAPABILITIES_METHOD } from "../../src/daemon/daemonRequestHandlers";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
+
+let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
+let errorSpy: ReturnType<typeof spyOn<typeof console, "error">>;
+let exitSpy: ReturnType<typeof spyOn<typeof process, "exit">>;
+beforeEach(() => {
+  logSpy = spyOn(console, "log");
+  errorSpy = spyOn(console, "error");
+  exitSpy = spyOn(process, "exit");
+});
+afterEach(() => {
+  mock.restore();
+});
 
 class FakeCapabilitiesClient implements DaemonCapabilitiesCommandClient, DaemonClientLike {
   readonly events: unknown[] = [];
@@ -61,9 +73,9 @@ async function runCommand(client: FakeCapabilitiesClient) {
   const stderr: string[] = [];
   const exits: unknown[] = [];
   const exited = new Error("fake exit");
-  const log = spyOn(console, "log").mockImplementation((line) => stdout.push(String(line)));
-  const error = spyOn(console, "error").mockImplementation((line) => stderr.push(String(line)));
-  const exit = spyOn(process, "exit").mockImplementation((code) => {
+  const log = logSpy.mockImplementation((line) => stdout.push(String(line)));
+  const error = errorSpy.mockImplementation((line) => stderr.push(String(line)));
+  const exit = exitSpy.mockImplementation((code) => {
     exits.push(code);
     throw exited;
   });

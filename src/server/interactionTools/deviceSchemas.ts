@@ -101,7 +101,17 @@ export const selectAllTextInput = z.object({
 });
 
 export const pressButtonInput = z.object({
-  button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
+  button: z.enum([
+    "home",
+    "back",
+    "menu",
+    "power",
+    "volume_up",
+    "volume_down",
+    "recent",
+    "action",
+    "camera",
+  ]),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on
   // its own.

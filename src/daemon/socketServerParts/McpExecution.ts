@@ -1,5 +1,5 @@
 import { HostInventoryForward } from "../socketServer/hostInventoryForward";
-import { isHostInventoryCall } from "../socketRequestAdmission";
+import { isHostInventoryCall, latestBarrierCompletionOrder } from "../socketRequestAdmission";
 import { ControlDiscoveryCache, runPassthroughForward } from "../socketServer/controlRoutes";
 
 import { logger } from "../../utils/logger";
@@ -297,7 +297,7 @@ export class McpExecution {
     const inventory = this.inventoryForward.read(
       context,
       (shared) => this.forwardUncachedMcpRequest(shared),
-      this.state.sessions.get(context.socketSessionId)?.requestQueue.lastBarrierCompletionOrder,
+      latestBarrierCompletionOrder(),
     );
     if (inventory) {
       return await inventory;

@@ -3256,6 +3256,13 @@ is authoritative. Reads may fall back after a recognized SDK timeout, transport
 loss, missing route, or inspection-disabled response. Unknown faults, app mismatch,
 and mutation refusals surface as errors.
 
+On physical iOS devices (#14093), the embedded SDK is the only route: devices expose
+no container plist or `defaults` store to fall back to. Reads and writes go through
+an open SDK connection with storage inspection enabled, exactly as on simulators,
+and `appId` is required. Without a connection, both tools fail with an error that
+names the SDK requirement. Every SDK failure is final, so a write is attempted at
+most once and never retried through another route.
+
 Writes fall back when the client is absent or closed, or the runner refuses the
 SDK route before dispatch because the target app lacks the SDK. The runner marks
 these refusals with `sdk_unavailable_not_dispatched`; exact legacy capability

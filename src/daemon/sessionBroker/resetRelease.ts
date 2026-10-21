@@ -5,6 +5,7 @@ import { drainFailureOutcome } from "./brokerSupport";
 import { ResetFailureError } from "./ResetFailureError";
 import type { BrokerTimingRecorder } from "./timingRecorder";
 import { ResetBootQueue } from "./resetBootQueue";
+import type { ResetBootRunner } from "./devicePort";
 import type { BrokerRequestRecord, BrokerResourceRecord, DestructionTicket } from "./store";
 import type {
   SessionBrokerResetTiming,
@@ -83,13 +84,23 @@ export class BrokerResetRelease {
       const resetDevice = async () => {
         this.setResetActive(resource.resourceId, true);
         try {
-          // Shutdown only cancels resets still queued; a started native reset must finish.
-          return await this.options.devices.reset!(resource);
+          // Shutdown cancels queued erase work, not a started native reset.
+          const runResetBoot: ResetBootRunner | undefined = this.options.devices
+            .managesResetBootSlots
+            ? async <Result>(operation: () => Promise<Result>) => {
+                this.setResetActive(resource.resourceId, false);
+                return this.resetBoots.run(async () => {
+                  this.setResetActive(resource.resourceId, true);
+                  return operation();
+                }, signal);
+              }
+            : undefined;
+          return await this.options.devices.reset!(resource, undefined, runResetBoot);
         } finally {
           this.setResetActive(resource.resourceId, false);
         }
       };
-      const reset = await (nativeProfile(resource).platform === "ios"
+      const reset = await (this.needsResetBootSlot(resource)
         ? this.resetBoots.run(resetDevice, signal)
         : resetDevice());
       timing.phases.reset = this.now() - resetStarted;
@@ -120,6 +131,12 @@ export class BrokerResetRelease {
         resetClean,
       );
     }
+  }
+
+  private needsResetBootSlot(resource: BrokerResourceRecord): boolean {
+    return (
+      nativeProfile(resource).platform === "ios" && !this.options.devices.managesResetBootSlots
+    );
   }
 
   private async completeCleanReset(

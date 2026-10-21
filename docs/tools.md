@@ -2044,6 +2044,23 @@ immediate OS diagnostic evidence. <code>success: true</code> and
 <code>confirmed: true</code> require fresh, target-specific crash evidence, not
 merely command dispatch or process disappearance.
 
+After dispatch, <code>crashApp</code> also looks for the OS crash report for the
+crashed process and returns it as <code>crashReport</code>. On iOS Simulator
+that is the host's <code>~/Library/Logs/DiagnosticReports/*.ips</code>; on
+Android it is the <code>dumpsys dropbox</code> <code>data_app_crash</code> or
+<code>data_app_native_crash</code> entry. A report is attributed only when it
+names the same Simulator UDID (iOS), app, and process ID, and was captured after
+the crash was induced. A found report is bounded: exception type and codes,
+termination reason, app version, report path, and the crashing thread's top
+frames. It is also recorded as a <code>crash</code> entry in
+<code>automobile:failures</code>, and its <code>failureOccurrenceId</code> is
+returned. A matching report confirms a crash that the log heuristic missed (its
+<code>evidence.source</code> is <code>ios_crash_report</code> or
+<code>android_dropbox</code>). Otherwise <code>crashReport</code> is
+<code>{"status": "notFound"}</code>. Physical iOS reports
+<code>{"status": "unsupported", "reason": …}</code> until device retrieval is
+verified.
+
 </details>
 
 <details class="example" markdown="1">

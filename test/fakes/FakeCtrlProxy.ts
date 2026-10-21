@@ -1,7 +1,10 @@
 import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type { TwoFingerSwipeRequest } from "../../src/features/observe/android/types";
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
-import type { AndroidActivateAccessibilityLinkRequest } from "../../src/features/observe/android/AndroidActionDispatcher";
+import type {
+  AndroidAccessibilityActionRequest,
+  AndroidActivateAccessibilityLinkRequest,
+} from "../../src/features/observe/android/AndroidActionDispatcher";
 import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
 import type {
   PrototypePatchReply,
@@ -1211,6 +1214,20 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       action: "activate_accessibility_link",
       totalTimeMs: 100,
     };
+  }
+
+  async requestAccessibilityAction(
+    request: AndroidAccessibilityActionRequest,
+  ): Promise<A11yActionResult> {
+    request.signal?.throwIfAborted();
+    await this.applyDelay("requestAccessibilityAction");
+    this.checkFailure("requestAccessibilityAction");
+    this.actionHistory.push({
+      action: request.action,
+      resourceId: request.resourceId,
+      timeoutMs: request.timeoutMs ?? 5000,
+    });
+    return { success: true, action: request.action, totalTimeMs: 100 };
   }
 
   async requestTwoFingerSwipe(request: TwoFingerSwipeRequest): Promise<A11ySwipeResult> {

@@ -13,8 +13,6 @@ import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
   resolveSessionDeviceProfile,
-  type SessionDeviceCatalog,
-  type SessionRequirementDefaults,
 } from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
@@ -29,18 +27,15 @@ import {
 } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { defaultTimer } from "../../utils/SystemTimer";
 import { readBrokerTimingStats } from "./timingStats";
-import type { BindingProcessIdentity } from "./registry/bindingRegistry";
-import type { BrokerLimits } from "./admission";
-import { SessionBrokerFailureError, type SessionBrokerDevicePort } from "./devicePort";
 import { BrokerTimingRecorder } from "./timingRecorder";
 import { BrokerResetRelease } from "./resetRelease";
-import type { SessionLiveness } from "./sessionDisposition";
+import { SessionBrokerFailureError } from "./devicePort";
+import type { SessionBrokerOptions } from "./brokerOptions";
 import { nativeProfile, poolProfile } from "./profile";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
-import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import {
   destructionTicket,
   EXPORT_RETENTION_MS,
@@ -53,28 +48,7 @@ import {
   type DestructionTicket,
 } from "./store";
 
-export interface SessionBrokerOptions {
-  store: SqliteSessionBrokerStore;
-  devices: SessionBrokerDevicePort;
-  owner: BindingProcessIdentity;
-  limits: BrokerLimits;
-  catalog: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
-  defaults: (platform: "ios" | "android") => SessionRequirementDefaults;
-  /** Admission-only lookup; must not start lazy release from inside recovery. */
-  sessionDisposition?: (sessionUuid: string) => SessionLiveness | Promise<SessionLiveness>;
-  /** Opt in only after the native reset baseline has passed contamination tests. */
-  reuseCleanDevices?: boolean;
-  /** How long a terminal receipt keeps answering replay; defaults to {@link RECEIPT_RETENTION_MS}. */
-  receiptRetentionMs?: number;
-  /** Maximum pin age for an unacknowledged export. */
-  exportRetentionMs?: number;
-  cleanupConcurrency?: number;
-  /** Per-item pass wait only; native work retains its slot until it settles. */
-  cleanupWaitMs?: number;
-  /** Caller wait after durable release ownership commits; native cleanup keeps running. */
-  releaseReplyBudgetMs?: number;
-  timer?: Pick<Timer, "setTimeout" | "clearTimeout"> & Partial<Pick<Timer, "now">>;
-}
+export type { SessionBrokerOptions } from "./brokerOptions";
 
 export { EXPORT_RETENTION_MS } from "./store";
 export { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./releaseReply";

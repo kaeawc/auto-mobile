@@ -66,7 +66,7 @@ import {
   isRetryableIosDefaultsError,
   iosDefaultsOperationTimeoutError,
   preferenceWriteWarning,
-  unsupportedPhysicalIosUserDefaultsError,
+  physicalIosUserDefaultsRequireSdkError,
 } from "./preferenceValues";
 export {
   type PreferenceScope,
@@ -324,7 +324,7 @@ export class AppPreferences {
     write = false,
   ): Promise<T> {
     if (!isIosSimulatorDevice(this.device)) {
-      throw unsupportedPhysicalIosUserDefaultsError();
+      return this.withPhysicalIosSdkPreferenceStore(input, operation);
     }
     const domain = sanitizeIosDefaultsDomain(iosDefaultsDomain(input));
     if (!input.appId) {
@@ -347,6 +347,42 @@ export class AppPreferences {
     return operation(
       await this.resolveIosContainerPreferenceStore(input, store, domain, deadlineMs, write),
     );
+  }
+
+  /**
+   * Physical iOS (#14093): the app's own embedded SDK is the only route to its UserDefaults. There
+   * is no container plist or `defaults` fallback on hardware, so an SDK failure is final and a write
+   * is attempted at most once.
+   */
+  private async withPhysicalIosSdkPreferenceStore<T>(
+    input: GetPreferenceInput,
+    operation: (store: IosPreferenceStore) => Promise<T>,
+  ): Promise<T> {
+    if (!input.appId) {
+      throw physicalIosUserDefaultsRequireSdkError("appId is required on physical devices.");
+    }
+    const domain = sanitizeIosDefaultsDomain(iosDefaultsDomain(input));
+    sanitizeIosDefaultsDomain(input.appId);
+    const client = this.iosKeyValueClientProvider();
+    if (!client?.isConnected()) {
+      throw physicalIosUserDefaultsRequireSdkError(
+        `No embedded AutoMobile SDK connection is open for '${input.appId}'.`,
+      );
+    }
+    try {
+      return await operation({
+        kind: "sdk",
+        store: isStandardIosStore(input) ? "standard" : domain,
+        client,
+      });
+    } catch (error) {
+      if (errorMessage(error).includes("mutation_not_authorized")) {
+        throw new ActionableError(
+          `iOS key-value storage mutation is not authorized: ${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT}`,
+        );
+      }
+      throw toActionableError(error, "Failed to access iOS app UserDefaults through the SDK");
+    }
   }
 
   /** Throws unless the SDK failure may be retried through the container plist. */

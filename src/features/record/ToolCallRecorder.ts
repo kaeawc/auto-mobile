@@ -4,6 +4,7 @@ import { logger } from "../../utils/logger";
 import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
 import { normalizedAxis } from "./normalizedAxis";
 import { isInternalStepParam } from "../../constants/internalStepParams";
+import { redactToolSecrets, TOOL_SECRET_PLACEHOLDER } from "../../utils/redactToolSecrets";
 
 /** The registry-declared tool traits the recorder reads (structural subset of `ToolTraits`). */
 export interface RecorderToolTraits {
@@ -239,12 +240,7 @@ export class ToolCallRecorder {
       this.warnings.push(warning);
       return;
     }
-    const recorded = withholdDestructiveConfirmations(toolName, params);
-    if (recorded !== params) {
-      this.warnings.push(
-        `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
-      );
-    }
+    const recorded = this.withholdUnsafeParams(toolName, params);
     const context = args.__tapAtRecordingContext as
       | import("../../models/TapAtGeometry").TapAtPlanContext
       | undefined;
@@ -269,6 +265,26 @@ export class ToolCallRecorder {
       this.steps.push({ tool: toolName, params: recordedParams });
     }
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
+  }
+
+  /** Withhold destructive confirmations and credentials, warning the author of each. */
+  private withholdUnsafeParams(
+    toolName: string,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const confirmed = withholdDestructiveConfirmations(toolName, params);
+    if (confirmed !== params) {
+      this.warnings.push(
+        `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
+      );
+    }
+    const recorded = redactToolSecrets(toolName, confirmed);
+    if (recorded !== confirmed) {
+      this.warnings.push(
+        `${toolName} was recorded with its credentials replaced by ${TOOL_SECRET_PLACEHOLDER}: set them in the plan by hand before a replay`,
+      );
+    }
+    return recorded;
   }
 
   private paramsToStore(

@@ -12,9 +12,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         ))
         let required = try Set(JSONDecoder().decode([String].self, from: data))
         let supported = Set(AutoMobilePrototypeCapabilities.supported)
-        // #13722: No gate capabilities are currently missing from the iOS advertisement.
-        // Add any future intentional gaps here with their reason; remove them when supported.
-        let exclusions: Set<String> = []
+        // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
+        // when supported. Chat-list scrolls (#14232) are drawn on Android only so far (#14671).
+        let exclusions: Set<String> = ["prototype_chat_scroll_v1"]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")
         XCTAssertEqual(required.subtracting(supported).subtracting(exclusions).sorted(), [])

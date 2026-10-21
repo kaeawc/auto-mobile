@@ -31,8 +31,8 @@ import {
   type AccessibilityDisplaySupportLevel,
   type AccessibilityDisplayValues,
 } from "./AccessibilityDisplayPreferences";
-import { IOSCtrlProxyClient } from "../observe/ios";
 import type { CtrlProxyAppearanceResult } from "../observe/ios/types";
+import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
 
 /**
  * The argv-shaped slice of the simctl client this feature needs. Routing
@@ -249,7 +249,7 @@ export class DisplayConfig {
         },
       };
     }
-    const runner = this.iosRunnerAppearance ?? IOSCtrlProxyClient.getInstance(this.device);
+    const runner = this.iosRunnerAppearance ?? iosCtrlProxyClientFor(this.device);
     const call = async (appearance?: "light" | "dark") => {
       const result = await runner.requestAppearance(appearance);
       if (!result.success) {

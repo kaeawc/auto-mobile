@@ -119,7 +119,6 @@ interface AdmittedSocketRequest {
   receivedAtMs: number;
   context: RequestContext;
   cancellation: { signal: AbortSignal };
-  onOwnerSignal: (signal: AbortSignal) => void;
   onInputDispatch: () => void;
 }
 
@@ -195,7 +194,6 @@ export class SocketAdmission {
       return unqueued;
     }
     const { totalTimeoutMs, deadline } = context;
-    let activeRequestSignal: AbortSignal | undefined;
     const cancellation = this.callbacks.registerRequestCancellation(session, context);
     const admissionCancellation = this.callbacks.socketAdmissionCancellation(
       request,
@@ -212,9 +210,6 @@ export class SocketAdmission {
         receivedAtMs,
         context,
         cancellation,
-        onOwnerSignal: (signal) => {
-          activeRequestSignal = signal;
-        },
         onInputDispatch: () => onInputDispatch?.(),
       });
     // Admit through the socket's queue: same-lane requests keep arrival order, while an
@@ -284,7 +279,7 @@ export class SocketAdmission {
           ? ((await this.callbacks.provisionCancellationReply(
               request,
               response,
-              cancellation.signal.aborted ? cancellation.signal : activeRequestSignal,
+              cancellation.signal.aborted ? cancellation.signal : context.owner.signal,
             )) ?? response)
           : response,
       )
@@ -676,12 +671,7 @@ export class SocketAdmission {
     input: AdmittedSocketRequest,
   ): Promise<DaemonResponse | undefined> {
     const { request, sessionId, ownerSocket, receivedAtMs, context, cancellation } = input;
-    const { deadline } = context;
-    let activeRequestSignal: AbortSignal | undefined;
-    const onOwnerSignal = (signal: AbortSignal) => {
-      activeRequestSignal = signal;
-      input.onOwnerSignal(signal);
-    };
+    const { deadline, owner } = context;
 
     try {
       if (request.method.startsWith("daemon/")) {
@@ -701,7 +691,7 @@ export class SocketAdmission {
       }
       // Status and ping are local probes used while the daemon is starting.
       if (!STARTUP_PROBE_METHODS.has(request.method)) {
-        onOwnerSignal(cancellation.signal);
+        owner.adopt(cancellation.signal);
         await this.callbacks.waitForStartup(request, deadline, cancellation.signal);
       }
       const localResult = await this.callbacks.runLocalSocketRequest(
@@ -711,9 +701,7 @@ export class SocketAdmission {
         cancellation.signal,
         receivedAtMs,
         {
-          onOwnerSignal: (signal) => {
-            onOwnerSignal(signal);
-          },
+          onOwnerSignal: (signal) => owner.adopt(signal),
           onInputDispatch: input.onInputDispatch,
         },
       );
@@ -725,22 +713,19 @@ export class SocketAdmission {
           result: localResult,
         };
       }
-      return await this.runAdmittedMcpForward(input, onOwnerSignal);
+      return await this.runAdmittedMcpForward(input);
     } catch (error) {
       const failure = this.callbacks.mcpForwardFailureResponse({
         error,
         request,
         sessionId,
         ownerSocket,
-        signal: activeRequestSignal,
+        signal: owner.signal,
       });
       return failure;
     }
   }
-  private async runAdmittedMcpForward(
-    input: AdmittedSocketRequest,
-    onOwnerSignal: (signal: AbortSignal) => void,
-  ): Promise<DaemonResponse> {
+  private async runAdmittedMcpForward(input: AdmittedSocketRequest): Promise<DaemonResponse> {
     const { request, sessionId, ownerSocket, context, cancellation } = input;
     const { totalTimeoutMs, deadline } = context;
     let endOwnerCall: (() => void) | undefined;
@@ -763,7 +748,7 @@ export class SocketAdmission {
         cancellation.signal,
       );
       disposeMcpRequest = mcpRequest.dispose;
-      onOwnerSignal(mcpRequest.signal);
+      context.owner.adopt(mcpRequest.signal);
       const result = await this.callbacks.runMcpForwardForCurrentRoute(
         initialRoute,
         request,

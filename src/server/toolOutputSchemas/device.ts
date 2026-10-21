@@ -14,6 +14,11 @@ import {
   networkConditionProfileSchema,
 } from "../../features/utility/DeviceState";
 import { deviceClockInputSchema } from "../../features/utility/DeviceClock";
+import { EMULATOR_SENSOR_NAMES } from "../../features/utility/EmulatorSensors";
+import {
+  LOCK_CREDENTIAL_MISMATCH,
+  LOCK_CREDENTIAL_PREEXISTING,
+} from "../../features/utility/screenLock/ScreenLockTypes";
 import { observationOutputSchema } from "./observation";
 import { observationDiffMetadataSchema, tapEffectSchema } from "./observationMetadata";
 
@@ -202,6 +207,32 @@ const deviceStateOutputFields = {
       readBack: z.boolean().optional(),
       toleranceMs: z.number().optional(),
       outcome: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+  sensors: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      sensors: z
+        .array(z.object({ name: z.enum(EMULATOR_SENSOR_NAMES), value: z.array(z.number()) }))
+        .optional(),
+      unavailable: z
+        .array(z.object({ name: z.enum(EMULATOR_SENSOR_NAMES), reason: z.string() }))
+        .optional(),
+    })
+    .passthrough()
+    .optional(),
+  // Type and outcome only: a lock-screen credential is never part of a result (#14107).
+  screenLock: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      type: z.enum(["none", "pin", "password", "pattern", "unknown"]).optional(),
+      secure: z.boolean().optional(),
+      set: z.boolean().optional(),
+      cleared: z.boolean().optional(),
+      outcome: z.enum(["set", "changed", "cleared", "unchanged"]).optional(),
+      restoreOnRelease: z.boolean().optional(),
+      errorCode: z.enum([LOCK_CREDENTIAL_PREEXISTING, LOCK_CREDENTIAL_MISMATCH]).optional(),
     })
     .passthrough()
     .optional(),

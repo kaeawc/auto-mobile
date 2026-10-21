@@ -13,7 +13,7 @@ the exact arguments supported by your connection.
 
 The following tools expose `sessionUuid` and `keepScreenAwake`:
 
-`accessibility`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
+`accessibility`, `accessibilityAction`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
@@ -25,7 +25,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
-`setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
+`setNotificationPolicy`, `setPosture`, `setPreference`, `setSensor`, `setUIState`, `shake`, `snapshotOf`,
 `sqlQuery`,
 `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`, `windowMode`.
@@ -1872,7 +1872,7 @@ subtree, or the whole active-window tree when owner-less.
 | ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 🔏 <code>inspectPackageSigning</code>                                                            | Android: fresh read of a package's presence (`installed`, `absent`, `unknown`) for one user and its SHA-256 signing certificates, including the complete signer set and rotation history. Never cached.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 🔏 <code>inspectPackageSigning</code>                                                            | Fresh read of an app's presence (`installed`, `absent`, `unknown`) and signing. Android: one user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and the embedded provisioning profile. Never cached.                                                                                                                                                                                                                                                                                                                               |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                           |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -1913,6 +1913,16 @@ termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 `removeKeyValue.fileName` are deprecated aliases for the store selector `name`.
 `setAppPermissions.action` selects `grant`, `revoke`, or `reset`.
+
+On iOS, `getDeepLinks` reads custom URL schemes (`CFBundleURLTypes`) and document
+types from the installed bundle's `Info.plist`, and universal-link hosts from the
+`com.apple.developer.associated-domains` entitlement (`applinks:` entries). The
+Simulator reads its host bundle directly. A physical device (#14094) copies the
+installed bundle to the host with `devicectl device copy from` and reads it the
+same way, so both report the same links for the same build. A failed copy returns
+`success: false` with devicectl's stderr. Physical-device results are cached per
+device, bundle ID and installed version, so repeat calls skip the copy until the
+app is updated.
 
 On iOS Simulator, a stored TCC Photos grant is not proof of effective full
 read/write authorization. `getAppPermissions` reports it as `unknown` with
@@ -1966,7 +1976,52 @@ starts with `[activity_not_exported]`, `[activity_not_found]`, `[intent_unresolv
 `[am_start_failed]`, or `[invalid_intent]` for a request refused before `am start`
 runs. iOS refuses `intent`; use `launchArguments` there.
 
-`installApp.artifactPath` is the host path to an `.apk`, `.app`, or `.ipa`.
+`installApp.artifactPath` is the host path to an `.app` or `.ipa` on iOS. On Android it is one
+of:
+
+- an `.apk` (`adb install`); add `splits` (a list of split `.apk` paths) to install it as the
+  base APK with those splits through `adb install-multiple`.
+- a directory of split APKs, for example a base plus per-ABI and per-density splits. Every `.apk`
+  directly inside it is installed with `adb install-multiple`. `base.apk` or `base-master.apk`
+  is the base the package name is read from; without either, the first file by name is used.
+- an `.apks` APK set, installed with `bundletool install-apks`.
+- an `.aab` app bundle. `bundletool build-apks --connected-device` builds an APK set for the
+  target device in a private temp directory, then `bundletool install-apks` installs it. The
+  temp directory is removed afterwards.
+
+`bundle` holds the bundletool options. `bundle.modules` lists the dynamic feature modules to
+install (`["_ALL_"]` for every module; by default only install-time modules), for `.aab` and
+`.apks`. `bundle.localTesting` (`.aab` only) builds with `--local-testing`, so `install-apks`
+also pushes the on-demand module splits where Play Core's local testing reads them.
+`bundle.keystore` (`.aab` only) is `{path, alias, storePassword, keyPassword?}`; without it
+bundletool signs with the debug keystore (`~/.android/debug.keystore`), and `keyPassword`
+defaults to `storePassword`. The passwords are written to owner-only (0600) files in the private
+temp directory and handed to bundletool as `--ks-pass=file:` and `--key-pass=file:`, never as
+`pass:` arguments. They therefore never appear in process listings or in command-failure
+messages. They are replaced with `<redacted>` in request logs, telemetry, plan logs, recorded
+plans and bundletool error text. A password must be a single line.
+
+`grantAllPermissions` grants every requested runtime permission (`install -g`;
+`--grant-runtime-permissions` on the bundletool routes). `allowDowngrade` installs a lower
+`versionCode` over the installed one (`install -d`; `--allow-downgrade` on the bundletool
+routes); Android honors it only for debuggable apps, so a release-build downgrade still goes
+through the downgrade recovery described below. The result carries `installRoute`
+(`split-apks`, `apk-set` or `bundle`) for every route except a single APK.
+
+The bundletool routes need bundletool on the host. AutoMobile uses the jar named by
+`AUTOMOBILE_BUNDLETOOL_JAR` (run with `JAVA_HOME/bin/java`, else `java` on `PATH`), else a
+`bundletool` on `PATH` (for example `brew install bundletool`). It never downloads bundletool.
+The `bundletool` entry of the `automobile:host/toolchain` resource reports whether one was
+found. When none is found, `installApp` fails before touching the device with a
+`BundletoolNotFoundError` that lists these install steps. bundletool installs for every user,
+since it takes no `--user`, while the adb routes keep the resolved target user.
+
+Every route keeps the signing guard, the downgrade recovery and the installed-apps cache
+invalidation of the single-APK install. The package name the signing guard checks comes from the
+base APK, which is the base split for split installs and the base split extracted from the APK
+set for `.apks` and `.aab`. An APK set without a base split cannot name its package, so a guarded
+install of it refuses (`presence-unknown`). `splits`, `bundle`, `grantAllPermissions` and
+`allowDowngrade` are rejected on iOS.
 `uninstallApp.keepData` retains app data after uninstall on Android (default
 false; Android only).
 
@@ -1990,7 +2045,7 @@ uninstalls per device, so a guarded check-then-mutate cannot interleave with ano
 mutation; package changes made outside AutoMobile (adb in a terminal, another tool) are not
 visible to that lock, so hold the device exclusively when that matters.
 
-`inspectPackageSigning` (Android) takes `appId` and an optional `userId`; when omitted the
+`inspectPackageSigning` on Android takes `appId` and an optional `userId`; when omitted the
 user is resolved the way `uninstallApp` does and reported as `userId` and `userSource`. Each
 call reads the device (`dumpsys package`, `pm path`, and the installed base APK's signing
 block); nothing is cached, and `observation` records `fresh: true`, `observedAt`, the scope,
@@ -2006,6 +2061,26 @@ installed APK without re-verifying its signatures. JAR (v1)-only APKs, ZIP64 APK
 package on a device whose API level cannot be read report `unavailable`. The signing read pulls
 the installed base APK to a host temp file and removes it afterwards. It does not use CtrlProxy,
 so helper version does not affect the result.
+
+On iOS (#14099) the result has `platform: "ios"` and `deviceKind` (`simulator` or `physical`);
+the Android fields above are unchanged, and `userId` is refused. The Simulator bundle is read in
+place (`simctl get_app_container <udid> <bundle> app`); a physical device's bundle is copied off
+with `devicectl device copy from` and the copy is removed afterwards. Both need macOS. A missing
+app is `absent`; a failed lookup is `unknown`. `signing` is one of:
+
+- `{status: "available", cdHash, identifier, teamId, signingIdentity, adHoc, authorities,
+  entitlements, provisioningProfile, warnings?}`, from `codesign -dvvv`, the signed entitlements,
+  and `security cms -D` on `embedded.mobileprovision`. iOS has no SHA-256 signer set, so the
+  identity is the CodeDirectory hash (`cdHash`) plus `teamId` and the certificate chain
+  (`authorities`, leaf first). `teamId` and `signingIdentity` are null for ad-hoc (Simulator)
+  signatures.
+- `{status: "unsigned", reason}` when codesign reports no signature.
+- `{status: "unavailable", reason}` when codesign itself fails.
+
+`provisioningProfile` is null when the bundle embeds none (Simulator and App Store builds);
+otherwise it reports `name`, `uuid`, `teamIds`, `expirationDate`, `expired` (against host time)
+and `provisionedDeviceCount`. A failed entitlement or profile read leaves that field null and
+adds a `warnings` entry instead of failing the call.
 
 `openLink.acceptOpenAlert` automatically taps Open on an iOS system
 "Open in <app>?" alert. On Android, `chooserAppPackage` selects the exact package
@@ -2043,6 +2118,23 @@ confirmed crashes also report <code>processId</code> when available and include
 immediate OS diagnostic evidence. <code>success: true</code> and
 <code>confirmed: true</code> require fresh, target-specific crash evidence, not
 merely command dispatch or process disappearance.
+
+After dispatch, <code>crashApp</code> also looks for the OS crash report for the
+crashed process and returns it as <code>crashReport</code>. On iOS Simulator
+that is the host's <code>~/Library/Logs/DiagnosticReports/*.ips</code>; on
+Android it is the <code>dumpsys dropbox</code> <code>data_app_crash</code> or
+<code>data_app_native_crash</code> entry. A report is attributed only when it
+names the same Simulator UDID (iOS), app, and process ID, and was captured after
+the crash was induced. A found report is bounded: exception type and codes,
+termination reason, app version, report path, and the crashing thread's top
+frames. It is also recorded as a <code>crash</code> entry in
+<code>automobile:failures</code>, and its <code>failureOccurrenceId</code> is
+returned. A matching report confirms a crash that the log heuristic missed (its
+<code>evidence.source</code> is <code>ios_crash_report</code> or
+<code>android_dropbox</code>). Otherwise <code>crashReport</code> is
+<code>{"status": "notFound"}</code>. Physical iOS reports
+<code>{"status": "unsupported", "reason": …}</code> until device retrieval is
+verified.
 
 </details>
 
@@ -2286,10 +2378,12 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 🧬 <code>getIosSimulatorCapabilities</code>                                    | Discovers biometrics for a selected iOS Simulator device type and runtime.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🫆 <code>biometricAuth</code>                                                  | Simulates biometric authentication.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator; duration must be an integer from 1 to 1,798,000 ms, and Android intensity must be from 1 to 1,000.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 🎚️ <code>setSensor</code>                                                      | Sets or resets one Android emulator virtual sensor (`acceleration`, `gyroscope`, `magnetic-field`, `orientation`, `temperature`, `proximity`, `light`, `pressure`, `humidity`) through the emulator console, returning `applied`, `previous` and a `restore` receipt. Pass `sensor` plus exactly one of `value` or `reset: true`. A daemon session (`sessionUuid`) restores every sensor it changed on release or rebind. Physical devices and iOS are refused.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📞 <code>phoneCall</code> / 💬 <code>sendSms</code>                            | Simulates an incoming call or SMS: Android emulator console, or CallKit and a notification through the app's AutoMobile iOS SDK.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 🔔 <code>postNotification</code>                                               | Posts a notification through Android SDK hooks or iOS Simulator push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 🪫 <code>killProfile</code>                                                    | Android: applies or resets an OEM background-kill profile (standby bucket, appops, Doze, force-stop) on a stock device; opt-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 Clock control uses `setDeviceState` with `clock: { mode: "set", instant: "2026-10-01T00:00:00Z" }`, `clock: { mode: "advance", byMs: 60000 }`, or `clock: { mode: "reset" }`. Set requires ISO-8601 with Z or an explicit offset within **2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z, inclusive** (`MIN_DEVICE_CLOCK_INSTANT_MS` / `MAX_DEVICE_CLOCK_INSTANT_MS`). Advance requires an integer `byMs >= 1000`, at most `MAX_DEVICE_CLOCK_ADVANCE_MS` (315360000000, ten 365-day years). An early device read rejects cumulative targets outside that window before any clock or other field mutation. Immediately before the clock write, after other requested fields, root acquisition and disabling automatic time, advance reads the device again and range-checks the fresh target. A target that leaves the window during those operations returns a typed clock-field failure; other fields retain their results. Read-only root-capability probes and `date +%s` may run during validation. All inputs are validated before applying any field. Only rootable Android emulators support writes; Play Store images, physical Android devices, and all iOS targets return unsupported. Changing the clock affects TLS/certificate validation, token expiry, and the daemon's own freshness checks for that device.
 
@@ -2303,11 +2397,19 @@ The restore slot is **in memory only**: daemon restart loses it, potentially lea
 
 `getDeviceState` with `include: ["clock"]` reads current Android instant and automatic time without root, including physical devices and non-rootable images; iOS reports unsupported. The default read selection remains Do Not Disturb and connectivity.
 
+`getDeviceState` with `include: ["sensors"]` reads every `setSensor` sensor on an Android emulator with `adb emu sensor get <name>`, one console round trip per sensor. `sensors.sensors` lists `{ name, value }` for each readable sensor; `sensors.unavailable` lists `{ name, reason }` for sensors the console refuses (for example a sensor the AVD disables) or answers unrecognizably. Physical Android devices and iOS report `sensors` unsupported without failing the read.
+
 Camera posters use `setDeviceState` with `cameraPoster: { mode: "image", path: "/abs/poster.png" }`, `cameraPoster: { mode: "qr", text: "payload" }`, or `cameraPoster: { mode: "clear" }`, plus an optional `surface` of `wall` (default) or `table`. It runs `adb -s <serial> emu virtualscene-image <surface> [path]` on a **running** Android emulator, with no gRPC client and no cold restart; QR payloads reuse the `startDevice` `cameraPosterQr` poster writer. The path must be a PNG/JPG/JPEG that exists and contains no whitespace (the console splits on spaces). The AVD back camera must be `virtualscene`: boot it with `startDevice` `cameraPosterPath` or `cameraPosterQr`, otherwise the console refuses and the error is returned with that hint. iOS and physical Android return unsupported. The console answering `OK` does not confirm the camera shows the poster: the virtual scene's default camera pose may not face it, and nothing reads the camera frame back, so the result carries a `warning` instead of `verified`. The poster persists until cleared or the AVD is cold-booted.
 
 Location route playback uses `setDeviceState` with `location: { mode: "route", waypoints: [{ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 1 }], durationMs: 10000 }`. Provide exactly one of positive, finite `durationMs` or `speedMetersPerSecond`. A route needs at least two ordered waypoints; latitude is −90..90, longitude is −180..180, and optional altitude is finite. `loop` defaults to false; `updateIntervalMs` defaults to 1000 and accepts integers from 200 to 60000. Starting a route returns immediately with its waypoint count, total distance, expected duration, loop, interval, and method. iOS Simulator interpolates on the host and sends repeated `simctl location set` commands. Three consecutive fix failures stop playback and are logged; the next location write reports the failed route in `previousRoute` with `endedReason: "failed"` and `lastError`.
 
 One route runs per device. A static fix, new route, `location: { mode: "stop" }`, session release, unbind, or device removal cancels it. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged. A sessionless fix written while a session marker remains on that device is cleared by that session's release; markers are per device and session, not per write. Stop reports `stopped: false` when idle and `previousRoute` when a route ended, including its `endedReason` (`completed`, `failed`, `replaced`, or `stopped`) and any `lastError`.
+
+Lock-screen credentials use `setDeviceState` with `screenLock: { type: "pin", credential: "1357" }`, `screenLock: { type: "password", credential: "s3cret" }`, `screenLock: { type: "pattern", credential: "14789" }` (cells of the 3x3 grid as digits 1-9, row by row, each used once), or `screenLock: { type: "none", currentCredential: "1357" }` to clear one. It runs `adb shell locksettings set-pin|set-password|set-pattern|clear` for user 0 on an Android emulator or physical device, so `KeyguardManager.isDeviceSecure()` becomes true and Keystore keys that need user authentication can be generated; iOS returns unsupported. A PIN is 4-16 digits; a password or `currentCredential` is 4-16 printable ASCII characters, not starting with `-` and without a single quote. `getDeviceState` with `include: ["screenLock"]` reads the credential type (`none`, `pin`, `password`, `pattern`, or `unknown`) from `dumpsys lock_settings`, falling back to the keyguard's `secure` flag.
+
+The result reports only the type and outcome, such as `screenLock: { type: "pin", set: true, outcome: "set", verified: true, restoreOnRelease: true }`; the credential is never returned. Within a session, AutoMobile keeps the credential in daemon memory (never on disk) so that session can replace it (`--old`) and its release or rebind clears it. A leaked lock blocks every later session on the device, so the outcome of that clear is returned in the session-release result as `screenLockRestore` (`cleared`, `failed` with the leftover and how to remove it, `skipped` for a replaced device, or `pending` if still running at the teardown cap); a refused credential is not retried, because each refusal counts toward the device's failed-attempt lockout. A daemon restart loses the in-memory credential, leaving the lock until it is cleared by hand. A sessionless set is never cleared automatically and carries a `warning`. An existing credential this session did not set is never overwritten: the call fails with `errorCode: "lock_credential_preexisting"` and no write; a wrong `currentCredential` fails with `lock_credential_mismatch`. Any change also drops the PIN `wakeAndUnlock` remembered for the device.
+
+The credential is replaced by `<redacted>` in request and plan logs, telemetry, the memory-audit store and `recordToolCalls` plans (the recorder warns that a replay needs it set by hand). AutoMobile's adb logs and command errors show `shell locksettings <credential redacted>`, and `locksettings` output, which echoes credentials, is scrubbed before it can reach an error. The credential is still an argument of the `locksettings` process on the device while it runs, so it is visible to anything that can list device processes for that moment. Work-profile users are not supported yet.
 
 During canonical-shape phase 1, every device surface returns the complete shared description:
 static facts are top-level, changing state is under `runtime`, and the previous nested and flat
@@ -2414,6 +2516,50 @@ include `currentOrientation`, `previousOrientation`, `rotationPerformed`,
 Successful no-ops report `rotationPerformed: false`. Returned failures retain
 the structured result with `success: false` and set the MCP `isError` flag.
 
+### Background-kill profiles (`killProfile`)
+
+`killProfile` (Android, opt-in with `setToolEnabled`) reproduces the **effect** of an OEM's
+background restrictions on a stock emulator or device (#14051). It simulates what the app
+observes, not the OEM firmware that causes it. `action: "list"` returns the catalog and the
+behaviour that cannot be simulated; it changes nothing on the device.
+
+| Profile                     | Steps                                                        | Evidence            |
+| --------------------------- | ------------------------------------------------------------ | ------------------- |
+| `samsung-sleeping`          | `dumpsys battery unplug`; `am set-standby-bucket restricted` | `vendor_documented` |
+| `samsung-deep-sleeping`     | `am force-stop`; `appops RUN_ANY_IN_BACKGROUND ignore`       | `inferred`          |
+| `xiaomi-autostart-off`      | `am force-stop`; `appops RUN_ANY_IN_BACKGROUND ignore`       | `inferred`          |
+| `oneplus-deep-optimization` | `am force-stop`; `appops RUN_ANY_IN_BACKGROUND ignore`       | `inferred`          |
+| `recents-swipe-kill`        | `KEYCODE_HOME`; `am kill` (soft)                             | `inferred`          |
+| `recents-swipe-force-stop`  | `KEYCODE_HOME`; `am force-stop` (hard)                       | `inferred`          |
+| `oneplus-sleep-standby`     | `dumpsys battery unplug`; `dumpsys deviceidle force-idle`    | `inferred`          |
+| `motorola-adaptive`         | `am set-standby-bucket rare`                                 | `inferred`          |
+| `user-restricted`           | `appops RUN_ANY_IN_BACKGROUND ignore`                        | `cdd_derived`       |
+| `exact-alarm-denied`        | `appops --uid SCHEDULE_EXACT_ALARM deny`                     | `vendor_documented` |
+
+```ts
+killProfile({ action: "apply", appId: "com.example.app", profile: "user-restricted" });
+killProfile({ action: "reset", appId: "com.example.app" });
+```
+
+- Each step reports `applied`, `unsupported` (for example the restricted bucket below API 30,
+  RUN_ANY_IN_BACKGROUND below API 28, or force-idle with Doze disabled) or `failed`. The
+  profile's `status` is `applied`, `partial` or `unsupported`. A profile that changes nothing
+  because a step failed is an error.
+- `apply` is idempotent. Before the first change it records the battery state, standby bucket
+  and appop modes, and the result's `restore.commands` lists what reset will run. Applying
+  again never overwrites that record. `am kill`, `am force-stop` and `KEYCODE_HOME` have
+  nothing to restore.
+- `reset` restores the recorded state for that app plus the device-wide battery and Doze
+  state, then forgets it, so a second reset changes nothing. The record is in memory only:
+  after a daemon restart, `reset` with `baseline: true` writes the AOSP defaults instead
+  (`dumpsys battery reset`, `dumpsys deviceidle unforce`, bucket `active`, appops `default`).
+- In a daemon session (`sessionUuid`), release or rebind restores every facet the session
+  changed before the next session can acquire the device. Sessionless changes persist until
+  `reset`. The shared `platform` and `keepScreenAwake` device options apply as for other tools.
+- Not reproducible, and reported by `list` as `nonEmulatable`: OEM triggers such as "unused
+  for 3 days", exemption resets after a firmware update, and Xiaomi's proprietary AppOps
+  10008/10021.
+
 ### Localization, display, and event options
 
 `changeLocalization.appId` selects the Android app package for locale changes.
@@ -2438,7 +2584,10 @@ when none was recorded), and session release restores the recorded value through
 the same path. A runner that predates `request_appearance` returns a failure that
 names the command. Whether the appearance persists after the runner exits has not
 been verified on hardware.
-`shake.duration` is an integer from 1 to 1,798,000 ms (default 1000); the maximum leaves 2 seconds for action-timeout overhead under the 30-minute MCP request limit. Invalid values are rejected before shaking. `shake.intensity` is an Android acceleration value from 1 to 1,000 (default 100); iOS ignores it. The maximum is a conservative bound because the repository does not define an emulator sensor limit. Android shake restores the acceleration vector read before the shake; when read-back fails, it uses the issue-reported emulator resting vector `0:9.77622:0` and includes `restoreWarning` in the result.
+`shake` runs on the iOS Simulator and Android emulator only: physical iOS devices have no XCTest shake API and physical Android devices have no emulator console, so both are refused with an error before any command runs. `shake.duration` is an integer from 1 to 1,798,000 ms (default 1000); the maximum leaves 2 seconds for action-timeout overhead under the 30-minute MCP request limit. Invalid values are rejected before shaking. `shake.intensity` is an Android acceleration value from 1 to 1,000 (default 100); iOS ignores it. The maximum is a conservative bound because the repository does not define an emulator sensor limit. Android shake restores the acceleration vector read before the shake; when read-back fails, it uses the issue-reported emulator resting vector `0:9.77622:0` and includes `restoreWarning` in the result.
+
+`setSensor` drives the Android emulator console (`adb -s <serial> emu sensor set <sensor> <a[:b[:c]]>`), the same path `shake` uses for acceleration. Each `sensor` takes a fixed number of values in a sanity range: `acceleration` (x, y, z in m/s², ±1000), `gyroscope` (rad/s, ±100), `magnetic-field` (µT, ±2000), `orientation` (azimuth 0..360, pitch −180..180, roll −90..90 degrees), and single values for `temperature` (°C, −273.15..1000), `proximity` (cm, 0..100), `light` (lux, 0..200000), `pressure` (hPa, 0..2000) and `humidity` (%, 0..100). Values are rounded to 6 decimal places. A wrong arity or out-of-range value is rejected before any console command. The tool reads the current value first and refuses to write when the console cannot read it (for example a sensor the AVD disables), so it never changes a sensor it cannot restore. The result reports `previous` (read before the call), `applied` (what was written), `changed`, `reset`, and, while a restore slot remains, `restore: { value, onSessionRelease }`. The slot holds the value read before the first change and is never overwritten by later calls; `reset: true` writes it back and clears it, and setting the original value again also clears it. With nothing recorded, `reset: true` reads the sensor and reports `changed: false`. Within a daemon session (`sessionUuid`), release or rebind writes back every recorded sensor on that device, bounded to 1 second per sensor; the device stays quarantined until the writes settle. A session that changes a sensor also takes over values a sessionless call recorded on that device, so its release returns the device to the values found before AutoMobile changed them. Sessionless changes persist until `reset`. The slots live in daemon memory: a daemon restart loses them, and the emulator keeps the last value until it is cold-booted. Physical Android devices and iOS are refused with an error naming the emulator requirement. Console acceptance is not a read-back: whether an app reacts depends on its sensor listeners (for example, `proximity` 0 turns the screen off only while an app holds a proximity wake lock, such as during a call). Read current values with `getDeviceState` `include: ["sensors"]`.
+
 `biometricAuth.errorCode` supplies the BiometricPrompt error code for `action: "error"`.
 On iOS, `match`, `fail`, `cancel` and `error` first arm an `AutoMobileBiometrics`
 override through the app's AutoMobile iOS SDK (DEBUG build, app in the foreground),
@@ -2921,12 +3070,31 @@ accept the recording `display` argument.
 
 ## Accessibility & session tools
 
-| Tool                               | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
-| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
-| 🧪 <code>audit</code>              | Runs the accessibility (WCAG), performance or memory audit on the current Android screen on demand, with every audit feature flag off; supports container scoping, named baselines and `failOn` for plan assertions.                                                                                                                                                                                                                                        |
-| 🔀 <code>setToolEnabled</code>     | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
+| Tool                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ♿ <code>accessibility</code>       | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
+| 🎯 <code>accessibilityFocus</code>  | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
+| 🧭 <code>accessibilityAction</code> | Performs an Android accessibility action (expand, collapse, dismiss, select, scroll or page in a direction, press and hold, set progress, or an app-defined custom action by label) on an element, the way TalkBack or Switch Access does.                                                                                                                                                                                                                  |
+| 🧪 <code>audit</code>               | Runs the accessibility (WCAG), performance or memory audit on the current Android screen on demand, with every audit feature flag off; supports container scoping, named baselines and `failOn` for plan assertions.                                                                                                                                                                                                                                        |
+| 🔀 <code>setToolEnabled</code>      | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
+
+### accessibilityAction
+
+`accessibilityAction` performs an accessibility action on an Android element through the
+CtrlProxy accessibility service (#14077), instead of a coordinate gesture. Target the element
+with `resourceId`, `text` or `contentDesc`; it must resolve to a unique resource-id. `action`
+is one of `expand`, `collapse`, `dismiss`, `select`, `clear_selection`, `show_on_screen`,
+`scroll_forward`, `scroll_backward`, `scroll_up`, `scroll_down`, `scroll_left`,
+`scroll_right`, `page_up`, `page_down`, `page_left`, `page_right` (API 29+),
+`press_and_hold` (API 30+), `set_progress` (with `progress`, in the control's own range)
+or `custom` (with `customAction`, the label of an app-defined action such as a Compose
+`customActions` entry; matched exactly, then ignoring case).
+
+An action the element does not offer is refused, and the error lists the actions it does
+offer, with app-defined ones as `custom:<label>`. An action newer than the device's API level
+is refused with the level it needs. The tool requires a CtrlProxy APK that advertises
+`semantic_node_actions_v1`; with an older APK it fails before sending anything and asks for
+a daemon restart so the current APK is installed. iOS is not supported.
 
 ### audit
 
@@ -3221,6 +3389,13 @@ is authoritative. Reads may fall back after a recognized SDK timeout, transport
 loss, missing route, or inspection-disabled response. Unknown faults, app mismatch,
 and mutation refusals surface as errors.
 
+On physical iOS devices (#14093), the embedded SDK is the only route: devices expose
+no container plist or `defaults` store to fall back to. Reads and writes go through
+an open SDK connection with storage inspection enabled, exactly as on simulators,
+and `appId` is required. Without a connection, both tools fail with an error that
+names the SDK requirement. Every SDK failure is final, so a write is attempted at
+most once and never retried through another route.
+
 Writes fall back when the client is absent or closed, or the runner refuses the
 SDK route before dispatch because the target app lacks the SDK. The runner marks
 these refusals with `sdk_unavailable_not_dispatched`; exact legacy capability
@@ -3324,7 +3499,7 @@ errors.
 
 `getDeviceState` and `setDeviceState` report `success`, `deviceId`, and `platform`,
 with optional `error` and requested field results: `doNotDisturb`, `connectivity`,
-`biometrics`, `networkCondition`, `clock`, and (writes only) `location`. Reads may
+`biometrics`, `networkCondition`, `clock`, `screenLock`, and (writes only) `location`. Reads may
 also include `displays` and `unsupported` field names. Field results report
 `supported` and optional verification, capability, method, values, warning, or
 error metadata. Clock writes can report `outcome` as `changed`, `unchanged`, or

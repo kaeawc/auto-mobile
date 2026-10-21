@@ -576,6 +576,18 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "customAction",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "progress",
+          "type": "double",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -9547,10 +9559,54 @@
         "hasDefault": true
       },
       {
+        "name": "reverse",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stickToEnd",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "atEndKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onStartReached",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "child",
         "type": "polymorphic",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "scrollTo": [
+      {
+        "name": "scroll",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "to",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "animated",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "searchBar": [

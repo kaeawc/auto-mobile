@@ -9,7 +9,7 @@ import type {
   IosRunnerWireHierarchy,
   IosRunnerWireNode,
 } from "../../../../src/features/observe/ios/types";
-import { decodeRunnerWireHierarchy } from "../../../../src/features/observe/ios/decodeRunnerWireHierarchy";
+import { decodeRunnerWireHierarchy } from "../../../helpers/decodeRunnerWireHierarchy";
 import { normalizeIosHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";

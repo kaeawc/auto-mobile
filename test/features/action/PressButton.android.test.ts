@@ -209,6 +209,22 @@ describe("PressButton Android keycode dispatch", () => {
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 
+  test.each(["action", "camera"])(
+    "refuses the iOS-only %s button with a typed error and no keyevent",
+    async (button) => {
+      const result = await press(button);
+
+      expect(result).toMatchObject({
+        success: false,
+        keyCode: -1,
+        code: "unsupported_button",
+        retryable: false,
+      });
+      expect(result.error).toContain("iOS-only");
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
   // Navigation buttons fall back to an ADB keyevent when the a11y global action
   // is unavailable. This pins the keycode each navigation button maps to — e.g.
   // "back" must be 4 (KEYCODE_BACK), never 3 (KEYCODE_HOME).

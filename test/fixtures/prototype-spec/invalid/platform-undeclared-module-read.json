@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{platform:/test/count}"
+    }
+  },
+  "expectedPath": "root.text",
+  "expectedMessage": "Platform module test is not declared in requires.platform"
+}

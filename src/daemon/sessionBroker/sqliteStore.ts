@@ -395,6 +395,9 @@ export class SqliteSessionBrokerStore {
       if (request.fingerprint !== input.fingerprint || request.state !== "acquiring") {
         throw new ActionableError("Cannot continue a changed or terminal session request");
       }
+      if (request.resourceId === null) {
+        return this.reserve(trx, request, input);
+      }
       const resource = requireValue(
         await readResource(
           trx,
@@ -778,20 +781,38 @@ export class SqliteSessionBrokerStore {
     const decision = selectAdmission(
       {
         activeOrAcquiringSessions: sessionCount,
+        resetWaitThresholdMs: input.resetReadiness?.thresholdMs,
         resources: occupiedResources(resources).map((resource) => ({
           ...resource,
           compatible:
-            resource.state === "idle" &&
+            (resource.state === "idle" || resource.state === "resetting") &&
             input.matches(
               requireValue(
                 resources.find((entry) => entry.resourceId === resource.id),
                 "Missing resource",
               ).profile,
             ),
+          expectedReadyMs:
+            input.resetReadiness?.canWait?.(resource.id) === false
+              ? undefined
+              : input.resetReadiness?.expectedReadyMs.get(resource.id),
         })),
       },
       input.limits,
     );
+    if (decision.kind === "wait") {
+      input.resetReadiness?.reserveWait?.(request.requestId, decision.resourceId);
+      const resetting = requireValue(
+        resources.find((resource) => resource.resourceId === decision.resourceId),
+        "Waiting resource disappeared",
+      );
+      return {
+        ...decision,
+        request: await this.updateRequest(trx, request.requestId, {
+          ...pendingAcquisitionTiming(input, request, resetting, "wait", this.clock.now()),
+        }),
+      };
+    }
     if (decision.kind === "refuse") {
       return {
         kind: "refused",

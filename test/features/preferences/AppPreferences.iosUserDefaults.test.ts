@@ -33,6 +33,7 @@ const input = {
   key: "kv8327",
 } as const;
 const container = "/fake/app container";
+const PHYSICAL_UDID = "00008110-0012345678901234";
 const fixtureXml = readFileSync(
   new URL("../../fixtures/ios-userdefaults-plist/xml-origin.plist", import.meta.url),
   "utf8",
@@ -411,26 +412,21 @@ describe("runner SDK refusals before dispatch", () => {
     );
     expect(simctl.calls).toEqual([]);
   });
-  test("physical device rejects writes before consulting the SDK", async () => {
-    const sdk = new FakeKeyValueClient();
-    sdk.writeError = notDispatchedMessages[0];
-    const provider = spyOn({ get: () => sdk }, "get");
-    const simctl = new FakeContainerSimctl();
-    const preferences = new AppPreferences(
-      { ...device, deviceId: "physical-device" },
-      {
-        iosKeyValueClientProvider: provider,
-        simctl,
-        timer: new FakeTimer(),
-      },
-    );
-    await expect(preferences.setPreference({ ...input, value: 42, type: "int" })).rejects.toThrow(
-      "iOS physical devices are not supported for UserDefaults preferences yet.",
-    );
-    expect(provider).not.toHaveBeenCalled();
-    expect(sdk.calls).toEqual([]);
-    expect(simctl.calls).toEqual([]);
-    provider.mockRestore();
+  test("physical device without an SDK connection names the SDK requirement", async () => {
+    for (const client of [null, Object.assign(new FakeKeyValueClient(), { connected: false })]) {
+      const simctl = new FakeContainerSimctl();
+      const preferences = new AppPreferences(
+        { ...device, deviceId: PHYSICAL_UDID },
+        { iosKeyValueClientProvider: () => client, simctl, timer: new FakeTimer() },
+      );
+      await expect(preferences.setPreference({ ...input, value: 42, type: "int" })).rejects.toThrow(
+        "require the app to embed the AutoMobile SDK",
+      );
+      await expect(preferences.getPreference(input)).rejects.toThrow(
+        "No embedded AutoMobile SDK connection is open for 'com.Example.app'.",
+      );
+      expect(simctl.calls).toEqual([]);
+    }
   });
   test("SDK read-back refusal after a successful write never retries the write", async () => {
     const { preferences, sdk, simctl, plist } = harness();
@@ -1347,3 +1343,61 @@ for (const error of [
     expect(write.plist.paths).toEqual([]);
   });
 }
+
+describe("physical iOS UserDefaults through the SDK (#14093)", () => {
+  const physical = () => {
+    const sdk = new FakeKeyValueClient();
+    const simctl = new FakeContainerSimctl();
+    const preferences = new AppPreferences(
+      { ...device, deviceId: PHYSICAL_UDID },
+      { iosKeyValueClientProvider: () => sdk, simctl, timer: new FakeTimer() },
+    );
+    return { sdk, simctl, preferences };
+  };
+
+  test.each([
+    { type: "string" as const, value: "hello", sdkType: "STRING" as const },
+    { type: "bool" as const, value: true, sdkType: "BOOLEAN" as const },
+    { type: "int" as const, value: 42, sdkType: "INT" as const },
+  ])("round-trips a $type in a named suite and the standard store", async (row) => {
+    for (const suite of ["mt8327Suite", undefined]) {
+      const { sdk, simctl, preferences } = physical();
+      const target = { ...input, suite };
+      await preferences.setPreference({ ...target, value: row.value, type: row.type });
+      const result = await preferences.getPreference(target);
+      expect(result).toMatchObject({ found: true, value: row.value });
+      expect(sdk.calls[0]).toMatchObject({
+        operation: "set",
+        appId: "com.Example.app",
+        store: suite ?? "Standard",
+        type: row.sdkType,
+      });
+      expect(simctl.calls).toEqual([]);
+    }
+  });
+
+  test("an SDK write failure is final: no retry and no container fallback", async () => {
+    const { sdk, simctl, preferences } = physical();
+    sdk.writeError = "sdk_unavailable_not_dispatched: app lacks the SDK";
+    await expect(preferences.setPreference({ ...input, value: 1, type: "int" })).rejects.toThrow(
+      "Failed to access iOS app UserDefaults through the SDK",
+    );
+    expect(sdk.calls.filter((call) => call.operation === "set")).toHaveLength(1);
+    expect(simctl.calls).toEqual([]);
+  });
+
+  test("an SDK read failure surfaces instead of falling back", async () => {
+    const { sdk, simctl, preferences } = physical();
+    sdk.readError = "transport lost";
+    await expect(preferences.getPreference(input)).rejects.toThrow("transport lost");
+    expect(simctl.calls).toEqual([]);
+  });
+
+  test("mutation refusals keep their authorization hint", async () => {
+    const { sdk, preferences } = physical();
+    sdk.writeError = "mutation_not_authorized";
+    await expect(preferences.setPreference({ ...input, value: 1, type: "int" })).rejects.toThrow(
+      IOS_STORAGE_MUTATION_AUTHORIZATION_HINT,
+    );
+  });
+});

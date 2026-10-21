@@ -260,6 +260,7 @@ export const TEMP_SUBDIRS = {
   SCREENSHOTS: "screenshots",
   SNAPSHOTS: "snapshots",
   VIDEO_ARCHIVE: "video-archive",
+  PERFORMANCE_TRACES: "performance-traces",
   NAVIGATION_SCREENSHOTS: "navigation-screenshots",
   VIEW_HIERARCHY: "view_hierarchy",
   OBSERVE_RESULTS: "observe_results",

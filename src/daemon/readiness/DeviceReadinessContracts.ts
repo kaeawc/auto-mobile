@@ -124,6 +124,12 @@ export interface DeviceReadinessContract {
    */
   verifyAndroidDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void>;
 
+  /** Fresh, complete Android inventory for session-broker reset verification. */
+  listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]>;
+
+  /** Verify CtrlProxy health through the injected device-client provider. */
+  verifyAndroidCtrlProxyServiceReady(device: BootedDevice): Promise<boolean>;
+
   /**
    * Verify an iOS device is connected and ready
    */

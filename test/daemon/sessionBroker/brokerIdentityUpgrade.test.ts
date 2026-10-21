@@ -158,9 +158,11 @@ describe("legacy product inventory through broker lifecycle", () => {
         },
       },
       // Fake native reset permits exercising the real broker cache eviction policy.
-      resetIosBaseline: async (_, __, assertOwned) => {
-        await assertOwned();
-        return "clean";
+      resetBaseline: {
+        ios: async (_, __, assertOwned) => {
+          await assertOwned();
+          return "clean";
+        },
       },
       isCurrentReset: async () => true,
     });

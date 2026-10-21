@@ -28,7 +28,6 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `setActiveDevice`, `setAppLinks`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`,
 `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setSensor`, `setUIState`, `shake`, `snapshotOf`,
-`sqlQuery`,
 `sqlQuery`, `statusBar`,
 `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`, `windowMode`.

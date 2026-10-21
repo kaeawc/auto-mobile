@@ -1,3 +1,5 @@
+import type { ElementBounds } from "./ElementBounds";
+
 /**
  * Represents information about a fragment in the back stack
  */
@@ -48,6 +50,16 @@ export interface TaskInfo {
   topActivity?: string;
   /** Number of activities in this task */
   numActivities?: number;
+  /**
+   * The task's windowing mode as `dumpsys activity activities` prints it
+   * (`WindowConfiguration.windowingModeToString`): `fullscreen`, `pinned`
+   * (picture-in-picture), `freeform`, `multi-window` (split screen on API 32+),
+   * `split-screen-primary` / `split-screen-secondary` (legacy split screen,
+   * API 31 and below) or `undefined`.
+   */
+  windowingMode?: string;
+  /** The task's bounds in display pixels, when the dump prints them. */
+  bounds?: ElementBounds;
 }
 
 /**

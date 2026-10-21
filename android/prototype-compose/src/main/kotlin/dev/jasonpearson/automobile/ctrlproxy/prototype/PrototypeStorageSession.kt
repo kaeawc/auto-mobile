@@ -20,9 +20,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 
 /** Coalescing window between a stored key changing and the document being written. */
-const val PROTOTYPE_STORAGE_DEBOUNCE_MILLIS = 500L
+internal const val PROTOTYPE_STORAGE_DEBOUNCE_MILLIS = 500L
 
 /** Where a storage problem is explained; a seam so JVM tests need no `android.util.Log`. */
+@InternalAutoMobilePrototypeApi
 fun interface PrototypeStorageWarn {
   fun warn(message: String, error: Throwable?)
 }
@@ -36,6 +37,7 @@ private val logWarn = PrototypeStorageWarn { message, error ->
  * activity), by id, held weakly. Deleting a saved prototype silences every one of them first, so a
  * pending debounce or a later flush cannot recreate what the delete removed.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeStorageSessionRegistry {
   private val sessions = ArrayList<WeakReference<PrototypeStorageSession>>()
 
@@ -72,6 +74,7 @@ class PrototypeStorageSessionRegistry {
 }
 
 /** Sessions held back by [PrototypeStorageSessionRegistry.quiesce]. */
+@InternalAutoMobilePrototypeApi
 class QuiescedSessions internal constructor(private val sessions: List<PrototypeStorageSession>) {
   fun invalidate() = sessions.forEach { it.invalidate() }
 
@@ -83,6 +86,7 @@ class QuiescedSessions internal constructor(private val sessions: List<Prototype
  * one touches no disk: the deletions and rewrites a show implies are a plan that [commit] applies,
  * so a show the device refuses leaves the stored document as it was.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeStorageOpen(
   val spec: PrototypeSpec,
   val session: PrototypeStorageSession?,
@@ -105,6 +109,7 @@ class PrototypeStorageOpen(
  * the show is accepted). Restoring is not a device write: no revision, no `change` event, and it
  * happens before the first draw because the runtime is built from the returned spec.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeStoragePersistence(
   private val store: PrototypeStorageStore,
   private val scheduler: PrototypeScheduler,
@@ -227,6 +232,7 @@ class PrototypeStoragePersistence(
  * its previous stored value stays and the key is listed in [PrototypeStorageReport]. A listed data
  * pointer that a write removes loses its stored value, so the spec's returns next show.
  */
+@InternalAutoMobilePrototypeApi
 class PrototypeStorageSession
 internal constructor(
   val id: String,

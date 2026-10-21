@@ -85,6 +85,8 @@ const CLASSIFICATION: Classification = {
   },
   control: [
     "accessibilityFocus",
+    // The performance and memory audits drive the app, and a baseline record writes state.
+    "audit",
     "appLifecycle",
     "barrier",
     "biometricAuth",
@@ -145,6 +147,8 @@ const CLASSIFICATION: Classification = {
     // Starts a device-side recorder.
     "videoRecording",
     "wakeAndUnlock",
+    // Moves an app's task between window modes; may turn on freeform settings.
+    "windowMode",
   ],
 };
 

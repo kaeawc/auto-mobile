@@ -8,7 +8,7 @@ Usage: scripts/prepush-android.sh [--base-ref <ref>]
 
 Runs Android lint and the shrink-only baseline guard for changed Android modules,
 plus fast formatting, scoped Detekt, compilation, and tests for Kotlin changes.
-Sources, resources, manifests and baselines select their owning module for lint;
+Sources, resources, manifests and baselines select their owner and transitive Android consumers for lint;
 build-logic or Gradle configuration changes select all Android lintDebug tasks.
 Includes committed changes since the merge-base, staged, unstaged and untracked files.
 EOF
@@ -92,9 +92,9 @@ if [[ "${android_changes_status}" -ne 0 ]]; then
 fi
 
 # Include local edits before a commit, as well as branch changes. Deletions
-# matter too (removing a resource or baseline can introduce a lint finding).
+# and both sides of renames matter (removing a resource can introduce a finding).
 if [[ -e .git ]]; then
-  local_android_changes="$(git diff --name-only HEAD -- android scripts/android scripts/prepush-android.sh .github/workflows/pull_request.yml .github/workflows/merge.yml)"
+  local_android_changes="$(git diff --no-renames --name-only HEAD -- android scripts/android scripts/prepush-android.sh .github/workflows/pull_request.yml .github/workflows/merge.yml)"
   untracked_android_changes="$(git ls-files --others --exclude-standard -- android scripts/android scripts/prepush-android.sh)"
   android_changes_output="$(printf '%s\n' "$android_changes_output" "$local_android_changes" "$untracked_android_changes" | sort -u)"
 fi

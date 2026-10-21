@@ -21,7 +21,7 @@ import {
   type RecoveryAttemptOutcome,
 } from "../proxyLivenessRecovery";
 import { SESSION_NOT_FOUND_REASON } from "../releaseReasons";
-import { type SessionReleaseSnapshot } from "../sessionManager";
+import { type SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import { daemonInstanceFromError, releaseReasonFromError } from "../types";
 import type { ProxyRuntime } from "./ProxyRuntime";
 /** Operations supplied by the proxy's composition root. */

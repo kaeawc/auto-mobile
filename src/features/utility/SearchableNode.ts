@@ -11,6 +11,7 @@ import {
   resourceIdPackage,
 } from "../observe/android/ImeKeycapIds";
 import { iosWindowLayer, rankWithIosWindowLayer } from "../observe/ios/iosWindowLayer";
+import type { AccessibilityNodeSelector } from "../observe/android/types";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "./ElementParser";
@@ -71,6 +72,37 @@ export function textOrDescription(node: SearchableNode): string {
 /** The capture's `resource-id` as `toSearchable` reads it (blank ids are absent), without building the node. */
 export function searchableNativeId(properties: SearchableProperties): string | undefined {
   return nonEmptyString(properties["resource-id"]);
+}
+
+/**
+ * CtrlProxy's resource-id rule for node selectors: the full id, or the short name after the
+ * package's `:id/` (`save` matches `com.example:id/save`). Host-side checks that must agree with
+ * which node the device will act on use this, not the resolver's selector matching.
+ */
+export function matchesCtrlProxyResourceId(nativeId: unknown, resourceId: string): boolean {
+  return (
+    typeof nativeId === "string" &&
+    (nativeId === resourceId || nativeId.endsWith(`:id/${resourceId}`))
+  );
+}
+
+/**
+ * Whether a capture node satisfies a CtrlProxy node selector: every populated field must agree,
+ * mirroring the device's depth-first lookup (no focus, visibility or editability test).
+ */
+export function matchesCtrlProxyNodeSelector(
+  properties: SearchableProperties,
+  selector: AccessibilityNodeSelector,
+): boolean {
+  const { resourceId, testTag, uniqueId, collectionRow, collectionColumn } = selector;
+  return (
+    (resourceId === undefined ||
+      matchesCtrlProxyResourceId(properties["resource-id"], resourceId)) &&
+    (testTag === undefined || properties["test-tag"] === testTag) &&
+    (uniqueId === undefined || properties["unique-id"] === uniqueId) &&
+    (collectionRow === undefined || properties["collection-row-index"] === collectionRow) &&
+    (collectionColumn === undefined || properties["collection-column-index"] === collectionColumn)
+  );
 }
 
 /**

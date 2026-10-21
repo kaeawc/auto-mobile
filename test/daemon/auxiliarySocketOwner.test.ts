@@ -22,9 +22,10 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 const socketPath = "/isolated/appearance.sock";
 const sidecarPath = `${socketPath}.owner.json`;
-const inode = { dev: 1, ino: 2 };
+const inode = { dev: 1n, ino: 2n };
+const recordedInode = { dev: 1, ino: 2, exactDev: "1", exactIno: "2" };
 const identity = { pid: 741, version: "0.0.old", processGenerationToken: "linux:holder" };
-const record = { ...identity, socketName: "Appearance", socketPath, ...inode };
+const record = { ...identity, socketName: "Appearance", socketPath, ...recordedInode };
 
 function harness() {
   const contents = new Map<string, string>();
@@ -56,6 +57,16 @@ function harness() {
     },
     link: (from, to) => {
       beforeLink();
+      if (contents.has(to)) {
+        throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+      }
+      const text = contents.get(from);
+      if (text === undefined) {
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      }
+      contents.set(to, text);
+    },
+    copyExclusive: (from, to) => {
       if (contents.has(to)) {
         throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
       }
@@ -172,10 +183,30 @@ describe("auxiliary socket owner records", () => {
     });
   }
 
+  test("restores a successor sidecar via exclusive copy when link throws EPERM", () => {
+    const h = harness();
+    h.owner.publish(socketPath, "Appearance", inode);
+    const successor = JSON.stringify({ ...record, pid: 742, processGenerationToken: "linux:new" });
+    h.setBeforeLink(() => {
+      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    });
+    const read = h.files.read;
+    h.files.read = (path) => {
+      const text = read(path);
+      if (path === sidecarPath) {
+        h.contents.set(path, successor);
+      }
+      return text;
+    };
+    h.owner.remove(socketPath);
+    expect(h.contents.get(sidecarPath)).toBe(successor);
+    expect([...h.contents.keys()]).toEqual([sidecarPath]);
+  });
+
   test("leaves metadata intact if the socket inode has changed", () => {
     const h = harness();
     h.owner.publish(socketPath, "Appearance", inode);
-    h.setInode({ dev: 1, ino: 3 });
+    h.setInode({ dev: 1n, ino: 3n });
     h.owner.remove(socketPath);
     expect(h.contents.has(sidecarPath)).toBe(true);
     const error = h.owner.conflict(socketPath, "Appearance");
@@ -183,6 +214,43 @@ describe("auxiliary socket owner records", () => {
     expect(error.message).toContain("unknown holder");
     expect(error.message).not.toContain("741");
     expect(error.message).not.toContain(identity.version);
+  });
+
+  describe("file ids above 2^53 (NTFS)", () => {
+    // These differ by one but round to the same number, so only the exact fields tell them apart.
+    const large = { dev: 1n, ino: 12_947_848_930_067_504n };
+    const neighbour = { dev: 1n, ino: large.ino + 1n };
+
+    test("a replaced socket whose id rounds alike is not ours to clean up", () => {
+      expect(Number(large.ino)).toBe(Number(neighbour.ino));
+      const h = harness();
+      h.owner.publish(socketPath, "Appearance", large);
+      expect(JSON.parse(h.contents.get(sidecarPath) ?? "null")).toMatchObject({
+        ino: Number(large.ino),
+        exactIno: large.ino.toString(),
+      });
+      h.setInode(neighbour);
+      h.owner.remove(socketPath);
+      expect(h.contents.has(sidecarPath)).toBe(true);
+      expect(h.owner.conflict(socketPath, "Appearance").holder).toEqual({ holderVerified: false });
+      h.setInode(large);
+      expect(h.owner.conflict(socketPath, "Appearance").holder.holderVerified).toBe(true);
+    });
+
+    test("a record without the exact fields compares its rounded numbers", () => {
+      const h = harness();
+      const legacy = {
+        ...record,
+        ino: Number(large.ino),
+        exactDev: undefined,
+        exactIno: undefined,
+      };
+      h.contents.set(sidecarPath, JSON.stringify(legacy));
+      h.setInode(neighbour);
+      expect(h.owner.conflict(socketPath, "Appearance").holder.holderVerified).toBe(true);
+      h.setInode({ dev: 1n, ino: 3n });
+      expect(h.owner.conflict(socketPath, "Appearance").holder).toEqual({ holderVerified: false });
+    });
   });
 
   test("verifies a live OS generation", () => {

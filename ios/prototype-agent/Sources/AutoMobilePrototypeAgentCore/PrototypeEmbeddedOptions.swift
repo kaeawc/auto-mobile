@@ -10,7 +10,7 @@ public struct PrototypeAssets: Sendable, Hashable {
     /// Encoded OpenType or TrueType fonts.
     public let fonts: [String: Data]
     /// No supplied assets.
-    public static let none = PrototypeAssets()
+    public static let none = PrototypeAssets() // swiftlint:disable:this discouraged_none_name
 
     /// Creates an asset collection; invalid asset bytes use the renderer's missing-asset fallback.
     public init(images: [String: Data] = [:], fonts: [String: Data] = [:]) {
@@ -22,7 +22,7 @@ public struct PrototypeAssets: Sendable, Hashable {
 /// Persistence for keys explicitly listed in a prototype's `storage` block.
 public enum PrototypeStorageOption: Sendable, Hashable {
     /// Keep values only for this presentation. This is the embedded view's default.
-    case none
+    case none // swiftlint:disable:this discouraged_none_name
     /// Store values in the app's Application Support directory, partitioned by prototype id.
     case fileBacked
     /// Store values in an app-selected directory, using the same file format and id partitioning.
@@ -49,6 +49,18 @@ public struct PrototypeNetworkConfiguration: Sendable {
 
     /// The renderer's bounded, ephemeral URLSession client and its standard egress checks.
     public static let `default` = PrototypeNetworkConfiguration()
+
+    #if canImport(Network)
+        /// A transport that enforces the egress policy by dialing only checked IP addresses.
+        public static func pinned(allowsCleartext: Bool = false) -> PrototypeNetworkConfiguration {
+            PrototypeNetworkConfiguration(pinnedClient: PrototypePinnedHttpClient(allowsCleartext: allowsCleartext))
+        }
+
+        private init(pinnedClient: any PrototypeHttpClient) {
+            device = pinnedClient
+            handler = pinnedClient
+        }
+    #endif
 
     /// Uses the standard URLSession client unless `deviceClient` is supplied. A host handler
     /// receives only host-routed requests (including omitted `via`); explicit device requests

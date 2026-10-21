@@ -1,10 +1,7 @@
 import type { ExecResult } from "../../models";
 import { resolveIosDeviceKind } from "./IosDeviceKind";
 import { PhysicalIosCrashBackend } from "./PhysicalIosCrashBackend";
-export {
-  PhysicalIosCrashBackend,
-  PHYSICAL_IOS_CRASH_UNSUPPORTED_MESSAGE,
-} from "./PhysicalIosCrashBackend";
+export { PhysicalIosCrashBackend } from "./PhysicalIosCrashBackend";
 
 export interface SimulatorCrashCommandRunner {
   executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;

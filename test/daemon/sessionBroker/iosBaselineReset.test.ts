@@ -14,6 +14,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice } from "../../../src/models/DeviceInfo";
 import type { AppleDevice } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { BootCapacityReserver } from "../../../src/devices/bootAdmission/BootSlotReservation";
 
 const UDID = "A1B2C3D4-E5F6-47A8-90AB-CDEF12345678";
 const DEVICE_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
@@ -52,6 +53,7 @@ function image(
 }
 
 class FakeResetBootInstrumentation implements IosBootInstrumentation {
+  reserveBoot?: BootCapacityReserver["reserveBoot"];
   readonly requests: IosBootRequest[] = [];
   error: Error | undefined;
   beforeBoot: (() => void) | undefined;
@@ -158,6 +160,51 @@ describe("IosBaselineReset", () => {
     expect(h.events).toEqual(["list:1"]);
   });
 
+  test("returns measured stop, erase and boot durations with a fake clock", async () => {
+    const timer = new FakeTimer();
+    const h = harness({
+      timer,
+      stopDevice: async () => {
+        timer.advanceTime(3);
+      },
+      eraseSimulator: async () => {
+        timer.advanceTime(5);
+      },
+      bootSimulator: async () => {
+        timer.advanceTime(7);
+        return DEVICE;
+      },
+    });
+    expect(await h.resetter.resetWithTiming(DEVICE, PROFILE, h.assertOwned)).toEqual({
+      outcome: "clean",
+      mode: "erase",
+      phases: { stop: 3, erase: 5, boot: 7 },
+    });
+  });
+
+  test("failed erase preserves completed and failed phase evidence", async () => {
+    const timer = new FakeTimer();
+    const failure = new ActionableError("erase failed");
+    const h = harness({
+      timer,
+      stopDevice: async () => {
+        timer.advanceTime(3);
+      },
+      eraseSimulator: async () => {
+        timer.advanceTime(5);
+        throw failure;
+      },
+    });
+    await expect(h.resetter.resetWithTiming(DEVICE, PROFILE, h.assertOwned)).rejects.toMatchObject({
+      cause: failure,
+      reset: {
+        mode: "erase",
+        outcome: "pending",
+        phases: { stop: 3, erase: 5 },
+        fallbackReason: "erase failed",
+      },
+    });
+  });
   test("runs the bounded clean-baseline sequence with fresh authoritative reads", async () => {
     const h = harness();
 
@@ -178,7 +225,13 @@ describe("IosBaselineReset", () => {
       "owned:4",
     ]);
     expect(h.instrumentation.requests).toEqual([
-      { udid: UDID, runtime: RUNTIME, timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS },
+      {
+        udid: UDID,
+        runtime: RUNTIME,
+        timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+        reason: "reset",
+        signal: undefined,
+      },
     ]);
     expect(h.listOptions).toEqual([[UDID], [UDID], [UDID]]);
   });
@@ -316,10 +369,79 @@ describe("IosBaselineReset", () => {
     });
 
     await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
-    expect(gate.requests[0]).toMatchObject({ runtime: RUNTIME, excludeUdids: [UDID] });
-    expect(history.latestFor(UDID)).toMatchObject({ udid: UDID, durationMs: 42 });
+    expect(gate.requests).toEqual([undefined]);
+    expect(history.latestFor(UDID)).toMatchObject({ udid: UDID, durationMs: 42, reason: "reset" });
     expect(gate.admitted).toBe(0);
   });
+
+  test("a deferred reset keeps its shutdown retry when reserving capacity is refused", async () => {
+    const h = harness({
+      inventories: [
+        [image()],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image()],
+      ],
+    });
+    const refusal = capacityRefusal();
+    h.instrumentation.error = refusal;
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(refusal);
+    h.instrumentation.error = undefined;
+    h.instrumentation.reserveBoot = async () => {
+      throw refusal;
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(refusal);
+    h.instrumentation.reserveBoot = undefined;
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    expect(h.events.filter((event) => event.startsWith("stop:"))).toHaveLength(1);
+  });
+
+  test.each(["stop", "erase", "ownership", "abort", "boot"] as const)(
+    "held reset slot is released after %s failure",
+    async (failure) => {
+      const timer = new FakeTimer();
+      const history = new InMemoryBootDurationHistory();
+      const gate = new FakeSimulatorCapacityGate(timer, {
+        outcome: "allow",
+        limits: { maxBooted: 1, source: "derived" },
+        bootedCount: 0,
+      });
+      const controller = new AbortController();
+      const h = harness({
+        instrumentation: new FleetBootInstrumentation({ timer, history, gate }),
+        assertOwned: async (call) => {
+          if (failure === "ownership" && call === 2) {
+            throw new ActionableError("ownership failed");
+          }
+        },
+        stopDevice: async () => {
+          expect(gate.admitted).toBe(1);
+          if (failure === "abort") {
+            controller.abort(new ActionableError("abort failed"));
+          }
+          if (failure === "stop") {
+            throw new Error("stop failed");
+          }
+        },
+        eraseSimulator: async () => {
+          expect(gate.admitted).toBe(1);
+          if (failure === "erase") {
+            throw new Error("erase failed");
+          }
+        },
+        bootSimulator: async () => {
+          throw new Error("boot failed");
+        },
+      });
+      await expect(
+        h.resetter.reset(DEVICE, PROFILE, h.assertOwned, controller.signal),
+      ).rejects.toThrow(`${failure} failed`);
+      expect(gate.admitted).toBe(0);
+      expect(history.latestFor(UDID)).toBeUndefined();
+    },
+  );
 
   test("the real instrumentation's gate refusal prevents boot and records no duration", async () => {
     const timer = new FakeTimer();

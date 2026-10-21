@@ -2,7 +2,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import type { SessionReleaseSnapshot } from "../sessionManager";
+import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import {
   DAEMON_STALLED_CODE,
   PROXY_STALLED_CODE,

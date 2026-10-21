@@ -50,20 +50,9 @@ export type {
   AppsQueryAppInfo,
   AppsQueryOptions,
   AppsQueryResourceContent,
-  AppsQueryType,
-  IosInstalledAppInfo,
 } from "./appResourcesTypes";
-export {
-  extractIosApplicationType,
-  extractIosLaunchable,
-  isIosApplicationTypeUnclassified,
-  toQueryIosApp,
-} from "./appResourcesNormalization";
-export {
-  filterAppsByQuery,
-  launchabilityForProfile,
-  launchabilityUnknownApps,
-} from "./appResourcesQuery";
+export { extractIosApplicationType, toQueryIosApp } from "./appResourcesNormalization";
+export { filterAppsByQuery } from "./appResourcesQuery";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {

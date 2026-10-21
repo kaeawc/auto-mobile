@@ -96,8 +96,8 @@ or starts a device-side process is control. Reads: `observe`, `snapshotOf`,
 `getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`,
 `getAppPermissions`, `getNotificationPolicy`, `getDeepLinks` and
 `getNavigationGraph`. Mixed tools are classified per call: `keyboard`
-detect/listImes/listProfiles, `clipboard` get, `displayConfig` with no set field,
-`accessibility` with no toggle, `prototype` status/inspect, and a single
+detect/listImes/listProfiles, `clipboard` get, `mediaSession` get, `displayConfig`
+with no set field, `accessibility` with no toggle, `prototype` status/inspect, and a single
 read-only `sqlQuery` statement are reads; their other forms, `systemTray`,
 `videoRecording` and `deviceSnapshot` are control. Viewer video streaming stays
 an open read. A read is
@@ -716,7 +716,7 @@ For a sessionless call naming an unheld running device whose service is not read
 the **Yes/No** classifications refer to registry readiness: `ensureDeviceReady`
 with `intent: "read"`. **Yes** means the platform manager performs CtrlProxy/runner
 setup through that path. These are the exact sets pinned
-by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 19 of 22 tools on each platform.
+by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 21 of 25 tools on each platform.
 The handlers are stubbed in that test; platform-specific feature support is separate
 from target resolution and readiness.
 
@@ -751,6 +751,7 @@ entry point. Direct (non-daemon) mode is protected by the CtrlProxy manager guar
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |
 | `accessibility`         | Yes                                         | Yes                                         |
 | `clipboard`             | Yes                                         | Yes                                         |
+| `compareScreenshot`     | Yes                                         | Yes                                         |
 | `displayConfig`         | Yes                                         | Yes                                         |
 | `getAppPermissions`     | Yes                                         | Yes                                         |
 | `getDataStore`          | Yes                                         | Yes                                         |
@@ -767,12 +768,14 @@ entry point. Direct (non-daemon) mode is protected by the CtrlProxy manager guar
 | `keyboard`              | Yes                                         | Yes                                         |
 | `listApps`              | No: booted-only verification                | No: booted-only verification                |
 | `listDataStores`        | Yes                                         | Yes                                         |
+| `mediaSession`          | No: booted-only verification                | No: booted-only verification                |
 | `observe`               | Own path: may start the service (see below) | Own path: may start the service (see below) |
 | `prototype`             | Yes                                         | Yes                                         |
 | `snapshotOf`            | Yes                                         | Yes                                         |
 | `sqlQuery`              | Yes                                         | Yes                                         |
+| `statusBar`             | Yes                                         | Yes                                         |
 
-`listApps` and `inspectPackageSigning` declare `deviceReadiness: "booted"` and
+`listApps`, `inspectPackageSigning` and `mediaSession` declare `deviceReadiness: "booted"` and
 verify the device without CtrlProxy/runner setup. `observe {deviceId}` bypasses
 `ensureDeviceReady`; its own read path may start the hierarchy service on an
 unheld, idle, pooled device through `ObservationReadServiceStart`, as described in
@@ -1032,7 +1035,9 @@ device (owner decision 2026-10-09, #11145):
   setting's current value as the device default. Later changes keep the first
   recorded value. Changes made with no session holding the device are not
   recorded.
-- The covered settings are font scale, display density and night mode
+- The covered settings are font scale (the content size category on the iOS
+  Simulator), display density, night mode, and the
+  increase contrast, reduce motion, bold text and Android display accessibility (color inversion, color correction, magnification, extra dim) preferences
   (`displayConfig`), and the 24-hour format and calendar system
   (`changeLocalization`). The iOS Simulator device-wide locale is also covered.
   Android locale changes are not: on Android 13 and later they apply per app,

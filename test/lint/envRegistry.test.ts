@@ -3,12 +3,14 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import path from "node:path";
 import { type AssignmentTargetMaybeDefault, type Expression } from "oxc-parser";
 import {
+  AMBIENT_ENV,
   AMBIENT_ENV_REGISTRY,
   ENV_REGISTRY,
   readEnvRaw,
   readEnvTrimmed,
   ENV,
 } from "../../src/config/env";
+import type { EnvVarSpec } from "../../src/config/envSpec";
 import {
   parseGuardSource,
   relativePosix,
@@ -269,6 +271,48 @@ function computedProcessEnvReads(file: string, source: string): string[] {
   return hits;
 }
 
+const REGISTRY_TABLES: Readonly<Record<string, Readonly<Record<string, EnvVarSpec>>>> = {
+  ENV,
+  AMBIENT_ENV,
+};
+/** Readers that hand back the raw text, so a caller would have to supply its own truthiness rule. */
+const TEXT_READERS = new Set(["readEnvRaw", "readEnvTrimmed"]);
+
+/**
+ * `readEnvRaw(ENV.X)` / `readEnvTrimmed(ENV.X)` where `ENV.X` is declared `kind: "bool"`: the
+ * caller would compare the text itself, so `1`, `true` and `TRUE` stop meaning the same thing.
+ */
+function boolSpecTextReads(file: string, source: string): string[] {
+  const hits: string[] = [];
+  const program = parseGuardSource(file, source, guardTextMayMatch(source, /readEnv(Raw|Trimmed)/));
+  if (!program) {
+    return hits;
+  }
+  new Visitor({
+    CallExpression(node) {
+      const callee = unwrapCallee(node.callee);
+      const spec = node.arguments[0];
+      if (
+        callee.type !== "Identifier" ||
+        !TEXT_READERS.has(callee.name) ||
+        spec?.type !== "MemberExpression" ||
+        spec.computed ||
+        spec.object.type !== "Identifier" ||
+        spec.property.type !== "Identifier"
+      ) {
+        return;
+      }
+      const table = REGISTRY_TABLES[spec.object.name];
+      if (table && Object.hasOwn(table, spec.property.name)) {
+        if (table[spec.property.name].kind === "bool") {
+          hits.push(`${file}\t${callee.name}(${spec.object.name}.${spec.property.name})`);
+        }
+      }
+    },
+  }).visit(program);
+  return hits;
+}
+
 function unregisteredReads(files: Map<string, string>): string[] {
   const registered = registeredNames();
   return [...files]
@@ -286,6 +330,7 @@ describe("environment variable registry", () => {
   let rawReads: string[];
   let computedReads: string[];
   let allowlistedReads: string[];
+  let boolTextReads: string[];
   // The AST scan of src/ runs in the hook so the per-test 100 ms budget is not spent on it.
   beforeAll(() => {
     const files = new Map(
@@ -305,6 +350,10 @@ describe("environment variable registry", () => {
     allowlistedReads = [...files]
       .filter(([relative]) => relative !== REGISTRY_FILE)
       .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, allowlisted));
+    boolTextReads = [...files]
+      .filter(([relative]) => !relative.startsWith("src/config/"))
+      .flatMap(([relative, source]) => boolSpecTextReads(relative, source))
+      .sort();
   }, 60_000);
 
   test("every env read in src/ is registered", () => {
@@ -382,6 +431,26 @@ describe("environment variable registry", () => {
     for (const reason of Object.values(NON_ENV_LITERALS)) {
       expect(reason.length).toBeGreaterThan(0);
     }
+  });
+
+  test("bool variables are read with readEnvBool, never compared as text", () => {
+    expect(
+      boolTextReads,
+      'Read kind: "bool" variables with readEnvBool(spec) so 1, true and TRUE all enable them.',
+    ).toEqual([]);
+  });
+
+  test("bool text-read detector flags only bool specs passed to the text readers", () => {
+    const boolKey = Object.entries(ENV).find(([, spec]) => spec.kind === "bool")?.[0];
+    const textKey = Object.entries(ENV).find(([, spec]) => spec.kind === "path")?.[0];
+    expect(boolKey && textKey).toBeTruthy();
+    expect(
+      boolSpecTextReads(
+        "x.ts",
+        `readEnvRaw(ENV.${boolKey}) === "1"; readEnvTrimmed(ENV.${boolKey}, env);
+         readEnvBool(ENV.${boolKey}); readEnvRaw(ENV.${textKey}); readEnvRaw(OTHER.${boolKey});`,
+      ),
+    ).toEqual([`x.ts\treadEnvRaw(ENV.${boolKey})`, `x.ts\treadEnvTrimmed(ENV.${boolKey})`]);
   });
 
   test("detector recognises dotted, bracket, destructured and literal forms", () => {

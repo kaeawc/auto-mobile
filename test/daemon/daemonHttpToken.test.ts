@@ -414,7 +414,7 @@ class RemovalFiles implements DaemonHttpTokenRemovalFiles {
   entries: string[] = [];
   metadata = new Map<
     string,
-    { directory?: boolean; symlink?: boolean; uid?: number; mode?: number }
+    { directory?: boolean; symlink?: boolean; uid?: number; mode?: number; mtimeMs?: number }
   >();
   removedDirectories: string[] = [];
   list(_path: string): string[] {
@@ -428,6 +428,7 @@ class RemovalFiles implements DaemonHttpTokenRemovalFiles {
       isSymbolicLink: () => !!entry.symlink,
       uid: entry.uid ?? process.getuid?.() ?? 0,
       mode: entry.mode ?? 0o700,
+      mtimeMs: entry.mtimeMs ?? 0,
     };
   }
   createDirectory(prefix: string): string {
@@ -468,6 +469,105 @@ class RemovalFiles implements DaemonHttpTokenRemovalFiles {
 
 describe("atomic token removal", () => {
   const scratch = useScratchRoot("am-token-remove-");
+  const now = 120_000;
+
+  test("a successor sweep preserves a fresh claim until the old daemon restores its token", () => {
+    const path = join(scratch.next(), "daemon.token");
+    const claim = `${path}.remove-Ab12Cd`;
+    const files = new RemovalFiles();
+    const store = new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), {
+      removalFiles: files,
+    });
+    store.write(TOKEN);
+    const move = files.move.bind(files);
+    const successor = new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), {
+      removalFiles: files,
+      now: () => now,
+      renameFile: (temporary, publicPath) => {
+        // Publish B into the fake filesystem, then let A claim it before B's sweep.
+        files.files.set(publicPath, readFileSync(temporary, "utf8"));
+        rmSync(temporary);
+        move(publicPath, `${claim}/token`);
+      },
+    });
+    files.entries = ["daemon.token.remove-Ab12Cd"];
+    files.metadata.set(claim, { directory: true, mtimeMs: now });
+    // Pause A's move while B publishes; resume A's read/restore after B's sweep.
+    files.move = () => successor.write("successor");
+
+    store.remove();
+
+    expect(files.restoreCalls).toBe(1);
+    expect(files.read(path)).toBe("successor");
+    expect(files.removedDirectories).toEqual([claim]);
+  });
+
+  test.each([
+    { mtimeMs: now - 60_001, swept: true },
+    { mtimeMs: now - 60_000, swept: false },
+    { mtimeMs: now, swept: false },
+    { mtimeMs: now + 1, swept: false },
+    { mtimeMs: Number.NaN, swept: false },
+    { mtimeMs: Number.NEGATIVE_INFINITY, swept: false },
+  ])("sweeps only claims older than the age floor ($mtimeMs)", ({ mtimeMs, swept }) => {
+    const path = join(scratch.next(), "daemon.token");
+    const claim = `${path}.remove-Ab12Cd`;
+    const files = new RemovalFiles();
+    files.entries = ["daemon.token.remove-Ab12Cd"];
+    files.metadata.set(claim, { directory: true, mtimeMs });
+    files.files.set(`${claim}/token`, "stale");
+
+    new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), {
+      removalFiles: files,
+      now: () => now,
+    }).write(TOKEN);
+
+    expect(files.removedDirectories).toEqual(swept ? [claim] : []);
+    expect(files.read(`${claim}/token`)).toBe(swept ? undefined : "stale");
+  });
+
+  test.each(["win32", "linux"] as const)(
+    "%s applies platform-appropriate ownership checks to stale claims",
+    (platform) => {
+      const path = join(scratch.next(), "daemon.token");
+      const claim = `${path}.remove-Ab12Cd`;
+      const files = new RemovalFiles();
+      files.entries = ["daemon.token.remove-Ab12Cd"];
+      files.metadata.set(claim, { directory: true, uid: -1, mode: 0o666 });
+
+      new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), {
+        removalFiles: files,
+        platform,
+        now: () => now,
+      }).write(TOKEN);
+
+      expect(files.removedDirectories).toEqual(platform === "win32" ? [claim] : []);
+    },
+  );
+
+  test("POSIX cannot sweep a root-owned claim when getuid is unavailable", () => {
+    const path = join(scratch.next(), "daemon.token");
+    const files = new RemovalFiles();
+    files.entries = ["daemon.token.remove-Ab12Cd"];
+    files.metadata.set(`${path}.remove-Ab12Cd`, { directory: true, uid: 0 });
+    const getuid = Object.getOwnPropertyDescriptor(process, "getuid");
+    Object.defineProperty(process, "getuid", { configurable: true, value: undefined });
+    try {
+      new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), {
+        removalFiles: files,
+        platform: "linux",
+        now: () => now,
+      }).write(TOKEN);
+      expect(files.removedDirectories).toEqual([]);
+    } finally {
+      if (getuid) {
+        Object.defineProperty(process, "getuid", getuid);
+      } else {
+        Reflect.deleteProperty(process, "getuid");
+      }
+    }
+  });
+
   test("publication sweeps private crash claims through the filesystem seam", () => {
     const parent = scratch.next();
     const path = join(parent, "daemon.token");
@@ -491,9 +591,12 @@ describe("atomic token removal", () => {
     new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), { removalFiles: files }).write(
       TOKEN,
     );
-    expect(files.removedDirectories).toEqual([join(parent, files.entries[0]!)]);
+    const swept = process.platform === "win32" ? [0, 2, 3] : [0];
+    expect(files.removedDirectories).toEqual(
+      swept.map((index) => join(parent, files.entries[index]!)),
+    );
     expect(files.files.has(`${parent}/${files.entries[0]}/token`)).toBe(false);
-    expect(files.files.size).toBe(5);
+    expect(files.files.size).toBe(files.entries.length - swept.length);
   });
 
   test("a restore failure without a newer publication also discards the claim", () => {

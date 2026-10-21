@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 import { logger, resolveAutomobileLogFormat } from "./logger";
-import { ENV, readEnvRaw } from "../config/env";
+import { ENV, readEnvBool, readEnvRaw } from "../config/env";
 
 const STARTUP_BENCHMARK_PREFIX = "STARTUP_BENCHMARK";
 
@@ -28,11 +28,7 @@ export function isStartupBenchmarkEnabled(
     return true;
   }
 
-  const envEnabled = (readEnvRaw(ENV.STARTUP_BENCHMARK, environment) ?? "").toLowerCase();
-  return (
-    args.includes("--daemon-mode") &&
-    (envEnabled === "1" || envEnabled === "true" || envEnabled === "yes")
-  );
+  return args.includes("--daemon-mode") && readEnvBool(ENV.STARTUP_BENCHMARK, environment);
 }
 
 const enabled = isStartupBenchmarkEnabled(process.argv, process.env);

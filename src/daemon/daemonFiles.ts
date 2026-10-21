@@ -7,16 +7,18 @@ import {
 export { writeJsonFileAtomicSync, type AtomicPidFileWriteSyncDependencies } from "./atomicJsonFile";
 import path from "node:path";
 import {
+  constants as fsConstants,
+  copyFileSync,
   existsSync,
   linkSync,
   readFileSync,
   renameSync,
-  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
+import { sameFileIdentity, statFileIdentity, type SocketFileIdentity } from "./socketFileIdentity";
 import {
   compareProcessGenerationTokens,
   readProcessGenerationTokenForPid,
@@ -37,7 +39,7 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDir
 import { sortedReaddirSync } from "../utils/io";
 import { ENV, readEnvRaw } from "../config/env";
 import type { IdGenerator } from "../utils/IdGenerator";
-import { removeOwnedFileSync } from "./ownedFileRemoval";
+import { OwnedRecordRestoreError, removeOwnedFileSync } from "./ownedFileRemoval";
 
 export {
   compareProcessGenerationTokens,
@@ -164,7 +166,7 @@ export interface DaemonFileCleanupOptions {
   pidFilePath?: string;
   socketPaths?: string[];
   /** Bound socket identities, used to avoid unlinking a successor's replacement path. */
-  socketFileIdentities?: ReadonlyMap<string, { dev: number; ino: number }>;
+  socketFileIdentities?: ReadonlyMap<string, SocketFileIdentity>;
   controlSocketPath?: string;
   expectedPid?: number;
   /**
@@ -337,22 +339,24 @@ export function getDaemonSocketPathList(): string[] {
 
 export interface DaemonCleanupFileSystem {
   exists: (path: string) => boolean;
-  stat: (path: string) => { dev: number; ino: number };
+  stat: (path: string) => SocketFileIdentity;
   unlink: (path: string) => Promise<void>;
   unlinkSync: (path: string) => void;
   renameSync: (from: string, to: string) => void;
   linkSync: (from: string, to: string) => void;
+  copyFileExclusiveSync: (from: string, to: string) => void;
   readPid: typeof readPidFileDataSync;
   persistOwner: typeof persistDaemonLaunchLogOwnerTombstoneSync;
 }
 
 const cleanupFileSystem: DaemonCleanupFileSystem = {
   exists: existsSync,
-  stat: statSync,
+  stat: statFileIdentity,
   unlink: (path) => unlink(path),
   unlinkSync: (path) => unlinkSync(path),
   renameSync,
   linkSync,
+  copyFileExclusiveSync: (from, to) => copyFileSync(from, to, fsConstants.COPYFILE_EXCL),
   readPid: readPidFileDataSync,
   persistOwner: persistDaemonLaunchLogOwnerTombstoneSync,
 };
@@ -367,8 +371,7 @@ function stillOwnsSocketFile(
     return true;
   }
   try {
-    const current = files.stat(socketPath);
-    return current.dev === identity.dev && current.ino === identity.ino;
+    return sameFileIdentity(files.stat(socketPath), identity);
   } catch (error) {
     // A vanished or unreadable path is not safe to unlink during shutdown.
     logger.warn(`daemon socket ownership check failed for ${socketPath}: ${error}`, error);
@@ -480,11 +483,16 @@ function cleanupPidFile(
       {
         rename: (from, to) => files.renameSync(from, to),
         link: (from, to) => files.linkSync(from, to),
+        copyExclusive: (from, to) => files.copyFileExclusiveSync(from, to),
         remove: (path) => files.unlinkSync(path),
       },
       options.idGenerator,
     );
   } catch (error) {
+    if (error instanceof OwnedRecordRestoreError) {
+      logger.warn(`Could not restore successor daemon PID file ${pidFilePath}`, error);
+      return false;
+    }
     // Preserve the existing best-effort cleanup return contract on I/O failure.
     logger.warn(`Could not remove daemon PID file ${pidFilePath}`, error);
     return true;

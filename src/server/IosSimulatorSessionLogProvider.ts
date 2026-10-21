@@ -22,6 +22,7 @@ import {
   type ResetAppLogsRequest,
 } from "./DefaultSessionLogService";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
+import { logShowArgs, unifiedLogPredicate, unifiedLogWindowResult } from "./unifiedLogWindow";
 import type {
   SessionLogAppGroupRequest,
   SessionLogAppGroupResult,
@@ -129,33 +130,16 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     signal?: AbortSignal,
   ): Promise<UnifiedLogWindowResult> {
     this.requireSimulator(device, "collect the unified log");
-    const predicate = `subsystem == "${appId}" OR subsystem BEGINSWITH "${appId}."`;
-    const args = [
-      "spawn",
-      device.deviceId,
-      "log",
-      "show",
-      "--last",
-      `${request.lastSeconds}`,
-      "--style",
-      "compact",
-      "--predicate",
-      predicate,
-      ...(request.level === "info" ? ["--info"] : []),
-      ...(request.level === "debug" ? ["--info", "--debug"] : []),
-    ];
+    const predicate = unifiedLogPredicate(appId);
+    const args = ["spawn", device.deviceId, "log", ...logShowArgs(request, predicate)];
+    const startedAt = this.timer.now();
     const stdout = await this.runBounded(device, args, signal);
-    const buffer = Buffer.from(stdout, "utf8");
-    const bounded = buffer.byteLength > maxBytes ? buffer.subarray(0, maxBytes) : buffer;
-    return {
-      lastSeconds: request.lastSeconds,
-      level: request.level,
+    return unifiedLogWindowResult(request, stdout, maxBytes, {
       predicate,
+      mechanism: "simctl-log-show",
+      collectionMs: this.timer.now() - startedAt,
       timeoutMs: this.unifiedLogTimeoutMs,
-      byteCount: buffer.byteLength,
-      truncated: bounded.byteLength < buffer.byteLength,
-      text: bounded.toString("utf8"),
-    };
+    });
   }
 
   /**

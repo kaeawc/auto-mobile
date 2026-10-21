@@ -105,7 +105,7 @@ describe("idle eviction retry receipts", () => {
         outcome: "failed",
         failure: { code: "eviction_pending", retryable: true, retryAfterMs: 1_000 },
       });
-      expect(failed.failure).not.toHaveProperty("retryRequires");
+      expect(failed.failure).toHaveProperty("retryRequires", "new_request_id");
       expect(await options.store.getRequest(request.requestId)).toMatchObject({
         errorCode: "eviction_pending",
         retryable: true,
@@ -113,16 +113,16 @@ describe("idle eviction retry receipts", () => {
       expect((await options.store.listResources())[0].state).toBe("destroying");
       expect(devices.prepared).toHaveLength(1);
       expect(await broker.ownedStatus(request.requestId, "owner-token")).toEqual(failed);
+      expect(await broker.prepare(request, "owner-token")).toEqual(failed);
       devices.destroyError = undefined;
       devices.canDestroy = true;
       await broker.recover();
       expect((await options.store.listResources())[0].state).toBe("destroyed");
       // Reconstruct the broker to prove the failure remains durable after recovery.
       broker = new SessionBroker(options);
-      expect(await broker.ownedStatus(request.requestId, "owner-token")).toMatchObject({
-        outcome: "failed",
-        failure: { code: "eviction_pending", retryable: true, retryAfterMs: 1_000 },
-      });
+      const recoveredFailure = { ...failed, cleanupPending: false };
+      expect(await broker.ownedStatus(request.requestId, "owner-token")).toEqual(recoveredFailure);
+      expect(await broker.prepare(request, "owner-token")).toEqual(recoveredFailure);
       const retry = config("needs-tablet-retry", true);
       const ready = await broker.prepare(retry, "owner-token");
       expect(ready).toMatchObject({ outcome: "ready", requestId: retry.requestId });

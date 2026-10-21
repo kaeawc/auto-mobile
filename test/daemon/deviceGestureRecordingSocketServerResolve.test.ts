@@ -156,7 +156,7 @@ describe("resolveDeviceGestureRecordingDevice folds its discovery into the pool 
     const second: BootedDevice = { deviceId: "emulator-5556", name: "Other", platform: "android" };
     const sessions = {
       getPlatformDeviceManager: () => new FakeDeviceUtils(),
-      getCurrentDevice: () => first,
+      getExplicitDevicePin: () => first,
       ensureDeviceReady: async () => first,
     };
     const utils = sessions.getPlatformDeviceManager();

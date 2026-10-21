@@ -11,7 +11,7 @@ export {
 } from "./CtrlProxyManagerContracts";
 import * as fs from "fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { ENV, readEnvRaw } from "../config/env";
+import { ENV, readEnvBool, readEnvRaw } from "../config/env";
 import {
   isExplicitPin,
   isPinnedVersionKnown,
@@ -73,11 +73,13 @@ import {
 } from "./CtrlProxyManagerContracts";
 import { ctrlProxyManagerHost, type SavedPrototypeService } from "./ctrlProxyManagerHost";
 import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
+import { AndroidDeviceTraitsReader } from "../utils/android-cmdline-tools/deviceTraits";
 
 export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Kept on the manager for the observe availability-invalidation test seam.
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
   private readonly accessibility: AndroidCtrlProxyAccessibility;
+  private readonly deviceTraits: AndroidDeviceTraitsReader;
   private readonly rebind: AndroidCtrlProxyRebind;
   private readonly compatibility: AndroidCtrlProxyCompatibility;
   private readonly apkInstaller: AndroidCtrlProxyApkInstaller;
@@ -96,6 +98,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       get adb() {
         return manager.adb;
       },
+      readDeviceTraits: () => this.deviceTraits.read(this.adb, this.device.deviceId),
       statusInspectionDeviceError: (error) => this.statusInspectionDeviceError(error),
       isInstalled: () => this.isInstalled(),
       isEnabled: (_signal, options) => this.isEnabled(_signal, options),
@@ -295,6 +298,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     this.timer = timer;
     this.fileDownloader = fileDownloader;
     this.checksumCalculator = checksumCalculator;
+    // One manager per device, so a per-manager reader reads each device's traits once per TTL.
+    this.deviceTraits = new AndroidDeviceTraitsReader(timer);
     this.accessibility = this.createAndroidCtrlProxyAccessibility();
     this.rebind = this.createAndroidCtrlProxyRebind();
     this.compatibility = this.createAndroidCtrlProxyCompatibility();
@@ -1003,8 +1008,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   private shouldSkipChecksum(): boolean {
     // @deprecated AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK - use AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM instead
-    const explicitSkip = readEnvRaw(ENV.SKIP_ACCESSIBILITY_CHECKSUM);
-    return Boolean(explicitSkip && (explicitSkip === "1" || explicitSkip.toLowerCase() === "true"));
+    return readEnvBool(ENV.SKIP_ACCESSIBILITY_CHECKSUM);
   }
 
   /**
@@ -1013,8 +1017,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private static isChecksumSkipConfigured(): boolean {
     // @deprecated AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK - use AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM instead
-    const explicitSkip = readEnvRaw(ENV.SKIP_ACCESSIBILITY_CHECKSUM);
-    if (explicitSkip && (explicitSkip === "1" || explicitSkip.toLowerCase() === "true")) {
+    if (readEnvBool(ENV.SKIP_ACCESSIBILITY_CHECKSUM)) {
       return true;
     }
     const apkPathOverride = readEnvRaw(ENV.CTRL_PROXY_APK_PATH)?.trim();
@@ -1065,8 +1068,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private shouldSkipDownloadIfInstalled(): boolean {
-    const skipEnv = readEnvRaw(ENV.SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED);
-    return Boolean(skipEnv && (skipEnv === "1" || skipEnv.toLowerCase() === "true"));
+    return readEnvBool(ENV.SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED);
   }
 }
 

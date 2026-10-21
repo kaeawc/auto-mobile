@@ -2,7 +2,8 @@ import { OrphanRecorderActiveError } from "../daemon/orphanRecorderRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
 import { ActionableError, type BootedDevice, type VideoRecordingConfigInput } from "../models";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { videoRecordingResultSchema } from "./videoRecordingToolOutputSchemas";
 import {
   getStartupOrphanCaptures,
   heldVideoRecordingOwner,
@@ -11,7 +12,6 @@ import {
   startVideoRecording,
   stopVideoRecording,
 } from "../daemon/videoRecordingManager";
-import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
 import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
@@ -217,7 +217,7 @@ function createVideoStartResponse(output: {
     throw new ActionableError(message);
   }
 
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     action: "start",
     skipped: skipped.length > 0 ? skipped : undefined,
     count: recordings.length,
@@ -416,7 +416,7 @@ export function createVideoStopResponse(output: {
     );
   }
 
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     action: "stop",
     count: results.length,
     recordings: results,
@@ -599,7 +599,7 @@ export function registerVideoRecordingTools(
   const ctx: RecordingToolContext = {
     deviceDetector: dependencies.deviceDetector ?? {
       detectConnectedPlatforms: (signal) =>
-        DeviceReadiness.getInstance().detectConnectedPlatforms(signal),
+        ToolRegistry.getDeviceReadiness().detectConnectedPlatforms(signal),
     },
     requesterResolver: dependencies.requesterResolver ?? daemonRecordingRequesterResolver,
   };
@@ -647,6 +647,7 @@ export function registerVideoRecordingTools(
           ? "booted"
           : "automationReady",
       nonDeviceHandler: videoRecordingNonDeviceHandler,
+      outputSchema: videoRecordingResultSchema,
     },
   );
 }

@@ -4,6 +4,7 @@ import {
   hashIosLayoutTelemetryTree,
 } from "../../../../src/features/observe/ios/IosLayoutTelemetryTree";
 import { goldenLayoutHierarchy, largeLayoutHierarchy } from "./iosLayoutTelemetryFixture";
+import type { ViewHierarchyNode } from "../../../../src/models";
 
 describe("iOS layout telemetry display tree", () => {
   test("maps only Android's flat display properties and recursively preserves children", () => {
@@ -64,13 +65,50 @@ describe("iOS layout telemetry display tree", () => {
   });
 
   test("hashes structure, package and window count, ignoring omitted capture fields", () => {
-    const first = buildIosLayoutTelemetryTree({ $: { text: "a", bounds: "old" } });
-    const same = buildIosLayoutTelemetryTree({ $: { bounds: "new", text: "a" } });
-    const different = buildIosLayoutTelemetryTree({ $: { text: "b" } });
-    const key = hashIosLayoutTelemetryTree(first.node, "app", 1);
-    expect(hashIosLayoutTelemetryTree(same.node, "app", 1)).toBe(key);
-    expect(hashIosLayoutTelemetryTree(different.node, "app", 1)).not.toBe(key);
-    expect(hashIosLayoutTelemetryTree(first.node, "other", 1)).not.toBe(key);
-    expect(hashIosLayoutTelemetryTree(first.node, "app", 2)).not.toBe(key);
+    const first = { $: { text: "a", bounds: "old" } };
+    const same = { $: { bounds: "new", text: "a" } };
+    const different = { $: { text: "b" } };
+    const key = hashIosLayoutTelemetryTree(first, "app", 1, 1);
+    expect(hashIosLayoutTelemetryTree(same, "app", 1, 1)).toBe(key);
+    expect(hashIosLayoutTelemetryTree(different, "app", 1, 1)).not.toBe(key);
+    expect(hashIosLayoutTelemetryTree(first, "other", 1, 1)).not.toBe(key);
+    expect(hashIosLayoutTelemetryTree(first, "app", 2, 1)).not.toBe(key);
+  });
+
+  test("includes the full node count in the fingerprint", () => {
+    const root = { $: { text: "a" } };
+    expect(hashIosLayoutTelemetryTree(root, "app", 1, 1)).not.toBe(
+      hashIosLayoutTelemetryTree(root, "app", 1, 2),
+    );
+  });
+
+  test("fingerprints omitted nodes while retaining the compact payload cap", () => {
+    const root = { node: Array.from({ length: 100 }, () => ({ $: { text: "leaf" } })) };
+    const compact = buildIosLayoutTelemetryTree(root);
+    const key = hashIosLayoutTelemetryTree(root, "app", 1, 101);
+    root.node[99].$.text = "changed";
+    expect(buildIosLayoutTelemetryTree(root)).toEqual(compact);
+    expect(hashIosLayoutTelemetryTree(root, "app", 1, 101)).not.toBe(key);
+  });
+
+  test("uses the same projection beyond the cutoff and normalizes wire child objects", () => {
+    const root = {
+      node: Array.from({ length: 100 }, () => ({ $: { text: "leaf", bounds: "old" } })),
+    };
+    const key = hashIosLayoutTelemetryTree(root, "app", 1, 101);
+    root.node[99].$.bounds = "new";
+    expect(hashIosLayoutTelemetryTree(root, "app", 1, 101)).toBe(key);
+    const wire: ViewHierarchyNode = JSON.parse('{"node":{"$":{"text":"leaf"}}}');
+    expect(hashIosLayoutTelemetryTree(wire, "app", 1, 2)).toBe(
+      hashIosLayoutTelemetryTree({ node: [{ $: { text: "leaf" } }] }, "app", 1, 2),
+    );
+  });
+
+  test("distinguishes nesting and child order with equal node counts", () => {
+    const a = { $: { text: "a" } };
+    const b = { $: { text: "b" } };
+    const key = hashIosLayoutTelemetryTree({ node: [a, b] }, "app", 1, 3);
+    expect(hashIosLayoutTelemetryTree({ node: [b, a] }, "app", 1, 3)).not.toBe(key);
+    expect(hashIosLayoutTelemetryTree({ node: [{ ...a, node: [b] }] }, "app", 1, 3)).not.toBe(key);
   });
 });

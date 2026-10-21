@@ -19,6 +19,11 @@ export interface InstallAppResult extends BaseActionResult {
    * carried exactly the expected signers, `no-existing-package` when nothing was replaced.
    */
   signingGuard?: { status: "matched"; matchedSha256: string[] } | { status: "no-existing-package" };
+  /**
+   * Android, when not a single APK: `split-apks` (`adb install-multiple`), `apk-set` (bundletool
+   * `install-apks`) or `bundle` (bundletool `build-apks` then `install-apks`).
+   */
+  installRoute?: "split-apks" | "apk-set" | "bundle";
   /** Command-span timing tree, present only when `--debug-perf` is enabled. */
   perfTiming?: TimingData;
 }

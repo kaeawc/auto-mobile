@@ -11,8 +11,6 @@ export {
   resolveUniqueTrayAppLabel,
 } from "./helpers/dependencies";
 export {
-  SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
-  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
   EXPAND_GROUP_SETTLE_MS,
   resolveSystemTrayAwaitTimeout,
   observeSystemTray,
@@ -26,16 +24,11 @@ export {
   swipeElement,
 } from "./helpers/runtime";
 export {
-  type SystemTrayNotificationCandidate,
-  type SystemTrayNotificationMatch,
   createSubHierarchy,
-  nodeIsNotificationGroup,
   isMatchInCollapsedGroup,
   getNotificationGroupHeader,
   getNotificationGroupChildRows,
-  type NotificationGroupExpansionState,
   resolveNotificationGroupExpansionState,
-  isNotificationGroupExpanded,
   collectNotificationCandidates,
   extractNodeTextCandidates,
   findHeaderAppLabel,
@@ -47,9 +40,7 @@ export {
 } from "./helpers/groupExpansion";
 export { resolveNotificationTapElement, resolveNotificationSwipeElement } from "./helpers/matching";
 export {
-  type NotificationDismissBaseline,
   captureNotificationDismissBaseline,
-  type NotificationDismissVerification,
   verifyNotificationDismissed,
   clearMatchingSystemTrayNotifications,
   clearIosSystemTrayNotifications,

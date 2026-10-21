@@ -17,8 +17,10 @@ import kotlinx.serialization.json.put
 /**
  * Credential-encrypted app-private root for [PrototypeStorageDirectoryStore], beside saved ones.
  */
+@InternalAutoMobilePrototypeApi
 fun prototypeStorageRoot(filesDir: File): File = File(filesDir, "prototype-storage")
 
+@InternalAutoMobilePrototypeApi
 sealed interface PrototypeStorageLoad {
   data object Missing : PrototypeStorageLoad
 
@@ -33,6 +35,7 @@ sealed interface PrototypeStorageLoad {
  * the main thread. [save] and [delete] throw [IOException] when the disk refuses; [load] reports an
  * untrustworthy file as [PrototypeStorageLoad.Corrupt] instead of throwing.
  */
+@InternalAutoMobilePrototypeApi
 interface PrototypeStorageStore {
   fun load(id: String): PrototypeStorageLoad
 
@@ -48,7 +51,7 @@ interface PrototypeStorageStore {
  * A save writes `<name>.tmp`, syncs it and renames it over the target; a leftover temp file from a
  * crash is overwritten by the next save and never read. All operations are serialized.
  */
-class PrototypeStorageDirectoryStore(private val root: File) : PrototypeStorageStore {
+internal class PrototypeStorageDirectoryStore(private val root: File) : PrototypeStorageStore {
   @Synchronized
   override fun load(id: String): PrototypeStorageLoad {
     val file = fileFor(id)
@@ -125,6 +128,7 @@ class PrototypeStorageDirectoryStore(private val root: File) : PrototypeStorageS
   }
 }
 
+@InternalAutoMobilePrototypeApi
 object PrototypeStorageStores {
   private val stores = mutableMapOf<String, PrototypeStorageStore>()
 

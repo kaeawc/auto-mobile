@@ -657,6 +657,46 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
   });
 
+  test("records a timed-out AVD-name probe without dispatching the property fallback", async () => {
+    const timer = new FakeTimer();
+    const adb = new DeferredAvdNameAdbExecutor();
+    adb.setDevices([{ name: "ignored", platform: "android", deviceId: "emulator-5554" }]);
+    const client = new AndroidEmulatorClient({
+      timer,
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
+
+    const discovery = client.getBootedDevicesChecked();
+    await adb.avdNameProbeStarted;
+    timer.advanceTime(2_001);
+    adb.rejectAvdNameProbe(new Error("Command timed out after 2000ms"));
+
+    const [discovered] = await discovery;
+
+    expect(discovered).toMatchObject({
+      name: "Unknown (emulator-5554)",
+      nameProbeTimedOut: true,
+    });
+    expect(adb.getExecutedCommands()).not.toContain("shell getprop ro.boot.qemu.avd_name");
+  });
+
+  test("does not mark a fast failed AVD-name probe and empty property as timed out", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([{ name: "ignored", platform: "android", deviceId: "emulator-5554" }]);
+    adb.setCommandError("emu avd name", new Error("emulator console unavailable"));
+    adb.setCommandResponse("shell getprop ro.boot.qemu.avd_name", execResult(""));
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
+
+    const [discovered] = await client.getBootedDevicesChecked();
+
+    expect(discovered.name).toBe("Unknown (emulator-5554)");
+    expect(discovered.nameProbeTimedOut).toBeUndefined();
+    expect(adb.getExecutedCommands()).toContain("shell getprop ro.boot.qemu.avd_name");
+  });
+
   test("records console busy state when the failed AVD-name probe runs", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([

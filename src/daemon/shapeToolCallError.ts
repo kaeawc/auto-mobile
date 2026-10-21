@@ -7,6 +7,7 @@ import {
 } from "../devices/deviceBootService";
 import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { ActionableError } from "../models/ActionableError";
+import { DirectSessionNotActiveError } from "../models/DirectSessionNotActiveError";
 import { TextIndeterminateError } from "../features/action/TextIndeterminateError";
 import { McpError } from "./mcpError";
 import { logger } from "../utils/logger";
@@ -177,6 +178,7 @@ function hasSelfDescribedRefusalPayload(
   | DeviceGestureRecordingStartUnheldError
   | OrphanRecorderActiveError
   | AppNotRunningError
+  | DirectSessionNotActiveError
   | SdkTooOldError
   | BindingDiscoveryIncompleteError
   | BindingOwnershipUnconfirmedError {
@@ -196,6 +198,7 @@ function hasSelfDescribedRefusalPayload(
     DeviceGestureRecordingStartUnheldError,
     OrphanRecorderActiveError,
     AppNotRunningError,
+    DirectSessionNotActiveError,
     SdkTooOldError,
     BindingDiscoveryIncompleteError,
     BindingOwnershipUnconfirmedError,

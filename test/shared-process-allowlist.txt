@@ -146,7 +146,6 @@ test/daemon/deviceBinding.test.ts
 test/daemon/deviceBindingReaders.test.ts
 test/daemon/deviceCleanupQuarantine.test.ts
 test/daemon/deviceControlTransportFailure.test.ts
-test/daemon/deviceDataStreamSocketServer.test.ts
 test/daemon/deviceDataStreamSocketServerCharacterization.test.ts
 test/daemon/deviceDisconnectHandler.test.ts
 test/daemon/deviceForwardLeaseIdleReleaser.test.ts
@@ -286,6 +285,7 @@ test/daemon/observerReleaseBroadcast.test.ts
 test/daemon/observerSessionRegistry.test.ts
 test/daemon/observerSessionRequestHandlers.test.ts
 test/daemon/outboundWriteGuard.test.ts
+test/daemon/ownedFileRemoval.test.ts
 test/daemon/ownerConflictLeash.test.ts
 test/daemon/ownerDisconnectReleaseRearm.test.ts
 test/daemon/ownerDisconnectReleaseRemaining.test.ts
@@ -393,7 +393,6 @@ test/daemon/runDaemonLivenessRelease.test.ts
 test/daemon/runDaemonSessionCommandArgs.test.ts
 test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
 test/daemon/sessionBroker/admission.test.ts
-test/daemon/sessionBroker/broker.test.ts
 test/daemon/sessionBroker/brokerAbortAfterActivate.test.ts
 test/daemon/sessionBroker/brokerCleanReleaseRetry.test.ts
 test/daemon/sessionBroker/brokerPostActivationRead.test.ts
@@ -994,8 +993,6 @@ test/features/observe/TakeScreenshot.AndroidCancellation.test.ts
 test/features/observe/TakeScreenshot.AndroidCleanup.test.ts
 test/features/observe/TakeScreenshot.AndroidPhysicalDisplayId.test.ts
 test/features/observe/TakeScreenshot.PathGeneration.test.ts
-test/features/observe/TakeScreenshot.iOS.test.ts
-test/features/observe/TakeScreenshot.iOSHidePrototype.test.ts
 test/features/observe/TrackedScreenGeometry.property.test.ts
 test/features/observe/TrackedScreenGeometry.test.ts
 test/features/observe/ViewHierarchy.filter.test.ts
@@ -1684,7 +1681,6 @@ test/server/executePlanCleanupToolResults.test.ts
 test/server/executionTracker.test.ts
 test/server/failuresResources.test.ts
 test/server/failuresTimelineMalformedUri.test.ts
-test/server/featureFlagResources.test.ts
 test/server/fileSourcePreparation.test.ts
 test/server/finalizeToolResponse.structuredParity.test.ts
 test/server/flattenTopLevelUnion.test.ts

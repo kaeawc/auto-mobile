@@ -57,7 +57,7 @@ export const BACK_OUT_RETRY_LIMIT = 3;
  */
 export interface DoomedPublication {
   raw: string;
-  ino?: number;
+  ino?: bigint;
   mtimeMs?: number;
 }
 
@@ -223,7 +223,7 @@ export function finishLockSteps<T>(steps: Steps<T>): T {
 }
 
 export interface LockSample {
-  ino: number;
+  ino: bigint;
   mtimeMs: number;
   raw: string;
 }
@@ -279,7 +279,8 @@ export function isSamePublication(left: DoomedPublication, right: DoomedPublicat
 }
 
 export function toSample(publication: DoomedPublication): LockSample {
-  return { raw: publication.raw, ino: publication.ino ?? NaN, mtimeMs: publication.mtimeMs ?? NaN };
+  // No real file has inode -1, and the NaN mtime never equals any sample's, this one's included.
+  return { raw: publication.raw, ino: publication.ino ?? -1n, mtimeMs: publication.mtimeMs ?? NaN };
 }
 
 export function isOwnLockContent(

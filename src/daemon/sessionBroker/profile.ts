@@ -13,7 +13,7 @@ const iosModelType = z.discriminatedUnion("family", [
   z.object({ family: z.literal("duo"), variant: z.literal("duo") }),
 ]);
 
-const exactProfile = z.discriminatedUnion("platform", [
+export const exactProfile = z.discriminatedUnion("platform", [
   z.object({
     platform: z.literal("ios"),
     metadataState: z.literal("current"),

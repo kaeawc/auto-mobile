@@ -87,7 +87,6 @@ export {
   DEFAULT_PER_APP_MAX_OBSERVATIONS,
   DEFAULT_GLOBAL_MAX_OBSERVATIONS,
   DEFAULT_EVICTION_CHUNK_SIZE,
-  DEFAULT_MAX_EDGE_TRAVERSALS_PER_TRANSITION,
   DEFAULT_NAV_RETENTION_INTERVAL_MS,
   MAX_EVICTION_CHUNK_SIZE,
   MAX_INTERVAL_MS,
@@ -100,7 +99,6 @@ export {
   computeProtectedBuildKeyIds,
   buildOldestNodeEvictableQuery,
   buildOldestEdgeEvictableQuery,
-  buildOldestSuggestionEvictableQuery,
 } from "./navigationRetentionQueries";
 
 /**

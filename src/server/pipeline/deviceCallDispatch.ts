@@ -8,7 +8,7 @@ import {
   DeviceReadiness,
   type ConnectedPlatformScan,
 } from "../../daemon/readiness/DeviceReadiness";
-import { ActionableError, BootedDevice, SomePlatform } from "../../models";
+import { BootedDevice, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
@@ -488,8 +488,8 @@ export function bindingPlatformsFor(
 /**
  * The device `ensureDeviceReady` would select for a call without a deviceId, read from the scan
  * the call already shares and the session manager's selections, without touching a device
- * (#10828). It mirrors readiness selection: the explicit `setActiveDevice` pin, then the current
- * device, then the only candidate on the platform. Undefined when readiness would not settle on a
+ * (#10828). It mirrors readiness selection: this connection's explicit `setActiveDevice` pin,
+ * then the only candidate on the platform. Undefined when readiness would not settle on a
  * connected device; the post-resolution ownership check still covers that call.
  */
 export async function predictReadinessTarget(
@@ -500,40 +500,15 @@ export async function predictReadinessTarget(
 ): Promise<string | undefined> {
   const { devices } = await getConnectedPlatforms();
   const pin = deviceReadiness.getExplicitDevicePin(connectionId);
-  const current = deviceReadiness.getCurrentDevice();
   const platforms = new Set(devices.map((device) => device.platform));
   const targetPlatform =
-    platform !== "either"
-      ? platform
-      : platforms.size > 1
-        ? (pin?.platform ?? deviceReadiness.getCurrentPlatform())
-        : devices[0]?.platform;
+    platform !== "either" ? platform : platforms.size > 1 ? pin?.platform : devices[0]?.platform;
   const candidates = devices.filter((device) => device.platform === targetPlatform);
   const connected = (deviceId: string | undefined) =>
     candidates.find((device) => device.deviceId === deviceId)?.deviceId;
   return (
-    connected(pin?.deviceId) ??
-    connected(current?.deviceId) ??
-    (candidates.length === 1 ? candidates[0]!.deviceId : undefined)
+    connected(pin?.deviceId) ?? (candidates.length === 1 ? candidates[0]!.deviceId : undefined)
   );
-}
-
-export function assertDeviceReadRouting(
-  args: Record<string, unknown>,
-  options: DeviceAwareToolOptions,
-  sessionDeviceId: string | undefined,
-): void {
-  if (
-    options.sessionlessDeviceRead &&
-    typeof args.deviceId === "string" &&
-    typeof args.sessionUuid === "string" &&
-    sessionDeviceId &&
-    args.deviceId !== sessionDeviceId
-  ) {
-    throw new ActionableError(
-      `observe deviceId '${args.deviceId}' does not match session '${args.sessionUuid}' device '${sessionDeviceId}'.`,
-    );
-  }
 }
 
 // Reuse the display capability across registrations and internal dispatch without

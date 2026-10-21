@@ -29,7 +29,7 @@ const noOpTelemetryRecorder: IosTelemetryRecorder = {
   recordOsEvent: async () => {},
   recordNavigationEvent: async () => {},
   recordStorageEvent: async () => {},
-  recordLayoutEvent: async () => {},
+  recordLayoutEvent: async () => true,
 };
 
 describe("iOS navigation-event graph workflow", () => {

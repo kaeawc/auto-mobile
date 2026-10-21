@@ -1,6 +1,7 @@
 import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 import { AndroidUser, BootedDevice, DeviceLockState, ExecResult } from "../../models";
-import { deviceLostErrorFromAbortSignal, isDeviceLostError } from "../../models/DeviceLostError";
+import { isDeviceLostError } from "../../models/DeviceLostError";
+import { deviceLostErrorFromAbortSignal } from "../deviceLossAbortRegistry";
 import { getAbortSignal } from "../AbortContext";
 import { type AndroidTransportRouting } from "../androidSerial";
 import type { BackoffPolicy } from "../Backoff";

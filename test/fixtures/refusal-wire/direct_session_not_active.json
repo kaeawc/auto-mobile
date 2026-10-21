@@ -1,0 +1,13 @@
+{
+  "code": "direct_session_not_active",
+  "builder": "DirectSessionNotActiveError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Direct session '11111111-2222-4333-8444-555555555555' is not active. Acquire a new device session with getAndroid or getApple and use its sessionUuid.\",\"code\":\"direct_session_not_active\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"retryable\":false,\"nextAction\":\"acquire_new_session\"}"
+      }
+    ],
+    "isError": true
+  }
+}

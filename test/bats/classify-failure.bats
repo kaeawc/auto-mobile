@@ -1014,6 +1014,30 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   [[ "$output" == *"INVESTIGATE — unit shard was killed by a signal on both attempts of the in-job infra retry"* ]]
 }
 
+@test "does not join an ordinary build unit failure to later passing retry text" {
+  runner_shutdown_fixture "Node TypeScript Build and Test (ubuntu-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+    FAKE_RUNNER_LOG=$'FAIL: unit shard 1 exited with status 1\n(pass) BindingAcquisition back-out retry > timer failure leaves inspectable cleanup with no task, after a retry=true [1.96ms]' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"infra retry"* ]]
+}
+
+@test "does not join an ordinary unit failure to later passing retry text" {
+  runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+    FAKE_RUNNER_LOG=$'FAIL: unit shard 1 exited with status 1\n(pass) BindingAcquisition back-out retry > timer failure leaves inspectable cleanup with no task, after a retry=true [1.96ms]' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"infra retry"* ]]
+}
+
+@test "does not join an ordinary coverage failure to later passing retry text" {
+  runner_shutdown_fixture "TypeScript Code Coverage"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+    FAKE_RUNNER_LOG=$'FAIL: coverage shard 1/3 exited with status 1\n(pass) BindingAcquisition back-out retry > timer failure leaves inspectable cleanup with no task, after a retry=true [1.96ms]' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"infra retry"* ]]
+}
+
 @test "does not classify an ordinary unit shard failure or a passing retry as a retry signature" {
   runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 0 hit its 720s wall-clock budget (exit 124) after 721s; retrying once with the same budget\ntest-ts: unit shard 0 passed on its retry\nFAIL: unit shard 1 exited with status 1' bash "$SCRIPT" 123
@@ -1039,6 +1063,7 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
     run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$diagnostic" bash "$SCRIPT" 123
     [ "$status" -eq 0 ]
     [[ "$output" == *"INVESTIGATE"* ]]
+    [[ "$output" == *"both attempts of the in-job infra retry"* ]]
     [[ "$output" != *"RERUN-DONT-FIX"* ]]
   done
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG='FAIL: coverage shard 1 exited with status 1' bash "$SCRIPT" 123

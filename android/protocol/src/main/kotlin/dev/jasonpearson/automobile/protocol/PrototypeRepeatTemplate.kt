@@ -287,8 +287,32 @@ internal object PrototypeBindableFields {
             ?: binding(action["value"], "$path.value")
         "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
         "request" -> request(action, path)
+        "platform" -> platform(action, path)
         else -> null
       }
+
+    /** Mirrors `mapPlatformAction` (#14294): argument bindings, into, statusKey, follow-ups. */
+    fun platform(action: JsonObject, path: String): T? {
+      for ((name, value) in (action["args"] as? JsonObject).orEmpty()) {
+        binding(value, memberPath("$path.args", name))?.let {
+          return it
+        }
+      }
+      field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {
+        return it
+      }
+      field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
+        return it
+      }
+      for (name in listOf("onSuccess", "onError")) {
+        for ((entry, entryPath) in objects(action, name, path)) {
+          action(entry, entryPath)?.let {
+            return it
+          }
+        }
+      }
+      return null
+    }
 
     /** Mirrors `mapRequestAction`: url, headers, query, body, into, statusKey, then follow-ups. */
     fun request(action: JsonObject, path: String): T? {
@@ -449,7 +473,7 @@ internal object PrototypeBindableFields {
       }
 
     fun keys(node: JsonObject, path: String): T? {
-      for (key in listOf("stateKey", "activeKey", "hourKey", "minuteKey")) {
+      for (key in listOf("stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey")) {
         visitor.field(node, key, path, PrototypeBindableKind.KEY)?.let {
           return it
         }

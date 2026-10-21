@@ -141,6 +141,16 @@ const methods: RequestMethod[] = [
       }),
   },
   {
+    name: "requestAccessibilityAction",
+    invoke: (h, s) =>
+      h.client.requestAccessibilityAction({
+        action: "expand",
+        resourceId: "com.example:id/row",
+        timeoutMs: LONG_TIMEOUT_MS,
+        signal: s,
+      }),
+  },
+  {
     name: "requestClipboard",
     invoke: (h, s) => h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, s),
   },

@@ -13,7 +13,7 @@ the exact arguments supported by your connection.
 
 The following tools expose `sessionUuid` and `keepScreenAwake`:
 
-`accessibility`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
+`accessibility`, `accessibilityAction`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
@@ -2956,12 +2956,31 @@ accept the recording `display` argument.
 
 ## Accessibility & session tools
 
-| Tool                               | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
-| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
-| 🧪 <code>audit</code>              | Runs the accessibility (WCAG), performance or memory audit on the current Android screen on demand, with every audit feature flag off; supports container scoping, named baselines and `failOn` for plan assertions.                                                                                                                                                                                                                                        |
-| 🔀 <code>setToolEnabled</code>     | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
+| Tool                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ♿ <code>accessibility</code>       | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
+| 🎯 <code>accessibilityFocus</code>  | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
+| 🧭 <code>accessibilityAction</code> | Performs an Android accessibility action (expand, collapse, dismiss, select, scroll or page in a direction, press and hold, set progress, or an app-defined custom action by label) on an element, the way TalkBack or Switch Access does.                                                                                                                                                                                                                  |
+| 🧪 <code>audit</code>               | Runs the accessibility (WCAG), performance or memory audit on the current Android screen on demand, with every audit feature flag off; supports container scoping, named baselines and `failOn` for plan assertions.                                                                                                                                                                                                                                        |
+| 🔀 <code>setToolEnabled</code>      | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
+
+### accessibilityAction
+
+`accessibilityAction` performs an accessibility action on an Android element through the
+CtrlProxy accessibility service (#14077), instead of a coordinate gesture. Target the element
+with `resourceId`, `text` or `contentDesc`; it must resolve to a unique resource-id. `action`
+is one of `expand`, `collapse`, `dismiss`, `select`, `clear_selection`, `show_on_screen`,
+`scroll_forward`, `scroll_backward`, `scroll_up`, `scroll_down`, `scroll_left`,
+`scroll_right`, `page_up`, `page_down`, `page_left`, `page_right` (API 29+),
+`press_and_hold` (API 30+), `set_progress` (with `progress`, in the control's own range)
+or `custom` (with `customAction`, the label of an app-defined action such as a Compose
+`customActions` entry; matched exactly, then ignoring case).
+
+An action the element does not offer is refused, and the error lists the actions it does
+offer, with app-defined ones as `custom:<label>`. An action newer than the device's API level
+is refused with the level it needs. The tool requires a CtrlProxy APK that advertises
+`semantic_node_actions_v1`; with an older APK it fails before sending anything and asks for
+a daemon restart so the current APK is installed. iOS is not supported.
 
 ### audit
 
@@ -3255,6 +3274,13 @@ SDK requests are bounded to 2.5 seconds. An SDK missing key
 is authoritative. Reads may fall back after a recognized SDK timeout, transport
 loss, missing route, or inspection-disabled response. Unknown faults, app mismatch,
 and mutation refusals surface as errors.
+
+On physical iOS devices (#14093), the embedded SDK is the only route: devices expose
+no container plist or `defaults` store to fall back to. Reads and writes go through
+an open SDK connection with storage inspection enabled, exactly as on simulators,
+and `appId` is required. Without a connection, both tools fail with an error that
+names the SDK requirement. Every SDK failure is final, so a write is attempted at
+most once and never retried through another route.
 
 Writes fall back when the client is absent or closed, or the runner refuses the
 SDK route before dispatch because the target app lacks the SDK. The runner marks

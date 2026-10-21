@@ -21,6 +21,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
   ...pendingTools(
     [
       "accessibility",
+      "accessibilityAction",
       "biometricAuth",
       "changeLocalization",
       "clipboard",

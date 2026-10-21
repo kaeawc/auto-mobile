@@ -185,6 +185,8 @@ export const ctrlProxyRequests = {
     action: string;
     resourceId?: string;
     selector?: RequestActionMessage["selector"];
+    customAction?: string;
+    progress?: number;
   }): RequestActionMessage {
     return {
       type: "request_action",
@@ -192,6 +194,8 @@ export const ctrlProxyRequests = {
       action: args.action,
       resourceId: args.resourceId,
       selector: args.selector,
+      ...(args.customAction !== undefined ? { customAction: args.customAction } : {}),
+      ...(args.progress !== undefined ? { progress: args.progress } : {}),
     };
   },
 

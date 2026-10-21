@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "atEnd_b": true
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "id": "a"
+          }
+        ],
+        "as": "room",
+        "key": "id"
+      },
+      "children": [
+        {
+          "type": "scroll",
+          "atEndKey": "atEnd_{room.id}",
+          "child": {
+            "type": "spacer"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].atEndKey",
+  "expectedMessage": "atEndKey must name a declared boolean state key (repeat item 0)"
+}

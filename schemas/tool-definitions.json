@@ -1529,6 +1529,150 @@
     }
   },
   {
+    "name": "displayProfile",
+    "description": "Android: apply an OEM-style display persona in one call (screen size, density, font scale, display-cutout and navigation-mode overlays, force dark, fold posture), composing displayConfig and setPosture. Each step reports applied | partial | unsupported | failed. The state before each facet's first change is recorded once; reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM look and geometry; it cannot reproduce OEM SystemUI.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "apply the given fields, or reset every recorded change",
+          "type": "string",
+          "enum": ["apply", "reset"]
+        },
+        "screenSize": {
+          "description": "wm size override WIDTHxHEIGHT, or 'default' to reset it",
+          "type": "string",
+          "pattern": "^(\\d+x\\d+|default)$"
+        },
+        "density": {
+          "description": "Display density dpi or bucket, as displayConfig (approximates Samsung Screen zoom)",
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 72,
+              "maximum": 1280
+            },
+            {
+              "type": "string",
+              "enum": ["smaller", "default", "larger"]
+            }
+          ]
+        },
+        "fontScale": {
+          "description": "System font scale, as displayConfig",
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 10
+        },
+        "cutout": {
+          "description": "Display cutout emulation overlay, or none to disable it",
+          "type": "string",
+          "enum": ["none", "corner", "double", "hole", "tall", "waterfall"]
+        },
+        "navigationMode": {
+          "description": "Navigation bar overlay",
+          "type": "string",
+          "enum": ["gestural", "threebutton", "twobutton"]
+        },
+        "forceDark": {
+          "description": "true forces dark rendering (debug.hwui.force_dark) and night mode, as OEM force dark",
+          "type": "boolean"
+        },
+        "posture": {
+          "description": "Fold posture, as setPosture (foldable AVDs and devices)",
+          "type": "string",
+          "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["apply", "reset"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["applied", "partial", "unsupported"]
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["applied", "partial", "unsupported", "failed"]
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": ["step", "status"],
+            "additionalProperties": {}
+          }
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "facets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "onSessionRelease": {
+              "type": "boolean"
+            }
+          },
+          "required": ["facets", "onSessionRelease"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "message", "deviceId", "action", "status", "steps"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "string",
+          "enum": ["screenSize", "display", "cutout", "navigationMode", "forceDark", "posture"]
+        }
+      }
+    }
+  },
+  {
     "name": "dragAndDrop",
     "description": "Drag and drop element",
     "inputSchema": {
@@ -2572,6 +2716,7 @@
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
+              "displayProfile",
               "dragAndDrop",
               "dragPath",
               "executePlan",
@@ -2702,6 +2847,7 @@
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
+              "displayProfile",
               "dragAndDrop",
               "dragPath",
               "executePlan",
@@ -20523,6 +20669,7 @@
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
+              "displayProfile",
               "dragAndDrop",
               "dragPath",
               "executePlan",
@@ -26811,6 +26958,7 @@
             "deleteDevice",
             "deviceSnapshot",
             "displayConfig",
+            "displayProfile",
             "dragAndDrop",
             "dragPath",
             "executePlan",
@@ -26907,6 +27055,7 @@
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
+              "displayProfile",
               "dragAndDrop",
               "dragPath",
               "executePlan",

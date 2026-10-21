@@ -25,6 +25,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "changeLocalization",
       "clipboard",
       "displayConfig",
+      "displayProfile",
       "installApp",
       "keyboard",
       "network",

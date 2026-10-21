@@ -92,6 +92,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "displayProfile",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -184,6 +185,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "displayProfile",
     "setToolEnabled"
   ],
   "cli": [
@@ -266,6 +268,7 @@
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "displayProfile",
     "getPreference",
     "setPreference",
     "deviceSnapshot",

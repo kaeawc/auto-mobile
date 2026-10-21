@@ -94,6 +94,7 @@ const CLASSIFICATION: Classification = {
     "crashApp",
     "criticalSection",
     "deviceSnapshot",
+    "displayProfile",
     "dragAndDrop",
     "dragPath",
     "executePlan",

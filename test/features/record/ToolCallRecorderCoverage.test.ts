@@ -104,6 +104,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "clipboard",
   "crashApp",
   "displayConfig",
+  "displayProfile",
   "dragAndDrop",
   "dragPath",
   "homeScreen",

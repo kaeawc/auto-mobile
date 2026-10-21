@@ -38,6 +38,8 @@ data class PrototypeRuntimeSnapshot(
   val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   /** Device-local error visibility, cleared on spec replacement. */
   val shownErrors: Set<String> = emptySet(),
+  /** The latest `scrollTo` per scroll id (#14232); the scroll performs each once. */
+  val scrollRequests: Map<String, PrototypeScrollRequest> = emptyMap(),
 ) {
   val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
@@ -506,6 +508,7 @@ class PrototypeRuntime(
         is PrototypeAppendDataAction,
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
+        is PrototypeScrollToAction -> requestScroll(action)
         else ->
           writes[index]?.let { (key, planned) ->
             // A data write earlier in this list may have added rows that bind this key, so a
@@ -589,6 +592,19 @@ class PrototypeRuntime(
       }
     }
     emit(kind = PrototypeEventKind.EMIT, name = "change", payload = payload)
+  }
+
+  private var scrollSequence = 0L
+
+  /**
+   * Queues a `scrollTo` for its scroll to perform; scrolling is not a state change and emits
+   * nothing.
+   */
+  private fun requestScroll(action: PrototypeScrollToAction) {
+    val target = PrototypeScrollTarget.of(action.to) ?: return
+    val request = PrototypeScrollRequest(target, action.animated ?: true, ++scrollSequence)
+    mutableSnapshot.value =
+      current.copy(scrollRequests = current.scrollRequests + (action.scroll to request))
   }
 
   private suspend fun setPage(id: String, requested: Int) {

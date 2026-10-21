@@ -41,6 +41,19 @@ shows while it is true. A pull sets the key to true and runs \`onRefresh\` like 
 \`baseRevision\`) sets it back to false to hide the indicator. Declare the key in \`state\` as a
 boolean; a horizontal scroll with \`refresh\` is rejected. The pull is a swipe down from the top of
 the scroll (\`swipeOn\` with the prototype layer) and \`observe\` reports the scroll as usual.
+
+### Chat lists
+
+A vertical \`scroll\` can be a conversation view (needs \`prototype_chat_scroll_v1\`, Android only for
+now): \`reverse: true\` anchors it at the end of its content, so the newest row sits at the bottom;
+\`stickToEnd: true\` follows rows appended while it is at the end; \`atEndKey\` names a declared
+boolean state key the runtime keeps true while it is at the end (show a "new messages" pill with
+\`visibleWhen {key, equals: false}\`); \`onStartReached\` runs each time the start is reached, to load
+older history. \`scrollTo {scroll, to: "start" | "end" | {key: <repeat.key value>}, animated?}\` moves
+the scroll whose \`id\` is \`scroll\` (exactly one); \`{key}\` scrolls to that repeat row. A composer is a
+row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`iconButton\`, with
+\`safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}\`. Rows off screen are absent from
+\`observe\`; \`swipeOn lookFor\` still finds them.
 `;
 
 /**
@@ -171,6 +184,19 @@ these selectors act across windows because tapOn refuses layer with accessibilit
 Use \`tapAt\` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by \`tapAt\` only; show reports the
 \`rich-text-links\` platform note for tappable spans because there are no separate accessibility elements or semantic links.
+
+### Linkify
+
+\`linkify: {kinds, style?, onTap}\` on a text node with \`text\` (not \`spans\`) turns @mentions,
+#hashtags and URLs in the resolved text (for example \`{item.body}\`) into links. \`kinds\` lists 1-3 of
+\`mention\`, \`hashtag\`, \`url\`; \`style\` takes the span style fields. A match starts at the start of
+the text or after whitespace: a mention is \`@\` + 1-30 of \`[A-Za-z0-9_]\` (\`ana@example.com\` is not
+one), a hashtag \`#\` + up to 100 letters, digits or \`_\` (not all digits), a URL \`http(s)://\` up to
+whitespace without trailing punctuation. Inside \`onTap\` only, \`{match: "text"}\` (the tapped
+\`@ana\`) and \`{match: "kind"}\` work as a \`setState\` value, a \`setData\`/\`appendData\` value or an emit
+context entry: \`[{type:"setState",key:"profileHandle",value:{match:"text"}},{type:"push",stack:"nav",screen:"profile"}]\`.
+Repeat bindings are refused inside linkify \`onTap\`. URL taps never open a browser. Requires
+\`prototype_linkify_v1\`.
 
 ## Saved prototypes
 

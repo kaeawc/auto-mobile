@@ -172,6 +172,7 @@ fun PrototypeRuntimeContent(
         }
       CompositionLocalProvider(
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
+        LocalPrototypeScrollRequests provides snapshot.scrollRequests,
         LocalPrototypeImageCache provides images,
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
@@ -568,6 +569,7 @@ private fun RenderPrototypeNodeContent(
       }
   val modifier =
     (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
+      .prototypeScrollAnchor(node.identity)
       .then(boundsModifier)
       .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
       .then(focusModifier)
@@ -742,14 +744,28 @@ private fun RenderPrototypeNodeContent(
       val scroll = key(LocalPrototypeShowEpoch.current) { rememberScrollState() }
       val source = node.source as? PrototypeScrollNode
       val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
+      // A vertical scroll may be a chat list (#14232); reverse anchors it at its end.
+      val chat = source?.takeIf { it.axis != "horizontal" }
+      val reverse = chat?.reverse == true
+      val anchors = remember { PrototypeScrollAnchors() }
+      val viewport = Modifier.onGloballyPositioned { anchors.viewport = it }
       val scrolling =
         if (source?.axis == "horizontal")
           modifier.boundedScrollViewport(vertical = false).horizontalScroll(scroll)
         else if (refresh != null)
-          Modifier.boundedScrollViewport(vertical = true).verticalScroll(scroll)
-        else modifier.boundedScrollViewport(vertical = true).verticalScroll(scroll)
+          viewport
+            .boundedScrollViewport(vertical = true)
+            .verticalScroll(scroll, reverseScrolling = reverse)
+        else
+          modifier
+            .then(viewport)
+            .boundedScrollViewport(vertical = true)
+            .verticalScroll(scroll, reverseScrolling = reverse)
+      if (chat != null) PrototypeChatScrollEffects(chat, scroll, anchors, interact)
       val content: @Composable BoxScope.() -> Unit = {
-        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+        CompositionLocalProvider(LocalPrototypeScrollAnchors provides chat?.let { anchors }) {
+          node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+        }
       }
       if (refresh != null) {
         PrototypeRefreshBox(refresh, node.checked, modifier, interact) {

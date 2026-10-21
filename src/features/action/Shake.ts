@@ -19,6 +19,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { emulatorConsoleReportsFailure } from "../utility/DeviceState";
 import { parseEmulatorSensorReadback } from "../utility/EmulatorSensors";
@@ -27,6 +28,9 @@ import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
 // Issue #10250 reports this as the emulator's default resting gravity vector.
 const FALLBACK_RESTING_ACCELERATION = "0:9.77622:0";
+/** Android shake drives the emulator console's sensor API, which real devices lack (#14078). */
+const ANDROID_PHYSICAL_SHAKE_UNSUPPORTED_ERROR =
+  "shake is not supported on physical Android devices: it sets the accelerometer through the emulator console (`adb emu sensor`), which real devices do not have. Use an Android emulator, or trigger the app's shake handler another way.";
 /** Bound on the best-effort emulator sensor restore after a shake. */
 const SHAKE_RESTORE_TIMEOUT_MS = 1_000;
 
@@ -127,6 +131,16 @@ export class Shake extends BaseVisualChange {
           perf,
         },
       );
+    }
+
+    if (!isAndroidEmulatorSerial(this.device.deviceId)) {
+      perf.end();
+      return {
+        success: false,
+        duration,
+        intensity,
+        error: ANDROID_PHYSICAL_SHAKE_UNSUPPORTED_ERROR,
+      };
     }
 
     return this.observedInteraction(

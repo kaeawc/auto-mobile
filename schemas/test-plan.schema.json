@@ -793,10 +793,10 @@
                 "required": ["cameraPoster"]
               },
               {
-                "required": ["deviceCondition"]
+                "required": ["screenLock"]
               },
               {
-                "required": ["screenLock"]
+                "required": ["deviceCondition"]
               },
               {
                 "required": ["params"]
@@ -1890,10 +1890,10 @@
           "required": ["cameraPoster"]
         },
         {
-          "required": ["deviceCondition"]
+          "required": ["screenLock"]
         },
         {
-          "required": ["screenLock"]
+          "required": ["deviceCondition"]
         }
       ],
       "description": "Parameters for setDeviceState"

@@ -176,8 +176,8 @@ describe("DisplayConfig getConfig", () => {
     const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
 
     expect(result.success).toBe(true);
-    expect(result.current).toEqual({ fontScale: 1.15, density: 480, theme: "dark" });
-    expect(result.supported).toEqual({ fontScale: true, density: true, theme: true });
+    expect(result.current).toMatchObject({ fontScale: 1.15, density: 480, theme: "dark" });
+    expect(result.supported).toMatchObject({ fontScale: true, density: true, theme: true });
     expect(result.previous).toBeUndefined();
     expect(result.applied).toBeUndefined();
   });
@@ -671,7 +671,20 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
     const result = await config.getConfig();
 
     expect(result).toMatchObject({ success: true, current: { theme: "dark" } });
-    expect(result.supported).toEqual({ fontScale: false, density: false, theme: true });
+    // Physical iOS has no path for the accessibility display preferences (#14088).
+    expect(result.supported).toEqual({
+      fontScale: false,
+      density: false,
+      theme: true,
+      increaseContrast: false,
+      reduceMotion: false,
+      boldText: false,
+      colorInversion: false,
+      colorCorrection: false,
+      magnification: false,
+      magnificationScale: false,
+      extraDim: false,
+    });
     expect(runner.requests).toEqual([undefined]);
     expect(simctlArgvCalls(simctl)).toEqual([]);
   });
@@ -718,6 +731,14 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
     expect(runner.requests).toEqual([]);
   });
 
+  test("contentSize stays unsupported on a physical device", async () => {
+    const runner = new FakeRunnerAppearance();
+    const result = await physical(runner).config.setConfig({ contentSize: "extra-large" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("fontScale is not supported on iOS");
+    expect(runner.requests).toEqual([]);
+  });
+
   test("the restorable config records the device theme for session release", async () => {
     const runner = new FakeRunnerAppearance("dark");
     expect(await physical(runner).config.getRestorableConfig()).toEqual({ theme: "dark" });
@@ -725,11 +746,11 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
 });
 
 describe("DisplayConfig iOS Simulator theme support", () => {
-  test("reports theme (only) as supported on an iOS Simulator", async () => {
+  test("reports theme and font scale (not density) as supported on an iOS Simulator", async () => {
     const simctl = new FakeSimctl();
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
-    expect(result.supported).toEqual({ fontScale: false, density: false, theme: true });
+    expect(result.supported).toEqual({ fontScale: true, density: false, theme: true });
   });
 
   test("reads the current appearance through the SimCtlClient seam", async () => {
@@ -818,18 +839,19 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     ]);
   });
 
-  test("rejects fontScale on the iOS Simulator without issuing a simctl appearance write", async () => {
+  test("fails closed on fontScale when the Simulator text size is unreadable, before any write", async () => {
     const simctl = new FakeSimctl();
+    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "light\n");
+    simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "content_size"], "\n");
 
     const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       fontScale: 1.3,
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("fontScale");
-    expect(
-      simctlArgvCalls(simctl).some((args) => args.length >= 4 && args[2] === "appearance"),
-    ).toBe(false);
+    expect(result.error).toContain("content size");
+    expect(result.previous).toBeUndefined();
+    expect(simctlArgvCalls(simctl).some((args) => args.length >= 4)).toBe(false);
   });
 
   test("rejects density on the iOS Simulator", async () => {

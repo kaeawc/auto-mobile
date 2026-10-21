@@ -23,7 +23,6 @@ export type {
   ObservationArtifactMetadata,
   ObservationArtifactWriteInput,
   ObservationArtifactWriter,
-  ObservationArtifactMode,
   FinalizeToolResponseContext,
 } from "./finalizeToolResponse/contracts";
 export { DEFAULT_OBSERVATION_INLINE_MAX_BYTES } from "./finalizeToolResponse/responseArtifacts";

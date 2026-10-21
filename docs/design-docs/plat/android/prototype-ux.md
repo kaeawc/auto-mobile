@@ -492,6 +492,7 @@ layout room.
 | `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                            |
 | `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                             |
 | `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                                     |
+| `chart`           | Required `variant` (`line`, `area`, `bar`, `ring`) and 1 to 4 `series` `{path, x?, y, label, color?}` over a `/data` array; optional `yRange`, `xLabels`, `goal`. See Charts.                                                                          |
 | `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                                  |
 | `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                                      |
 | `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                                      |
@@ -2304,6 +2305,27 @@ pinned to the material3 supplied by `androidx-compose-bom` in
 window, not a SearchBar popup/dialog or lazy list that drops rows, so `observe`
 sees every result row.
 
+## Charts (#14209, not device-verified)
+
+A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series`. Each series
+reads the `/data` array at `path` (objects only, at most 500 like any data array), taking each
+point's numeric `y` member and optional `x` label member. A literal `path` must resolve to an array
+when the spec is shown, and every point must be an object with a numeric `y`. A repeat-bound path is
+bound per row. `yRange {min, max}` fixes the axis (max above min); otherwise it spans the values
+and the goal, and bars rise from zero. `xLabels` (`none`, `ends`, `all`) draws the first series'
+x labels below the plot. `goal` is a dashed reference line; a `ring` takes exactly one series and a
+positive goal and draws that series' latest value against it. The capability is
+`prototype_chart_v1`.
+
+Android draws it with Compose `Canvas` and no new dependency. The render mapper reads the points
+from the current `/data` on every mapping pass, so a data action, request or patch redraws it. Points
+a later write broke (a non-object, a non-numeric `y`) are skipped rather than failing the frame. The
+chart is one accessibility node labelled with its summary ("Line chart, Heart rate, 24 points, min
+58, max 141, latest 72"; "Ring chart, Steps today, 6500 of 10000"); an authored
+`contentDescription` replaces it, and `observe` reports it. The x labels are visual only. iOS
+rendering with Swift Charts and `AXChartDescriptor` is #14679; until then the iOS agent does not
+advertise the capability and the host refuses chart specs there.
+
 ## Rich text
 
 A text node has exactly one of `text` or `spans`; plain `text: ""` remains valid.
@@ -2323,6 +2345,23 @@ these selectors act across windows because tapOn refuses layer with accessibilit
 Use `tapAt` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
 `rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.
+
+### Linkify (#14233)
+
+`linkify: {kinds, style?, onTap}` on a text node with `text` (not `spans`) turns @mentions,
+#hashtags and URLs in the resolved text into links, for content from data such as `{item.body}`.
+`kinds` lists 1 to 3 of `mention`, `hashtag` and `url`; `style` takes the span style fields; a tap on
+a match runs `onTap` (1 to 32 actions). The grammar is fixed and shared by every runtime
+(`test/fixtures/prototype-spec/linkify/cases.json`): a match starts at the start of the text or
+after whitespace; a mention is `@` and 1 to 30 of `[A-Za-z0-9_]` (so `ana@example.com` is not one);
+a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a URL is `http://` or
+`https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
+`{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
+value, a `setData` / `appendData` value or an emit context entry, for example
+`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused, as
+are repeat bindings inside `onTap`. A URL tap never opens a browser; that is the `links.open`
+platform call. Matches are links like tappable spans (Android `tapOn {accessibilityLink}`, iOS
+`tapAt`) and require `prototype_linkify_v1`.
 
 Owed device checks (later platform passes): advertise the capability only after renderer support;
 verify mixed span styles, resolved concatenated observe text, per-span actions without URL navigation,

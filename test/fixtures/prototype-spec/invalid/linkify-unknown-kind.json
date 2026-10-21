@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "@ana",
+      "linkify": {
+        "kinds": ["email"],
+        "onTap": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.linkify.kinds[0]",
+  "expectedMessage": "Invalid enum value"
+}

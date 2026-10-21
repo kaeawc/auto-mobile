@@ -78,13 +78,10 @@ import {
 } from "../daemon/videoRecordingManager";
 export {
   convertDebugStepsToRecords,
-  convertPerDeviceSkippedStepsToRecords,
   planBaseEndFields,
   type PlanExecutionDependencies,
   type PlanExecutionRequest,
-  type PlanExecutionTestMetadata,
   planRefusalFields,
-  planShutdownInterruptionFields,
   type VideoRecorder,
 } from "./planExecutionRecords";
 

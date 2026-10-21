@@ -361,7 +361,9 @@ export const inspectPackageSigningSchema = withAppIdAliases(
           .int()
           .nonnegative()
           .optional()
-          .describe("Android user/profile to inspect; when omitted it is resolved and reported"),
+          .describe(
+            "Android user/profile to inspect; when omitted it is resolved and reported. Refused on iOS",
+          ),
       })
       .strict(),
   ),

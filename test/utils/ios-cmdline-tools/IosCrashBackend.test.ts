@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ExecResult } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { PhysicalIosAppCrasher } from "../../../src/utils/ios-cmdline-tools/PhysicalIosAppCrasher";
 import {
   PhysicalIosCrashBackend,
   SimulatorIosCrashBackend,
@@ -145,5 +146,45 @@ describe("IosCrashBackend", () => {
       kind === "simulator" ? SimulatorIosCrashBackend : PhysicalIosCrashBackend,
     );
     expect(runner.calls).toEqual([]);
+  });
+});
+
+describe("PhysicalIosAppCrasher (#14096)", () => {
+  const deviceUdid = "00008110-0012345678901234";
+
+  test("binds DeviceAppManager's PID lookup and SIGABRT to one device", async () => {
+    const calls: unknown[][] = [];
+    const crasher = new PhysicalIosAppCrasher(deviceUdid, {
+      findRunningAppPid: async (udid, bundleId) => {
+        calls.push(["find", udid, bundleId]);
+        return 4321;
+      },
+      signalProcess: async (udid, pid, signal) => {
+        calls.push(["signal", udid, pid, signal]);
+        return "already_exited";
+      },
+    });
+
+    expect(await crasher.findAppPid("com.example.app")).toBe(4321);
+    expect(await crasher.sendAbort(4321)).toBe("already_exited");
+    expect(calls).toEqual([
+      ["find", deviceUdid, "com.example.app"],
+      ["signal", deviceUdid, 4321, "SIGABRT"],
+    ]);
+  });
+
+  test("a cancelled request never sends the signal", async () => {
+    let signalled = false;
+    const crasher = new PhysicalIosAppCrasher(deviceUdid, {
+      findRunningAppPid: async () => 4321,
+      signalProcess: async () => {
+        signalled = true;
+        return "signalled";
+      },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(crasher.sendAbort(4321, { signal: controller.signal })).rejects.toThrow();
+    expect(signalled).toBe(false);
   });
 });

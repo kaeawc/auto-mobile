@@ -69,7 +69,6 @@ import {
   physicalIosUserDefaultsRequireSdkError,
 } from "./preferenceValues";
 export {
-  type PreferenceScope,
   type PreferenceValueType,
   type PreferenceResultType,
   type PreferenceValue,

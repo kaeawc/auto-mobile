@@ -288,6 +288,9 @@ jobs:
               - 'test/fixtures/refusal-wire/**'
               - 'scripts/generate-refusal-wire-fixtures.ts'
               - 'test/daemon/refusalWireContract.test.ts'
+              # Shared job bodies live in composite actions; editing one must run
+              # the jobs that consume it.
+              - '.github/actions/ci-build-desktop-core/**'
 
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin
@@ -296,6 +299,8 @@ jobs:
           filters: |
             ide_plugin:
               - 'android/ide-plugin/**'
+              - '.github/actions/ci-build-ide-plugin/**'
+              - '.github/actions/ci-ide-plugin-unit-tests/**'
 
       - name: "Check for Desktop App changes"
         id: filter-desktop-app
@@ -305,6 +310,7 @@ jobs:
             desktop_app:
               - 'android/desktop-app/**'
               - 'android/desktop-core/**'
+              - '.github/actions/ci-desktop-app-unit-tests/**'
 
       # Native (Kotlin/Swift) build+test jobs gate on the native source trees ONLY.
       # src/** is intentionally NOT here: a pure-TypeScript change cannot break the
@@ -660,12 +666,8 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-desktop-core
         with:
-          gradle-tasks: ":desktop-core:build -x test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   desktop-core-unit-tests:
@@ -725,32 +727,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-ide-plugin
         with:
-          gradle-tasks: "build -x test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Build Plugin ZIP"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew buildPlugin --stacktrace --continue
-
-      - name: "Verify Plugin"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew verifyPlugin --stacktrace --continue
-
-      - name: "Upload IDE Plugin ZIP"
-        uses: actions/upload-artifact@v6
-        if: success()
-        with:
-          name: ide-plugin-zip
-          path: android/ide-plugin/build/distributions/*.zip
 
   ide-plugin-unit-tests:
     timeout-minutes: 20
@@ -767,20 +746,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-ide-plugin-unit-tests
         with:
-          gradle-tasks: "test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: ide-plugin-test-results
-          path: android/ide-plugin/build/reports/tests/test/
 
   build-desktop-app:
     timeout-minutes: 20
@@ -881,20 +849,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-desktop-app-unit-tests
         with:
-          gradle-tasks: ":desktop-app:test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: desktop-app-test-results
-          path: android/desktop-app/build/reports/tests/test/
 
   fast-validation:
     timeout-minutes: 20

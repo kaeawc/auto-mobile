@@ -6,6 +6,7 @@ import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
+import { registerAppLinkTools } from "./appLinkTools";
 import { registerNavigationTools } from "./navigationTools";
 import { registerNotificationTools } from "./notificationTools";
 import { registerPlanTools } from "./planTools";
@@ -30,6 +31,7 @@ import { registerStorageTools } from "./storageTools";
 import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerSessionLogTools } from "./sessionLogTools";
+import { registerPerformanceTraceTools } from "./performanceTraceTools";
 import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
@@ -67,6 +69,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerUtilityTools();
   registerDeviceTools();
   registerDeepLinkTools();
+  registerAppLinkTools();
   registerNavigationTools();
   registerNotificationTools();
   // Plan tools (executePlan, recordToolCalls, recordDeviceGestures, exportPlan)
@@ -100,6 +103,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerPreferenceTools();
   registerAppFileTools();
   registerSessionLogTools();
+  registerPerformanceTraceTools();
   registerDownloadsFixtureTools();
   registerFormTools();
   registerAccessibilityTools();

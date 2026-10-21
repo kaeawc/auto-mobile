@@ -1080,11 +1080,12 @@ version mismatch as a failure) together with
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                  | Use and accepted values                                                                                       | Default   |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------- |
-| `AUTOMOBILE_OBSERVE_PERF_SNAPSHOT`, `AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT`   | Attach rolling performance snapshot to observe results; `1`/`true` enables.                                   | off       |
-| `AUTOMOBILE_OBSERVE_PERF_WINDOW_MS`, `AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS` | Positive finite snapshot window milliseconds, rounded and clamped to `1000..30000`; invalid values fall back. | `5000` ms |
-| `AUTOMOBILE_DISABLE_PERF_AUDIT`                                           | Disable UI performance audit with `1`/`true`; audit otherwise requires UI perf mode and debug-perf.           | off       |
-| `AUTOMOBILE_TOUCH_LATENCY_SAMPLING`                                       | Opt into synthetic tap latency sampling; `1`/`true` enables.                                                  | off       |
+| Variable                                                                  | Use and accepted values                                                                                                                 | Default                         |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `AUTOMOBILE_OBSERVE_PERF_SNAPSHOT`, `AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT`   | Attach rolling performance snapshot to observe results; `1`/`true` enables.                                                             | off                             |
+| `AUTOMOBILE_OBSERVE_PERF_WINDOW_MS`, `AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS` | Positive finite snapshot window milliseconds, rounded and clamped to `1000..30000`; invalid values fall back.                           | `5000` ms                       |
+| `AUTOMOBILE_DISABLE_PERF_AUDIT`                                           | Disable UI performance audit with `1`/`true`; audit otherwise requires UI perf mode and debug-perf.                                     | off                             |
+| `AUTOMOBILE_TOUCH_LATENCY_SAMPLING`                                       | Opt into synthetic tap latency sampling; `1`/`true` enables.                                                                            | off                             |
+| `AUTOMOBILE_TRACE_PROCESSOR`                                              | Perfetto `trace_processor_shell` executable that summarises Android `performanceTrace` traces; trimmed filesystem path or command name. | `trace_processor_shell` on PATH |
 
 </div>

@@ -71,9 +71,21 @@ function stringsIn(node: ts.Node): string[] {
   return found;
 }
 
-// Block all direct xcrun argv calls outside the owner: variable argv values
-// cannot be proven to be non-simctl statically, and the conservative boundary
-// prevents an easy bypass.
+/**
+ * An argv array literal whose first element is a string literal naming another
+ * xcrun tool (`["xctrace", …]`) cannot run simctl, so it is outside this row.
+ */
+function provablyOtherXcrunTool(argv: ts.Expression | undefined): boolean {
+  if (!argv || !ts.isArrayLiteralExpression(argv)) {
+    return false;
+  }
+  const tool = argv.elements[0] ? literalText(argv.elements[0]) : undefined;
+  return tool !== undefined && tool !== "simctl" && !tool.startsWith("-");
+}
+
+// Block all other direct xcrun argv calls outside the owner: variable argv
+// values cannot be proven to be non-simctl statically, and the conservative
+// boundary prevents an easy bypass.
 function detectSimctl(source: string, file: string): BoundarySpan[] {
   const sourceFile = parse(source, file);
   const hits: BoundarySpan[] = [];
@@ -88,7 +100,8 @@ function detectSimctl(source: string, file: string): BoundarySpan[] {
       name !== undefined &&
       SIMCTL_ARGV_LAUNCHERS.has(name) &&
       firstText !== undefined &&
-      firstText.startsWith("xcrun");
+      firstText.startsWith("xcrun") &&
+      !provablyOtherXcrunTool(node.arguments[1]);
     const shellXcrun =
       name !== undefined &&
       SIMCTL_SHELL_LAUNCHERS.has(name) &&

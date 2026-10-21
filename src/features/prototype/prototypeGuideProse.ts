@@ -160,6 +160,23 @@ node's centre without moving siblings. \`transition\` also takes \`slideStart\` 
 accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
 \`motion: "none"\` or animator scale 0. The iOS agent does not support it yet (#14684).
 
+## Charts
+
+\`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
+\`ring\` chart (needs \`prototype_chart_v1\`). \`series\` holds 1-4 \`{path, x?, y, label, color?}\`
+entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most 500 items as
+for any data array), \`y\` names each point's numeric member and \`x\` its optional label member;
+\`color\` is a hex or theme role, or a \`{light, dark}\` pair. Points are drawn in array order, so
+\`appendData\`, a \`request\` \`into\` or a \`/data\` patch re-renders the chart. \`yRange {min, max}\`
+fixes the axis (max above min); otherwise it spans the values and the goal, and bars rise from zero.
+\`xLabels\` is \`none\` (default), \`ends\` or \`all\` of the first series' x labels. \`goal\` draws a
+dashed reference line; a \`ring\` takes exactly one series and a positive \`goal\`, and draws that
+series' latest value against it. The chart is one accessible node labelled with its summary, such as
+"Line chart, Heart rate, 24 points, min 58, max 141, latest 72" or "Ring chart, Steps, 6500 of
+10000"; \`observe\` reports it, and an authored \`contentDescription\` replaces it. A literal path that
+does not resolve to an array, a point that is not an object, or a point whose \`y\` is not a number
+fails at \`<path>.series[i].path\` or \`.y\`. The iOS agent does not draw charts yet (#14679).
+
 ## Rich text
 
 A text node has exactly one of \`text\` or \`spans\`; plain \`text: ""\` remains valid.
@@ -179,6 +196,19 @@ these selectors act across windows because tapOn refuses layer with accessibilit
 Use \`tapAt\` on the span bounds as the fallback.
 On iOS, links are drawn as links and tap-through is by \`tapAt\` only; show reports the
 \`rich-text-links\` platform note for tappable spans because there are no separate accessibility elements or semantic links.
+
+### Linkify
+
+\`linkify: {kinds, style?, onTap}\` on a text node with \`text\` (not \`spans\`) turns @mentions,
+#hashtags and URLs in the resolved text (for example \`{item.body}\`) into links. \`kinds\` lists 1-3 of
+\`mention\`, \`hashtag\`, \`url\`; \`style\` takes the span style fields. A match starts at the start of
+the text or after whitespace: a mention is \`@\` + 1-30 of \`[A-Za-z0-9_]\` (\`ana@example.com\` is not
+one), a hashtag \`#\` + up to 100 letters, digits or \`_\` (not all digits), a URL \`http(s)://\` up to
+whitespace without trailing punctuation. Inside \`onTap\` only, \`{match: "text"}\` (the tapped
+\`@ana\`) and \`{match: "kind"}\` work as a \`setState\` value, a \`setData\`/\`appendData\` value or an emit
+context entry: \`[{type:"setState",key:"profileHandle",value:{match:"text"}},{type:"push",stack:"nav",screen:"profile"}]\`.
+Repeat bindings are refused inside linkify \`onTap\`. URL taps never open a browser. Requires
+\`prototype_linkify_v1\`.
 
 ## Saved prototypes
 

@@ -55,7 +55,17 @@ const fixtures: Record<string, Node> = {
     child: label,
   },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_chart_v1: {
+    type: "chart",
+    variant: "line",
+    series: [{ path: "/points", y: "y", label: "Points" }],
+  },
   prototype_rich_text_v1: { type: "text", spans: [{ text: "Hello" }] },
+  prototype_linkify_v1: {
+    type: "text",
+    text: "@ana",
+    linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
+  },
   prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
   prototype_menus_v1: {
     type: "menu",

@@ -14,6 +14,7 @@ import dev.jasonpearson.automobile.protocol.*
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
@@ -75,6 +76,8 @@ data class PrototypeRenderNode(
   val spans: List<PrototypeRenderSpan>? = null,
   val enabled: Boolean = true,
   val errorMessage: String? = null,
+  /** A `chart`'s points and summary read against the current `/data`; null for other roles. */
+  val chart: PrototypeChartModel? = null,
 )
 
 @Immutable
@@ -137,6 +140,7 @@ fun mapPrototypeSpec(
           validity =
             prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
           shownErrors = shownErrors,
+          data = resolved.data,
         )
         .map(resolved.root, "root"),
     )
@@ -163,6 +167,7 @@ internal class PrototypeNodeMapping(
   private val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   private val validity: Map<String, Boolean> = emptyMap(),
   private val shownErrors: Set<String> = emptySet(),
+  private val data: JsonObject? = null,
 ) {
   val nodes = mutableMapOf<String, PrototypeRenderNode>()
 
@@ -189,7 +194,9 @@ internal class PrototypeNodeMapping(
         allEntries.filter { it.path == screenPath }
       } else allEntries
     val role = prototypeNodeRole(node)
-    val text = prototypeNodeText(node, state, localState, inPager)
+    val chart = (node as? PrototypeChartNode)?.let { PrototypeChart.model(it, data) }
+    // A chart's label is its summary, so `observe` reports what it draws (#14209).
+    val text = chart?.summary ?: prototypeNodeText(node, state, localState, inPager)
     val visibleEntries =
       if (
         node is PrototypeSearchBarNode &&
@@ -264,6 +271,7 @@ internal class PrototypeNodeMapping(
           node.contentDescription?.let { interpolatePrototypeText(it, localState, inPager) },
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
+        chart = chart,
       )
     val shared = intern(mapped, old)
     nodes[path] = shared
@@ -322,6 +330,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeDividerNode -> "divider"
     is PrototypeBadgeNode -> "badge"
     is PrototypeProgressNode -> "progress"
+    is PrototypeChartNode -> "chart"
     is PrototypeDialogNode -> "dialog"
     is PrototypeSnackbarNode -> "snackbar"
     is PrototypeTimePickerNode -> "timePicker"
@@ -543,24 +552,59 @@ internal fun mapPrototypeTextSpans(
   inPager: Boolean = false,
 ): List<PrototypeRenderSpan>? =
   node.spans?.map { span ->
-    val authored = span.style
-    val style =
-      PrototypeStyle(
-        color = authored?.color,
-        fontWeight = authored?.fontWeight,
-        fontStyle = authored?.fontStyle,
-        textDecoration = authored?.textDecoration,
-        textSize = authored?.textSize,
-        letterSpacing = authored?.letterSpacing,
-        fontFamily = authored?.fontFamily,
-        background = authored?.background,
-      )
     PrototypeRenderSpan(
       interpolatePrototypeText(span.text, state, inPager),
-      mapPrototypeStyle(style),
+      mapPrototypeSpanStyle(span.style),
       span.onTap,
     )
+  } ?: node.linkify?.let { linkify -> linkifiedSpans(node.text.orEmpty(), linkify, state, inPager) }
+
+private fun mapPrototypeSpanStyle(authored: PrototypeTextSpanStyle?): PrototypeRenderStyle =
+  mapPrototypeStyle(
+    PrototypeStyle(
+      color = authored?.color,
+      fontWeight = authored?.fontWeight,
+      fontStyle = authored?.fontStyle,
+      textDecoration = authored?.textDecoration,
+      textSize = authored?.textSize,
+      letterSpacing = authored?.letterSpacing,
+      fontFamily = authored?.fontFamily,
+      background = authored?.background,
+    ),
+  )
+
+/**
+ * `linkify` (#14233): the resolved text split into plain runs and one run per match, each match a
+ * link running `onTap` with its `{match}` bindings bound. Null without a match, so the text keeps
+ * the plain path.
+ */
+private fun linkifiedSpans(
+  text: String,
+  linkify: PrototypeLinkifyOptions,
+  state: Map<String, PrototypeScalar>,
+  inPager: Boolean,
+): List<PrototypeRenderSpan>? {
+  val resolved = interpolatePrototypeText(text, state, inPager)
+  val matches = PrototypeLinkify.matches(resolved, linkify.kinds)
+  if (matches.isEmpty()) return null
+  val plain = mapPrototypeSpanStyle(null)
+  val linked = mapPrototypeSpanStyle(linkify.style)
+  val spans = mutableListOf<PrototypeRenderSpan>()
+  var cursor = 0
+  for (match in matches) {
+    if (match.start > cursor) {
+      spans.add(PrototypeRenderSpan(resolved.substring(cursor, match.start), plain, null))
+    }
+    spans.add(
+      PrototypeRenderSpan(match.text, linked, PrototypeLinkify.actions(linkify.onTap, match)),
+    )
+    cursor = match.end
   }
+  if (cursor < resolved.length) {
+    spans.add(PrototypeRenderSpan(resolved.substring(cursor), plain, null))
+  }
+  return spans
+}
 
 private fun prototypeTextDecoration(value: String?): TextDecoration =
   when (value) {

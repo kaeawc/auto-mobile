@@ -593,7 +593,21 @@ data class PrototypeTextNode(
   override val span: Int? = null,
   val text: String? = null,
   val spans: List<PrototypeTextSpan>? = null,
+  /** Mentions, hashtags and URLs in [text] as links (`prototype_linkify_v1`, #14233). */
+  val linkify: PrototypeLinkifyOptions? = null,
 ) : PrototypeNode()
+
+/**
+ * `linkify` on a text node: the [kinds] to detect, the [style] of a match and the actions a tap
+ * runs. [onTap] stays JSON because its `{match}` bindings are bound per match before decoding
+ * ([PrototypeLinkify.actions]).
+ */
+@Serializable
+data class PrototypeLinkifyOptions(
+  val kinds: List<String>,
+  val style: PrototypeTextSpanStyle? = null,
+  val onTap: JsonArray,
+)
 
 @Serializable
 data class PrototypeTextSpan(
@@ -1171,6 +1185,45 @@ data class PrototypeProgressNode(
   val stateKey: String? = null,
   val max: Double? = null,
 ) : PrototypeNode()
+
+/**
+ * A `chart` (#14209): a [variant] line, area, bar or ring over 1–4 [series], each the objects of a
+ * `/data` array read through its `y` (and optional `x`) member. A ring draws its one series' latest
+ * value against [goal]; other variants draw [goal] as a reference line.
+ */
+@SerialName("chart")
+@Serializable
+data class PrototypeChartNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val variant: String,
+  val series: List<PrototypeChartSeries>,
+  val yRange: PrototypeChartRange? = null,
+  val xLabels: String = "none",
+  val goal: Double? = null,
+) : PrototypeNode()
+
+/** One chart series: the `/data` array at [path], its points' [y] and optional [x] members. */
+@Serializable
+data class PrototypeChartSeries(
+  val path: String,
+  val x: String? = null,
+  val y: String,
+  val label: String,
+  val color: PrototypeModeValue? = null,
+)
+
+/** A fixed y axis for a chart; [max] is above [min]. */
+@Serializable data class PrototypeChartRange(val min: Double, val max: Double)
 
 /**
  * A Material alert dialog, open while [openWhen] holds. Its buttons and scrim close it by writing

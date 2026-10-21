@@ -114,6 +114,8 @@ const CLASSIFICATION: Classification = {
     "navigateTo",
     "network",
     "openLink",
+    // Starts and stops an on-device tracer (perfetto) or a device-attached xctrace.
+    "performanceTrace",
     "phoneCall",
     "pinchOn",
     "multiTouch",
@@ -130,6 +132,7 @@ const CLASSIFICATION: Classification = {
     "selectAllText",
     "sendKeys",
     "sendSms",
+    "setAppLinks",
     "setAppPermissions",
     "setDeviceResources",
     "setDeviceState",

@@ -14,8 +14,11 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         let supported = Set(AutoMobilePrototypeCapabilities.supported)
         // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
         // when supported. Chat-list scrolls (#14232) are drawn on Android only so far (#14671);
+        // the chart node (#14209) renders on Android only until Swift Charts lands (#14679);
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684).
-        let exclusions: Set<String> = ["prototype_chat_scroll_v1", "prototype_motion_v2"]
+        let exclusions: Set<String> = [
+            "prototype_chart_v1", "prototype_chat_scroll_v1", "prototype_motion_v2",
+        ]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")
         XCTAssertEqual(required.subtracting(supported).subtracting(exclusions).sorted(), [])

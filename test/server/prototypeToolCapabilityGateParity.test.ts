@@ -25,6 +25,13 @@ const base = {
   state: { liked: false, name: "Ada", query: "", active: false },
   root: { type: "column", children: [label] },
 };
+const chart = {
+  type: "chart",
+  id: "label",
+  variant: "line",
+  series: [{ path: "/points", y: "y", label: "Points" }],
+};
+const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
@@ -92,7 +99,19 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     child: label,
   }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
+  // A chart reads a /data array, so the spec carries data and the data capability is advertised.
+  prototype_chart_v1: {
+    minimalSpec: { ...fixture(chart).minimalSpec, data: chartData },
+    ops: [{ op: "add", path: "/data", value: chartData }, ...fixture(chart).ops],
+    with: ["prototype_data_model_v1"],
+  },
   prototype_rich_text_v1: fixture({ type: "text", id: "label", spans: [{ text: "Hello" }] }),
+  prototype_linkify_v1: fixture({
+    type: "text",
+    id: "label",
+    text: "@ana",
+    linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
+  }),
   prototype_chat_scroll_v1: fixture({
     type: "scroll",
     id: "label",

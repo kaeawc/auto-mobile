@@ -108,8 +108,56 @@ const expectedSigningSha256Schema = z
   .min(1)
   .max(16);
 
+const bundleKeystoreSchema = z
+  .object({
+    path: z.string().min(1).describe("Keystore file path"),
+    alias: z.string().min(1).describe("Key alias"),
+    storePassword: z.string().min(1).describe("Keystore password (redacted from logs)"),
+    keyPassword: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Key password (redacted from logs; default storePassword)"),
+  })
+  .strict();
+
+const installBundleSchema = z
+  .object({
+    keystore: bundleKeystoreSchema
+      .optional()
+      .describe(".aab: signing key for the built APKs (default ~/.android/debug.keystore)"),
+    modules: z
+      .array(z.string().min(1))
+      .min(1)
+      .optional()
+      .describe("Dynamic feature modules to install, or ['_ALL_']"),
+    localTesting: z
+      .boolean()
+      .optional()
+      .describe(".aab: build with bundletool --local-testing for on-demand modules"),
+  })
+  .strict();
+
 const installAppInput = z.object({
-  artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
+  artifactPath: z
+    .string()
+    .describe(
+      "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
+    ),
+  splits: z
+    .array(z.string().min(1))
+    .min(1)
+    .optional()
+    .describe("Android: split APKs installed with the base .apk artifactPath (install-multiple)"),
+  bundle: installBundleSchema.optional().describe("Android .aab/.apks options"),
+  grantAllPermissions: z
+    .boolean()
+    .optional()
+    .describe("Android: grant all requested runtime permissions (install -g)"),
+  allowDowngrade: z
+    .boolean()
+    .optional()
+    .describe("Android: allow a lower versionCode (install -d; debuggable apps only)"),
   expectedSigningSha256: expectedSigningSha256Schema
     .optional()
     .describe(
@@ -128,7 +176,7 @@ const installAppInput = z.object({
 
 export const installAppTool = defineDeviceTool({
   name: "installApp",
-  description: "Install app on device (.apk, .app, or .ipa)",
+  description: "Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)",
   input: installAppInput,
   options: {
     defaultEnabled: true,

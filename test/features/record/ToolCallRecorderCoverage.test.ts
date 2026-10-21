@@ -66,6 +66,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   barrier: "Multi-device coordination primitive, handled by the plan executor",
   videoRecording: "Starts or stops a host-side capture; not part of the replayed interaction",
   explore: "Builds the navigation graph; an exploration run, not a scripted step",
+  measureStartup: "Performance measurement run over repeated launches, not an interaction step",
   navigateTo: "Resolves through a host-local navigation graph, so the step is not portable",
   prototype: HOST_LOCAL,
   highlight: HOST_LOCAL,

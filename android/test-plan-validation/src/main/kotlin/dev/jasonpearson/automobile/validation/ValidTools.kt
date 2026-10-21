@@ -90,6 +90,7 @@ object ValidTools {
         "getPreference",
         "hitTest",
         "listDataStores",
+        "measureStartup",
         "prototype",
         "phoneCall",
         "reconcileDeviceResources",

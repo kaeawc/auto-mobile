@@ -20,7 +20,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
+`measureStartup`, `mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
@@ -1862,6 +1862,7 @@ subtree, or the whole active-window tree when owner-less.
 | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 📱 <code>listApps</code>                                                                         | Lists installed apps with optional label/launchability when reported (`device`, `type`, `search`, `profile`; default `type=launchable`).                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 🚀 <code>launchApp</code>                                                                        | Launches an app by package name. On iOS, optional `launchArguments` start a fresh process and pass argv after the bundle ID. DEBUG storage writes require a launch-scoped mutation token; the daemon supplies it when `--allow-storage-mutations` is present. Android rejects non-empty launch arguments; an app already in the foreground is a success flagged `alreadyForeground`. On iOS simulators, `prototype: true` relaunches the app with the prototype agent injected (state is lost); physical iOS, Android and `com.apple.*` apps reject it.                                   |
+| ⏱️ <code>measureStartup</code>                                                                   | Android: launches an app N times cold, warm or hot and reports time-to-initial-display (TTID) and, when the app calls `reportFullyDrawn`, time-to-full-display (TTFD) percentiles. Stored in `automobile:performance-results`.                                                                                                                                                                                                                                                                                                                                                            |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -1877,6 +1878,40 @@ subtree, or the whole active-window tree when owner-less.
 | 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+<details class="note" markdown="1">
+<summary>Measuring startup with measureStartup</summary>
+
+<code>measureStartup</code> (Android only, off by default; enable it with
+<code>setToolEnabled</code>) measures one launch per iteration with plain
+<code>am start -W</code> calls. It never runs <code>launchApp</code>, observation or UI
+settling during the run, so AutoMobile adds no work of its own to the measured launch.
+
+- `appId`: the package to launch.
+- `activity`: an activity class (`.MainActivity`) or a full `pkg/.Activity` component.
+  Omitted, the launcher activity is resolved with `cmd package resolve-activity`.
+- `mode`: `cold` force-stops the app before every launch; `warm` keeps the process
+  but clears the task so the activity is recreated; `hot` presses Home and brings the
+  existing activity back. Warm and hot runs start with one unmeasured launch.
+- `iterations`: launches to measure, 1–50 (default 5).
+- `compilation`: `asIs` (default) or a `cmd package compile -m <mode> -f` mode
+  (`speed-profile`, `speed`, `verify`) applied once before the run.
+- `dropCaches`: cold only. Drops the page cache before each launch through a root
+  shell (`adb root` or `su`); refused when the device has neither.
+- `waitForFullyDrawn`: wait up to 10 s after each launch for the app's
+  `Fully drawn` log line. Without it, the log is read once per launch.
+
+The result has `ttid` (from `TotalTime`) and, when any launch logged
+`Fully drawn`, `ttfd`, each with `min`, `p50`, `p90`, `max` and the per-launch
+`samples`. `launchState` lists what `am start -W` reported per launch (`COLD`,
+`WARM`, `HOT`; `UNKNOWN` before API 29) and `waitTimeMs` the matching `WaitTime`.
+`warnings` explains a missing TTFD, launches without a `TotalTime`, and launches
+whose state differs from `mode`. Each run is stored in
+`automobile:performance-results` with the TTID p50 as `timeToFirstFrameMs`, the
+TTFD p50 as `timeToInteractiveMs`, and the full result in `diagnostics` (`kind:
+"startup"`), so runs can be compared over time.
+
+</details>
 
 <details class="note" markdown="1">
 <summary>State-preserving app lifecycle contract</summary>

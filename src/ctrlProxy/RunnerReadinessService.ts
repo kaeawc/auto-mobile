@@ -8,10 +8,7 @@ import {
   CTRL_PROXY_RESTART_MIN_FAILED_PROBES,
   IOS_CTRL_PROXY_MINIMUM_IOS_VERSION,
 } from "./RunnerReadinessPolicy";
-export {
-  RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS,
-  IOS_CTRL_PROXY_MINIMUM_IOS_VERSION,
-} from "./RunnerReadinessPolicy";
+export { RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS } from "./RunnerReadinessPolicy";
 import type { BootedDevice } from "../models";
 import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -47,7 +44,6 @@ import { isTerminalLeaseConflict } from "./readinessLeaseConflict";
 import { normalizeDiagnostic } from "./runnerReadinessDiagnosticText";
 export type {
   AndroidFrameworkReadinessResult,
-  AndroidRunnerConnectDiagnostic,
   AndroidRunnerHealthDiagnostic,
   ReadinessAndroidManager,
   ReadinessClient,

@@ -30,7 +30,7 @@ export const boundsSchema = z
   .strict();
 
 // Reuse the existing interaction contract's type; anchors reject ambiguous selection.
-export let containerObject: z.ZodType<ElementContainerSelector> | undefined;
+let containerObject: z.ZodType<ElementContainerSelector> | undefined;
 
 export const containerSchema: z.ZodType<ElementContainerSelector> = z.lazy(
   () =>
@@ -86,7 +86,7 @@ export type PrototypeCondition =
   | { any: PrototypeCondition[] }
   | { not: PrototypeCondition };
 
-export let conditionUnion: z.ZodType<PrototypeCondition> | undefined;
+let conditionUnion: z.ZodType<PrototypeCondition> | undefined;
 
 export const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
   () =>

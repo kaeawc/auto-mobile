@@ -20,6 +20,7 @@ interface SdkEventsHost {
   resolveWebSocketHost(): string;
   pollSdkEvents(): Promise<SdkEventPollResult>;
   getSdkScreenIdentity(appId?: string): ScreenIdentity | undefined;
+  getSdkAvailability(appId?: string): boolean | undefined;
 }
 /** Long-poll scheduling, backoff and generation-bound event ingestion. */
 export class CtrlProxySdkEvents {
@@ -59,14 +60,24 @@ export class CtrlProxySdkEvents {
    */
   public async refreshSdkScreenIdentity(
     applicationId?: string,
+    capturedAt?: number,
   ): Promise<ScreenIdentity | undefined> {
+    const available = this.host.getSdkAvailability(applicationId);
+    if (available === false) {
+      return this.host.getSdkScreenIdentity(applicationId);
+    }
+    // #4463: a newer capture may precede its navigation event in /sdk-events.
+    // Missing capability/freshness evidence keeps the conservative 100 ms retry.
+    const needsRetry =
+      available !== true ||
+      !this.host.screenIdentity.hasSdkScreenIdentityForCapture(applicationId, capturedAt);
     const deadline = this.host.timer.now() + CtrlProxySdkEvents.SDK_IDENTITY_REFRESH_TIMEOUT_MS;
     while (this.host.timer.now() < deadline) {
       const result = await this.pollSdkEventsUntil(deadline);
       const refreshed = applicationId
         ? result?.rememberedApplicationIds.has(applicationId)
         : result?.receivedEvents;
-      if (refreshed) {
+      if (refreshed || !needsRetry) {
         break;
       }
       const remaining = deadline - this.host.timer.now();

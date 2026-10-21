@@ -16,7 +16,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { runOutsideRequestContext, runWithAbortSignal } from "../../../utils/AbortContext";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { type runWithinShutdownDeadline } from "./deadlines";
-import { type waitForDeviceShutdown } from "./shutdownDiscovery";
+import { type waitForDeviceShutdown } from "../teardown/shutdownDiscovery";
 import {
   type shouldClearIntentionalShutdownAfterFailure,
   type cancelUnownedColdBoot,
@@ -24,7 +24,7 @@ import {
 import { type isUnknownAndroidRuntimeName } from "./androidIdentity";
 import { type StartDeviceArgs } from "./contracts";
 import { type ColdBootSettlementCollector } from "./bootIdentity";
-import { getShutdownInitiatingExecutionId } from "./shutdownPreparation";
+import { getShutdownInitiatingExecutionId } from "../teardown/shutdownPreparation";
 
 export interface SystemUiAnrRecoveryOperations {
   deviceShutdownTimeoutMs: number;

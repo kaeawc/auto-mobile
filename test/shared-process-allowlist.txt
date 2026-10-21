@@ -445,6 +445,7 @@ test/daemon/sessionBroker/registry/platformLegacySlotDeviceStopper.test.ts
 test/daemon/sessionBroker/registry/registrySchemaCompatibility.test.ts
 test/daemon/sessionBroker/registry/registryUpgradeFromCapturedSchema.test.ts
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.test.ts
+test/daemon/sessionBroker/releaseReply.test.ts
 test/daemon/sessionBroker/service.test.ts
 test/daemon/sessionBroker/sqliteStore.test.ts
 test/daemon/sessionBroker/sqliteStoreBoundedReads.test.ts
@@ -1056,6 +1057,7 @@ test/features/observe/ios/CtrlProxyMagicTap.test.ts
 test/features/observe/ios/CtrlProxyMultiFingerFence.test.ts
 test/features/observe/ios/CtrlProxyPressDispatch.test.ts
 test/features/observe/ios/CtrlProxySdkCapabilities.test.ts
+test/features/observe/ios/CtrlProxySdkEvents.test.ts
 test/features/observe/ios/CtrlProxySdkTrigger.test.ts
 test/features/observe/ios/CtrlProxyStructure.test.ts
 test/features/observe/ios/CtrlProxySwipeDispatch.test.ts

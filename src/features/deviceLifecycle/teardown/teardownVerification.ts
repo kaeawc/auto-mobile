@@ -13,12 +13,12 @@ import {
   inventoryContainsTarget,
   createTeardownResponse,
 } from "./teardownContracts";
-import { runWithinShutdownDeadline, sleepUnlessAborted } from "./deadlines";
+import { runWithinShutdownDeadline, sleepUnlessAborted } from "../core/deadlines";
 import {
   isVirtualAndroidDevice,
   isUnknownAndroidRuntimeName,
   getValidatedPooledAndroidAvdName,
-} from "./androidIdentity";
+} from "../core/androidIdentity";
 import {
   readTeardownBootedDiscovery,
   type TeardownInventoryDiscovery,

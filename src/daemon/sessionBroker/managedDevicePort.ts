@@ -1,4 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../../utils/deviceTimeouts";
@@ -101,12 +102,25 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         ...(options.signal ? { signal: options.signal } : {}),
       });
     };
+    // Only an empty iOS binding can create a retained device for one warm readiness retry.
+    // Reserve one third (at most a runner provisioning window) for that retry; an occupied
+    // binding's reuse/adoption cannot produce retained creation evidence and gets the full budget.
+    let canCreate = true;
+    if (profile.platform === "ios") {
+      try {
+        const assignment = await this.dependencies.registry.getAssignment(this.key(resource));
+        canCreate = assignment === null || assignment.stableDeviceId === null;
+      } catch (error) {
+        // If the optional budget hint is unavailable, preserve the existing retry reserve.
+        logger.warn(
+          `Cannot read binding for iOS readiness retry budget: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
     const remainingMs = deadlineMs - timer.now();
-    // Reserve one third (at most a runner provisioning window) for one warm iOS retry.
-    // The first acquisition passes this shorter deadline through to provisionDevice readiness,
-    // so a cold create can exhaust its entire attempt budget without exhausting prepare itself.
     const retryReserveMs =
-      profile.platform === "ios"
+      profile.platform === "ios" && canCreate
         ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)
         : 0;
     let result = await acquire(remainingMs - retryReserveMs);

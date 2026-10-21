@@ -156,7 +156,7 @@ object PrototypeSpecValidator {
   }
 
   private val stateWriteActionTypes =
-    setOf("setState", "toggle", "increment", "decrement", "request")
+    setOf("setState", "toggle", "increment", "decrement", "request", "platform")
 
   private fun fullStateWrites(spec: PrototypeSpec, encoder: Json) =
     PrototypeStateWriteValidator { state ->

@@ -4,6 +4,7 @@
   "project": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
   "ignore": ["dist/**", "node_modules/**", "android/**", "src/db/migrations/**", "**/*.d.ts"],
   "ignoreDependencies": [
+    "@typescript/native-preview",
     "oxlint",
     "oxlint-tsgolint",
     "@borewit/text-codec",

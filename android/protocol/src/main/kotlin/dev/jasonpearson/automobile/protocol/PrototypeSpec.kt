@@ -58,6 +58,8 @@ data class PrototypeCondition(
   val any: List<PrototypeCondition>? = null,
   val not: PrototypeCondition? = null,
   val data: String? = null,
+  /** A `/platform` pointer (#14294); platform state is device-owned and read-only. */
+  val platform: String? = null,
   val valid: PrototypeValidityKeys? = null,
 )
 
@@ -375,6 +377,25 @@ data class PrototypeRequestAction(
   val into: String? = null,
   val statusKey: String? = null,
   val via: String? = null,
+  val timeoutMs: Int? = null,
+  val onSuccess: List<PrototypeAction>? = null,
+  val onError: List<PrototypeAction>? = null,
+) : PrototypeAction()
+
+/**
+ * A platform call (`prototype_platform_v1`, #14294): [call] is `<module>.<op>` from the contract's
+ * `platformModules` table, each [args] entry a value binding (`{value}`, `{state}`, `{data}`,
+ * `{platform}`, `{item}` / `{index}` in a repeat and `{event}` inside a handler) kept as JSON. The
+ * result goes to [into] (and `<into>__meta`), [statusKey] follows `loading`, `success` and `error`,
+ * and [onSuccess] or [onError] runs afterwards. Dispatch is the module registry's (#14295).
+ */
+@SerialName("platform")
+@Serializable
+data class PrototypePlatformAction(
+  val call: String,
+  val args: Map<String, JsonElement>? = null,
+  val into: String? = null,
+  val statusKey: String? = null,
   val timeoutMs: Int? = null,
   val onSuccess: List<PrototypeAction>? = null,
   val onError: List<PrototypeAction>? = null,
@@ -1539,7 +1560,25 @@ data class PrototypeSpec(
   val data: JsonObject? = null,
   /** The state keys and `/data` pointers the device keeps across shows (#12522). */
   val storage: PrototypeStorageBlock? = null,
+  /** What the spec needs from the platform before show (#14294). */
+  val requires: PrototypeRequires? = null,
+  /** `platform.on`: action lists run when a platform event is delivered (#14294). */
+  val platform: PrototypePlatformHandlers? = null,
 )
+
+/** The root `requires` block (#14294): platform modules, permissions and background needs. */
+@Serializable
+data class PrototypeRequires(
+  val platform: List<String>? = null,
+  val permissions: List<PrototypePermissionRequirement>? = null,
+  val background: List<String>? = null,
+)
+
+/** One declared permission: a canonical [name] and the [purpose] shown to the user. */
+@Serializable data class PrototypePermissionRequirement(val name: String, val purpose: String)
+
+/** Root `platform`: action lists keyed by `<module>.<event>`. */
+@Serializable data class PrototypePlatformHandlers(val on: Map<String, List<PrototypeAction>>)
 
 @Serializable
 enum class PrototypeValidateOn {

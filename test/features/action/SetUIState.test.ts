@@ -1196,6 +1196,51 @@ describe("SetUIState", () => {
     );
   });
 
+  test("verifies a platform Spinner by its selected child text (#14657)", async () => {
+    const spinner = (selected: string): ViewHierarchyResult => ({
+      hierarchy: {
+        node: {
+          node: [
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "com.android.settings:id/security",
+                class: "android.widget.Spinner",
+                clickable: "true",
+              },
+              node: [
+                {
+                  $: {
+                    bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                    "resource-id": "android:id/text1",
+                    class: "android.widget.TextView",
+                    text: selected,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    let observeCallCount = 0;
+    fakeObserve.setResultFactory(() =>
+      createObserveResult(spinner(++observeCallCount <= 1 ? "None" : "WPA3-Personal")),
+    );
+    fakeFieldTypeDetector.setFieldType("com.android.settings:id/security", "dropdown");
+
+    const result = await createSetUIState().execute({
+      fields: [
+        { selector: { elementId: "com.android.settings:id/security" }, value: "WPA3-Personal" },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fields[0]).toMatchObject({ success: true, fieldType: "dropdown", attempts: 1 });
+    // One tap opens the menu and one picks the value; nothing is retried.
+    expect(fakeTap.getCallCount()).toBe(2);
+  });
+
   describe("scroll to find", () => {
     const modelSearch = (revealOn: "up" | "down" | "visible") => {
       let visible = revealOn === "visible";

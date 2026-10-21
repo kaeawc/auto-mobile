@@ -3,6 +3,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
+import { nodeAttributes } from "../../models/ViewHierarchyResult";
 import { FieldSpec, SetUIStateElementSelector } from "../../models/SetUIStateOptions";
 import { FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector, type FieldTypeDetection } from "./FieldTypeDetector";
@@ -570,8 +571,7 @@ export class SetUIStateFields {
 
       case "dropdown":
         if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
+          return this.dropdownValue(element) === fieldSpec.value;
         }
         return false;
 
@@ -959,14 +959,23 @@ export class SetUIStateFields {
 
       case "dropdown":
         if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return { verified: currentValue === fieldSpec.value, observation };
+          const observedValue = this.dropdownValue(element);
+          return { verified: observedValue === fieldSpec.value, observation, observedValue };
         }
         return { verified: true, observation };
 
       default:
         return { verified: true, observation };
     }
+  }
+
+  /**
+   * A dropdown's selected value: its own text, else its first descendant's (#14657). A platform
+   * Spinner carries no text itself; the selection is shown by a child TextView.
+   */
+  private dropdownValue(element: Element): string {
+    const children = (getHierarchyNodeSource(element) ?? element).node;
+    return this.fieldTypeDetector.getTextValue(element) || firstDescendantText(children) || "";
   }
 
   /**
@@ -1033,4 +1042,23 @@ export class SetUIStateFields {
   private getObserveScreen(): ObserveScreen {
     return this.options.dependencies.observeScreen ?? this.options.observeScreen();
   }
+}
+
+/** The first non-empty `text` in a parsed node's subtree, depth first. */
+function firstDescendantText(node: unknown): string | undefined {
+  const children = Array.isArray(node) ? node : node ? [node] : [];
+  for (const child of children) {
+    if (!child || typeof child !== "object") {
+      continue;
+    }
+    const { text } = nodeAttributes(child);
+    if (typeof text === "string" && text !== "") {
+      return text;
+    }
+    const nested = "node" in child ? firstDescendantText(child.node) : undefined;
+    if (nested) {
+      return nested;
+    }
+  }
+  return undefined;
 }

@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"],
+      "background": ["audio"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "test.protected"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].call",
+  "expectedMessage": "Platform call test.protected requires permission camera in requires.permissions"
+}

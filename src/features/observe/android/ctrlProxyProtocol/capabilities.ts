@@ -83,8 +83,18 @@ export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
 /** The `request` action (#12523); see prototypeRequest.ts. A `via: "device"` one also needs the second. */
 export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
 export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1";
+/**
+ * The platform vocabulary (#14294): root `requires`, `platform.on` handlers, the `platform` action
+ * and `{platform}` reads. Each module adds its own `prototype_platform_<module>_v1`, generated from
+ * the contract's `platformModules` table; see prototypePlatform.ts.
+ */
+export const PROTOTYPE_PLATFORM_CAPABILITY = "prototype_platform_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
+/** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
+export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
+/** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */
+export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
 export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
@@ -118,6 +128,8 @@ export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
 
 /** Renders styled text spans and their independent tap actions. */
 export const PROTOTYPE_RICH_TEXT_CAPABILITY = "prototype_rich_text_v1";
+/** `linkify` on a text node (#14233): mentions, hashtags and URLs as tappable links. */
+export const PROTOTYPE_LINKIFY_CAPABILITY = "prototype_linkify_v1";
 
 /** Future iOS capabilities that lift host-reported prototype platform differences. */
 export const PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY =
@@ -175,9 +187,18 @@ export const SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY = "screenshot_hide_prototype_v
  */
 export const MULTI_FINGER_GESTURE_CAPABILITY = "multi_finger_gesture_v1";
 
+/**
+ * request_action honours the semantic accessibility actions (expand, collapse, dismiss, select,
+ * scroll and page directions, press_and_hold, set_progress with `progress`, custom with
+ * `customAction`) and its refusal lists the node's available actions (#14077). An older service
+ * refuses them as unsupported, so hosts require this flag before sending one.
+ */
+export const SEMANTIC_NODE_ACTIONS_CAPABILITY = "semantic_node_actions_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
+  SEMANTIC_NODE_ACTIONS_CAPABILITY,
   "ime_key_events_v1",
   "ime_clear_field_v1",
   "ime_password_commit_v1",

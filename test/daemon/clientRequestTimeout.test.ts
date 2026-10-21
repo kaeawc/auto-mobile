@@ -12,6 +12,7 @@ import {
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { pushProgressNotification } from "../../src/daemon/socketServer/notificationFanOut";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { MAX_CANCELLED_REQUEST_IDS } from "../../src/daemon/clientResponseDecoding";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -1180,8 +1181,11 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
   function setup() {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
+    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      idGenerator: new FakeIdGenerator(),
+    });
     client.testHooks.attachSocket(socket);
+    socket.once("close", () => client.testHooks.socketClosed(socket));
     return { client, timer, socket };
   }
 
@@ -1271,4 +1275,101 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
       await client.close();
     }
   });
+
+  for (const abortMode of ["request", "connection"] as const) {
+    test(`cancelOnTimeout:false cancels after timeout with ${abortMode} abort mode`, async () => {
+      const { client, timer, socket } = setup();
+      const controller = new AbortController();
+      const remove = spyOn(controller.signal, "removeEventListener");
+      const outcome = client
+        .callDaemonMethod(
+          "daemon/prepareSession",
+          {},
+          {
+            timeoutMs: 5000,
+            cancelOnTimeout: false,
+            signal: controller.signal,
+            abortMode,
+          },
+        )
+        .catch((error: unknown) => error);
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+      try {
+        timer.advanceTime(request.timeoutMs! + responseGraceMs);
+        const error = await outcome;
+        expect(error).toBeInstanceOf(McpTimeoutError);
+        controller.abort(new Error("proxy closing after timeout"));
+        controller.abort();
+        const frames = socket.getWrittenMessages(daemonRequestFrameSchema);
+        expect(frames).toHaveLength(2);
+        expect(frames[1]).toMatchObject({
+          method: DAEMON_CANCEL_REQUEST_METHOD,
+          params: { requestId: request.id },
+        });
+        expect(socket.destroyed).toBe(abortMode === "connection");
+        expect(await outcome).toBe(error);
+        expect(remove).toHaveBeenCalled();
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        remove.mockRestore();
+        await client.close();
+      }
+    });
+  }
+
+  for (const settlement of ["response", "socket close", "client close", "eviction"] as const) {
+    test(`cancelOnTimeout:false removes the retained abort listener on ${settlement}`, async () => {
+      const { client, timer, socket } = setup();
+      const controller = new AbortController();
+      const remove = spyOn(controller.signal, "removeEventListener");
+      const outcome = client
+        .callDaemonMethod(
+          "daemon/prepareSession",
+          {},
+          {
+            timeoutMs: 5000,
+            cancelOnTimeout: false,
+            signal: controller.signal,
+            abortMode: "request",
+          },
+        )
+        .catch((error: unknown) => error);
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+      try {
+        timer.advanceTime(request.timeoutMs! + responseGraceMs);
+        expect(await outcome).toBeInstanceOf(McpTimeoutError);
+        expect(remove).not.toHaveBeenCalled();
+        if (settlement === "response") {
+          client.testHooks.simulateIncomingData(
+            Buffer.from(
+              JSON.stringify({ id: request.id, type: "mcp_response", success: true, result: {} }) +
+                "\n",
+            ),
+          );
+        } else if (settlement === "socket close") {
+          client.testHooks.socketClosed(socket);
+          // An old signal must not cancel a request on a replacement connection.
+          client.testHooks.attachSocket(socket);
+        } else if (settlement === "client close") {
+          await client.close();
+        } else {
+          const outcomes = Array.from({ length: MAX_CANCELLED_REQUEST_IDS }, () =>
+            client
+              .callDaemonMethod("daemon/status", {}, { timeoutMs: 5000, cancelOnTimeout: false })
+              .catch((error: unknown) => error),
+          );
+          timer.advanceTime(5000 + responseGraceMs);
+          await Promise.all(outcomes);
+        }
+        expect(remove).toHaveBeenCalledTimes(1);
+        const frameCount = socket.getWrittenMessages().length;
+        controller.abort(new Error("abort after daemon settlement"));
+        expect(socket.getWrittenMessages()).toHaveLength(frameCount);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        remove.mockRestore();
+        await client.close();
+      }
+    });
+  }
 });

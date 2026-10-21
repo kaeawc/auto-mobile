@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { logger } from "../../../src/utils/logger";
 import { SetUIState } from "../../../src/features/action/SetUIState";
+import { FieldTypeDetector } from "../../../src/features/action/FieldTypeDetector";
+import { readCapturedHierarchy } from "../../fixtures/capturedFixtures";
 import { resolveSwipeDirection } from "../../../src/features/action/swipeon/swipeOnUtils";
 import type { SwipeDirection, SwipeOnOptions } from "../../../src/models/SwipeOnOptions";
 import type { Keyboard } from "../../../src/features/action/Keyboard";
@@ -1105,6 +1107,99 @@ describe("SetUIState", () => {
   });
 
   describe("dropdown handling", () => {
+    const spinnerId = "com.android.settings:id/security";
+    const capturedSpinner = readCapturedHierarchy(
+      "android-settings/add-network-security-spinner.viewHierarchy.json",
+    );
+
+    const withSpinnerValue = (value: string | undefined): ViewHierarchyResult => {
+      // Derived variant: change only the selected text1 text, including its window copy.
+      const hierarchy = structuredClone(capturedSpinner);
+      const nodes = new SearchableHierarchy().project(hierarchy);
+      const selectedValues = nodes.filter(
+        (node) =>
+          node.nativeId === "android:id/text1" &&
+          nodes[node.parentIndex ?? -1]?.nativeId === spinnerId,
+      );
+      expect(selectedValues.length).toBeGreaterThan(0);
+      for (const node of selectedValues) {
+        const properties = nodeAttributes(node.source);
+        if (value === undefined) {
+          delete properties.text;
+        } else {
+          properties.text = value;
+        }
+      }
+      return hierarchy;
+    };
+
+    const createCapturedSpinnerAction = (postSelection = capturedSpinner) => {
+      fakeObserve.setResultFactory(() =>
+        createObserveResult(fakeTap.getCallCount() >= 2 ? postSelection : capturedSpinner),
+      );
+      return new SetUIState(device, null, {
+        tapOnElement: fakeTap,
+        inputText: fakeInput,
+        clearText: fakeClear,
+        swipeOn: fakeSwipe,
+        observeScreen: fakeObserve,
+        fieldTypeDetector: new FieldTypeDetector(),
+        timer: fakeTimer,
+      });
+    };
+
+    test("captured Spinner skips taps when child text already matches None", async () => {
+      const result = await createCapturedSpinnerAction().execute({
+        fields: [{ selector: { elementId: spinnerId }, value: "None" }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fields[0]).toMatchObject({
+        success: true,
+        verified: true,
+        skipped: true,
+        attempts: 1,
+        fieldType: "dropdown",
+      });
+      expect(fakeTap.getCallCount()).toBe(0);
+    });
+
+    test("captured Spinner verifies selected child text on the first attempt", async () => {
+      const value = "WPA/WPA2-Personal";
+      const result = await createCapturedSpinnerAction(withSpinnerValue(value)).execute({
+        fields: [{ selector: { elementId: spinnerId }, value }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fields[0]).toMatchObject({ success: true, verified: true, attempts: 1 });
+      expect(fakeTap.getCalls().map((call) => call.options)).toEqual([
+        { elementId: spinnerId, action: "tap" },
+        { text: value, action: "tap" },
+      ]);
+    });
+
+    test("captured Spinner accepts unreadable selection without retrying", async () => {
+      const result = await createCapturedSpinnerAction(withSpinnerValue(undefined)).execute({
+        fields: [{ selector: { elementId: spinnerId }, value: "WPA/WPA2-Personal" }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fields[0]).toMatchObject({ success: true, attempts: 1 });
+      expect(result.fields[0].verified).toBeUndefined();
+      expect(fakeTap.getCallCount()).toBe(2);
+    });
+
+    test("captured Spinner retries a readable mismatch and reports observed None", async () => {
+      const result = await createCapturedSpinnerAction().execute({
+        fields: [{ selector: { elementId: spinnerId }, value: "WPA/WPA2-Personal" }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fields[0]).toMatchObject({ success: false, attempts: 3 });
+      expect(result.fields[0].error).toContain('observed "None"');
+      expect(fakeTap.getCallCount()).toBe(6);
+    });
+
     test("settles a slow dropdown menu before the animation delay and option tap", async () => {
       fakeObserve.setViewHierarchy(
         createHierarchyWithElement({
@@ -2104,26 +2199,7 @@ describe("SetUIState iOS Forms nodes", () => {
 
   test("reads the control's checked state and taps to set it false", async () => {
     const tap = new FakeTapOnElement();
-    let tappedBounds: Element["bounds"] | undefined;
     let tapPoint: { x: number; y: number } | undefined;
-    const tapOnElement = {
-      execute: async (...args: Parameters<FakeTapOnElement["execute"]>) => {
-        const [options] = args;
-        const selected = new ResolverElementSelector().selectByText(
-          iosFormsSwitch("true"),
-          options.text!,
-          { intentAction: "tap" },
-        );
-        tappedBounds = selected.element?.bounds;
-        if (tappedBounds) {
-          tapPoint = {
-            x: (tappedBounds.left + tappedBounds.right) / 2,
-            y: (tappedBounds.top + tappedBounds.bottom) / 2,
-          };
-        }
-        return tap.execute(...args);
-      },
-    };
     const observe = new FakeObserveScreenForSetUIState();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -2132,11 +2208,20 @@ describe("SetUIState iOS Forms nodes", () => {
         updatedAt: timer.now(),
         screenSize: { width: 402, height: 874 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        viewHierarchy: iosFormsSwitch(tap.getCallCount() === 0 ? "true" : "false"),
+        viewHierarchy: iosFormsSwitch(tapPoint ? "false" : "true"),
       }),
     );
     const action = new SetUIState(device, null, {
-      tapOnElement,
+      tapOnElement: tap,
+      tapAt: {
+        execute: async (options) => {
+          if (options.x === undefined || options.y === undefined) {
+            throw new Error("Expected absolute switch coordinates");
+          }
+          tapPoint = { x: options.x, y: options.y };
+          return { success: true, ...tapPoint };
+        },
+      },
       inputText: new FakeInputText(),
       clearText: new FakeClearText(),
       swipeOn: new FakeSwipeOn(),
@@ -2149,14 +2234,8 @@ describe("SetUIState iOS Forms nodes", () => {
     });
 
     expect(result.fields[0]).toMatchObject({ success: true, verified: true, fieldType: "toggle" });
-    expect(tap.getCalls().map((call) => call.options)).toEqual([
-      { text: "Enable Notifications", action: "tap" },
-    ]);
-    expect(tappedBounds).toEqual({ left: 301, top: 296, right: 364, bottom: 324 });
-    expect(tapPoint?.x).toBeGreaterThanOrEqual(301);
-    expect(tapPoint?.x).toBeLessThan(364);
-    expect(tapPoint?.y).toBeGreaterThanOrEqual(296);
-    expect(tapPoint?.y).toBeLessThan(324);
+    expect(tap.getCallCount()).toBe(0);
+    expect(tapPoint).toEqual({ x: 332, y: 310 });
   });
 });
 

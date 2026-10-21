@@ -198,9 +198,14 @@ private constructor(
   }
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
+    // A device read never needs a session (#11364): naming this client's UUID would make the read
+    // fail with that session's terminal or suspect error between a release and the rotation.
     val sessionArguments =
       if (
-        sessionUuid != null && name != SET_TOOL_ENABLED_TOOL_NAME && "sessionUuid" !in arguments
+        sessionUuid != null &&
+          name != SET_TOOL_ENABLED_TOOL_NAME &&
+          "sessionUuid" !in arguments &&
+          !isDeviceReadCall(name, arguments)
       ) {
         buildJsonObject {
           arguments.forEach { (key, value) -> put(key, value) }

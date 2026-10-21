@@ -52,7 +52,11 @@ internal object PrototypeChartRules {
     return if (max > min) null else fail("$path.yRange.max", "Chart yRange max must be above min")
   }
 
-  private fun seriesError(series: JsonObject, path: String, data: JsonObject?): PrototypeSpecError? {
+  private fun seriesError(
+    series: JsonObject,
+    path: String,
+    data: JsonObject?,
+  ): PrototypeSpecError? {
     // A repeat-bound path is bound per row by the repeat expansion.
     val pointer = series.text("path")?.takeUnless { '{' in it } ?: return null
     val points =

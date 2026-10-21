@@ -12,9 +12,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         ))
         let required = try Set(JSONDecoder().decode([String].self, from: data))
         let supported = Set(AutoMobilePrototypeCapabilities.supported)
-        // #13722: No gate capabilities are currently missing from the iOS advertisement.
-        // Add any future intentional gaps here with their reason; remove them when supported.
-        let exclusions: Set<String> = []
+        // Intentional gaps, each with its reason; remove them when supported.
+        // #14679: the chart node (#14209) renders on Android only until Swift Charts lands.
+        let exclusions: Set<String> = ["prototype_chart_v1"]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")
         XCTAssertEqual(required.subtracting(supported).subtracting(exclusions).sorted(), [])

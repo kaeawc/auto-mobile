@@ -86,6 +86,7 @@
     "setPreference",
     "putAppFile",
     "resetAppLogs",
+    "performanceTrace",
     "stageSessionDownloads",
     "setUIState",
     "accessibility",
@@ -185,6 +186,7 @@
     "setPreference",
     "putAppFile",
     "resetAppLogs",
+    "performanceTrace",
     "stageSessionDownloads",
     "setUIState",
     "accessibility",
@@ -298,6 +300,7 @@
     "phoneCall",
     "sendSms",
     "resetAppLogs",
+    "performanceTrace",
     "stageSessionDownloads",
     "windowMode"
   ],

@@ -171,6 +171,13 @@ describe("selectAdmission ordering and hard caps", () => {
         { totalDeviceCap: 0 },
       ),
     ).toEqual({ kind: "refuse", reason: "total-device-cap-exceeded" });
+    // A compatible idle resource is evicted, never reused, under a zero cap (#14462).
+    expect(
+      selectAdmission(
+        { activeOrAcquiringSessions: 0, resources: [resource("idle", "idle", 1, true)] },
+        { totalDeviceCap: 0 },
+      ),
+    ).toEqual({ kind: "evict", resourceId: "idle" });
   });
 });
 

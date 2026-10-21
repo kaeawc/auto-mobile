@@ -136,8 +136,9 @@ export function selectAdmission(snapshot: BrokerSnapshot, limits: BrokerLimits):
     return { kind: "refuse", reason: "session-cap-reached" };
   }
 
-  // Reuse does not increase the total, including after a cap reduction.
-  const reusable = newestCompatibleIdle(snapshot);
+  // Reuse does not increase the total, including after a cap reduction. A zero cap still admits
+  // nothing (#14462): an idle resource is evicted below rather than handed to a new session.
+  const reusable = limits.totalDeviceCap === 0 ? undefined : newestCompatibleIdle(snapshot);
   if (reusable) {
     return { kind: "reuse", resourceId: reusable.id };
   }

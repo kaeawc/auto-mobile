@@ -84,6 +84,20 @@ describe("evaluateClientHandshake", () => {
     }
   });
 
+  test("accepts a client whose version differs from the daemon only in the dirty stamp (#14658)", () => {
+    const clean = "0.0.87+gf514d78885fa";
+    const dirty = "0.0.87+gf514d78885fa.dirty.e0f955f354af";
+    expect(evaluateClientHandshake(daemon(dirty), { clientVersion: clean })).toEqual({ ok: true });
+    expect(evaluateClientHandshake(daemon(clean), { clientVersion: dirty })).toEqual({ ok: true });
+  });
+
+  test("still rejects a client on a different commit even when both are dirty (#14658)", () => {
+    const result = evaluateClientHandshake(daemon("0.0.87+gaaaaaaaaaaaa.dirty.111111111111"), {
+      clientVersion: "0.0.87+gbbbbbbbbbbbb.dirty.111111111111",
+    });
+    expect(result.ok).toBe(false);
+  });
+
   test("accepts a git-stamped client version identical to the daemon", () => {
     const result = evaluateClientHandshake(daemon("0.0.40+gaaa"), { clientVersion: "0.0.40+gaaa" });
     expect(result.ok).toBe(true);

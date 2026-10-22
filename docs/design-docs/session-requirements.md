@@ -20,6 +20,10 @@ type SessionDeviceRequirement =
       platform: "android";
       hardware: AndroidHardwareSelector;
       os: OsSelector;
+      deviceProfile?: {
+        manufacturerProfile: ManufacturerProfileId;
+        requires?: NonEmulatableCapability[];
+      };
     };
 ```
 
@@ -38,8 +42,21 @@ iOS hardware has four explicit selector kinds:
 - `omitted` requests the configured default archetype.
 
 Android hardware is `phone`, `tablet`, or `omitted`. Exact Android profiles,
-OEM selectors, foldables, and other categories are not accepted at this
-boundary.
+foldables, and other categories are not accepted at this boundary.
+
+An Android request may name an OEM manufacturer profile as `deviceProfile`
+(owner decision on #14058). It is a simulated effect, not a firmware guarantee:
+the profile's keyboard, display and background-kill behaviour are applied to the
+session's stock emulator after readiness, and nothing about the OEM's firmware,
+SystemUI or vendor services is present. It is not a hardware selector: it never
+chooses, matches or fingerprints pool devices, and it is distinct from the
+resolved hardware `profile.profileId`. The kill facet needs the app it targets,
+so it is deferred until the caller applies it. Releasing the session restores
+everything the profile changed, keyboard included. `requires` lists OEM
+capabilities the task needs; one the profile cannot emulate refuses the request
+with non-retryable `requires_real_device` before anything is reserved. Selecting
+a matching hardware profile or emulator skin, and routing to real OEM devices,
+are not part of this boundary yet.
 
 OS selectors are `exact`, `major`, `minimum`, and `omitted`. Their kind is
 always explicit. Values are positive dotted numeric releases. Android API

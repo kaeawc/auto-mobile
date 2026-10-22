@@ -13,7 +13,7 @@ class GeneratedViewIdTest {
   @Test
   fun `generated ids match the original formula and UUID shape`() {
     val shape = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-    for (path in paths) {
+    for (path in equalityPaths) {
       val actual = GeneratedViewId.fromPath(path)
       assertEquals(originalId(path), actual)
       assertTrue("Invalid generated id: $actual", shape.matches(actual))
@@ -49,4 +49,8 @@ class GeneratedViewIdTest {
   private val paths =
     listOf("", "root", "root/0/1", "根/子/🙂/é", "e\u0301", "a\u0000b", "root/".repeat(4096)) +
       List(320) { index -> "window[${index % 7}]/root/$index/子/${index * 31}/🙂" }
+
+  /** The equality check covers 10,000 paths; the concurrent test keeps the smaller set. */
+  private val equalityPaths =
+    paths + List(10_000 - paths.size) { index -> "window[${index % 11}]/root/${index / 97}/$index" }
 }

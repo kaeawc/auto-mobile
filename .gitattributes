@@ -12,6 +12,7 @@ test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/android-dumpsys-package/*.txt text eol=lf
 test/fixtures/android-notification-policy/*.txt text eol=lf
 test/fixtures/android-app-links/*.txt text eol=lf
+test/fixtures/ios-simctl/*.txt text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
@@ -199,3 +200,7 @@ test/fixtures/docs-site/*.html text eol=lf
 test/fixtures/android-pin-dialog/*.json text eol=lf
 test/fixtures/android-pin-dialog/*.xml text eol=lf
 test/fixtures/android-pin-dialog/*.md text eol=lf
+ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift text eol=lf
+
+# Cross-language prototype bundle corpus is base64 JSON, never an LFS binary.
+test/fixtures/prototype-bundle/*.json text eol=lf

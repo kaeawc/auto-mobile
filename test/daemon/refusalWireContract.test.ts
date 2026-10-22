@@ -255,6 +255,8 @@ const INSTALLER_ERROR_EXEMPTION =
   "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.";
 
 const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/prototype/bundle/bundleContract":
+    "Internal ZIP/manifest parsing control flow caught by readPrototypeBundle and exportPrototypeBundle and returned as corpus-tested BundleRejection values; BundleFailure never escapes as an MCP/tool or daemon refusal.",
   "features/action/androidLaunchIntent":
     "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":

@@ -1357,7 +1357,6 @@ test/features/shared/MetricsUtils.test.ts
 test/features/snapshot/DeviceSnapshotConfig.property.test.ts
 test/features/storage/debuggableBuildProbe.test.ts
 test/features/storage/storageProviderCoverage.test.ts
-test/features/systemTray/NotificationUIDetector.test.ts
 test/features/systemTray/notificationDumpsys.test.ts
 test/features/systemTray/notificationHints.test.ts
 test/features/talkback/FocusElementMatcher.test.ts

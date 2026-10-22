@@ -4,6 +4,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
   ANDROID_CRASH_DROPBOX_TAGS,
+  dropboxTagOfReportId,
   parseDropboxCrashReports,
   parseUtcOffsetMinutes,
 } from "./androidDropboxCrashReport";
@@ -11,9 +12,11 @@ import {
   isFreshCrashReport,
   matchesCrashQuery,
   type NativeCrashReport,
+  type NativeCrashReportBody,
   type NativeCrashReportFinder,
   type NativeCrashReportLookup,
   type NativeCrashReportQuery,
+  type NativeCrashReportReader,
 } from "./NativeCrashReport";
 
 const ADB_COMMAND_TIMEOUT_MS = 5_000;
@@ -22,7 +25,9 @@ const ADB_COMMAND_TIMEOUT_MS = 5_000;
  * Android records every app crash in the DropBox service without root:
  * `data_app_crash` (Java) and `data_app_native_crash` (tombstone).
  */
-export class AndroidDropboxCrashReportFinder implements NativeCrashReportFinder {
+export class AndroidDropboxCrashReportFinder
+  implements NativeCrashReportFinder, NativeCrashReportReader
+{
   constructor(private readonly adb: Pick<AdbExecutor, "executeCommand">) {}
 
   async find(query: NativeCrashReportQuery): Promise<NativeCrashReportLookup> {
@@ -46,6 +51,19 @@ export class AndroidDropboxCrashReportFinder implements NativeCrashReportFinder 
       )
       .at(-1);
     return match ? { status: "found", report: match } : { status: "notFound" };
+  }
+
+  /** The dropbox entry this id names, re-read from the device. */
+  async read(reportId: string, signal?: AbortSignal): Promise<NativeCrashReportBody | undefined> {
+    const tag = dropboxTagOfReportId(reportId);
+    if (!tag) {
+      return undefined;
+    }
+    const output = await this.run(`shell dumpsys dropbox --print ${tag}`, signal);
+    const entry = parseDropboxCrashReports(output ?? "").find(
+      (parsed) => parsed.report.id === reportId,
+    );
+    return entry ? { report: entry.report, text: entry.rawText } : undefined;
   }
 
   private async run(command: string, signal?: AbortSignal): Promise<string | undefined> {

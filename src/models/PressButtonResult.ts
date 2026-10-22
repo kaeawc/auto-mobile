@@ -8,4 +8,6 @@ export interface PressButtonResult extends BaseActionResult {
   keyCode: number;
   code?: string;
   retryable?: boolean;
+  dispatched?: boolean;
+  acknowledged?: boolean;
 }

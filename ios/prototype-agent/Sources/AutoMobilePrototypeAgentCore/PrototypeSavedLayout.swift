@@ -79,9 +79,13 @@ private enum SavedReadError: Error {
 /// This reader never deletes or repairs files. Missing spec references need not have manifest entries.
 struct PrototypeSavedLayoutReader {
     private let limits: PrototypeSavedLayoutLimits
-    private let files = FileManager.default
+    private let files: any PrototypeLibraryFileSystem
 
-    init(limits: PrototypeSavedLayoutLimits = PrototypeSavedLayoutLimits()) {
+    init(
+        limits: PrototypeSavedLayoutLimits = PrototypeSavedLayoutLimits(),
+        files: any PrototypeLibraryFileSystem = PrototypeLibraryDiskFileSystem()
+    ) {
+        self.files = files
         self.limits = limits
     }
 
@@ -94,15 +98,15 @@ struct PrototypeSavedLayoutReader {
     }
 
     private func read(_ directory: URL) throws -> PrototypeSavedLoadResult {
-        guard files.fileExists(atPath: directory.path) else { return .notFound }
+        guard files.exists(directory) else { return .notFound }
         try requireDirectory(directory)
-        let children = try files.contentsOfDirectory(atPath: directory.path)
+        let children = try files.children(directory)
         if children.isEmpty { return .notFound }
         let manifestData = try boundedData(
             directory.appendingPathComponent(PrototypeSavedLayout.manifestName), cap: limits.maxManifestBytes
         )
         // JSONValue preserves bool vs number, rejects nonobjects, and avoids NSNumber boolean coercion.
-        let document = try JSONDecoder().decode(JSONValue.self, from: manifestData)
+        let document = try JSONDecoder().decode(JSONValue.self, from: PrototypeStrictJSON.prepare(manifestData))
         guard case let .object(fields) = document,
               case let .number(number) = fields["formatVersion"],
               let version = Int(exactly: number)
@@ -193,7 +197,7 @@ struct PrototypeSavedLayoutReader {
         let url = directory.appendingPathComponent(record.file)
         let folder = url.deletingLastPathComponent()
         // Reject intermediate symlinks too, even when the leaf is an ordinary file.
-        if (try? files.attributesOfItem(atPath: folder.path)) != nil { try requireDirectory(folder) }
+        if files.exists(folder) { try requireDirectory(folder) }
         let cap = record.isFont ? limits.maxFontBytes : limits.maxImageBytes
         let data = try boundedData(url, cap: cap)
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -202,29 +206,14 @@ struct PrototypeSavedLayoutReader {
     }
 
     private func requireDirectory(_ url: URL) throws {
-        let attributes = try files.attributesOfItem(atPath: url.path)
-        guard attributes[.type] as? FileAttributeType == .typeDirectory
-        else { throw SavedReadError.asset(.unsafePath, "Not a regular directory") }
+        do { try files.assertRealDirectory(url) }
+        catch { throw SavedReadError.asset(.unsafePath, "Not a regular directory") }
     }
 
     private func boundedData(_ url: URL, cap: Int) throws -> Data {
-        let attributes: [FileAttributeKey: Any]
-        do {
-            attributes = try files.attributesOfItem(atPath: url.path)
-        } catch {
-            let code = (error as NSError).code
-            if code == NSFileReadNoSuchFileError || code == NSFileNoSuchFileError {
-                throw SavedReadError.asset(.missing, "File is missing")
-            }
-            throw SavedReadError.asset(.unreadable, "Cannot read file attributes")
+        do { return try files.read(url, cap: cap) }
+        catch let failure as PrototypeLibraryReadFailure {
+            throw SavedReadError.asset(failure.kind, failure.message)
         }
-        guard attributes[.type] as? FileAttributeType == .typeRegular
-        else { throw SavedReadError.asset(.unsafePath, "Not a regular file or is a symlink") }
-        guard let size = attributes[.size] as? NSNumber, size.int64Value > 0, size.int64Value <= Int64(cap)
-        else { throw SavedReadError.asset(.oversized, "Empty file or byte cap exceeded") }
-        let data = try Data(contentsOf: url)
-        guard !data.isEmpty, data.count <= cap
-        else { throw SavedReadError.asset(.oversized, "Empty file or byte cap exceeded") }
-        return data
     }
 }

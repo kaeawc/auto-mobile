@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -15,7 +18,8 @@ import org.junit.Test
  * [IcuRegexSyntax.problems] (unescaped `{`/`}`/`]` literals, a `]` opening a character class, `&&`
  * class intersection, lookbehind, named groups, `\h \H \R \X \N`), and no pattern is built from a
  * non-literal or templated string that this scan could not inspect, except the explicitly reviewed
- * parser-validated compilation in PrototypeCheckPattern.
+ * parser-validated compilation in PrototypeCheckPattern and the contract-driven patterns in
+ * PrototypeSpecContract, whose actual strings are checked by the contract test below.
  *
  * What this does NOT prove: JVM tests cannot run ICU. The checker is a hand-written approximation
  * of the known JVM-vs-ICU divergences, not ICU itself, so a pattern it accepts could still fail on
@@ -111,6 +115,36 @@ class IcuRegexCompatibilityTest {
         violations.joinToString("\n"),
       violations.isEmpty(),
     )
+  }
+
+  @Test
+  fun `every pattern in the prototype spec contract is icu safe`() {
+    val text =
+      checkNotNull(javaClass.getResourceAsStream("/prototype-spec-contract.json")) {
+          "prototype-spec-contract.json missing from the test classpath"
+        }
+        .bufferedReader()
+        .use { it.readText() }
+    val patterns = Json.parseToJsonElement(text).jsonObject.getValue("patterns").jsonObject
+    assertTrue("contract defines no patterns; the guard would pass vacuously", patterns.isNotEmpty())
+    val violations =
+      patterns.flatMap { (name, value) ->
+        IcuRegexSyntax.problems(value.jsonPrimitive.content).map { "$name: $it" }
+      }
+    assertTrue(
+      "Contract patterns that Android's ICU engine may reject:\n" + violations.joinToString("\n"),
+      violations.isEmpty(),
+    )
+  }
+
+  @Test
+  fun `scanner exempts only the contract driven pattern compilation`() {
+    val path =
+      "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt"
+    val call = "mapValues { Regex(it.value.jsonPrimitive.content) }"
+    assertTrue(RegexLiteralScanner.scan(call, path).isEmpty())
+    assertEquals(1, RegexLiteralScanner.scan(call, "Other.kt").size)
+    assertEquals(1, RegexLiteralScanner.scan("Regex(other.value)", path).size)
   }
 
   @Test
@@ -230,7 +264,15 @@ object RegexLiteralScanner {
         next != null &&
         s.startsWith("source(pattern))", next) &&
         s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
-    if (call != null && !isLiteralArg && !validatedPortablePattern) {
+    // Contract JSON patterns are checked as strings by the contract test, not as source.
+    val contractPatterns =
+      call == "Regex(" &&
+        path.endsWith(
+          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt",
+        ) &&
+        next != null &&
+        s.startsWith("it.value.jsonPrimitive.content)", next)
+    if (call != null && !isLiteralArg && !validatedPortablePattern && !contractPatterns) {
       sites +=
         RegexSite(
           "$path:${lineOf(s, i)}",

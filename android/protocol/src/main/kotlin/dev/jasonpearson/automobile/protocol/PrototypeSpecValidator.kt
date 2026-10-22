@@ -108,7 +108,7 @@ object PrototypeSpecValidator {
         checkNotNull(context.root).jsonObject,
         supportedCapabilities,
         library,
-        context.actions,
+        context,
       )
     return if (error == null) result else PrototypeSpecValidation.Failure(error)
   }

@@ -266,7 +266,7 @@ app-owned parent directory; callers serialize commits and the Node adapter uses 
 2. The strict zip reader (section 4) for bundles.
 3. Strict JSON parse: BOM strip, duplicate keys rejected, depth-limited.
 4. The full validator (TS and Kotlin full; Swift reject-only port): unknown keys rejected,
-   `window.layer: "system"` rejected, `secure` and `password` bindings into request URL, headers or
+   `window.layer: "system"` rejected, `secure` and `password` bindings into request URL, headers, query or
    body and into `storage` rejected, forbidden request headers (`Host`, `Connection`, `Upgrade`,
    `Proxy-*`, `Cookie`) and CR/LF rejected, and `via: "host"` rejected for library prototypes.
 5. Capability check: `PROTOTYPE_SPEC_CAPABILITY_GATES` against the app's capability set, yielding

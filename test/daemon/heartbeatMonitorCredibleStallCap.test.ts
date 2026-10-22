@@ -8,9 +8,10 @@ import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/se
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { monotonicClockIncludesHostSleep } from "../../src/utils/SystemTimer";
 
-// #10962 (owner decision 2026-10-09): where the monotonic clock runs through host sleep (Linux,
-// Windows) a credible daemon stall is capped at a fixed 30 s, independent of the idle window. Any
+// #10962 (owner decision 2026-10-09): where the monotonic clock runs through host sleep (Windows;
+// Linux too before Bun 1.4) a credible daemon stall is capped at a fixed 30 s, independent of the idle window. Any
 // longer gap is host sleep and counts toward idle. Plus a self-check for clock-semantics drift.
 
 const SESSION = "credible-stall-session";
@@ -29,11 +30,8 @@ afterEach(async () => {
   manager = undefined;
 });
 
-/** A monitor with its DEFAULT stall cap (no maxCredibleStallMs) on a Linux-model clock. */
-async function linuxModel(idleMs: number, bunVersion = "1.3.14", timer = new FakeTimer()) {
-  if (!timer.monotonicIncludesHostSleep) {
-    timer.simulateSleepCountingMonotonicClock();
-  }
+/** A monitor with its DEFAULT stall cap (no maxCredibleStallMs) on the given clock. */
+async function monitorOn(timer: FakeTimer, idleMs: number, bunVersion: string) {
   manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const sessions = manager;
   monitor = new SessionHeartbeatMonitor(
@@ -50,13 +48,21 @@ async function linuxModel(idleMs: number, bunVersion = "1.3.14", timer = new Fak
   return { timer, manager: sessions, monitor, session };
 }
 
+/** A monitor with its DEFAULT stall cap on a sleep-counting (Windows) clock. */
+async function sleepCountingModel(idleMs: number, bunVersion = "1.4.4", timer = new FakeTimer()) {
+  if (!timer.monotonicIncludesHostSleep) {
+    timer.simulateSleepCountingMonotonicClock();
+  }
+  return monitorOn(timer, idleMs, bunVersion);
+}
+
 describe("credible daemon stall cap on a sleep-counting clock (#10962)", () => {
   test("defaults to 30 s, not the idle window", () => {
     expect(MAX_CREDIBLE_DAEMON_STALL_MS).toBe(30_000);
   });
 
   test("a 90 s gap counts toward idle under the 2-minute window", async () => {
-    const { timer, monitor, session } = await linuxModel(DEFAULT_IDLE_MS);
+    const { timer, monitor, session } = await sleepCountingModel(DEFAULT_IDLE_MS);
     const expiresAt = session.expiresAt;
     timer.simulateHostSleep(90_000);
     await monitor.tick();
@@ -64,7 +70,7 @@ describe("credible daemon stall cap on a sleep-counting clock (#10962)", () => {
   });
 
   test("a 20 s gap is forgiven as a daemon stall", async () => {
-    const { timer, monitor, session } = await linuxModel(DEFAULT_IDLE_MS);
+    const { timer, monitor, session } = await sleepCountingModel(DEFAULT_IDLE_MS);
     const expiresAt = session.expiresAt;
     timer.simulateHostSleep(20_000);
     await monitor.tick();
@@ -73,7 +79,7 @@ describe("credible daemon stall cap on a sleep-counting clock (#10962)", () => {
 
   test("a 60 s autolock window is never extended by more than 30 s, at any gap", async () => {
     for (let gapMs = 0; gapMs <= 150_000; gapMs += 2_500) {
-      const { timer, monitor, manager, session } = await linuxModel(AUTOLOCK_IDLE_MS);
+      const { timer, monitor, manager, session } = await sleepCountingModel(AUTOLOCK_IDLE_MS);
       const expiresAt = session.expiresAt;
       timer.simulateHostSleep(gapMs);
       await monitor.tick();
@@ -88,7 +94,7 @@ describe("credible daemon stall cap on a sleep-counting clock (#10962)", () => {
     for (const lateMs of [MAX_CREDIBLE_DAEMON_STALL_MS, MAX_CREDIBLE_DAEMON_STALL_MS + 1]) {
       const results: number[] = [];
       for (const lookupFirst of [true, false]) {
-        const { timer, monitor, manager, session } = await linuxModel(AUTOLOCK_IDLE_MS);
+        const { timer, monitor, manager, session } = await sleepCountingModel(AUTOLOCK_IDLE_MS);
         const expiresAt = session.expiresAt;
         timer.simulateHostSleep(lateMs + SCAN_MS);
         if (lookupFirst) {
@@ -109,8 +115,8 @@ describe("clock-semantics self-check (#10962)", () => {
   test("warns at startup when the running Bun is not the verified release line", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      await linuxModel(DEFAULT_IDLE_MS, "1.4.2");
-      expect(warn.mock.calls.some((call) => String(call[0]).includes("Bun 1.4.2"))).toBe(true);
+      await sleepCountingModel(DEFAULT_IDLE_MS, "1.3.14");
+      expect(warn.mock.calls.some((call) => String(call[0]).includes("Bun 1.3.14"))).toBe(true);
     } finally {
       warn.mockRestore();
     }
@@ -119,7 +125,7 @@ describe("clock-semantics self-check (#10962)", () => {
   test("is silent on the verified release line", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      await linuxModel(DEFAULT_IDLE_MS, "1.3.14");
+      await sleepCountingModel(DEFAULT_IDLE_MS, "1.4.4");
       expect(warn.mock.calls.some((call) => String(call[0]).includes("#10962"))).toBe(false);
     } finally {
       warn.mockRestore();
@@ -144,7 +150,7 @@ describe("clock-semantics self-check (#10962)", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const timer = new MisjudgedClock();
-      const { monitor } = await linuxModel(DEFAULT_IDLE_MS, "1.3.14", timer);
+      const { monitor } = await sleepCountingModel(DEFAULT_IDLE_MS, "1.4.4", timer);
       timer.sleepWithPausedMonotonic(20_000);
       await monitor.tick();
       timer.sleepWithPausedMonotonic(20_000);
@@ -156,5 +162,32 @@ describe("clock-semantics self-check (#10962)", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("Linux clock under Bun 1.4 (#14979)", () => {
+  /** A FakeTimer with the clock semantics the platform table assigns to Linux. */
+  function linuxClock(): FakeTimer {
+    const timer = new FakeTimer();
+    if (monotonicClockIncludesHostSleep("linux")) {
+      timer.simulateSleepCountingMonotonicClock();
+    }
+    return timer;
+  }
+
+  test("a 20 s host sleep counts toward idle instead of being forgiven as a daemon stall", async () => {
+    const { timer, monitor, session } = await monitorOn(linuxClock(), DEFAULT_IDLE_MS, "1.4.4");
+    const expiresAt = session.expiresAt;
+    timer.simulateHostSleep(20_000);
+    await monitor.tick();
+    expect(session.expiresAt).toBe(expiresAt);
+  });
+
+  test("a 90 s daemon stall is still forgiven past the sleep-counting 30 s cap", async () => {
+    const { timer, monitor, session } = await monitorOn(linuxClock(), DEFAULT_IDLE_MS, "1.4.4");
+    const expiresAt = session.expiresAt;
+    timer.setCurrentTime(timer.now() + 90_000);
+    await monitor.tick();
+    expect(session.expiresAt).toBeGreaterThan(expiresAt + MAX_CREDIBLE_DAEMON_STALL_MS);
   });
 });

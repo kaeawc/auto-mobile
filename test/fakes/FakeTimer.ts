@@ -258,7 +258,7 @@ export class FakeTimer implements FakeTimerContract {
   /**
    * The monotonic clock: it moves with every advance and `setCurrentTime`, but not across
    * {@link simulateHostSleep}, like `performance.now()` across a macOS suspend. With
-   * {@link simulateSleepCountingMonotonicClock} it runs through sleep too, as on Windows and Linux.
+   * {@link simulateSleepCountingMonotonicClock} it runs through sleep too, as on Windows.
    */
   monotonicNow(): number {
     return this.monotonicIncludesHostSleep ? this.currentTime : this.currentTime - this.hostSleptMs;
@@ -271,7 +271,7 @@ export class FakeTimer implements FakeTimerContract {
 
   /**
    * Make the monotonic clock run through {@link simulateHostSleep}, like `QueryPerformanceCounter`
-   * on Windows or `CLOCK_BOOTTIME` on Linux, so sleep is indistinguishable from a stall.
+   * on Windows (or `CLOCK_BOOTTIME` on Linux under Bun 1.3), so sleep is indistinguishable from a stall.
    */
   simulateSleepCountingMonotonicClock(): void {
     this.sleepCountingMonotonic = true;

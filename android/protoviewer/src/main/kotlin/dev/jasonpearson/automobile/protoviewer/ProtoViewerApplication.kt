@@ -84,6 +84,8 @@ class ProtoViewerServices(
   allowedClient: () -> PrototypeHttpClient = {
     RetrofitPrototypeHttpClient(OkHttpClient(), policy = PrototypeEgressPolicy())
   },
+  val renderWatchdog: RenderWatchdog = DeadlineRenderWatchdog(),
+  val renderer: ViewerRenderer = GuardedViewerRenderer,
   val localNetworkPermission: (ComponentActivity, (Boolean) -> Unit) -> LocalNetworkPermission =
     ::AndroidLocalNetworkPermission,
 ) {

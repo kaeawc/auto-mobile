@@ -86,9 +86,9 @@ and its renderer honours privileged window options. ProtoViewer declares `INTERN
 runtime-granted `ACCESS_LOCAL_NETWORK` permission that Android 17 (API 37) requires for private LAN
 connections, and nothing else (no accessibility, input method, overlay, device-admin or camera).
 `ACCESS_LOCAL_NETWORK` is requested only when the user turns on "Allow network for imported
-prototypes" (section 6), never at install or first launch; if it is denied, the switch stays on for
-internet access and the library explains that LAN requests may time out (Android slice 3, closing
-#14539 via this work). The validator rejects `window.layer: "system"` and any other privileged window
+prototypes" (section 6), never at install or first launch; if it is denied, the switch turns off and
+the library explains that network access is disabled until permission is granted (Android slice 3,
+closing #14539 via this work). The validator rejects `window.layer: "system"` and any other privileged window
 option for library prototypes.
 
 - **Android renderer extraction is one mechanical move.** The `ctrlproxy/prototype` package imports
@@ -292,7 +292,9 @@ app's release plus the capability gates. There are no migrations.
 
 **Imported prototypes (library imports, and prototypes saved through MCP, which follow the same
 policy):** one global switch, "Allow network for imported prototypes", **default off**. When off,
-`request` actions fail with a typed error shown to the prototype (`statusKey` `error`). Per-host
+`request` actions fail with a typed error shown to the prototype (`statusKey` `error`). Switching
+network off cancels in-flight Android requests and drops late responses, even after a quick off/on
+cycle. Per-host
 consent is later work. MCP-direct `show` keeps today's behaviour. When on:
 
 - The egress check runs in the HTTP client on the resolved address, at every hop. It blocks
@@ -330,7 +332,8 @@ consent is later work. MCP-direct `show` keeps today's behaviour. When on:
 - Imported-prototype content is marked as imported in `observe` and `awaitEvent`; `open` states
   when an entry is imported; host attach is off by default for imported prototypes.
 - Limits: 200 prototypes and 100 MiB per library, enforced at commit and on load, plus a render
-  watchdog. Android sets `allowBackup=false` and allows no cleartext outside the dev flavor. iOS
+  watchdog. Android allows 10 seconds for loading and the first successful content composition;
+  timeout or composition failure shows the corrupt state with Back. Android sets `allowBackup=false` and allows no cleartext outside the dev flavor. iOS
   distributed (non-simulator) builds carry no App Transport Security exception.
 
 The shared request-policy and storage work is tracked in #13622.

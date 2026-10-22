@@ -1080,7 +1080,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       # The selector adds `docs-github-markdown` when docs/ changes, and that
       # check exits 2 without uv ("uv is required"), failing every docs PR.
@@ -1278,7 +1278,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
       - name: "Install Bun dependencies"
@@ -2026,7 +2026,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         shell: bash
@@ -3137,7 +3137,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: "Install Bun dependencies"
         shell: bash
@@ -3448,6 +3448,35 @@ jobs:
         working-directory: .
         run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
 
+      # Prototype renderer publication (#13727): publish the renderer and the
+      # protocol it depends on, and check the renderer's stable API.
+      # Update the baseline with: cd android && ./gradlew :prototype-compose:apiDump
+      - name: "Publish prototype renderer and check its public API"
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":protocol:publishToMavenLocal :prototype-compose:publishToMavenLocal :prototype-compose:apiCheck"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      # Asserts the AAR, sources jar and POM, then builds a minified release app
+      # that resolves the renderer from the local Maven repo.
+      - name: "Verify the published prototype renderer from a minified consumer"
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: bash scripts/android/validate-prototype-compose-consumer.sh --skip-publish
+
+      - name: "Upload prototype consumer logs"
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: prototype-compose-consumer-logs
+          path: scratch/prototype-compose-consumer/logs/
+          if-no-files-found: ignore
+
       # JUnit Runner Kotlin Consumer Compatibility (folded in by #10894).
       - name: "Install JDK"
         if: ${{ !cancelled() }}
@@ -3598,7 +3627,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
       - name: "Install Bun dependencies"
@@ -3713,7 +3742,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 

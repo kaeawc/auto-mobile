@@ -25,6 +25,10 @@ import {
 } from "../../features/prototype/prototypeEventTimeout";
 import { MAX_PROTOTYPE_PATCH_OPS } from "../../features/prototype/prototypePatch";
 import {
+  MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS,
+  PROTOTYPE_ACCESSIBILITY_RULES,
+} from "../../features/prototype/prototypeAccessibilityLint";
+import {
   MAX_PROTOTYPE_SPEC_BYTES,
   prototypeSpecSchema,
   type PrototypeData,
@@ -693,6 +697,28 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "Successful show on iOS only: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
     ),
+  accessibilityFindings: z
+    .array(
+      z.object({
+        rule: z.enum(PROTOTYPE_ACCESSIBILITY_RULES),
+        path: z.string(),
+        detail: z.string(),
+        mode: z.enum(["light", "dark"]).optional(),
+        value: z.number().optional(),
+        minimum: z.number().optional(),
+      }),
+    )
+    .max(MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS)
+    .optional()
+    .describe(
+      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA) or small-touch-target (authored size under 48dp); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
+    ),
+  accessibilityFindingsTotal: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Total accessibility findings, present only when accessibilityFindings was capped"),
   event: prototypeEventOutputSchema.optional(),
   timedOut: z
     .literal(true)

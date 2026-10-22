@@ -225,7 +225,8 @@ Journaled non-read calls with an empty adapter result record an opaque
 `unobservable` intent instead of silently proceeding. `screenLock` is covered;
 its reader can capture an unsecured baseline, but cannot recover an existing
 secure credential, so it records `unobservable` without storing secrets or adding
-a keep-booted gate. Prior reads are skipped when the scoped `(kind, key)` already
+a keep-booted gate. `power` is covered the same way: it records `unobservable` because its
+session restore registry (`restoreReceipt`, `powerRestore`) owns the prior values. Prior reads are skipped when the scoped `(kind, key)` already
 exists, using one journal list per call. Rotation and screen-reader keys use
 `device`, matching the legacy adapters. iOS rotation records `unobservable`
 instead of inventing portrait orientation or attempting Android orientation reads.

@@ -24,6 +24,7 @@ import { BiometricOperations } from "./device-state/BiometricOperations";
 import type { BiometricEnrollment, BiometricEnrollmentState } from "./device-state/BiometricState";
 import { ClockOperations } from "./device-state/ClockOperations";
 import { createScreenLockOperations } from "./screenLock/ScreenLockOperations";
+import { createPowerOperations } from "./power/PowerOperations";
 import {
   DEFAULT_DEVICE_STATE_FIELDS,
   EMPTY_STATE_SELECTION_ERROR,
@@ -174,12 +175,21 @@ export class DeviceState {
 
   private readonly screenLock: ReturnType<typeof createScreenLockOperations>;
 
+  private readonly power: ReturnType<typeof createPowerOperations>;
+
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
     this.screenLock = createScreenLockOperations(
       () => this.device,
       () => this.adbFactory,
       dependencies.screenLock,
+    );
+    this.power = createPowerOperations(
+      () => this.device,
+      () => this.adbFactory,
+      () => this.deviceTraits,
+      () => this.timer,
+      dependencies.power,
     );
     this.clock = new ClockOperations(
       {
@@ -282,6 +292,7 @@ export class DeviceState {
           }
         : {}),
       ...(include.includes("screenLock") ? { screenLock: await this.screenLock.read() } : {}),
+      ...(include.includes("power") ? { power: await this.power.read() } : {}),
     };
   }
 
@@ -372,6 +383,7 @@ export class DeviceState {
           }
         : {}),
       ...(input.screenLock ? { screenLock: await this.screenLock.write(input.screenLock) } : {}),
+      ...(input.power ? { power: await this.power.write(input.power) } : {}),
     };
   }
 

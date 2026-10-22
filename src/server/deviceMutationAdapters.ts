@@ -85,6 +85,7 @@ function deviceStateMutations(args: Record<string, unknown>): ToolMutation[] {
     ["doNotDisturb", "device-setting"],
     ["cameraPoster", "device-setting"],
     ["screenLock", "device-setting"],
+    ["power", "device-setting"],
   ];
   const mutations = entries
     .filter(([field]) => args[field] !== undefined)

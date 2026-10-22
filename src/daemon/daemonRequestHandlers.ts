@@ -49,6 +49,7 @@ import {
 } from "./deviceLeaseActivitySources";
 import { decideOwnerRelinquish } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import { screenLockRestoreResult } from "./screenLockSessionCleanup";
+import { powerRestoreResult } from "./powerSessionCleanup";
 import type {
   DaemonStateAccess,
   DevicePoolStats,
@@ -513,7 +514,7 @@ async function releaseSessionWithoutDevice(
   );
 }
 
-/** Restores a release reports in its result: keep-awake settings and the session's screen lock. */
+/** Restores a release reports in its result: keep-awake settings, the session's screen lock and power state. */
 async function releaseRestoreReports(
   state: DaemonStateAccess,
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
@@ -523,6 +524,7 @@ async function releaseRestoreReports(
   return {
     ...(keepAwakeRestore ? { keepAwakeRestore } : {}),
     ...(await screenLockRestoreResult(sessionId, { registry: state.getScreenLockRegistry?.() })),
+    ...(await powerRestoreResult(sessionId, { registry: state.getPowerRegistry?.() })),
   };
 }
 

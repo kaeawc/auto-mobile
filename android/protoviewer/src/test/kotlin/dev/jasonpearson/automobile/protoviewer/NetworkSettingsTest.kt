@@ -33,7 +33,7 @@ class NetworkSettingsTest {
   }
 
   @Test
-  fun permissionOnlyOnEnableAtApi37OrHigherAndDenialKeepsInternetEnabled() {
+  fun permissionOnlyOnEnableAtApi37OrHigherAndDenialDisablesNetwork() {
     for (api in listOf(37, 38)) {
       val before = permission.requests
       val controller = NetworkSettings(settings, permission, api)
@@ -41,15 +41,30 @@ class NetworkSettingsTest {
       controller.setEnabled(false)
       assertEquals(before, permission.requests)
       var granted: Boolean? = null
-      permission.result = { granted = it }
+      permission.result = {
+        granted = it
+        controller.onPermissionResult(it)
+      }
       controller.setEnabled(true)
       assertEquals(before + 1, permission.requests)
       assertEquals(false, granted)
-      assertTrue(settings.allowNetwork.value)
+      assertFalse(settings.allowNetwork.value)
+      permission.granted = true
       controller.setEnabled(true)
       controller.setEnabled(false)
-      assertEquals(before + 1, permission.requests)
+      assertEquals(before + 2, permission.requests)
+      permission.granted = false
     }
+  }
+
+  @Test
+  fun lateGrantAfterSwitchOffDoesNotReenableNetwork() {
+    val controller = NetworkSettings(settings, permission, 37)
+    permission.result = {} // Hold the platform result until after the user switches off.
+    controller.setEnabled(true)
+    controller.setEnabled(false)
+    controller.onPermissionResult(true)
+    assertFalse(settings.allowNetwork.value)
   }
 
   @Test
@@ -68,7 +83,11 @@ class NetworkSettingsTest {
     permission.granted = true
     val controller = NetworkSettings(settings, permission, 37)
     repeat(2) {
-      permission.result = { assertTrue(it) }
+      permission.result = {
+        controller.onPermissionResult(it)
+        assertTrue(it)
+      }
+      controller.setEnabled(true)
       controller.setEnabled(true)
       assertTrue(settings.allowNetwork.value)
       controller.setEnabled(false)

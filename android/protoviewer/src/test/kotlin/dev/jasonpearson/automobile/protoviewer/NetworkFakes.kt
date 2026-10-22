@@ -9,8 +9,11 @@ import kotlinx.coroutines.flow.asStateFlow
 internal class FakeSettingsStore : SettingsStore {
   private val network = MutableStateFlow(false)
   override val allowNetwork = network.asStateFlow()
+  private val revocations = MutableStateFlow(0L)
+  override val networkRevocations = revocations.asStateFlow()
 
   override fun setAllowNetwork(enabled: Boolean) {
+    if (!enabled && network.value) revocations.value++
     network.value = enabled
   }
 }

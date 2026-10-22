@@ -13,6 +13,7 @@ export function deviceStateMessage(result: DeviceStateResult): string {
     networkConditionMessage(result),
     sensorsMessage(result),
     screenLockMessage(result),
+    powerMessage(result),
   ].filter((section): section is string => section !== undefined);
   return sections.length > 0 ? sections.join("; ") : "Read device state";
 }
@@ -61,4 +62,19 @@ function sensorsMessage(result: DeviceStateResult): string | undefined {
 function screenLockMessage(result: DeviceStateResult): string | undefined {
   const type = result.screenLock?.supported ? result.screenLock.type : undefined;
   return type === undefined ? undefined : `Screen lock ${type}`;
+}
+
+function powerMessage(result: DeviceStateResult): string | undefined {
+  const power = result.power?.supported ? result.power : undefined;
+  if (!power) {
+    return undefined;
+  }
+  const parts = [
+    power.battery ? `battery ${power.battery.level}% ${power.battery.charging}` : undefined,
+    power.doze && power.doze.mode !== "off" ? `${power.doze.mode} Doze` : undefined,
+    power.batterySaver ? "battery saver on" : undefined,
+    power.dataSaver ? "data saver on" : undefined,
+    power.thermal?.override ? `thermal ${power.thermal.status} (override)` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.length > 0 ? `Power: ${parts.join(", ")}` : "Power read";
 }

@@ -84,8 +84,10 @@ the existing shell/push mechanism is retained. See
 - `changeLocalization` sets language, region, time zone, and formatting for a
   device. Set the locale before launching the app.
 - `setDeviceState` configures supported system state such as biometric
-  enrollment, or an Android lock-screen PIN, password, or pattern (`screenLock`)
-  that the session clears on release.
+  enrollment, an Android lock-screen PIN, password, or pattern (`screenLock`)
+  that the session clears on release, or Android power constraints (`power`:
+  battery, battery saver, Doze, standby buckets, Data Saver, thermal status)
+  that the session restores on release.
 - `biometricAuth` simulates a match or failure on supported emulators and iOS
   simulators, and every result in apps that embed the AutoMobile SDK.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.

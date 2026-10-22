@@ -8,9 +8,33 @@ import {
   type PerfSample,
 } from "../../../src/features/performance/PerfWindowBuffer";
 import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrameMetricsStore";
+import { TelemetryPushSocketServer } from "../../../src/daemon/telemetryPushSocketServer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeSocket } from "../../fakes/FakeNetServer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
+
+/** A real telemetry server whose sole performance subscriber is mid-backfill. */
+class BackfillingTelemetryServer extends TelemetryPushSocketServer {
+  readonly socket = new FakeSocket();
+  constructor(timer: FakeTimer) {
+    super("/fake/telemetry-demand.sock", timer);
+  }
+  beginBackfill(): void {
+    this.subscribers.set("perf", {
+      socket: this.socket,
+      subscriptionId: "perf",
+      lastActivity: 0,
+      filter: { category: "performance", deviceSessionUuid: null, deviceId: null, sessionId: null },
+      backfilling: true,
+      drainPending: false,
+    });
+    this.startBackfill("perf");
+  }
+  finish(): Promise<void> {
+    return this.finishBackfill("perf");
+  }
+}
 
 class RecordingBuffer extends PerfWindowBuffer {
   readonly records: PerfSample[] = [];
@@ -103,6 +127,27 @@ describe("PerformanceMonitor demand", () => {
     expect(pushes).toHaveLength(2);
     expect(pushes.every(({ deviceId }) => deviceId === "android-a")).toBe(true);
     expect(ps).toHaveLength(0);
+  });
+
+  test("a telemetry subscriber mid-backfill keeps the device sampling across ticks (#14461)", async () => {
+    const telemetry = new BackfillingTelemetryServer(new FakeTimer());
+    const probe = createDaemonPerformanceDemandProbe({
+      getPerformancePushServer: () => null,
+      getDeviceDataStreamServer: () => null,
+      getTelemetryPushServer: () => telemetry,
+    });
+    const { monitor, advance, pushes } = setup(probe);
+    monitor.startMonitoring("ios-a", "com.c", "ios");
+    telemetry.beginBackfill();
+    // Two sampling ticks land while the subscription's DB backfill is in flight.
+    await advance(1000);
+    expect(pushes).toHaveLength(2);
+    await telemetry.finish();
+    await advance(500);
+    expect(pushes).toHaveLength(3);
+    telemetry.socket.destroy();
+    await advance(500);
+    expect(pushes).toHaveLength(3);
   });
 
   test("no consumers: zero subprocesses, pushes or buffer records for a minute", async () => {
@@ -269,6 +314,27 @@ describe("PerformanceMonitor demand", () => {
     await advance(500);
     expect(pushes).toHaveLength(1);
     expect(monitor.isMonitoring("ios-a")).toBe(true);
+  });
+
+  test("an incarnation reset mid-lease drops the old lease so the replacement stays dormant (#14472)", async () => {
+    const { monitor, advance, pushes, demanded } = setup();
+    monitor.requestPerfWindow("ios-a", "com.c", "ios");
+    await advance(500);
+    expect(pushes).toHaveLength(1);
+    // VM restore / identity replacement well inside the five-minute lease.
+    monitor.resetDeviceState("ios-a");
+    await advance(1000);
+    expect(pushes).toHaveLength(1);
+    expect(monitor.isMonitoring("ios-a")).toBe(true);
+    // A real consumer of the replacement incarnation still resumes sampling.
+    demanded.add("ios-a");
+    await advance(500);
+    expect(pushes).toHaveLength(2);
+    // A fresh observe on the replacement grants a new lease.
+    demanded.clear();
+    monitor.requestPerfWindow("ios-a", "com.c", "ios");
+    await advance(500);
+    expect(pushes).toHaveLength(3);
   });
 
   test("hierarchy-style registration stays monitored without doing work", async () => {

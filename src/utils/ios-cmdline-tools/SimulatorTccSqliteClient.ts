@@ -30,6 +30,10 @@ const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
   ["siri", "kTCCServiceSiri"],
 ]);
 
+export const SIMCTL_PRIVACY_TCC_SERVICES: readonly string[] = [
+  ...new Set(TCC_SERVICE_BY_PERMISSION.values()),
+];
+
 export type TccPermissionRow = {
   service: string;
   client: string;
@@ -46,6 +50,27 @@ export interface TccPermissionReader {
     permissions?: string[],
     signal?: AbortSignal,
   ): Promise<TccPermissionRow[]>;
+}
+
+export interface TccServiceRowReader {
+  readServiceRows(
+    deviceId: string,
+    services: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<TccPermissionRow[]>;
+}
+
+/** A user trust setting row: the SHA-256 (hex) of a certificate the user trusts explicitly. */
+export interface UserTrustedCertificate {
+  sha256: string;
+}
+
+export interface UserTrustStoreReader {
+  /** Certificates in the simulator's user trust settings (`tsettings`); empty when none. */
+  readUserTrustedCertificates(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<UserTrustedCertificate[]>;
 }
 
 export interface TccDatabaseFileSystem {
@@ -228,7 +253,9 @@ function parsePermissionRows(output: string, deviceId: string): TccPermissionRow
  * database path, argv construction, schema handling, timeout, and error
  * classification together so permission actions never invoke sqlite directly.
  */
-export class SimulatorTccSqliteClient implements TccPermissionReader {
+export class SimulatorTccSqliteClient
+  implements TccPermissionReader, TccServiceRowReader, UserTrustStoreReader
+{
   private readonly resolveKind: typeof resolveIosDeviceKind;
   private readonly executor: HostCommandExecutor;
   private readonly fileSystem: TccDatabaseFileSystem;
@@ -260,17 +287,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     signal?: AbortSignal,
   ): Promise<TccPermissionRow[]> {
     const databasePath = await this.resolveDatabasePath(deviceId);
-    const columns = await this.readAccessColumns(databasePath, deviceId, signal);
-    const requiredColumns = ["service", "client"].filter((column) => !columns.has(column));
-    if (requiredColumns.length > 0) {
-      throw new ActionableError(
-        `Simulator TCC database for ${deviceId} is incompatible: missing required access columns: ${requiredColumns.join(", ")}`,
-      );
-    }
-
-    const optionalColumns = ["auth_version", "auth_value", "allowed", "prompt_count"].filter(
-      (column) => columns.has(column),
-    );
+    const optionalColumns = await this.readPermissionColumns(databasePath, deviceId, signal);
     const services = (permissions ?? []).map(tccServiceForPermission);
     const parameterArgs = [
       "-cmd",
@@ -298,6 +315,100 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
       signal,
     );
     return parsePermissionRows(result.stdout, deviceId);
+  }
+
+  async readServiceRows(
+    deviceId: string,
+    services: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<TccPermissionRow[]> {
+    if (services.length === 0) {
+      return [];
+    }
+    const databasePath = await this.resolveDatabasePath(deviceId);
+    const optionalColumns = await this.readPermissionColumns(databasePath, deviceId, signal);
+    const parameterArgs = [
+      "-cmd",
+      ".parameter init",
+      ...services.flatMap((service, index) => [
+        "-cmd",
+        `.parameter set :service${index} ${sqliteParameterValue(service)}`,
+      ]),
+    ];
+    const query = [
+      `select ${["service", "client", ...optionalColumns].join(", ")}`,
+      "from access",
+      `where service in (${services.map((_service, index) => `:service${index}`).join(", ")});`,
+    ].join("\n");
+    const result = await this.execute(
+      ["-json", ...parameterArgs, databasePath, query],
+      databasePath,
+      deviceId,
+      signal,
+    );
+    return parsePermissionRows(result.stdout, deviceId);
+  }
+
+  /**
+   * Reads the simulator's user trust settings from trustd's database. `simctl keychain reset`
+   * leaves them alone, so a root CA trusted during a session survives it (#14828).
+   */
+  async readUserTrustedCertificates(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<UserTrustedCertificate[]> {
+    const udid = deviceId.trim();
+    if (!udid || this.resolveKind({ deviceId: udid }) === "physical") {
+      throw new ActionableError(`Trust store lookup requires a simulator UDID, received ${udid}`);
+    }
+    const databasePath = join(
+      this.deviceSetRoot,
+      udid,
+      "data",
+      "private",
+      "var",
+      "protected",
+      "trustd",
+      "private",
+      "TrustStore.sqlite3",
+    );
+    try {
+      await this.fileSystem.stat(databasePath);
+    } catch (error) {
+      // A missing store is unverifiable, not clean: fail closed so keep-booted erases (#14848).
+      throw new ActionableError(
+        `Simulator trust store is unavailable for ${udid}: ${sqliteErrorDetail(error)}`,
+      );
+    }
+    const result = await this.execute(
+      ["-json", databasePath, "select hex(sha256) as sha256 from tsettings;"],
+      databasePath,
+      udid,
+      signal,
+    );
+    return parseJsonArray(result.stdout, `simulator trust store for ${udid}`).map((row) => {
+      if (typeof row.sha256 !== "string") {
+        throw new ActionableError(`sqlite3 returned a trust setting without sha256 for ${udid}`);
+      }
+      return { sha256: row.sha256 };
+    });
+  }
+
+  private async readPermissionColumns(
+    databasePath: string,
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const columns = await this.readAccessColumns(databasePath, deviceId, signal);
+    const requiredColumns = ["service", "client"].filter((column) => !columns.has(column));
+    if (requiredColumns.length > 0) {
+      throw new ActionableError(
+        `Simulator TCC database for ${deviceId} is incompatible: missing required access columns: ${requiredColumns.join(", ")}`,
+      );
+    }
+    return ["auth_version", "auth_value", "allowed", "prompt_count"].filter((column) =>
+      columns.has(column),
+    );
   }
 
   private async resolveDatabasePath(deviceId: string): Promise<string> {

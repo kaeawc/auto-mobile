@@ -164,7 +164,7 @@ class VideoRecordingClientTest {
         """{"action":"start","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4"}]}""",
       )
 
-    val recordings = McpVideoRecordingActions { client }.startRecording("emulator-5554")
+    val recordings = McpVideoRecordingActions { client }.startRecording("emulator-5554").recordings
 
     assertEquals(1, recordings.size)
     assertEquals(listOf("setToolEnabled", "videoRecording"), client.toolCalls.map { it.name })

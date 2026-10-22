@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$manifest.specFile != "spec.json" || manifest.id.isEmpty() || manifest.id.length &gt; limits.assets.maxIdLength || manifest.label.isEmpty() || manifest.label.length &gt; limits.maxLabelLength</ID>
+    <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$override fun save: SavedPrototypeSaveResult</ID>
+    <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
+    <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun validate: SavedPrototypeSaveResult.Rejected?</ID>
+    <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$override fun save: SavedPrototypeSaveResult</ID>
+    <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
+    <ID>LongParameterList:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore</ID>
+    <ID>LongParameterList:SavedPrototypeStore.kt:SavedPrototypeLoadResult.Loaded</ID>
+    <ID>RedundantSuspendModifier:SavedPrototypeScreenState.kt:suspend</ID>
+    <ID>SwallowedException:RetrofitPrototypeHttpClient.kt:RetrofitPrototypeHttpClient$error: ConnectException</ID>
+    <ID>TooGenericExceptionCaught:SavedPrototypeScreenState.kt:error: Exception</ID>
+    <ID>TooManyFunctions:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore : SavedPrototypeStore</ID>
+  </CurrentIssues>
+</SmellBaseline>

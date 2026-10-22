@@ -38,6 +38,17 @@ final class PrototypeChartTests: XCTestCase {
         XCTAssertEqual(models[3].ringFraction, 0.65, accuracy: 1e-9)
     }
 
+    func testPointDescriptionsReadTheCategoryLabelAndValueNotPlotCoordinates() throws {
+        let bars = try charts()[2]
+        XCTAssertEqual(bars.pointDescription(seriesIndex: 0, index: 0).label, "Steps, Mon")
+        XCTAssertEqual(bars.pointDescription(seriesIndex: 0, index: 0).value, "6200")
+        XCTAssertEqual(bars.pointDescription(seriesIndex: 1, index: 2).label, "Goal pace, Wed")
+        XCTAssertEqual(bars.pointDescription(seriesIndex: 0, index: 9).label, "")
+        let line = try charts()[0]
+        XCTAssertEqual(line.pointDescription(seriesIndex: 0, index: 1).label, "9:00")
+        XCTAssertEqual(line.pointDescription(seriesIndex: 0, index: 1).value, "96")
+    }
+
     func testAuthoredContentDescriptionWinsOverTheSummary() throws {
         let spec = try JSONDecoder().decode(PrototypeSpec.self, from: fixture)
         let nodes = try XCTUnwrap(spec.root.children)

@@ -92,6 +92,11 @@ provisionDevice({
 - Releasing that session restores everything the profile changed, including the keyboard
   profile, so the device's next session starts from baseline.
 
+A session broker request takes the same selector in its Android device requirement
+(`device.deviceProfile`, see [session requirements](../design-docs/session-requirements.md)).
+The broker applies it to the prepared session's device after the reset baseline is captured,
+so a keep-booted reset returns the device to its pre-profile state.
+
 ## What cannot be emulated
 
 Each manufacturer profile lists the OEM capabilities no stock device provides, for example Samsung DeX, Knox,

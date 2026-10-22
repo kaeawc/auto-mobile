@@ -36,6 +36,7 @@ import { BrokerTimingRecorder } from "./timingRecorder";
 import { BrokerResetRelease } from "./resetRelease";
 import { ResetReadiness } from "./resetReadiness";
 import { SessionBrokerFailureError } from "./devicePort";
+import { assertDeviceProfileEmulatable, requestedDeviceProfile } from "./deviceProfile";
 import type { SessionBrokerOptions } from "./brokerOptions";
 import { nativeProfile, poolProfile } from "./profile";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
@@ -336,6 +337,7 @@ export class SessionBroker {
     const catalog = await this.options.catalog(config.device.platform, signal);
     const defaults = this.options.defaults(config.device.platform);
     const requirement = unwrap(normalizeSessionDeviceRequirement(config.device, defaults, catalog));
+    assertDeviceProfileEmulatable(requestedDeviceProfile(config));
     return {
       requestId: config.requestId,
       fingerprint,
@@ -401,6 +403,7 @@ export class SessionBroker {
       preparationTimeoutMs,
       idleTimeoutMs: config.idleTimeoutMs,
       executionOwnerPid: config.executionOwnerPid,
+      deviceProfile: requestedDeviceProfile(config),
     });
     signal.throwIfAborted();
     const request = await this.options.store.activate(
